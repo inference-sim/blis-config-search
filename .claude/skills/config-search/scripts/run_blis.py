@@ -3,40 +3,86 @@
 #
 #   python3 -I scripts/run_blis.py ...        (importable: sweep_pool.py reuses run_one())
 #
-# BLIS is driven on the **blis-latency-kernel** backend (the accurate per-operator model). The kernel
-# reads the deployment (model, hardware, tp/pp/dp/ep, engine knobs) from a committed SCENARIO, and
-# REFUSES --model/--hardware/--tp/--dp/--enable-expert-parallel on the CLI. So a candidate's
-# per-instance topology is written into a generated Scenario+Deployment YAML; only the things the
-# scenario does not state -- workload, concurrency, instance counts, seed -- stay on the CLI.
+# BLIS is driven on the **blis-latency-kernel** backend. The kernel reads the deployment (model,
+# hardware, tp/pp/dp/ep, engine knobs) from a committed SCENARIO and REFUSES
+# --model/--hardware/--tp/--dp/--enable-expert-parallel on the CLI. So a candidate's per-instance
+# topology is written into a generated Scenario+Deployment YAML; only workload, concurrency, instance
+# counts, scheduler/routing/admission policy, and seed stay on the CLI.
+#
+# Every candidate key is classified to its scenario/CLI slot; UNKNOWN or NOT-YET-SUPPORTED keys are
+# REJECTED (recorded as an error row), never silently dropped -- else two candidates could differ in
+# the ledger yet run the identical command.
 #
 # Pinned stack: BLIS PR #1851 @ 99bec1b6 (kernel v0.1.0 in go.mod), blis-catalog 0.2.1,
 # blis-registry v0.1.1 (holds the 6 coefficient sets below, incl cost-model-memory).
-#
-# `blis run` prints a "=== Simulation Metrics ===" header then one JSON object per instance (+ a
-# "cluster" aggregate); parse_metrics() extracts the cluster object, parse_all_instances() keeps the
-# per-instance ones (needed for idle-pool / imbalance diagnosis, disc #3 Regime 2).
-import argparse, hashlib, json, os, subprocess, sys, time
+import argparse, hashlib, json, os, subprocess, sys, tempfile, time
 
-# Coefficient sets a scenario loads from blis-registry v0.1.1 (cost-model-memory is required for
-# cudagraph memory occupancy; it is in v0.1.1 but not every older clone).
 COEFFICIENTS = ["cost-model-primitives", "cost-model-collectives", "cost-model-host-overheads",
                 "cost-model-attention", "cost-model-recurrent", "cost-model-memory"]
 
-# config keys describing ONE instance's deployment -> written into the scenario (NOT CLI flags).
-PARALLEL_KEYS = ("tp", "pp", "dp", "enable_expert_parallel")
-ENGINE_KEYS = ("quantization", "cache_dtype", "block_size", "max_num_batched_tokens",
-               "max_num_seqs", "max_model_len", "cudagraph_mode", "gpu_memory_utilization")
+# --- candidate-key classification (allowlist; anything else is rejected, never silently ignored) ---
+SCENARIO_PARALLEL = ("tp", "pp", "dp", "enable_expert_parallel")       # -> scenario Deployment.parallel
+SCENARIO_ENGINE = ("quantization", "cache_dtype", "block_size", "max_num_batched_tokens",
+                   "max_num_seqs", "max_model_len", "cudagraph_mode", "gpu_memory_utilization")
+CLI_FLAGS = {"num_instances": "--num-instances", "concurrency": "--concurrency",
+             "scheduler": "--scheduler", "routing_policy": "--routing-policy",
+             "routing_scorers": "--routing-scorers", "admission_policy": "--admission-policy",
+             "preemption_policy": "--preemption-policy"}
 PARALLEL_DEFAULTS = {"tp": 1, "pp": 1, "dp": 1, "enable_expert_parallel": False}
-ENGINE_DEFAULTS = {"quantization": "fp8", "cache_dtype": "fp8", "block_size": 16,
-                   "max_num_batched_tokens": 8192, "max_num_seqs": 256, "max_model_len": 32768,
-                   "cudagraph_mode": "PIECEWISE", "gpu_memory_utilization": 0.9}
-# config keys that stay on the CLI (instance count + load); the kernel takes these, not the scenario.
-CLI_INT_FLAGS = {"num_instances": "--num-instances", "concurrency": "--concurrency",
-                 "prefill_instances": "--prefill-instances", "decode_instances": "--decode-instances"}
+GPUS_PER_NODE = 8   # single-node H100; a per-instance footprint beyond this spans nodes (needs a fabric)
+# NON-PRECISION engine defaults only. quantization/cache_dtype are intentionally NOT defaulted: an
+# empty precision lets the checkpoint format govern (e.g. qwen3-14b stays BF16), so forcing FP8 here
+# would silently mis-price every non-FP8 model.
+ENGINE_DEFAULTS = {"block_size": 16, "max_num_batched_tokens": 8192, "max_num_seqs": 256,
+                   "max_model_len": 32768, "cudagraph_mode": "PIECEWISE", "gpu_memory_utilization": 0.9}
+# Deliberately unsupported in this runner -> fail loudly with the reason (do not silently drop).
+UNSUPPORTED = {
+    "prefill_instances": "PD disaggregation is not supported yet (single colocated pool only)",
+    "decode_instances": "PD disaggregation is not supported yet (single colocated pool only)",
+    "prefill_tp": "per-role PD TP is not supported yet (single colocated pool only)",
+    "decode_tp": "per-role PD TP is not supported yet (single colocated pool only)",
+    "num_speculative_tokens": "speculative decoding is not yet validated on the kernel backend",
+    "speculative_acceptance_rate": "speculative decoding is not yet validated on the kernel backend",
+    "speculative_method": "speculative decoding is not yet validated on the kernel backend",
+    "long_prefill_token_threshold": "not a kernel scenario field (chunked-prefill threshold is engine-internal)",
+}
+
+
+class ConfigError(ValueError):
+    pass
+
+
+def classify_config(config):
+    """Split a candidate into (parallel, engine, cli); raise ConfigError on unknown/unsupported keys."""
+    parallel, engine, cli = dict(PARALLEL_DEFAULTS), dict(ENGINE_DEFAULTS), {}
+    for k, v in config.items():
+        if k in SCENARIO_PARALLEL:
+            parallel[k] = v
+        elif k in SCENARIO_ENGINE:
+            engine[k] = v
+        elif k in CLI_FLAGS:
+            cli[k] = v
+        elif k in UNSUPPORTED:
+            raise ConfigError(f"{k!r}: {UNSUPPORTED[k]}")
+        else:
+            supported = sorted(SCENARIO_PARALLEL) + sorted(SCENARIO_ENGINE) + sorted(CLI_FLAGS)
+            raise ConfigError(f"{k!r}: unknown key; supported = {supported}")
+    if parallel["pp"] != 1:
+        raise ConfigError("pp>1: the pinned kernel does not price pipeline parallelism")
+    fp = footprint_gpus(parallel)
+    if fp > GPUS_PER_NODE:
+        raise ConfigError(
+            f"per-instance footprint tp*pp*dp={fp} > {GPUS_PER_NODE} (one node): a multi-node single "
+            f"instance needs a cluster fabric, not supported yet -- use num_instances to scale out instead")
+    return parallel, engine, cli
+
+
+def footprint_gpus(parallel):
+    """GPUs one instance occupies = tp x pp x dp (EP is within the TP ranks, not an extra factor)."""
+    return parallel["tp"] * parallel["pp"] * parallel["dp"]
 
 
 def _iter_json_objects(text):
-    """Yield each top-level JSON object in text (string/escape-aware via raw_decode), tolerating prose."""
     dec = json.JSONDecoder()
     i, n = 0, len(text)
     while i < n:
@@ -54,7 +100,6 @@ def _iter_json_objects(text):
 
 
 def _find_metrics_dicts(obj, out):
-    """Collect every dict carrying 'tokens_per_sec', recursing into nested dicts/lists."""
     if isinstance(obj, dict):
         if "tokens_per_sec" in obj:
             out.append(obj)
@@ -74,7 +119,6 @@ def _all_metrics(stdout):
 
 
 def parse_metrics(stdout):
-    """The cluster-aggregate metrics object (or the first metrics dict) from `blis run` stdout."""
     cands = _all_metrics(stdout)
     for o in cands:
         if o.get("instance_id") == "cluster":
@@ -83,17 +127,11 @@ def parse_metrics(stdout):
 
 
 def parse_all_instances(stdout):
-    """Per-instance metrics objects (excludes the cluster aggregate) -- for idle-pool/imbalance checks."""
     return [o for o in _all_metrics(stdout) if o.get("instance_id") not in (None, "cluster")]
 
 
 def _completion_issue(m):
-    """Why a run is NOT a usable capacity/ranking point (incomplete / overloaded), else None.
-
-    p99 latencies describe only the COMPLETED requests, so an overloaded point -- one that queued,
-    dropped, timed out, or left requests running/unserved -- can appear to satisfy the floor and be
-    picked as C*. (length_capped_requests is normal output truncation, not an overload signal.)
-    """
+    """Why a run is NOT a usable capacity/ranking point (incomplete/overloaded), else None."""
     inj, comp = m.get("injected_requests"), m.get("completed_requests")
     if inj is not None and comp is not None and inj != comp:
         return f"incomplete: injected={inj} != completed={comp}"
@@ -104,27 +142,13 @@ def _completion_issue(m):
     return None
 
 
-def _deployment(config):
-    """Split a candidate config into the scenario's parallel/engine blocks (defaults filled in)."""
-    parallel = dict(PARALLEL_DEFAULTS)
-    engine = dict(ENGINE_DEFAULTS)
-    for k, v in config.items():
-        if k in PARALLEL_KEYS:
-            parallel[k] = v
-        elif k in ENGINE_KEYS:
-            engine[k] = v
-    return parallel, engine
-
-
 def scenario_yaml(model, hardware, engine_version, parallel, engine, name):
-    """Render a two-doc Scenario+Deployment YAML the kernel backend prices (no external yaml dep)."""
+    """Render a two-doc Scenario+Deployment YAML (no external yaml dep). Omitted engine keys (e.g.
+    quantization when unset) let the checkpoint/engine govern."""
     def block(d, indent):
         pad = " " * indent
-        out = []
-        for k, v in d.items():
-            out.append(f"{pad}{k}: {json.dumps(v)}")  # json.dumps -> true/false, quoted strings
-        return "\n".join(out)
-    nodes = max(1, -(-parallel["tp"] // 8))  # ceil(tp/8); single-node H100 is 8 GPUs
+        return "\n".join(f"{pad}{k}: {json.dumps(v)}" for k, v in d.items())
+    nodes = max(1, -(-footprint_gpus(parallel) // 8))   # ceil(footprint/8); single-node H100 = 8 GPUs
     return f"""kind: Scenario
 name: {name}
 engine_version: "{engine_version}"
@@ -148,15 +172,22 @@ pools:
 
 
 def write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine):
-    """Write (idempotently) a scenario file for this per-instance deployment; return its file name."""
+    """Write a scenario ATOMICALLY (temp + os.replace) so concurrent pool workers never read a
+    half-written file for the same hashed deployment; return its file name."""
     key = json.dumps([model, hardware, engine_version, parallel, engine], sort_keys=True)
-    h = hashlib.sha1(key.encode()).hexdigest()[:10]
-    name = f"{model}-{hardware}-{h}"
+    name = f"{model}-{hardware}-{hashlib.sha1(key.encode()).hexdigest()[:10]}"
     os.makedirs(scenarios_dir, exist_ok=True)
     path = os.path.join(scenarios_dir, name + ".yaml")
     if not os.path.exists(path):
-        with open(path, "w") as f:
-            f.write(scenario_yaml(model, hardware, engine_version, parallel, engine, name))
+        body = scenario_yaml(model, hardware, engine_version, parallel, engine, name)
+        fd, tmp = tempfile.mkstemp(dir=scenarios_dir, prefix=".tmp-", suffix=".yaml")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(body)
+            os.replace(tmp, path)           # atomic publish; a concurrent writer's replace is idempotent
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
     return name + ".yaml"
 
 
@@ -168,7 +199,7 @@ def resolve_defaults(blis, defaults):
 
 
 def build_cmd(blis, catalog, registry, scenarios_dir, scenario_name, workload, num_requests, seed,
-              horizon, defaults, cli_knobs):
+              horizon, defaults, cli):
     cmd = [blis, "run", "--latency-model", "blis-latency-kernel",
            "--scenario", scenario_name, "--scenarios", scenarios_dir, "--registry", registry]
     if catalog:
@@ -183,22 +214,32 @@ def build_cmd(blis, catalog, registry, scenarios_dir, scenario_name, workload, n
         cmd += ["--seed", str(seed)]
     if horizon is not None:
         cmd += ["--horizon", str(horizon)]
-    for k, flag in CLI_INT_FLAGS.items():
-        if k in cli_knobs:
-            cmd += [flag, str(cli_knobs[k])]
+    for k, v in cli.items():
+        cmd += [CLI_FLAGS[k], str(v)]
     return cmd
+
+
+def _record_shell(config, phase):
+    return {"config": config, "concurrency": config.get("concurrency"),
+            "config_hash": hashlib.sha1(json.dumps(config, sort_keys=True).encode()).hexdigest()[:12],
+            "phase": phase}
 
 
 def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_version,
             workload, num_requests, seed, horizon, config, phase="probe", timeout=120, defaults=None):
     """Run one kernel-priced BLIS config and return a record dict. No runs.jsonl I/O (caller writes)."""
-    parallel, engine = _deployment(config)
-    cli_knobs = {k: config[k] for k in CLI_INT_FLAGS if k in config}
-    num_instances = cli_knobs.get("num_instances", 1)
+    rec = _record_shell(config, phase)
+    try:
+        parallel, engine, cli = classify_config(config)
+    except ConfigError as e:
+        rec.update({"returncode": None, "error": f"unsupported config: {e}",
+                    "metrics": {}, "metrics_all_instances": []})
+        return rec
+    num_instances = cli.get("num_instances", 1)
+    fp = footprint_gpus(parallel)
     scenario_name = write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine)
     cmd = build_cmd(blis, catalog, registry, scenarios_dir, scenario_name, workload,
-                    num_requests, seed, horizon, defaults, cli_knobs)
-    config_hash = hashlib.sha1(json.dumps(config, sort_keys=True).encode()).hexdigest()[:12]
+                    num_requests, seed, horizon, defaults, cli)
     t0 = time.time()
     try:
         pr = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -212,27 +253,18 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
         error = "rc=0 but no cluster metrics parsed from stdout (output format changed?)"
     else:
         error = _completion_issue(metrics)
-    return {
-        "config": config,
-        "concurrency": config.get("concurrency"),
-        "config_hash": config_hash,
-        "phase": phase,
-        # resolved deployment so the report need not parse the scenario YAML (per-GPU denominator etc.)
+    rec.update({
         "deployment": {"parallel": parallel, "engine": engine, "num_instances": num_instances,
-                       "gpus": parallel["tp"] * num_instances, "scenario": scenario_name},
-        "cmd": cmd,
-        "returncode": rc,
-        "wall_s": round(time.time() - t0, 3),
-        "metrics": metrics,
-        "metrics_all_instances": parse_all_instances(stdout) if rc == 0 else [],
-        "error": error,
-        "stdout_tail": stdout[-2000:],
-        "stderr_tail": stderr[-2000:],
-    }
+                       "footprint_gpus_per_instance": fp, "gpus": fp * num_instances,
+                       "scenario": scenario_name},
+        "cmd": cmd, "returncode": rc, "wall_s": round(time.time() - t0, 3),
+        "metrics": metrics, "metrics_all_instances": parse_all_instances(stdout) if rc == 0 else [],
+        "error": error, "stdout_tail": stdout[-2000:], "stderr_tail": stderr[-2000:],
+    })
+    return rec
 
 
 def add_common_args(p):
-    """Shared args for run_blis and sweep_pool so the kernel invocation surface stays single-sourced."""
     p.add_argument("--blis", default="./blis")
     p.add_argument("--catalog", default=os.environ.get("BLIS_CATALOG"))
     p.add_argument("--registry", default=os.environ.get("BLIS_REGISTRY"), help="blis-registry v0.1.1 clone root")

@@ -12,7 +12,9 @@
       "config": {
         "tp": 8,
         "enable_expert_parallel": true,
-        "num_instances": 1
+        "num_instances": 1,
+        "quantization": "fp8",
+        "cache_dtype": "fp8"
       },
       "gpus": 8,
       "c_star": 6,
@@ -87,7 +89,9 @@
       "config": {
         "tp": 8,
         "enable_expert_parallel": true,
-        "num_instances": 2
+        "num_instances": 2,
+        "quantization": "fp8",
+        "cache_dtype": "fp8"
       },
       "gpus": 16,
       "c_star": 12,
@@ -180,7 +184,9 @@
       "config": {
         "tp": 4,
         "enable_expert_parallel": true,
-        "num_instances": 4
+        "num_instances": 4,
+        "quantization": "fp8",
+        "cache_dtype": "fp8"
       },
       "gpus": 16,
       "c_star": 25,

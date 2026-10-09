@@ -95,10 +95,19 @@ Load axis is **concurrency** (closed-loop virtual users, `--concurrency`), not o
    | cluster shape with an idle pool / imbalance | routing/placement limited | fix prefill:decode ratio; open routing (`--routing-policy`/`--routing-scorers`) |
 
    Under the kernel, the per-instance knobs above (`block_size`, `max_num_seqs`,
-   `max_num_batched_tokens`, `gpu_memory_utilization`, `cache_dtype`/quantization, tp/dp/ep) are
-   **engine/parallel fields in the generated scenario**, not CLI flags; only routing/admission,
-   instance count, and concurrency stay on the CLI. Idle-pool/imbalance is read from
+   `max_num_batched_tokens`, `gpu_memory_utilization`, `quantization`/`cache_dtype`, `tp`/`dp`/
+   `enable_expert_parallel`) are **engine/parallel fields in the generated scenario**; only
+   `scheduler`/`routing_policy`/`routing_scorers`/`admission_policy`/`preemption_policy`,
+   `num_instances`, and `concurrency` stay CLI. Idle-pool/imbalance is read from
    `metrics_all_instances` (per-instance), which the aggregate hides.
+
+   The runner **rejects any other candidate key loudly** (recorded as an error row, never silently
+   dropped). Not supported yet in v1: PD prefill/decode split (`prefill_tp`/`decode_tp`/
+   `prefill_instances`/`decode_instances`), pipeline parallel (`pp`>1), speculative decoding, chunked-
+   prefill `long_prefill_token_threshold`, and a multi-node *single* instance (`tp*dp` > 8 on H100 --
+   scale out with `num_instances` instead). **Precision is never defaulted**: set `quantization`/
+   `cache_dtype` explicitly (GLM-5.3-Flash is fp8); unset lets the checkpoint govern (e.g. qwen3-14b
+   stays bf16).
 
 4. **Rank + finalists.** Compute the dual Pareto over **usable capacity** `C_use = h x C*`
    (budget-max output tok/s, and output tok/s per GPU `= tps/G`). Dense-sweep the top finalists'

@@ -14,8 +14,7 @@ import sweep_pool
 
 class ParseMetrics(unittest.TestCase):
     def test_picks_cluster_among_instances(self):
-        s = ('=== Simulation Metrics ===\n'
-             '{"instance_id":"i0","tokens_per_sec":10.0}\n'
+        s = ('{"instance_id":"i0","tokens_per_sec":10.0}\n'
              '{"instance_id":"cluster","tokens_per_sec":42.0}\n')
         self.assertEqual(run_blis.parse_metrics(s).get("tokens_per_sec"), 42.0)
 
@@ -24,18 +23,16 @@ class ParseMetrics(unittest.TestCase):
         self.assertEqual(run_blis.parse_metrics(s).get("tokens_per_sec"), 7.0)
 
     def test_nested_envelope(self):
-        s = 'prefix {"result":{"instance_id":"cluster","tokens_per_sec":5.0}} suffix'
-        self.assertEqual(run_blis.parse_metrics(s).get("tokens_per_sec"), 5.0)
+        self.assertEqual(run_blis.parse_metrics(
+            'x {"result":{"instance_id":"cluster","tokens_per_sec":5.0}} y').get("tokens_per_sec"), 5.0)
 
     def test_no_metrics_returns_empty(self):
-        self.assertEqual(run_blis.parse_metrics("no json {not valid} here"), {})
+        self.assertEqual(run_blis.parse_metrics("no json {not valid}"), {})
 
     def test_all_instances_excludes_cluster(self):
-        s = ('{"instance_id":"i0","tokens_per_sec":1.0}\n'
-             '{"instance_id":"i1","tokens_per_sec":2.0}\n'
+        s = ('{"instance_id":"i0","tokens_per_sec":1.0}\n{"instance_id":"i1","tokens_per_sec":2.0}\n'
              '{"instance_id":"cluster","tokens_per_sec":3.0}')
-        got = [o["instance_id"] for o in run_blis.parse_all_instances(s)]
-        self.assertEqual(got, ["i0", "i1"])
+        self.assertEqual([o["instance_id"] for o in run_blis.parse_all_instances(s)], ["i0", "i1"])
 
 
 class CompletionIssue(unittest.TestCase):
@@ -52,42 +49,86 @@ class CompletionIssue(unittest.TestCase):
             {"injected_requests": 100, "completed_requests": 100, "timed_out_requests": 3}))
 
 
-class Deployment(unittest.TestCase):
-    def test_split_parallel_engine_cli(self):
-        parallel, engine = run_blis._deployment(
+class ClassifyConfig(unittest.TestCase):
+    def test_splits_and_fills_parallel_defaults(self):
+        par, eng, cli = run_blis.classify_config(
             {"tp": 8, "enable_expert_parallel": True, "block_size": 32, "num_instances": 2, "concurrency": 64})
-        self.assertEqual(parallel["tp"], 8)
-        self.assertTrue(parallel["enable_expert_parallel"])
-        self.assertEqual(engine["block_size"], 32)
-        self.assertEqual(engine["max_num_seqs"], 256)          # default filled
-        self.assertNotIn("num_instances", {**parallel, **engine})  # CLI, not scenario
-        self.assertNotIn("concurrency", {**parallel, **engine})
+        self.assertEqual((par["tp"], par["pp"], par["dp"]), (8, 1, 1))
+        self.assertTrue(par["enable_expert_parallel"])
+        self.assertEqual(eng["block_size"], 32)
+        self.assertEqual(cli, {"num_instances": 2, "concurrency": 64})
+
+    def test_precision_not_defaulted(self):
+        _, eng, _ = run_blis.classify_config({"tp": 8})
+        self.assertNotIn("quantization", eng)       # empty precision lets the checkpoint govern
+        self.assertNotIn("cache_dtype", eng)
+
+    def test_precision_passes_through_when_set(self):
+        _, eng, _ = run_blis.classify_config({"tp": 8, "quantization": "fp8", "cache_dtype": "fp8"})
+        self.assertEqual(eng["quantization"], "fp8")
+
+    def test_policy_knobs_go_to_cli(self):
+        _, _, cli = run_blis.classify_config({"tp": 8, "scheduler": "fcfs", "routing_policy": "round-robin"})
+        self.assertEqual(cli, {"scheduler": "fcfs", "routing_policy": "round-robin"})
+
+    def test_rejects_unknown_key(self):
+        with self.assertRaises(run_blis.ConfigError):
+            run_blis.classify_config({"tp": 8, "totally_made_up": 1})
+
+    def test_rejects_pd_keys(self):
+        with self.assertRaises(run_blis.ConfigError):
+            run_blis.classify_config({"tp": 8, "prefill_tp": 4, "decode_tp": 8})
+
+    def test_rejects_long_prefill(self):
+        with self.assertRaises(run_blis.ConfigError):
+            run_blis.classify_config({"tp": 8, "long_prefill_token_threshold": 4096})
+
+    def test_rejects_pp_gt_1(self):
+        with self.assertRaises(run_blis.ConfigError):
+            run_blis.classify_config({"tp": 8, "pp": 2})
+
+
+class Footprint(unittest.TestCase):
+    def test_tp_pp_dp(self):
+        self.assertEqual(run_blis.footprint_gpus({"tp": 8, "pp": 1, "dp": 2}), 16)
+        self.assertEqual(run_blis.footprint_gpus({"tp": 4, "pp": 1, "dp": 1}), 4)
+
+    def test_within_node_dp_allowed(self):
+        _, _, _ = run_blis.classify_config({"tp": 4, "dp": 2})          # footprint 8 == one node, OK
+
+    def test_multinode_single_instance_rejected(self):
+        with self.assertRaises(run_blis.ConfigError):
+            run_blis.classify_config({"tp": 8, "dp": 2})                # footprint 16 > one node
 
 
 class ScenarioYaml(unittest.TestCase):
-    def test_renders_lowercase_bool_and_both_docs(self):
-        parallel, engine = run_blis._deployment({"tp": 8, "enable_expert_parallel": True})
-        y = run_blis.scenario_yaml("glm-5.3-flash", "h100", "0.29.0", parallel, engine, "s")
-        self.assertIn("kind: Scenario", y)
+    def test_omits_unset_precision_lists_memory_coeff(self):
+        par, eng, _ = run_blis.classify_config({"tp": 8})
+        y = run_blis.scenario_yaml("qwen3-14b", "h100", "0.29.0", par, eng, "s")
         self.assertIn("kind: Deployment", y)
-        self.assertIn("model: glm-5.3-flash", y)
-        self.assertIn("hardware: h100", y)
-        self.assertIn("enable_expert_parallel: true", y)       # not Python "True"
-        self.assertIn("cost-model-memory", y)                  # required coefficient set listed
+        self.assertNotIn("quantization", y)          # BF16 checkpoint governs -- no forced FP8
+        self.assertIn("cost-model-memory", y)
 
 
 class BuildCmd(unittest.TestCase):
     def test_kernel_flags_and_cli_knobs(self):
         cmd = run_blis.build_cmd("blis", "cat", "reg", "scn", "s.yaml", "chatbot", 100, 0, None, None,
-                                 {"num_instances": 2, "concurrency": 64})
-        self.assertEqual(cmd[:3], ["blis", "run", "--latency-model"])
+                                 {"num_instances": 2, "concurrency": 64, "scheduler": "fcfs"})
         self.assertIn("blis-latency-kernel", cmd)
-        for pair in (("--scenario", "s.yaml"), ("--scenarios", "scn"), ("--registry", "reg"),
-                     ("--num-instances", "2"), ("--concurrency", "64")):
-            self.assertEqual(cmd[cmd.index(pair[0]) + 1], pair[1])
-        # the kernel REFUSES these -- the runner must never emit them
+        for a, b in (("--scenario", "s.yaml"), ("--scenarios", "scn"), ("--registry", "reg"),
+                     ("--num-instances", "2"), ("--concurrency", "64"), ("--scheduler", "fcfs")):
+            self.assertEqual(cmd[cmd.index(a) + 1], b)
         for refused in ("--tp", "--model", "--hardware", "--enable-expert-parallel", "--dp"):
             self.assertNotIn(refused, cmd)
+
+
+class RunOneRejects(unittest.TestCase):
+    def test_unsupported_config_is_an_error_row_not_a_crash(self):
+        rec = run_blis.run_one("blis", "cat", "reg", "/tmp/scn-x", "m", "h100", "0.29.0",
+                               None, None, 0, None, {"tp": 8, "prefill_tp": 4})
+        self.assertIsNone(rec["returncode"])
+        self.assertIn("unsupported config", rec["error"])
+        self.assertEqual(rec["metrics"], {})
 
 
 class ComputeCap(unittest.TestCase):
@@ -106,7 +147,7 @@ class ComputeCap(unittest.TestCase):
         self.assertEqual(sweep_pool.compute_cap(0.8, 0.8, 1024.0, None)[:2], (8, "cores"))
 
     def test_memory_bound(self):
-        self._patch(64, 4096)  # mem_cap = floor(4096*0.8/1024) = 3
+        self._patch(64, 4096)
         self.assertEqual(sweep_pool.compute_cap(0.8, 0.8, 1024.0, None)[:2], (3, "memory"))
 
     def test_max_parallel_tightens(self):

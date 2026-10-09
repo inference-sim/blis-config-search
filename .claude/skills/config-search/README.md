@@ -21,9 +21,9 @@ headroom, or ask for a different headline -- just say so when you invoke it.
 
 ## Prerequisites
 
-See `SETUP.md`. In short: build BLIS at the `kernel-exclusive` branch (PR #1851) as `./blis`, and
-point `BLIS_CATALOG` at a catalog (blis-catalog `0.2.1`). All example models (`glm-5.3-flash`,
-`qwen3-14b`) already ship in `0.2.1` -- no model setup needed.
+See `SETUP.md`. In short: build BLIS PR #1851 @ `99bec1b6` as `./blis` (runs on the accurate
+`blis-latency-kernel` backend), and point `BLIS_CATALOG` at blis-catalog `0.2.1` and `BLIS_REGISTRY`
+at blis-registry `v0.1.1`. All example models (`glm-5.3-flash`, `qwen3-14b`) already ship in `0.2.1`.
 
 ## Use it
 
@@ -58,15 +58,15 @@ OSL 512, concurrency ladders, H100/H200) are drawn from the real llm-d campaigns
 
 ```
 runs/<run-id>/
-  scenario.json   # exactly what was searched
-  runs.jsonl      # every BLIS run: config, concurrency, metrics, diagnostics
-  pareto.json     # the finalists, the chosen winner, and why it won
+  scenario.json   # exactly what was searched (+ pinned_stack, pinned workload)
+  runs.jsonl      # every kernel run: config, resolved deployment, metrics (cluster) + metrics_all_instances[]
+  pareto.json     # finalists (c_star/c_use/enriched curve[]), dropped topologies, chosen winner + move trail
 ```
 
-How it's produced today: `scripts/run_blis.py` + `scripts/sweep_pool.py` run BLIS and write
-`runs.jsonl`; the **search brain (Claude, per `SKILL.md`)** decides which configs to run, assembles
-`scenario.json`, and computes/writes `pareto.json`. A single-command driver that emits all three is
-the TODO in Status.
+How it's produced today: `scripts/run_blis.py` + `scripts/sweep_pool.py` price configs on the kernel
+(generating a scenario per per-instance topology) and write `runs.jsonl`; the **search brain (Claude,
+per `SKILL.md`)** decides which configs to run, assembles `scenario.json`, and computes/writes
+`pareto.json`. A single-command driver that emits all three is the TODO in Status.
 
 Reproducibility: each `blis run` is deterministic (INV-6) and the pool writes `runs.jsonl` in a
 stable order, so the *data* is reproducible. The end-to-end *recommendation* is only as reproducible
@@ -83,7 +83,10 @@ one place that invokes BLIS.
 
 ## Status
 
-First engine version, **smoke-tested on the pinned stack**: the runner parses BLIS's JSON metrics
-correctly, the parallel pool hit ~7x on an 8-config batch (qwen3-14b), and the GLM-5.3-Flash headline
-example (2x TP8 + EP) runs clean. Still to do: tune the diagnostic-steering rules against real
-curvebender measurements, and build out the capacity-probe/finalist driver end to end.
+First engine version, **verified end-to-end on the kernel backend**: `examples/sample-run/` is a real
+kernel mini-search (GLM-5.3-Flash, 16x H100) -- topologies priced via generated scenarios, bisected to
+C* at the interactivity floor, winner `4x TP4 + EP`. The runner parses the JSON metrics and
+per-instance objects, the parallel pool hits ~4-14x, and 16 unit tests pass. Caveat: the kernel's
+step-time is pessimistic for MLA/hybrid attention (it warns on stderr) -- outputs are predictions, to
+be spot-checked against the real llm-d measurements in `curvebender-tools/reports`. Still to do: tune
+the steering rules against that real data, and wrap the capacity-probe/finalist driver as one command.

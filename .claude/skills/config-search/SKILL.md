@@ -29,13 +29,21 @@ knobs searched, the budget. That flexibility is the point of this skill.
 
 ## Pinned stack (required)
 
-- **BLIS** at the `kernel-exclusive` branch (PR #1851), built as `./blis` -- the kernel-exclusive
-  latency model is the most accurate we have, and a search is only as good as its latency model.
-- **blis-catalog @ `0.2.1`**, **blis-registry @ `v0.1.1`**, located via `--catalog` / `BLIS_CATALOG`.
-- A model runs **iff** it is in the catalog (NS-6). No HuggingFace fetch at run time.
+The search is priced by the **`blis-latency-kernel`** backend -- the accurate per-operator model, the
+reason to run BLIS at all here. It reads the deployment from a **scenario** + a **registry**, so:
 
-See `SETUP.md` for building the pinned binary. The example models (`glm-5.3-flash`, `qwen3-14b`) ship
-in catalog `0.2.1` -- no overlay needed.
+- **BLIS** PR #1851 pinned at commit **`99bec1b6`** (kernel `v0.1.0`, pinned in its `go.mod`), built
+  as `./blis`. Always run with `--latency-model blis-latency-kernel`.
+- **blis-catalog @ `0.2.1`** (`--catalog`/`BLIS_CATALOG`); a model runs **iff** it is in the catalog
+  (NS-6).
+- **blis-registry @ `v0.1.1`** (`--registry`) -- holds the 6 coefficient sets a scenario names,
+  including `cost-model-memory` (older clones lack it; use the `v0.1.1` tag).
+- A **scenario file** states model, hardware, tp/pp/dp/ep and engine knobs. The kernel **refuses**
+  `--model/--hardware/--tp/--dp/--enable-expert-parallel` on the CLI; the runner writes them into a
+  generated scenario instead (see "Running BLIS").
+
+See `SETUP.md` for the exact build + pins. The example models (`glm-5.3-flash`, `qwen3-14b`) ship in
+catalog `0.2.1`.
 
 ## Invocation
 
@@ -68,9 +76,10 @@ Load axis is **concurrency** (closed-loop virtual users, `--concurrency`), not o
 
 1. **Enumerate feasible topologies within budget.** Valid `tp` (divides attention/KV heads and, for
    MoE, expert count), instance counts with `tp x instances <= gpu_budget`, optional PD and EP shapes.
-   Cheap arithmetic feasibility only (weights + minimum KV must fit); **BLIS stays the arbiter** -- a
-   shape BLIS refuses at startup is dropped with its error recorded. (A vendored capacity pre-filter
-   is a later upgrade; see disc #3.)
+   Each per-instance topology (tp/pp/dp/ep + engine knobs) becomes a **generated scenario**; instance
+   count stays a CLI knob. Cheap arithmetic feasibility only; **BLIS stays the arbiter** -- a shape
+   BLIS refuses is dropped with its error recorded. (A vendored capacity pre-filter is a later
+   upgrade; see disc #3.)
 2. **Capacity probe to C\*.** For each candidate, probe `--concurrency` upward then **bisect** to
    `C*` = the largest concurrency whose p99s still meet the interactivity floor (and any SLOs).
    ~5-8 runs per candidate. With no floor/SLO, `C*` = the throughput knee.
@@ -84,6 +93,12 @@ Load axis is **concurrency** (closed-loop virtual users, `--concurrency`), not o
    | `preemption_count` > 0 / KV thrash | KV-starved | `--kv-cache-dtype fp8`; raise `--gpu-memory-utilization`; **check `--block-size-in-tokens`** (effective KV tokens = total_kv_blocks x block_size); lower `--max-num-seqs` |
    | `--max-num-seqs` saturated, tput below ceiling, no KV failures | batch-width limited | raise `--max-num-seqs` / `--max-num-batched-tokens` |
    | cluster shape with an idle pool / imbalance | routing/placement limited | fix prefill:decode ratio; open routing (`--routing-policy`/`--routing-scorers`) |
+
+   Under the kernel, the per-instance knobs above (`block_size`, `max_num_seqs`,
+   `max_num_batched_tokens`, `gpu_memory_utilization`, `cache_dtype`/quantization, tp/dp/ep) are
+   **engine/parallel fields in the generated scenario**, not CLI flags; only routing/admission,
+   instance count, and concurrency stay on the CLI. Idle-pool/imbalance is read from
+   `metrics_all_instances` (per-instance), which the aggregate hides.
 
 4. **Rank + finalists.** Compute the dual Pareto over **usable capacity** `C_use = h x C*`
    (budget-max output tok/s, and output tok/s per GPU `= tps/G`). Dense-sweep the top finalists'
@@ -100,20 +115,22 @@ configs coalesce (runs are exact and free to re-read). **Parallelism:** see belo
 
 ## Running BLIS (the runner + the parallel pool)
 
-Two scripts, verified against the pinned pr-1851 binary:
+Two scripts, verified end-to-end against the pinned kernel binary:
 
-- **`python3 -I scripts/run_blis.py`** -- the single source of truth for invoking BLIS and recording
-  **one** run. Maps Scenario knobs to real pr-1851 flags, runs `./blis run`, and parses the metrics.
-  `blis run` prints a JSON object under a `=== Simulation Metrics ===` header; the runner extracts
-  the `cluster` object (fields: `tokens_per_sec`, `responses_per_sec`, `ttft_p99_ms`, `itl_p99_ms`,
-  `e2e_p99_ms`, `scheduling_delay_p99_ms`, `preemption_count`, ...). It passes `--defaults-filepath`
-  (resolved next to the binary) so it does not depend on cwd. See `--help`.
+- **`python3 -I scripts/run_blis.py`** -- the single source of truth for one run. From a candidate's
+  per-instance topology (tp/pp/dp/ep + engine knobs) it **generates a scenario YAML** into
+  `--scenarios`, then runs `./blis run --latency-model blis-latency-kernel --scenario <generated>
+  --scenarios <dir> --registry <blis-registry>` with the still-CLI knobs (`--num-instances`,
+  `--concurrency`, `--workload`, `--num-requests`, `--seed`). It parses the `=== Simulation Metrics
+  ===` JSON -- the `cluster` aggregate into `metrics` and the per-instance objects into
+  `metrics_all_instances` -- flags incomplete/overloaded runs, and records the resolved `deployment`
+  (`parallel`/`engine`/`num_instances`/`gpus`/`scenario`). `--defaults-filepath` resolves next to the
+  binary so it is cwd-independent. See `--help`.
 - **`python3 -I scripts/sweep_pool.py`** -- runs a **batch** of configs in parallel under the
-  host-adaptive cap, appends all records to `runs.jsonl` in stable input order, and prints the cap +
-  speedup. This is how the search spends surplus cores (see Parallelism).
+  host-adaptive cap, appends records to `runs.jsonl` in stable input order, prints cap + speedup.
 
 > A first-class `RunResult` document upstream (declarative API, inference-sim#1853 / #1855) would
-> remove even the JSON-block extraction.
+> remove the JSON-block extraction.
 
 ## Parallelism
 
@@ -147,10 +164,16 @@ the runs. (Folding that assembly into a one-command driver is the open follow-up
 
 ```
 runs/<run-id>/
-  scenario.json   # the resolved Scenario (model, hw, budget, workload, objective, floor, headroom, slos)  -- written by the brain
-  runs.jsonl      # one row per blis run: {config, concurrency, metrics, diagnostics, binding_signal, config_hash, phase}  -- written by run_blis/sweep_pool
-  pareto.json     # finalists, dual-Pareto points, chosen winner, margins, explained move trail  -- written by the brain
+  scenario.json   # resolved Scenario (model, hw, budget, workload, objective, floor, headroom, slos, pinned_stack)  -- brain
+  runs.jsonl      # one row per blis run: {config, concurrency, deployment{parallel,engine,num_instances,gpus,scenario},
+                  #   metrics (cluster), metrics_all_instances[], error, phase}  -- run_blis/sweep_pool
+  pareto.json     # finalists{c_star,c_use,at_c_use,curve[]}, dropped[], winner{reason,move_trail}  -- brain
 ```
+
+`curve[]` carries per point: `concurrency`, `tokens_per_sec`, `itl_p99_ms`, `ttft_p99_ms`,
+`scheduling_delay_p99_ms`, `preemption_count`, and **`tok_per_s_per_user`**. The last is written by
+the brain, not derived as `1000/itl_p99_ms`: BLIS appends ITL per decode *step*, so under
+speculative decoding one entry covers several tokens and the naive axis understates the per-user rate.
 
 ## Report step (added later)
 

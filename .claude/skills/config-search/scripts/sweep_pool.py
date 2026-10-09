@@ -68,7 +68,7 @@ def main():
     p.add_argument("--mem-budget-fraction", type=float, default=0.8)
     p.add_argument("--peak-rss-mib", type=float, default=1024.0, help="conservative BLIS RSS/run")
     args = p.parse_args()
-    run_blis.require_catalog(args.catalog)
+    run_blis.require_env(args)
     if args.max_parallel is not None and args.max_parallel < 1:
         sys.exit("--max-parallel must be >= 1")
 
@@ -93,9 +93,10 @@ def main():
     t0 = time.time()
     results = [None] * len(configs)
     with ThreadPoolExecutor(max_workers=cap) as ex:
-        futs = {ex.submit(run_blis.run_one, args.blis, args.catalog, args.model, args.hardware,
-                          args.workload, args.num_requests, args.seed, args.horizon, cfg,
-                          args.phase, args.timeout, args.defaults): i for i, cfg in enumerate(configs)}
+        futs = {ex.submit(run_blis.run_one, args.blis, args.catalog, args.registry, args.scenarios,
+                          args.model, args.hardware, args.engine_version, args.workload,
+                          args.num_requests, args.seed, args.horizon, cfg, args.phase, args.timeout,
+                          args.defaults): i for i, cfg in enumerate(configs)}
         for fut, i in futs.items():
             results[i] = fut.result()
 

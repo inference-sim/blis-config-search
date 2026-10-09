@@ -1,25 +1,32 @@
-# sample-run (real end-to-end run)
+# sample-run (real kernel run)
 
-A **real** run directory produced by `config-search` on the pinned stack (BLIS `kernel-exclusive`
-PR #1851, blis-catalog `0.2.1`), not synthetic. Scenario: GLM-5.3-Flash on 16x H100, chatbot, hold
-ITL p99 <= 20 ms (>= 50 tok/s/user), headroom 0.8. It is the committed **seam fixture** the report
-step builds against.
+A **real** run directory produced by `config-search` on the pinned stack, priced by the
+**blis-latency-kernel** backend (BLIS PR #1851 @ 99bec1b6, kernel v0.1.0, blis-catalog 0.2.1,
+blis-registry v0.1.1). Scenario: GLM-5.3-Flash on 16x H100, chatbot, 200 requests, hold ITL p99
+<= 20 ms (>= 50 tok/s/user), headroom 0.8. It is the committed **seam fixture** the report step
+builds against.
 
 Files:
 
-- `scenario.json` -- the resolved Scenario that was searched.
-- `runs.jsonl` -- 40 BLIS runs (probe / steer / finalist), full metrics object per run. 8 of them are
-  the infeasible `4x TP4 + EP` topology BLIS refused (the feasibility filter), recorded with `error`.
-- `pareto.json` -- finalists with C* / C_use / curves, the dropped topology, and the chosen winner
-  with its move trail.
+- `scenario.json` -- the resolved search Scenario (one pinned workload for every run).
+- `runs.jsonl` -- 27 kernel-priced runs (probe / bisect / finalist). Each row carries `config`, the
+  resolved `deployment` (`parallel`/`engine`/`num_instances`/`gpus`/`scenario`), `metrics` (cluster
+  aggregate), `metrics_all_instances` (per-instance, for idle-pool/imbalance checks), and `error`.
+- `pareto.json` -- finalists with `c_star`/`c_use` and an enriched `curve[]` per point
+  (`tokens_per_sec`, `itl_p99_ms`, `ttft_p99_ms`, `scheduling_delay_p99_ms`, `preemption_count`, and
+  **`tok_per_s_per_user`**), plus `dropped[]` and `winner{reason, move_trail}`.
 
-What the search found: `4x TP4 + EP` was dropped as infeasible; `2x TP8 + EP` reached C*=128 and
-`1x TP8 + EP` C*=64 at the ITL floor; the binding signal was a decode-compute ceiling (ITL pinned
-~20 ms, no preemptions), so the steering move enabled MTP-3 speculative decoding, which the simulator
-predicts ~3x the output throughput at the same interactivity -- winning both the budget-max and
-per-GPU axes.
+What the search found: topologies were priced on the kernel via generated scenarios and bisected to
+C* at the 50 tok/s/user floor. The kernel shows a **sharp interactivity cliff** for this model, so C*
+is small (1x TP8+EP C*=6, 2x TP8+EP C*=12, 4x TP4+EP C*=25). The winner on both the budget-max and
+per-GPU axes is **4x TP4 + EP** (~1472 tok/s, 92/GPU at C_use=20).
 
-These are **simulator predictions**; the flat ~19-20 ms ITL across a wide concurrency range and the
-spec-decode gain are exactly the kind of thing to spot-check against the real llm-d measurements in
-`curvebender-tools/reports` before acting on them. The layout is convention-based and expected to
-evolve -- a starting contract, not a frozen schema.
+**On `tok_per_s_per_user` (why it is a field, not `1000/itl_p99_ms`):** BLIS appends an ITL entry per
+decode *step*, not per emitted token, so under speculative decoding/MTP one entry covers several
+tokens and `1000/itl_p99` understates the real per-user rate. The brain emits `tok_per_s_per_user`
+per point; the report plots that, not a derived axis.
+
+These are **simulator predictions**, and for GLM-5.3-Flash the kernel's step-time is **pessimistic**
+for MLA and hybrid (KDA) attention (BLIS warns about both on stderr). Spot-check against the real
+llm-d measurements in `curvebender-tools/reports` before acting. The layout is convention-based and
+expected to evolve.

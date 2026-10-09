@@ -1,8 +1,8 @@
 {
-  "_source": "REAL run",
-  "run_id": "glm53flash-h100x16-chatbot-0001",
+  "_source": "REAL kernel run",
+  "run_id": "glm53flash-h100-chatbot-kernel-0001",
   "model": "glm-5.3-flash",
-  "hardware": "H100",
+  "hardware": "h100",
   "gpu_budget": 16,
   "workload": {
     "preset": "chatbot"
@@ -14,13 +14,15 @@
   },
   "headroom": 0.8,
   "slos": {},
+  "workload_params": {
+    "num_requests": 200
+  },
+  "seed": 0,
+  "latency_model": "blis-latency-kernel",
   "pinned_stack": {
-    "blis": "kernel-exclusive (PR#1851)",
+    "blis": "PR#1851 @ 99bec1b6",
+    "kernel": "v0.1.0",
     "catalog": "0.2.1",
     "registry": "v0.1.1"
-  },
-  "workload_params": {
-    "num_requests": 400
-  },
-  "seed": 0
+  }
 }

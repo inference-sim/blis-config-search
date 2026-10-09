@@ -1,0 +1,37 @@
+# Headline example: GLM-5.3-Flash on 16x H100, ShareGPT chatbot, hold >= 50 tok/s/user.
+# A scenario file is optional -- natural-language invocation works too. Everything here is a
+# default the user may override. GLM-5.3-Flash ships in blis-catalog 0.2.1 (no setup needed).
+
+model: glm-5.3-flash          # in blis-catalog 0.2.1
+hardware: H100
+gpu_budget: 16                # 16x H100 == the real 2x TP8+EP deployment is one candidate here
+
+workload:
+  preset: chatbot             # BLIS presets: chatbot | summarization | contentgen | multidoc | distribution
+  # a ShareGPT-style chatbot maps to the chatbot preset; or specify prompt/output tokens directly:
+  # prompt_tokens_mean: 1024
+  # output_tokens_mean: 512
+
+objective: dual-pareto        # budget-max output tok/s AND output tok/s per GPU
+interactivity_floor:
+  tok_per_s_per_user: 50      # == ITL p99 <= ~20 ms
+headroom: 0.8                 # recommend usable capacity C_use = 0.8 * C*
+
+slos: {}                      # optional, e.g. { ttft_p99_ms: 2000, e2e_p99_ms: 30000 }
+
+# Knob space to search. Omit to use the skill's default tiers. Topology first (highest leverage).
+space:
+  tp: [2, 4, 8]
+  num_instances: auto         # tp * num_instances <= gpu_budget
+  enable_expert_parallel: [true]      # MoE: 288 routed experts
+  # engine knobs explored by diagnostic steering, not full grid:
+  max_num_seqs: [32, 64, 128, 256]
+  long_prefill_token_threshold: [0, 4096]
+  block_size_in_tokens: [16, 32]
+  gpu_memory_utilization: [0.9]
+
+budget:
+  max_runs: 150
+  # max_parallel: host-adaptive by default
+
+seed: 0

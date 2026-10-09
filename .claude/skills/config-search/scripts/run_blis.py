@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+# run_blis.py -- the ONE place config-search invokes BLIS and records a single run.
+#
+# Run it isolated:  python3 -I scripts/run_blis.py ...
+# Importable: sweep_pool.py imports run_one()/build_cmd()/parse_metrics() for batch parallelism.
+#
+# It maps a config (knobs) + scenario-fixed args to pr-1851 `blis run` flags, runs the pinned
+# binary, parses the TEXT metrics from stdout, and returns/records one JSON record.
+#
+# pr-1851 `blis run` prints a "=== Simulation Metrics ===" header then one JSON object per instance
+# (plus a "cluster" aggregate); parse_metrics() extracts the cluster object. Confirmed against a live
+# qwen3-14b run (fields: tokens_per_sec, responses_per_sec, ttft/itl/e2e *_p99_ms,
+# scheduling_delay_p99_ms, preemption_count, ...). Re-confirm if the output format changes.
+import argparse, hashlib, json, os, subprocess, sys, time
+
+# config-knob -> blis flag. Extend as the search space grows; unknown keys pass as --<key>.
+FLAG = {
+    "tp": "--tp", "num_instances": "--num-instances", "dp": "--dp",
+    "prefill_instances": "--prefill-instances", "decode_instances": "--decode-instances",
+    "prefill_tp": "--prefill-tp", "decode_tp": "--decode-tp",
+    "concurrency": "--concurrency",
+    "max_num_seqs": "--max-num-seqs", "max_num_batched_tokens": "--max-num-batched-tokens",
+    "long_prefill_token_threshold": "--long-prefill-token-threshold",
+    "block_size_in_tokens": "--block-size-in-tokens",
+    "gpu_memory_utilization": "--gpu-memory-utilization",
+    "kv_cache_dtype": "--kv-cache-dtype", "total_kv_blocks": "--total-kv-blocks",
+    "scheduler": "--scheduler", "routing_policy": "--routing-policy",
+    "routing_scorers": "--routing-scorers", "admission_policy": "--admission-policy",
+    "preemption_policy": "--preemption-policy",
+    "num_speculative_tokens": "--num-speculative-tokens",
+    "speculative_acceptance_rate": "--speculative-acceptance-rate",
+    "speculative_method": "--speculative-method",
+}
+BOOL_FLAGS = {"enable_expert_parallel": "--enable-expert-parallel"}
+
+
+def _iter_json_objects(text):
+    """Yield each top-level {...} block in text, parsed. Tolerates surrounding non-JSON prose."""
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] == "{":
+            depth = 0
+            for j in range(i, n):
+                if text[j] == "{":
+                    depth += 1
+                elif text[j] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            yield json.loads(text[i:j + 1])
+                        except ValueError:
+                            pass
+                        i = j
+                        break
+        i += 1
+
+
+def parse_metrics(stdout):
+    """Return the cluster-aggregate metrics object (or the first JSON block) from `blis run` stdout."""
+    objs = [o for o in _iter_json_objects(stdout) if isinstance(o, dict) and "tokens_per_sec" in o]
+    if not objs:
+        return {}
+    for o in objs:
+        if o.get("instance_id") == "cluster":
+            return o
+    return objs[0]
+
+
+def build_cmd(blis, catalog, model, hardware, workload, num_requests, seed, horizon, config, defaults):
+    cmd = [blis, "run", "--model", model, "--hardware", hardware]
+    if catalog:
+        cmd += ["--catalog", catalog]
+    if defaults:
+        cmd += ["--defaults-filepath", defaults]
+    if workload:
+        cmd += ["--workload", workload]
+    if num_requests is not None:
+        cmd += ["--num-requests", str(num_requests)]
+    if seed is not None:
+        cmd += ["--seed", str(seed)]
+    if horizon is not None:
+        cmd += ["--horizon", str(horizon)]
+    for k, v in config.items():
+        if k in BOOL_FLAGS:
+            if v:
+                cmd.append(BOOL_FLAGS[k])
+        else:
+            cmd += [FLAG.get(k, f"--{k.replace('_', '-')}"), str(v)]
+    return cmd
+
+
+def resolve_defaults(blis, defaults):
+    """Locate defaults.yaml so the run does not depend on cwd: explicit arg, else next to the binary."""
+    if defaults:
+        return defaults
+    beside = os.path.join(os.path.dirname(os.path.abspath(blis)), "defaults.yaml")
+    return beside if os.path.exists(beside) else None
+
+
+def run_one(blis, catalog, model, hardware, workload, num_requests, seed, horizon, config,
+            phase="probe", timeout=120, defaults=None):
+    """Run one BLIS config and return a record dict. No file I/O (caller writes runs.jsonl)."""
+    cmd = build_cmd(blis, catalog, model, hardware, workload, num_requests, seed, horizon, config,
+                    resolve_defaults(blis, defaults))
+    config_hash = hashlib.sha1(json.dumps(config, sort_keys=True).encode()).hexdigest()[:12]
+    t0 = time.time()
+    try:
+        pr = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        stdout, stderr, rc = pr.stdout, pr.stderr, pr.returncode
+    except subprocess.TimeoutExpired:
+        stdout, stderr, rc = "", "timeout", -1
+    return {
+        "config": config,
+        "concurrency": config.get("concurrency"),
+        "config_hash": config_hash,
+        "phase": phase,
+        "cmd": cmd,
+        "returncode": rc,
+        "wall_s": round(time.time() - t0, 3),
+        "metrics": parse_metrics(stdout) if rc == 0 else {},
+        "error": None if rc == 0 else (stderr.strip().splitlines()[-1] if stderr.strip() else f"rc={rc}"),
+        "stdout_tail": stdout[-2000:],
+    }
+
+
+def main():
+    p = argparse.ArgumentParser(description="Run one BLIS config; print its record, optionally append to runs.jsonl")
+    p.add_argument("--blis", default="./blis")
+    p.add_argument("--catalog", default=os.environ.get("BLIS_CATALOG"))
+    p.add_argument("--model", required=True)
+    p.add_argument("--hardware", required=True)
+    p.add_argument("--workload")
+    p.add_argument("--num-requests", type=int, dest="num_requests")
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--horizon", type=int)
+    p.add_argument("--config", required=True, help='JSON knob dict, e.g. {"tp":8,"num_instances":2,"concurrency":64}')
+    p.add_argument("--phase", default="probe")
+    p.add_argument("--defaults", help="path to defaults.yaml (default: next to the blis binary)")
+    p.add_argument("--out", help="optional runs.jsonl to append to (single-run use only)")
+    p.add_argument("--timeout", type=int, default=120)
+    args = p.parse_args()
+    if not args.catalog:
+        sys.exit("no catalog: pass --catalog or set BLIS_CATALOG (NS-6)")
+    rec = run_one(args.blis, args.catalog, args.model, args.hardware, args.workload,
+                  args.num_requests, args.seed, args.horizon, json.loads(args.config),
+                  args.phase, args.timeout, args.defaults)
+    if args.out:
+        os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+        with open(args.out, "a") as f:
+            f.write(json.dumps(rec) + "\n")
+    print(json.dumps(rec))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,26 @@
+{
+  "_source": "REAL run",
+  "run_id": "glm53flash-h100x16-chatbot-0001",
+  "model": "glm-5.3-flash",
+  "hardware": "H100",
+  "gpu_budget": 16,
+  "workload": {
+    "preset": "chatbot"
+  },
+  "objective": "dual-pareto",
+  "interactivity_floor": {
+    "tok_per_s_per_user": 50,
+    "itl_p99_ms_max": 20.0
+  },
+  "headroom": 0.8,
+  "slos": {},
+  "pinned_stack": {
+    "blis": "kernel-exclusive (PR#1851)",
+    "catalog": "0.2.1",
+    "registry": "v0.1.1"
+  },
+  "workload_params": {
+    "num_requests": 400
+  },
+  "seed": 0
+}

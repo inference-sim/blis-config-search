@@ -5,7 +5,7 @@
 # Importable: sweep_pool.py imports run_one()/build_cmd()/parse_metrics() for batch parallelism.
 #
 # It maps a config (knobs) + scenario-fixed args to pr-1851 `blis run` flags, runs the pinned
-# binary, parses the TEXT metrics from stdout, and returns/records one JSON record.
+# binary, parses the JSON metrics object from stdout, and returns/records one JSON record.
 #
 # pr-1851 `blis run` prints a "=== Simulation Metrics ===" header then one JSON object per instance
 # (plus a "cluster" aggregate); parse_metrics() extracts the cluster object. Confirmed against a live
@@ -35,24 +35,26 @@ BOOL_FLAGS = {"enable_expert_parallel": "--enable-expert-parallel"}
 
 
 def _iter_json_objects(text):
-    """Yield each top-level {...} block in text, parsed. Tolerates surrounding non-JSON prose."""
+    """Yield each top-level JSON object in text, tolerating surrounding prose.
+
+    Uses JSONDecoder.raw_decode (string/escape-aware), so braces inside string values do not
+    desync parsing -- a hand-rolled brace counter would mis-match on an error string or a path
+    token containing '{' or '}'.
+    """
+    dec = json.JSONDecoder()
     i, n = 0, len(text)
     while i < n:
         if text[i] == "{":
-            depth = 0
-            for j in range(i, n):
-                if text[j] == "{":
-                    depth += 1
-                elif text[j] == "}":
-                    depth -= 1
-                    if depth == 0:
-                        try:
-                            yield json.loads(text[i:j + 1])
-                        except ValueError:
-                            pass
-                        i = j
-                        break
-        i += 1
+            try:
+                obj, end = dec.raw_decode(text, i)
+            except ValueError:
+                i += 1          # not a valid object here (stray brace in prose); keep scanning
+                continue
+            if isinstance(obj, dict):
+                yield obj
+            i = end
+        else:
+            i += 1
 
 
 def parse_metrics(stdout):
@@ -109,6 +111,15 @@ def run_one(blis, catalog, model, hardware, workload, num_requests, seed, horizo
         stdout, stderr, rc = pr.stdout, pr.stderr, pr.returncode
     except subprocess.TimeoutExpired:
         stdout, stderr, rc = "", "timeout", -1
+    metrics = parse_metrics(stdout) if rc == 0 else {}
+    if rc != 0:
+        error = stderr.strip().splitlines()[-1] if stderr.strip() else f"rc={rc}"
+    elif not metrics:
+        # rc=0 but nothing parseable -> a format/parse failure, NOT a clean zero-throughput run.
+        # Flag it so sweep_pool and the search never treat it as a healthy result.
+        error = "rc=0 but no cluster metrics parsed from stdout (output format changed?)"
+    else:
+        error = None
     return {
         "config": config,
         "concurrency": config.get("concurrency"),
@@ -117,14 +128,14 @@ def run_one(blis, catalog, model, hardware, workload, num_requests, seed, horizo
         "cmd": cmd,
         "returncode": rc,
         "wall_s": round(time.time() - t0, 3),
-        "metrics": parse_metrics(stdout) if rc == 0 else {},
-        "error": None if rc == 0 else (stderr.strip().splitlines()[-1] if stderr.strip() else f"rc={rc}"),
+        "metrics": metrics,
+        "error": error,
         "stdout_tail": stdout[-2000:],
     }
 
 
-def main():
-    p = argparse.ArgumentParser(description="Run one BLIS config; print its record, optionally append to runs.jsonl")
+def add_common_args(p):
+    """Shared run-config flags for both run_blis and sweep_pool, so the surface stays single-sourced."""
     p.add_argument("--blis", default="./blis")
     p.add_argument("--catalog", default=os.environ.get("BLIS_CATALOG"))
     p.add_argument("--model", required=True)
@@ -133,14 +144,23 @@ def main():
     p.add_argument("--num-requests", type=int, dest="num_requests")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--horizon", type=int)
-    p.add_argument("--config", required=True, help='JSON knob dict, e.g. {"tp":8,"num_instances":2,"concurrency":64}')
-    p.add_argument("--phase", default="probe")
     p.add_argument("--defaults", help="path to defaults.yaml (default: next to the blis binary)")
-    p.add_argument("--out", help="optional runs.jsonl to append to (single-run use only)")
+    p.add_argument("--phase", default="probe")
     p.add_argument("--timeout", type=int, default=120)
-    args = p.parse_args()
-    if not args.catalog:
+
+
+def require_catalog(catalog):
+    if not catalog:
         sys.exit("no catalog: pass --catalog or set BLIS_CATALOG (NS-6)")
+
+
+def main():
+    p = argparse.ArgumentParser(description="Run one BLIS config; print its record, optionally append to runs.jsonl")
+    add_common_args(p)
+    p.add_argument("--config", required=True, help='JSON knob dict, e.g. {"tp":8,"num_instances":2,"concurrency":64}')
+    p.add_argument("--out", help="optional runs.jsonl to append to (single-run use only)")
+    args = p.parse_args()
+    require_catalog(args.catalog)
     rec = run_one(args.blis, args.catalog, args.model, args.hardware, args.workload,
                   args.num_requests, args.seed, args.horizon, json.loads(args.config),
                   args.phase, args.timeout, args.defaults)

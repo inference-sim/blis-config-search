@@ -45,41 +45,36 @@ def compute_cap(util_fraction, mem_budget_fraction, peak_rss_mib, max_parallel):
         mem_cap = max(1, int(mem * mem_budget_fraction / peak_rss_mib))
     else:
         mem_cap = core_cap  # unknown free memory -> let cores decide
-    cap = min(core_cap, mem_cap)
+    resource_cap = min(core_cap, mem_cap)
     bound = "cores" if core_cap <= mem_cap else "memory"
-    if max_parallel:
-        cap = min(cap, max_parallel)
-        if cap == max_parallel:
-            bound = "explicit --max-parallel"
+    cap = resource_cap
+    # Attribute to --max-parallel only when it ACTUALLY tightened the resource cap, not when it
+    # merely equals it (then the resource was still the real binding constraint).
+    if max_parallel is not None and max_parallel < resource_cap:
+        cap, bound = max_parallel, "explicit --max-parallel"
     return cap, bound, {"available_cpus": cpus, "mem_available_mib": mem,
                         "core_cap": core_cap, "mem_cap": mem_cap}
 
 
 def main():
     p = argparse.ArgumentParser(description="Run a batch of BLIS configs in parallel under a host-adaptive cap")
-    p.add_argument("--blis", default="./blis")
-    p.add_argument("--catalog", default=os.environ.get("BLIS_CATALOG"))
-    p.add_argument("--model", required=True)
-    p.add_argument("--hardware", required=True)
-    p.add_argument("--workload")
-    p.add_argument("--num-requests", type=int, dest="num_requests")
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--horizon", type=int)
-    p.add_argument("--phase", default="probe")
-    p.add_argument("--defaults", help="path to defaults.yaml (default: next to the blis binary)")
+    run_blis.add_common_args(p)  # shared run-config flags (single source of truth)
     p.add_argument("--batch", required=True, help="JSON file: array of config dicts (or '-' for stdin)")
     p.add_argument("--out", required=True, help="runs.jsonl to append to (written single-threaded)")
-    p.add_argument("--timeout", type=int, default=120)
-    p.add_argument("--max-parallel", type=int, dest="max_parallel")
+    p.add_argument("--max-parallel", type=int, dest="max_parallel", help="hard cap on parallel runs (>=1)")
     p.add_argument("--util-fraction", type=float, default=0.8)
     p.add_argument("--mem-budget-fraction", type=float, default=0.8)
     p.add_argument("--peak-rss-mib", type=float, default=1024.0, help="conservative BLIS RSS/run")
     args = p.parse_args()
-    if not args.catalog:
-        sys.exit("no catalog: pass --catalog or set BLIS_CATALOG (NS-6)")
+    run_blis.require_catalog(args.catalog)
+    if args.max_parallel is not None and args.max_parallel < 1:
+        sys.exit("--max-parallel must be >= 1")
 
-    src = sys.stdin if args.batch == "-" else open(args.batch)
-    configs = json.load(src)
+    if args.batch == "-":
+        configs = json.load(sys.stdin)
+    else:
+        with open(args.batch) as f:
+            configs = json.load(f)
     if not isinstance(configs, list):
         sys.exit("--batch must be a JSON array of config dicts")
 
@@ -104,7 +99,7 @@ def main():
             f.write(json.dumps(rec) + "\n")
 
     wall = time.time() - t0
-    ok = sum(1 for r in results if r["returncode"] == 0)
+    ok = sum(1 for r in results if r["returncode"] == 0 and not r["error"])  # rc0 + parsed metrics
     sum_run_s = sum(r["wall_s"] for r in results)
     print(json.dumps({
         "parallel_cap": cap, "bound_by": bound, "n_configs": len(configs), "ok": ok,

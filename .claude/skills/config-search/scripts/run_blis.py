@@ -232,8 +232,12 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     try:
         parallel, engine, cli = classify_config(config)
     except ConfigError as e:
-        rec.update({"returncode": None, "error": f"unsupported config: {e}",
-                    "metrics": {}, "metrics_all_instances": []})
+        # Same row SHAPE as a real run so neither sweep_pool's summary nor the report trips on a
+        # missing key (every record has wall_s, deployment, metrics, ...). returncode=None marks it
+        # "not run"; error carries the reason.
+        rec.update({"deployment": None, "cmd": None, "returncode": None, "wall_s": 0.0,
+                    "metrics": {}, "metrics_all_instances": [], "error": f"unsupported config: {e}",
+                    "stdout_tail": "", "stderr_tail": ""})
         return rec
     num_instances = cli.get("num_instances", 1)
     fp = footprint_gpus(parallel)
@@ -282,10 +286,15 @@ def add_common_args(p):
 
 
 def require_env(args):
+    """Raise ValueError (do NOT sys.exit) -- this module is imported as a library; callers in a
+    main() catch it and exit."""
+    missing = []
     if not args.catalog:
-        sys.exit("no catalog: pass --catalog or set BLIS_CATALOG (NS-6)")
+        missing.append("--catalog or BLIS_CATALOG (NS-6)")
     if not args.registry:
-        sys.exit("no registry: pass --registry or set BLIS_REGISTRY (blis-latency-kernel needs it)")
+        missing.append("--registry or BLIS_REGISTRY (blis-latency-kernel needs it)")
+    if missing:
+        raise ValueError("missing required: " + "; ".join(missing))
 
 
 def main():
@@ -294,7 +303,10 @@ def main():
     p.add_argument("--config", required=True, help='JSON knob dict, e.g. {"tp":8,"enable_expert_parallel":true,"num_instances":2,"concurrency":32}')
     p.add_argument("--out", help="optional runs.jsonl to append to (single-run use only)")
     args = p.parse_args()
-    require_env(args)
+    try:
+        require_env(args)
+    except ValueError as e:
+        sys.exit(str(e))
     rec = run_one(args.blis, args.catalog, args.registry, args.scenarios, args.model, args.hardware,
                   args.engine_version, args.workload, args.num_requests, args.seed, args.horizon,
                   json.loads(args.config), args.phase, args.timeout, args.defaults)

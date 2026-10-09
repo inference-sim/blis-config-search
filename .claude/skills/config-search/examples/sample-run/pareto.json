@@ -1,5 +1,5 @@
 {
-  "_source": "REAL kernel run (blis-latency-kernel); numbers carry MLA/hybrid step-time pessimism (see scenario caveats)",
+  "_source": "REAL kernel run (blis-latency-kernel); numbers are simulator predictions -- validate against curvebender real measurements before acting",
   "objective": "dual-pareto",
   "interactivity_floor": {
     "tok_per_s_per_user": 50,
@@ -54,6 +54,15 @@
           "scheduling_delay_p99_ms": 107.74464999999982,
           "preemption_count": 0,
           "tok_per_s_per_user": 120.1
+        },
+        {
+          "concurrency": 5,
+          "tokens_per_sec": 511.6,
+          "itl_p99_ms": 8.84,
+          "ttft_p99_ms": 452.742,
+          "scheduling_delay_p99_ms": 123.99073999999996,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 113.1
         },
         {
           "concurrency": 6,
@@ -140,6 +149,15 @@
           "scheduling_delay_p99_ms": 124.716,
           "preemption_count": 0,
           "tok_per_s_per_user": 107.1
+        },
+        {
+          "concurrency": 10,
+          "tokens_per_sec": 983.6,
+          "itl_p99_ms": 9.834,
+          "ttft_p99_ms": 470.49636999999944,
+          "scheduling_delay_p99_ms": 124.72896999999998,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 101.7
         },
         {
           "concurrency": 12,
@@ -244,6 +262,15 @@
           "scheduling_delay_p99_ms": 162.664,
           "preemption_count": 0,
           "tok_per_s_per_user": 74.2
+        },
+        {
+          "concurrency": 20,
+          "tokens_per_sec": 1471.5,
+          "itl_p99_ms": 14.292,
+          "ttft_p99_ms": 592.3869299999997,
+          "scheduling_delay_p99_ms": 153.278,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 70.0
         },
         {
           "concurrency": 24,

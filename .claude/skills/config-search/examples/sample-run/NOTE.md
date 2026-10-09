@@ -26,7 +26,8 @@ decode *step*, not per emitted token, so under speculative decoding/MTP one entr
 tokens and `1000/itl_p99` understates the real per-user rate. The brain emits `tok_per_s_per_user`
 per point; the report plots that, not a derived axis.
 
-These are **simulator predictions**, and for GLM-5.3-Flash the kernel's step-time is **pessimistic**
-for MLA and hybrid (KDA) attention (BLIS warns about both on stderr). Spot-check against the real
-llm-d measurements in `curvebender-tools/reports` before acting. The layout is convention-based and
-expected to evolve.
+These are **simulator predictions**. The kernel prices MLA and hybrid (KDA) attention from fitted
+per-operator coefficients (these runs are clean -- no step-time warnings); spot-check against the real
+llm-d measurements in `curvebender-tools/reports` before acting. `stderr_tail` is retained per run
+(empty on a clean run) for any diagnostics BLIS does emit. The layout is convention-based and expected
+to evolve.

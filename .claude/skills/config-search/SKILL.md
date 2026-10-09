@@ -88,8 +88,8 @@ Load axis is **concurrency** (closed-loop virtual users, `--concurrency`), not o
 
    | Binding signal at C* | Likely cause | Move |
    |---|---|---|
-   | ITL p99 binds, batch full, KV healthy | decode compute/bandwidth ceiling | accept as ceiling; more decode TP/instances, or spec-decode |
-   | TTFT / scheduling-delay binds, queue growing | prefill/admission-bound | chunked prefill (`--long-prefill-token-threshold`), raise `--max-num-batched-tokens` |
+   | ITL p99 binds, batch full, KV healthy | decode compute/bandwidth ceiling | accept as ceiling; add decode instances / raise `tp` (spec-decode is NOT supported in v1 -- the runner rejects it) |
+   | TTFT / scheduling-delay binds, queue growing | prefill/admission-bound | raise `max_num_batched_tokens` (chunked-prefill `long_prefill_token_threshold` is NOT a kernel field in v1 -- rejected) |
    | `preemption_count` > 0 / KV thrash | KV-starved | `--kv-cache-dtype fp8`; raise `--gpu-memory-utilization`; **check `--block-size-in-tokens`** (effective KV tokens = total_kv_blocks x block_size); lower `--max-num-seqs` |
    | `--max-num-seqs` saturated, tput below ceiling, no KV failures | batch-width limited | raise `--max-num-seqs` / `--max-num-batched-tokens` |
    | cluster shape with an idle pool / imbalance | routing/placement limited | fix prefill:decode ratio; open routing (`--routing-policy`/`--routing-scorers`) |

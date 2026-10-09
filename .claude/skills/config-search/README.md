@@ -86,7 +86,7 @@ one place that invokes BLIS.
 First engine version, **verified end-to-end on the kernel backend**: `examples/sample-run/` is a real
 kernel mini-search (GLM-5.3-Flash, 16x H100) -- topologies priced via generated scenarios, bisected to
 C* at the interactivity floor, winner `4x TP4 + EP`. The runner parses the JSON metrics and
-per-instance objects, the parallel pool hits ~4-14x, and 16 unit tests pass. Caveat: the kernel's
-step-time is pessimistic for MLA/hybrid attention (it warns on stderr) -- outputs are predictions, to
-be spot-checked against the real llm-d measurements in `curvebender-tools/reports`. Still to do: tune
+per-instance objects, the parallel pool hits ~4-14x, and the unit suite passes. Caveat: outputs are
+simulator **predictions** (the kernel prices MLA/KDA from fitted coefficients) -- spot-check against
+the real llm-d measurements in `curvebender-tools/reports` before acting. Still to do: tune
 the steering rules against that real data, and wrap the capacity-probe/finalist driver as one command.

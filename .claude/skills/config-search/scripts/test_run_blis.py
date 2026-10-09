@@ -129,6 +129,10 @@ class RunOneRejects(unittest.TestCase):
         self.assertIsNone(rec["returncode"])
         self.assertIn("unsupported config", rec["error"])
         self.assertEqual(rec["metrics"], {})
+        # same row SHAPE as a real run so sweep_pool summary + the report never trip on missing keys
+        for k in ("wall_s", "deployment", "metrics_all_instances", "stderr_tail", "cmd"):
+            self.assertIn(k, rec)
+        self.assertEqual(rec["wall_s"], 0.0)
 
 
 class ComputeCap(unittest.TestCase):
@@ -158,11 +162,16 @@ class ComputeCap(unittest.TestCase):
         self._patch(10, 10 ** 9)
         self.assertEqual(sweep_pool.compute_cap(0.8, 0.8, 1024.0, 8)[:2], (8, "cores"))
 
-    def test_mem_unknown_falls_back_to_cores(self):
-        self._patch(10, None)
-        cap, _, info = sweep_pool.compute_cap(0.8, 0.8, 1024.0, None)
-        self.assertEqual(cap, 8)
+    def test_mem_unknown_conservative_cap(self):
+        self._patch(10, None)                     # core_cap 8, no /proc/meminfo
+        cap, bound, info = sweep_pool.compute_cap(0.8, 0.8, 1024.0, None)
+        self.assertEqual(cap, sweep_pool.UNKNOWN_MEM_CAP)     # conservative fallback, not 8
+        self.assertEqual(bound, "memory-unknown-fallback")
         self.assertIsNone(info["mem_available_mib"])
+
+    def test_mem_unknown_but_max_parallel_wins(self):
+        self._patch(10, None)
+        self.assertEqual(sweep_pool.compute_cap(0.8, 0.8, 1024.0, 2)[:2], (2, "explicit --max-parallel"))
 
 
 if __name__ == "__main__":

@@ -90,10 +90,13 @@ Load axis is **concurrency** (closed-loop virtual users, `--concurrency`), not o
    concurrency for clean curves, pick the winner, and report its margin + the **move trail** ("why
    this won").
 
-**Determinism:** every `blis run` is deterministic (INV-6). Keep the *search* deterministic too --
-when a batch of results returns, decide the next step from a **stable ordering of the batch**, not
-worker-finish order. **Caching:** hash the config; identical configs coalesce (runs are exact and
-free to re-read). **Parallelism:** see below.
+**Determinism (scope it honestly):** every `blis run` is deterministic (INV-6) and the pool writes
+`runs.jsonl` in stable input order, so the *data* is reproducible. The end-to-end *recommendation* is
+only as reproducible as your search decisions -- in this v1 those are prompt-driven, so make them
+reproducible by always deciding the next step from a **stable ordering of the batch** (not
+worker-finish order) and recording the move trail. Do not claim a byte-identical recommendation the
+way the formal sweeper (with an executable policy) could. **Caching:** hash the config; identical
+configs coalesce (runs are exact and free to re-read). **Parallelism:** see below.
 
 ## Running BLIS (the runner + the parallel pool)
 
@@ -126,7 +129,9 @@ memory_cap = floor(MemAvailable * mem_budget_fraction / peak_rss_per_run)   # Me
 from the host's **available** (not installed) cpu/ram -- never assuming we own the box. BLIS is ~1
 core and ~0.1-0.6 GiB RSS per run (conservative default 1 GiB), so a big dedicated host binds on
 cores and a small / shared / containerized one binds on memory. Verified: 24-core/250 GiB host ->
-cap 19 (cores), ~7x speedup on an 8-config batch; `--max-parallel 2` -> cap 2.
+cap 19 (cores), ~7x speedup on an 8-config batch; `--max-parallel 2` -> cap 2. **Non-Linux note:**
+without `/proc/meminfo` (e.g. macOS) free memory is unknown, so the cap falls back to CPU-only and
+`sweep_pool.py` warns -- pass `--max-parallel` there to bound RAM.
 
 The adaptive steps (bisection, coordinate-ascent) are sequential, so the width comes from independent
 work: many candidate topologies, the finalists' dense sweeps, k-ary boundary probes. Baseline is
@@ -136,13 +141,15 @@ recommendation stays reproducible despite parallelism.
 
 ## The data dump (seam to the report step)
 
-A run directory, **convention-based, not a frozen schema** (see `examples/sample-run/`):
+A run directory, **convention-based, not a frozen schema** (see `examples/sample-run/`). Today the
+scripts write `runs.jsonl`; **you (the search brain) write `scenario.json` and `pareto.json`** from
+the runs. (Folding that assembly into a one-command driver is the open follow-up.)
 
 ```
 runs/<run-id>/
-  scenario.json   # the resolved Scenario (model, hw, budget, workload, objective, floor, headroom, slos)
-  runs.jsonl      # one row per blis run: {config, concurrency, metrics, diagnostics, binding_signal, config_hash, phase}
-  pareto.json     # finalists, dual-Pareto points, chosen winner, margins, explained move trail
+  scenario.json   # the resolved Scenario (model, hw, budget, workload, objective, floor, headroom, slos)  -- written by the brain
+  runs.jsonl      # one row per blis run: {config, concurrency, metrics, diagnostics, binding_signal, config_hash, phase}  -- written by run_blis/sweep_pool
+  pareto.json     # finalists, dual-Pareto points, chosen winner, margins, explained move trail  -- written by the brain
 ```
 
 ## Report step (added later)

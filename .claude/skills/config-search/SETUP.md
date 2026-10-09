@@ -55,3 +55,12 @@ python3 -I $S/sweep_pool.py --blis /path/to/blis \
 ```
 
 The summary line reports `parallel_cap`, `bound_by` (cores vs memory), and `speedup_x`.
+
+## 5. Unit tests (no BLIS / no network)
+
+```bash
+python3 .claude/skills/config-search/scripts/test_run_blis.py
+```
+
+Covers `parse_metrics` (cluster selection, braces-in-strings, nested envelope, empty), `build_cmd`
+boolean-knob handling, and the `compute_cap` host-adaptive logic.

@@ -63,8 +63,15 @@ runs/<run-id>/
   pareto.json     # the finalists, the chosen winner, and why it won
 ```
 
-Deterministic: the same scenario and seed give the same recommendation. Re-plot or re-analyze from
-the run directory without touching BLIS again.
+How it's produced today: `scripts/run_blis.py` + `scripts/sweep_pool.py` run BLIS and write
+`runs.jsonl`; the **search brain (Claude, per `SKILL.md`)** decides which configs to run, assembles
+`scenario.json`, and computes/writes `pareto.json`. A single-command driver that emits all three is
+the TODO in Status.
+
+Reproducibility: each `blis run` is deterministic (INV-6) and the pool writes `runs.jsonl` in a
+stable order, so the *data* is reproducible. The end-to-end *recommendation* is only as reproducible
+as the search policy, which in this v1 is prompt-driven -- so treat it as a strong default, not a
+byte-identical guarantee. Re-plot or re-analyze from the run directory without touching BLIS again.
 
 ## How it runs in parallel
 

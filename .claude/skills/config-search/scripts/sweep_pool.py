@@ -11,8 +11,10 @@
 # BLIS is ~1 core and ~0.1-0.6 GiB RSS per run, so on a big host the core cap binds and on a small /
 # shared / containerized host the memory cap binds -- neither is hard-coded. --max-parallel overrides.
 #
-# The search decision order stays deterministic: records are returned sorted by the batch's input
-# order, independent of which worker finished first (keeps the recommendation reproducible, INV-6).
+# Determinism scope: each BLIS run is deterministic (INV-6), and this pool writes records in the
+# batch's INPUT order regardless of which worker finished first -- so the ledger is reproducible.
+# It does NOT make the overall recommendation reproducible: candidate enumeration, bisection,
+# steering, and ranking are the (prompt-driven) search brain's decisions, outside this script.
 import argparse, json, os, sys, time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -80,6 +82,11 @@ def main():
 
     cap, bound, info = compute_cap(args.util_fraction, args.mem_budget_fraction,
                                    args.peak_rss_mib, args.max_parallel)
+    if info["mem_available_mib"] is None and args.max_parallel is None:
+        # non-Linux / no /proc/meminfo: memory is NOT accounted for -- only CPUs cap concurrency,
+        # which can over-subscribe RAM on a memory-constrained host. Warn and advise an explicit cap.
+        print("sweep_pool WARNING: free memory unknown (no /proc/meminfo); cap is CPU-only. "
+              "On non-Linux/containerized hosts pass --max-parallel to bound RAM.", file=sys.stderr)
     print(json.dumps({"parallel_cap": cap, "bound_by": bound, "n_configs": len(configs), **info}),
           file=sys.stderr)
 

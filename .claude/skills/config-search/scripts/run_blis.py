@@ -57,15 +57,31 @@ def _iter_json_objects(text):
             i += 1
 
 
+def _find_metrics_dicts(obj, out):
+    """Collect every dict carrying 'tokens_per_sec', recursing into nested dicts/lists so a future
+    enveloped format ({"result": {...cluster...}}) is still found, not just top-level objects."""
+    if isinstance(obj, dict):
+        if "tokens_per_sec" in obj:
+            out.append(obj)
+        for v in obj.values():
+            _find_metrics_dicts(v, out)
+    elif isinstance(obj, list):
+        for v in obj:
+            _find_metrics_dicts(v, out)
+    return out
+
+
 def parse_metrics(stdout):
-    """Return the cluster-aggregate metrics object (or the first JSON block) from `blis run` stdout."""
-    objs = [o for o in _iter_json_objects(stdout) if isinstance(o, dict) and "tokens_per_sec" in o]
-    if not objs:
+    """Return the cluster-aggregate metrics object (or the first metrics dict) from `blis run` stdout."""
+    cands = []
+    for o in _iter_json_objects(stdout):
+        _find_metrics_dicts(o, cands)
+    if not cands:
         return {}
-    for o in objs:
+    for o in cands:
         if o.get("instance_id") == "cluster":
             return o
-    return objs[0]
+    return cands[0]
 
 
 def build_cmd(blis, catalog, model, hardware, workload, num_requests, seed, horizon, config, defaults):
@@ -83,11 +99,14 @@ def build_cmd(blis, catalog, model, hardware, workload, num_requests, seed, hori
     if horizon is not None:
         cmd += ["--horizon", str(horizon)]
     for k, v in config.items():
-        if k in BOOL_FLAGS:
+        flag = FLAG.get(k) or BOOL_FLAGS.get(k) or f"--{k.replace('_', '-')}"
+        if isinstance(v, bool):
+            # presence-only: emit the flag when True, omit entirely when False -- for ANY boolean
+            # knob, not only those pre-listed in BOOL_FLAGS (else `foo: false` -> `--foo False`).
             if v:
-                cmd.append(BOOL_FLAGS[k])
+                cmd.append(flag)
         else:
-            cmd += [FLAG.get(k, f"--{k.replace('_', '-')}"), str(v)]
+            cmd += [flag, str(v)]
     return cmd
 
 

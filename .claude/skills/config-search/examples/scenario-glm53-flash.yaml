@@ -1,0 +1,43 @@
+# Headline example: GLM-5.3-Flash on 16x H100, ShareGPT chatbot, hold >= 50 tok/s/user.
+# A scenario file is optional -- natural-language invocation works too. Everything here is a
+# default the user may override. GLM-5.3-Flash ships in blis-catalog 0.2.1 (no setup needed).
+
+model: glm-5.3-flash          # in blis-catalog 0.2.1
+hardware: h100                # scenario hardware key (lowercase)
+gpu_budget: 16                # 16x H100 == the real 2x TP8+EP deployment is one candidate here
+
+workload:
+  preset: chatbot             # BLIS presets: chatbot | summarization | contentgen | multidoc | distribution
+  # a ShareGPT-style chatbot maps to the chatbot preset; or specify prompt/output tokens directly:
+  # prompt_tokens_mean: 1024
+  # output_tokens_mean: 512
+
+objective: dual-pareto        # budget-max output tok/s AND output tok/s per GPU
+interactivity_floor:
+  tok_per_s_per_user: 50      # == ITL p99 <= ~20 ms
+headroom: 0.8                 # recommend usable capacity C_use = 0.8 * C*
+
+slos: {}                      # optional, e.g. { ttft_p99_ms: 2000, e2e_p99_ms: 30000 }
+
+# Knob space to search. Keys must be ones the kernel runner supports (it rejects unknown ones).
+# Per-instance topology + engine knobs are written into the generated kernel scenario; num_instances
+# and concurrency stay CLI. tp*dp must be <= 8 (one node) -- scale past that with num_instances.
+space:
+  tp: [4, 8]
+  dp: [1]
+  num_instances: auto         # tp * dp * num_instances <= gpu_budget
+  enable_expert_parallel: [true]      # MoE: 288 routed experts
+  quantization: [fp8]         # GLM-5.3-Flash is FP8 -- set precision explicitly (never defaulted)
+  cache_dtype: [fp8]
+  block_size: [16, 32]        # engine knobs explored by diagnostic steering, not a full grid:
+  max_num_seqs: [128, 256]
+  gpu_memory_utilization: [0.9]
+  # NOT supported by the kernel runner yet (the runner rejects these keys): PD prefill/decode split
+  # (prefill_tp/decode_tp/prefill_instances/decode_instances), pipeline parallel (pp>1), speculative
+  # decoding (num_speculative_tokens/...), and long_prefill_token_threshold.
+
+budget:
+  max_runs: 150
+  # max_parallel: host-adaptive by default
+
+seed: 0

@@ -252,11 +252,16 @@ class QaRegressions(unittest.TestCase):
         self.assertNotIn("run-x", a)
         self.assertNotIn("DIFFERENT-name", b)
 
-    def test_g2_basename_fallback_only_without_run_id(self):
-        sc = {k: v for k, v in self.sc.items() if k != "run_id"}   # strip the in-data id
-        html = report.render_report(sc, {}, self.runs, {}, "/x/anon-run-dir")
-        self.assertIn("anon-run-dir", html)                # basename fallback, clearly labelled
-        self.assertIn("from directory name", html)
+    def test_g2_no_run_id_still_location_independent(self):
+        # Even without an in-data run_id, the output must NOT depend on the directory name: it says
+        # "unidentified" rather than leaking the basename, so two differently-named dirs still match.
+        sc = {k: v for k, v in self.sc.items() if k != "run_id"}
+        a = report.render_report(sc, {}, self.runs, {}, "/x/anon-one")
+        b = report.render_report(sc, {}, self.runs, {}, "/y/anon-two")
+        self.assertEqual(a, b)
+        self.assertNotIn("anon-one", a)
+        self.assertNotIn("anon-two", b)
+        self.assertIn("unidentified", a)
 
     # G3 — malformed ledger rows are counted + surfaced, not silently dropped
     def test_g3_malformed_rows_counted_and_surfaced(self):

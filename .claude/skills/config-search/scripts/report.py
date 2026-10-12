@@ -410,19 +410,21 @@ def _glossary(report):
             f'for the short definition.</p></div><dl class="gl-list">{"".join(items)}</dl></section>')
 
 
-def _footer(scenario, pareto, run_path, records, n_malformed=0):
+def _footer(scenario, pareto, records, n_malformed=0):
+    # run_path intentionally NOT a parameter: the footer must not depend on the directory path/name
+    # (QA G2). The run is identified by the in-data run_id only.
     ps = scenario.get("pinned_stack") or {}
     stack = ""
     if ps:
         stack = (f" · BLIS {esc(ps.get('blis','?'))}, kernel {esc(ps.get('kernel','?'))}, "
                  f"catalog {esc(ps.get('catalog','?'))}, registry {esc(ps.get('registry','?'))}")
-    # Identify the run by the id carried IN the data (scenario/pareto), never by the directory name,
-    # so the HTML is a pure function of the run-dir CONTENTS: identical data renders byte-identical
-    # no matter where the directory lives or what it is called (QA G2). We only fall back to the
-    # basename when the data carries no run_id at all, and label it as a fallback.
-    data_id = scenario.get("run_id") or pareto.get("run_id")
-    run_id = data_id or (os.path.basename(run_path.rstrip("/")) or run_path)
-    id_note = "" if data_id else " (from directory name; no run_id in scenario.json)"
+    # Identify the run ONLY by the id carried IN the data (scenario/pareto), never by the directory
+    # path or name, so the HTML is a pure function of the run-dir CONTENTS: identical data renders
+    # byte-identical no matter where the directory lives or what it is called (QA G2). If the data
+    # carries no run_id we say so plainly rather than falling back to the (location-dependent)
+    # basename -- a missing id must not make the output depend on the directory name.
+    run_id = (scenario.get("run_id") or pareto.get("run_id")
+              or "unidentified (no run_id in scenario.json/pareto.json)")
     # Surface skipped malformed ledger rows instead of hiding them (QA G3).
     malformed = ""
     if n_malformed:
@@ -430,17 +432,20 @@ def _footer(scenario, pareto, run_path, records, n_malformed=0):
                      f'skipped and are not reflected in the figures or counts.')
     return (f'<div class="foot"><b>These are simulator predictions</b> from the '
             f'blis-latency-kernel backend — spot-check against the real llm-d measurements in '
-            f'curvebender-tools/reports before acting. Run <code>{esc(run_id)}</code>{id_note}{stack}. '
+            f'curvebender-tools/reports before acting. Run <code>{esc(run_id)}</code>{stack}. '
             f'Raw per-run ledger, scenario and analysis sit beside this report in the run directory '
             f'({len(records)} runs).{malformed}</div>')
 
 
-def render_report(scenario, pareto, runs, report, run_path, n_malformed=0):
+def render_report(scenario, pareto, runs, report, run_path=None, n_malformed=0):
+    # run_path is accepted for call-site compatibility but intentionally UNUSED in the output: the
+    # report is a pure function of the run-dir contents, independent of where it lives (QA G2).
+    _ = run_path
     records = build_records(runs, scenario)
     facts = build_facts(records, scenario, pareto)
     body = (_header(report, scenario, facts) + _hero(report) + _section_measurements(report)
             + _sections(report, records, scenario) + _what_to_run(report, records)
-            + _glossary(report) + _footer(scenario, pareto, run_path, records, n_malformed))
+            + _glossary(report) + _footer(scenario, pareto, records, n_malformed))
     with open(TEMPLATE, encoding="utf-8") as f:
         html = f.read()
     title = report.get("title") or facts.get("model") or "config-search report"

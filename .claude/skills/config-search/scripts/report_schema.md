@@ -86,8 +86,8 @@ unchanged. Knobs the engine doesn't vary come through constant (e.g. `route: "de
 the explorer automatically hides single-value dimensions.
 
 `id, src, conc, tp, dp, ni, gpus, series, route, pd, mtp, mnbt, mns, a2a, epw,`
-`pu (per-user tok/s: authoritative tok_per_s_per_user if present; else 1000/mean-ITL when one step`
-`   == one token (mtp==0); else null -- never a known-wrong step rate),`
+`pu (per-user tok/s: authoritative tok_per_s_per_user if present; else 1000/ITL-p99 when one step`
+`   == one token (mtp==0) -- the p99 basis matches the floor + pareto; else null, never a step rate),`
 `pu_is_step_estimate (True = under MTP with no authoritative field, so pu is null not a wrong number),`
 `cl (=tokens_per_sec), itl (=mean ITL ms), ttft (=ttft_p99_ms),`
 `hit (prefix hit or null), to (timed out), drop (unservable), p95 (=e2e_p95_ms),`

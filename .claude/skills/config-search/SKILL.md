@@ -205,8 +205,10 @@ Inputs (all optional-tolerant -- three of four are brain-authored):
   classifies each run servable/not against the interactivity floor + SLOs (a declared SLO whose
   metric is absent from both the cluster aggregate and every instance counts as a *violation*, not a
   silent pass). `pu` (per-user tok/s) prefers the engine's authoritative `tok_per_s_per_user` field;
-  it falls back to `1000 / mean ITL` only when that field is absent **and** one decode step equals
-  one token (`mtp == 0`). Under speculative decoding with no authoritative field, mean ITL is a
+  it falls back to `1000 / ITL p99` only when that field is absent **and** one decode step equals
+  one token (`mtp == 0`). The p99 basis is deliberate: it matches `pareto.json`'s `tok_per_s_per_user`
+  and the interactivity floor (p99 <= 20 ms), so the page never shows two incompatible per-user
+  numbers for a point. Under speculative decoding with no authoritative field, ITL p99 is a
   per-*step* interval that would undercount the per-token rate, so `pu` is left **null** (flagged
   `pu_is_step_estimate`) rather than publishing a known-wrong number. It also computes a **`FACTS`**
   stats object the prose cites.

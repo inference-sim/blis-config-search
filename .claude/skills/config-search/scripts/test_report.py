@@ -277,6 +277,22 @@ class QaRegressions(unittest.TestCase):
         pu, _ = report._per_user_rate(run, mtp=0)
         self.assertEqual(pu, 50.0)                         # 1000/p99=50, NOT 1000/mean=100
 
+    # F3 (docs) — the user-facing description of `pu` must say p99, not mean, so the generated
+    # report and skill contract don't misdescribe the plotted metric (namasl re-review).
+    def test_f3_docs_describe_pu_as_p99(self):
+        base = os.path.dirname(report.VENDOR_DIR)          # .../report
+        skill = os.path.join(base, "..", "SKILL.md")
+        schema = os.path.join(HERE, "report_schema.md")
+        rjson = os.path.join(FIXTURE, "report.json")
+        for path in (skill, schema, rjson):
+            text = open(path, encoding="utf-8").read()
+            lo = text.lower()
+            self.assertNotIn("mean inter-token latency", lo, f"{path} still says mean ITL for pu")
+            self.assertNotIn("1000 / mean itl", lo, f"{path} still says 1000/mean ITL for pu")
+            self.assertNotIn("1000/mean-itl", lo, f"{path} still says 1000/mean-ITL for pu")
+        # the fixture narrative + schema should affirmatively mention the p99 basis
+        self.assertIn("p99", open(rjson, encoding="utf-8").read().lower())
+
     # F2 — a floor given only as tok_per_s_per_user still enforces (derived p99 cap)
     def test_f2_rate_only_floor_is_enforced(self):
         self.assertEqual(report._floor_itl_p99_max({"tok_per_s_per_user": 50}), 20.0)

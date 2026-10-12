@@ -21,7 +21,7 @@
       "num": 2,
       "title": "The operating curve, and where it stops",
       "figure": "operating_curve",
-      "caption": "<b>Figure 1. Each configuration trades per-user speed for fleet output, until it falls off a cliff.</b> Per-user <a class=\"gl\" href=\"#g-per-user-token-rate\" data-def=\"The output tokens per second one caller sees, 1000 divided by the mean inter-token latency.\">token rate</a> against total cluster output, walking concurrency up each configuration. Numbers beside markers are the session count; filled markers meet every limit, hollow ones break at least one. The dashed line is the 50 tok/s/user floor.",
+      "caption": "<b>Figure 1. Each configuration trades per-user speed for fleet output, until it falls off a cliff.</b> Per-user <a class=\"gl\" href=\"#g-per-user-token-rate\" data-def=\"The output tokens per second one caller sees, 1000 divided by the p99 inter-token latency.\">token rate</a> against total cluster output, walking concurrency up each configuration. Numbers beside markers are the session count; filled markers meet every limit, hollow ones break at least one. The dashed line is the 50 tok/s/user floor.",
       "prose": [
         "Every configuration trades the same way while it is healthy: serve more sessions, the fleet delivers more tokens, each user waits a little longer. Then the <a class=\"gl\" href=\"#g-inter-token-latency\" data-def=\"The average gap between consecutive output tokens in a response.\">inter-token latency</a> crosses its ceiling and the per-user rate falls off a cliff — the hollow markers.",
         "The single-instance TP8 shape reaches only 6 concurrent sessions before the cliff; two TP8 instances reach 12; four TP4 instances reach 20. Capacity is set by how many instances share the load, not by any single engine knob.",
@@ -59,7 +59,7 @@
     {"conc": 16, "flags": {"tp": 4, "ni": 4, "mnbt": 8192, "mns": 256, "mtp": 0}, "pu": 74.2, "cl": 1263.5, "itl": 13.48, "hit": null}
   ],
   "glossary": [
-    {"id": "g-per-user-token-rate", "term": "per-user token rate", "def": "The output tokens per second one caller sees, computed as 1000 divided by the mean inter-token latency.", "long": "The interactivity axis of the search. The floor for this run is 50 tok/s/user, i.e. an ITL p99 at or below 20 ms."},
+    {"id": "g-per-user-token-rate", "term": "per-user token rate", "def": "The output tokens per second one caller sees, computed as 1000 divided by the p99 inter-token latency.", "long": "The interactivity axis of the search, on the same p99 basis as the floor: 50 tok/s/user is an ITL p99 at or below 20 ms."},
     {"id": "g-inter-token-latency", "term": "inter-token latency", "def": "The average gap between consecutive output tokens in a response.", "long": "On this model the kernel prices it as nearly flat until a decode-compute ceiling, then it climbs sharply — the cliff in Figure 1."},
     {"id": "g-tensor-parallel-width", "term": "tensor-parallel width", "def": "How many GPUs each copy of the model is split across.", "long": "Written into the generated scenario as <code>parallel.tp</code>. TP8 fills one H100 node; TP4 lets four instances share the 16-GPU budget."}
   ]

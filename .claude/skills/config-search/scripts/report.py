@@ -20,8 +20,9 @@
 # loads d3 + crossfilter from cdnjs for the explorer, so viewing the explorer needs network; the
 # article and the baked figures render offline regardless -- the explorer silently no-ops without d3.)
 #
-# Determinism (INV-6): a pure function of the run directory. Same run-dir path => byte-identical HTML.
-# The footer intentionally stamps the resolved ABSOLUTE local path -- the one machine-specific string.
+# Determinism (INV-6): a pure function of the run-directory CONTENTS. Identical data renders
+# byte-identical HTML regardless of where the directory lives or what it is named -- the footer
+# identifies the run by the in-data run_id, never the path/basename (and says "unidentified" if none).
 import argparse, json, math, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -38,12 +39,24 @@ CARDS_PH = "/*__CONFIG_SEARCH_CARDS__*/[]"
 
 # --- defensive loading -------------------------------------------------------
 
+class MalformedInput(ValueError):
+    """An input file EXISTS but failed to parse. Distinct from a missing optional file."""
+
+
 def _read_json(path, default):
+    """Parse a JSON input. A MISSING optional file quietly returns `default`. A file that EXISTS but
+    fails to parse raises MalformedInput -- we must NOT silently substitute {} for a truncated
+    scenario.json, because that drops the floor/SLOs and would mark unconstrained runs servable
+    (review F1). The caller decides whether to abort or surface it."""
+    if not os.path.exists(path):
+        return default
     try:
         with open(path, encoding="utf-8") as f:
             return json.load(f)
-    except (OSError, ValueError):
+    except OSError:
         return default
+    except ValueError as e:
+        raise MalformedInput(f"{path}: invalid JSON ({e})") from e
 
 
 def _read_jsonl(path):
@@ -90,6 +103,17 @@ def load_run_dir(path):
 def esc(s):
     return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             .replace('"', "&quot;"))
+
+
+def _json_for_script(obj):
+    """JSON-serialize for embedding inside an inline <script> element. json.dumps alone is NOT safe
+    there: a string containing "</script>" would close the element early, which breaks the page and,
+    with attacker-influenced data (a model/route name like "</script><script>…"), executes arbitrary
+    code in whoever opens the shareable report (review F5). Escaping <, >, & to \\uXXXX keeps the data
+    valid JSON to JSON.parse while making those characters inert to the HTML parser. ensure_ascii is
+    default-on, so U+2028/U+2029 (which also break inline scripts) are already escaped."""
+    return (json.dumps(obj, sort_keys=True)
+            .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
 
 
 def _get(d, *keys, default=None):
@@ -141,6 +165,21 @@ def _metric_any(run, key):
     return None, True   # metric entirely absent (or non-numeric) in aggregate and every instance
 
 
+def _floor_itl_p99_max(floor):
+    """The p99 ITL cap the interactivity floor implies. Honor the explicit itl_p99_ms_max alias if
+    present; otherwise DERIVE it from the documented tok_per_s_per_user floor (p99 cap = 1000 / rate)
+    -- a scenario that specifies only the rate (as the checked-in YAML does) must still be enforced,
+    not treated as no floor at all (review F2)."""
+    floor = floor or {}
+    cap = _as_num(floor.get("itl_p99_ms_max"))
+    if cap is not None:
+        return cap
+    rate = _as_num(floor.get("tok_per_s_per_user"))
+    if rate:
+        return 1000.0 / rate
+    return None
+
+
 def _feasible(run, floor, slos):
     """(ok, viol[]) -- did this run meet completion + interactivity floor + any SLOs?
     A declared SLO whose metric is absent from BOTH the aggregate and every instance is treated as a
@@ -156,7 +195,7 @@ def _feasible(run, floor, slos):
         viol.append(f"timed_out_requests = {m['timed_out_requests']}")
     if m.get("dropped_unservable"):
         viol.append(f"dropped_unservable = {m['dropped_unservable']}")
-    itl_max = (floor or {}).get("itl_p99_ms_max")
+    itl_max = _floor_itl_p99_max(floor)
     if itl_max is not None:
         itl, missing = _metric_any(run, "itl_p99_ms")
         if missing:
@@ -175,23 +214,23 @@ def _feasible(run, floor, slos):
 
 
 def _per_user_rate(run, mtp):
-    """Per-user token rate (pu). Prefer the engine's authoritative per-token field
-    (tok_per_s_per_user). Else fall back to 1000/mean-ITL -- but ONLY when it is actually a token
-    rate, i.e. one decode step == one token (mtp == 0). Under speculative decoding (mtp>0) BLIS logs
-    ITL per decode STEP, so 1000/mean-ITL is a step rate that is known to undercount the per-token
-    rate; rather than publish a wrong number we return pu=None and set step_estimate=True so the
-    report shows the value as unavailable with an explanation, not a misleading figure (QA G1).
+    """Per-user token rate (pu), on the SAME p99 basis as pareto.json's tok_per_s_per_user and the
+    interactivity floor -- so one page never shows two incompatible per-user numbers for a point
+    (review F3). Prefer the engine's authoritative per-token field (tok_per_s_per_user). Else fall
+    back to 1000/itl_p99_ms, and ONLY when one decode step == one token (mtp == 0): under speculative
+    decoding BLIS logs ITL per decode STEP, so 1000/ITL is a step rate that undercounts the per-token
+    rate -- we return pu=None (flagged) rather than publish a wrong number (QA G1).
     Returns (pu_or_None, is_mtp_without_authoritative_field)."""
     m = run.get("metrics") or {}
-    authoritative = m.get("tok_per_s_per_user")
+    authoritative = _as_num(m.get("tok_per_s_per_user"))
     if authoritative is not None:
         return round(authoritative, 2), False
-    itl_mean = m.get("itl_mean_ms")
-    if not itl_mean:
+    itl_p99 = _as_num(m.get("itl_p99_ms"))
+    if not itl_p99:
         return None, False
     if mtp:
         return None, True   # step rate would undercount; do not fabricate a per-token number
-    return round(1000.0 / itl_mean, 2), False
+    return round(1000.0 / itl_p99, 2), False
 
 
 def build_records(runs, scenario):
@@ -474,8 +513,8 @@ def render_report(scenario, pareto, runs, report, run_path=None, n_malformed=0):
     replacements = {
         "__TITLE__": esc(title),
         "__BODY__": body,
-        RECORDS_PH: json.dumps(records, sort_keys=True),
-        FACTS_PH: json.dumps(facts, sort_keys=True),
+        RECORDS_PH: _json_for_script(records),
+        FACTS_PH: _json_for_script(facts),
     }
     for ph in replacements:
         if ph not in html:
@@ -501,7 +540,7 @@ def _card_for(scenario, pareto, report, href):
 def render_card_index(cards):
     with open(INDEX_TEMPLATE, encoding="utf-8") as f:
         html = f.read()
-    return html.replace(CARDS_PH, json.dumps(cards, sort_keys=True))
+    return html.replace(CARDS_PH, _json_for_script(cards))   # script-safe (review F5)
 
 
 # --- entrypoints -------------------------------------------------------------
@@ -540,13 +579,18 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if not os.path.isdir(args.path):
         raise SystemExit(f"{args.path}: not a directory")
-    if is_run_dir(args.path):
-        print(f"wrote {write_one(args.path, args.out)}")
-    else:
-        if args.out:
-            raise SystemExit("--out is only valid for a single run directory, not a parent of many")
-        index, children = write_tree(args.path)
-        print(f"wrote {index} + {len(children)} report(s): {', '.join(children)}")
+    try:
+        if is_run_dir(args.path):
+            print(f"wrote {write_one(args.path, args.out)}")
+        else:
+            if args.out:
+                raise SystemExit("--out is only valid for a single run directory, not a parent of many")
+            index, children = write_tree(args.path)
+            print(f"wrote {index} + {len(children)} report(s): {', '.join(children)}")
+    except MalformedInput as e:
+        # A present-but-unparseable scenario/pareto/report must abort, not silently unconstrain the
+        # recommendation (review F1).
+        raise SystemExit(f"error: {e}")
 
 
 if __name__ == "__main__":

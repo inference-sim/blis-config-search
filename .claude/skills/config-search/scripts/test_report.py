@@ -14,16 +14,18 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 import report
 import figures
 
-FIXTURE = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "examples", "sample-run"))
+FIXTURE = os.path.normpath(os.path.join(HERE, "..", "examples", "sample-run"))
+SMOKETEST_JS = os.path.join(HERE, "explorer_smoketest.js")
 
 
 def _svg_wellformed(svg):
@@ -39,12 +41,15 @@ class Records(unittest.TestCase):
         self.assertEqual(len(self.recs), len(self.runs))
         self.assertEqual(len(self.recs), 27)
 
-    def test_pu_is_per_token_from_mean_itl(self):
-        # pu is derived from the raw itl_mean_ms (not the display-rounded r["itl"]).
+    def test_pu_on_p99_basis_matching_floor_and_artifact(self):
+        # pu is on the p99 basis (1000/itl_p99 when no authoritative field), the SAME basis as the
+        # interactivity floor and pareto.json's tok_per_s_per_user -- so the page never shows two
+        # incompatible per-user numbers for a point (review F3). The fixture runs carry no
+        # tok_per_s_per_user, so this exercises the p99 fallback.
         for r, run in zip(self.recs, self.runs):
-            raw = (run.get("metrics") or {}).get("itl_mean_ms")
-            if raw:
-                self.assertAlmostEqual(r["pu"], round(1000.0 / raw, 2), places=2)
+            p99 = (run.get("metrics") or {}).get("itl_p99_ms")
+            if p99:
+                self.assertAlmostEqual(r["pu"], round(1000.0 / p99, 2), places=2)
 
     def test_per_gpu_series_from_deployment(self):
         # 4x TP4 => gpus 16, read from deployment not the flat config
@@ -98,8 +103,7 @@ class Figures(unittest.TestCase):
         svg = figures.fig_operating_curve(self.recs, floor_pu=50)
         self.assertTrue(_svg_wellformed(svg))
         self.assertIn("tok/s per user", svg)
-        self.assertIn("floor 50", svg)                   # floor reference line drawn
-        self.assertIn("servability is p99", svg)         # labelled as mean-ref, not the p99 boundary
+        self.assertIn("interactivity floor 50", svg)     # floor = the servability boundary (p99 basis)
         self.assertIn("4x TP4 + EP", svg)                # a series labelled
 
     def test_scale_bars(self):
@@ -224,19 +228,33 @@ class QaRegressions(unittest.TestCase):
 
     # G1 — pu under speculative decoding
     def test_g1_pu_prefers_authoritative_field(self):
-        run = {"metrics": {"tok_per_s_per_user": 90.0, "itl_mean_ms": 5.0}}
+        run = {"metrics": {"tok_per_s_per_user": 90.0, "itl_p99_ms": 5.0}}
         pu, is_step = report._per_user_rate(run, mtp=3)
         self.assertEqual(pu, 90.0)
         self.assertFalse(is_step)
 
     def test_g1_pu_null_under_mtp_not_wrong_number(self):
-        run = {"metrics": {"itl_mean_ms": 5.0}}            # no authoritative field
+        run = {"metrics": {"itl_p99_ms": 5.0}}             # no authoritative field
         pu, is_step = report._per_user_rate(run, mtp=3)
         self.assertIsNone(pu)                              # NOT the known-wrong step rate (1000/5)
         self.assertTrue(is_step)                           # flagged so the report can explain the gap
         pu0, is_step0 = report._per_user_rate(run, mtp=0)
-        self.assertEqual(pu0, 200.0)                       # no MTP -> step == token, real rate
+        self.assertEqual(pu0, 200.0)                       # no MTP -> step == token, real p99 rate
         self.assertFalse(is_step0)
+
+    # F3 — pu fallback is on the p99 basis (matches floor + artifact), not mean
+    def test_f3_pu_fallback_uses_p99_not_mean(self):
+        run = {"metrics": {"itl_p99_ms": 20.0, "itl_mean_ms": 10.0}}   # mean != p99
+        pu, _ = report._per_user_rate(run, mtp=0)
+        self.assertEqual(pu, 50.0)                         # 1000/p99=50, NOT 1000/mean=100
+
+    # F2 — a floor given only as tok_per_s_per_user still enforces (derived p99 cap)
+    def test_f2_rate_only_floor_is_enforced(self):
+        self.assertEqual(report._floor_itl_p99_max({"tok_per_s_per_user": 50}), 20.0)
+        # a run at itl_p99 25 ms (> 20 cap implied by 50 tok/s) must be rejected
+        ok, viol = report._feasible({"metrics": {"itl_p99_ms": 25}}, {"tok_per_s_per_user": 50}, {})
+        self.assertFalse(ok)
+        self.assertTrue(any("itl_p99_ms" in v for v in viol))
 
     def test_g1_records_carry_the_flag(self):
         recs = report.build_records(self.runs, self.sc)
@@ -339,6 +357,21 @@ class QaRegressions(unittest.TestCase):
             svg = fn(recs)
             self.assertTrue(svg.strip().endswith("</svg>"))
 
+    # F4 — the BROWSER path: the explorer must render with a null-bearing record (not just the
+    # Python SVG builders). Driven headlessly via explorer_smoketest.js with d3/crossfilter shims;
+    # skipped where node is unavailable.
+    def test_f4_explorer_tolerates_null_records_in_browser(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not available")
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        with tempfile.TemporaryDirectory() as d:
+            html = os.path.join(d, "index.html")
+            with open(html, "w") as f:
+                f.write(report.render_report(sc, pa, runs, rep, d))
+            r = subprocess.run([node, SMOKETEST_JS, html], capture_output=True, text=True, timeout=30)
+            self.assertEqual(r.returncode, 0, f"explorer smoketest failed: {r.stderr or r.stdout}")
+
     # jgchn review — robustness
     def test_auto_operating_table_tolerates_none_conc(self):
         # a servable record with conc=None must not blow up sorted() in the auto table path
@@ -359,6 +392,42 @@ class QaRegressions(unittest.TestCase):
         ok2, viol2 = report._feasible(bad, {}, {})
         self.assertFalse(ok2)
         self.assertTrue(any("incomplete" in v for v in viol2))
+
+    # F5 — inline JSON must be safe inside a <script> element
+    def test_f5_script_close_sequence_is_neutralized(self):
+        runs = [{"concurrency": 1, "config": {"routing_policy": "</script><script>alert(1)</script>"},
+                 "metrics": {"itl_p99_ms": 8, "tokens_per_sec": 10,
+                             "injected_requests": 1, "completed_requests": 1}}]
+        html = report.render_report({"interactivity_floor": {"itl_p99_ms_max": 20}}, {}, runs, {}, "/x")
+        # the literal closing tag must NOT survive in the embedded data...
+        self.assertNotIn("</script><script>alert", html)
+        # ...it is present only as the inert unicode-escaped form
+        self.assertIn("\\u003c/script", html)
+
+    def test_f5_card_index_also_escaped(self):
+        card = {"model": "m", "winner": "</script><script>x</script>", "href": "a/index.html",
+                "hw": "8x h100", "workload": "chatbot", "summary": "", "run_id": "r"}
+        html = report.render_card_index([card])
+        self.assertNotIn("</script><script>x", html)
+
+    # F1 — a present-but-malformed scenario/pareto must fail loudly, not silently unconstrain
+    def test_f1_malformed_scenario_raises_not_silent(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "runs.jsonl"), "w") as f:
+                f.write('{"concurrency":1,"metrics":{"itl_p99_ms":8,"tokens_per_sec":10}}\n')
+            with open(os.path.join(d, "scenario.json"), "w") as f:
+                f.write('{ truncated not valid json')
+            with self.assertRaises(report.MalformedInput):
+                report.load_run_dir(d)
+
+    def test_f1_missing_optional_file_still_defaults(self):
+        # a genuinely ABSENT optional file must still default quietly (not raise)
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "runs.jsonl"), "w") as f:
+                f.write('{"concurrency":1,"metrics":{"itl_p99_ms":8,"tokens_per_sec":10}}\n')
+            sc, pa, runs, rep, nmal = report.load_run_dir(d)   # no scenario/pareto/report files
+            self.assertEqual((sc, pa, rep), ({}, {}, {}))
+            self.assertEqual(len(runs), 1)
 
 
 if __name__ == "__main__":

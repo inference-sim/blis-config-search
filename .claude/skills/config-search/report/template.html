@@ -291,19 +291,27 @@ const FACTS = /*__FACTS__*/{};
             :(d.key==='mnbt'?d3.format(',')(+g.key):g.key));
           n.select('.c').text(g=>g.value); });
     });
-    const rows=dims.conc.top(Infinity).slice().sort((a,b)=>b.pu-a.pu);
+    const rows=dims.conc.top(Infinity).slice().sort((a,b)=>(b.pu??-Infinity)-(a.pu??-Infinity));
     const n=rows.length,nok=rows.filter(r=>r.ok).length;
     none.classed('show', n===0);   // selection matched no runs -> explain instead of a blank plot
+    // build_records intentionally emits null pu/cl/itl for rejected/MTP/missing-metric runs; EVERY
+    // read below must tolerate null or one such row kills the whole explorer (review F4).
+    const f1=v=>v==null?'n/a':v.toFixed(1);                 // null-safe 1-decimal
+    const fk=v=>v==null?'n/a':d3.format(',.0f')(v);         // null-safe integer
+    const bestPu=d3.max(rows,r=>r.pu), bestCl=d3.max(rows,r=>r.cl);  // d3.max skips null/undefined
     sumCount.html(`<b>${n}</b> of ${RECORDS.length} runs selected &nbsp;&middot;&nbsp; `
       +`<b>${nok}</b> meet every limit &nbsp;&middot;&nbsp; `
-      +(n?`best <b>${d3.max(rows,r=>r.pu).toFixed(1)}</b> tok/s per user, `
-        +`<b>${d3.format(',.0f')(d3.max(rows,r=>r.cl))}</b> tok/s fleet`:''));
-    gpt.selectAll('g.p').data(rows,r=>r.id)
+      +(n?`best <b>${f1(bestPu)}</b> tok/s per user, `
+        +`<b>${fk(bestCl)}</b> tok/s fleet`:''));
+    // Only points with BOTH axes present can be placed on the scatter; the rest still appear in the
+    // table (which shows "–" per null cell) but are not plotted.
+    const plot=rows.filter(r=>r.cl!=null && r.pu!=null);
+    gpt.selectAll('g.p').data(plot,r=>r.id)
       .join(enter=>enter.append('g').attr('class','p').call(g=>g.append('title')))
       .call(g=>{ g.select('title').text(r=>
           `${r.conc} sessions · ${r.route} · TP=${r.tp} · ${r.pd}${r.mtp?' · MTP=1':''}\n`
-          +`${r.pu.toFixed(1)} tok/s per user, ${d3.format(',.0f')(r.cl)} tok/s fleet, `
-          +`ITL ${r.itl.toFixed(1)} ms${r.hit==null?'':', prefix hit '+r.hit.toFixed(2)}`
+          +`${f1(r.pu)} tok/s per user, ${fk(r.cl)} tok/s fleet, `
+          +`ITL ${f1(r.itl)} ms${r.hit==null?'':', prefix hit '+r.hit.toFixed(2)}`
           +(r.ok?'':`\nNOT SERVABLE: ${(r.viol||[]).join('; ')}`));
         g.selectAll('circle').data(r=>[r]).join('circle')
           .attr('cx',r=>x(r.cl)).attr('cy',r=>y(r.pu)).attr('r',5)

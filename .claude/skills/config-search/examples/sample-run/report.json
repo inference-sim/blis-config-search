@@ -8,7 +8,7 @@
     "Interactivity floor 50 tok/s/user (ITL p99 ≤ 20 ms), headroom 0.8"
   ],
   "hero": [
-    {"h": "What was tested", "html": "Three topologies within 16 H100s — <a class=\"gl\" href=\"#g-tensor-parallel-width\" data-def=\"How many GPUs each copy of the model is split across.\">tensor-parallel</a> 8 as one or two instances, and TP4 as four — each probed up the concurrency axis and bisected to its interactivity limit. 27 runs in all; 19 met every service limit, 8 did not and are reported rather than dropped."},
+    {"h": "What was tested", "html": "Three topologies within 16 H100s — <a class=\"gl\" href=\"#g-tensor-parallel-width\" data-def=\"How many GPUs each copy of the model is split across.\">tensor-parallel</a> 8 as one or two instances, and TP4 as four — each probed up the concurrency axis and bisected to its interactivity limit. 27 runs in all; 17 met every service limit (checked per instance, not just the cluster average), 10 did not and are reported rather than dropped."},
     {"h": "What was found", "html": "The kernel shows a <b>sharp interactivity cliff</b> for this model: per-user token rate holds flat, then collapses within one or two sessions of a configuration's limit. The limit — not the peak throughput — is what separates the three shapes."},
     {"h": "What to run", "html": "<b>Four TP4 instances with expert parallel</b>, at a usable operating point of 16 concurrent sessions. It delivers 1,264 tok/s across the fleet (79 tok/s per GPU) while every user still sees ~74 tok/s, and it scales furthest before the cliff."}
   ],
@@ -24,7 +24,7 @@
       "caption": "<b>Figure 1. Each configuration trades per-user speed for fleet output, until it falls off a cliff.</b> Per-user <a class=\"gl\" href=\"#g-per-user-token-rate\" data-def=\"The output tokens per second one caller sees, 1000 divided by the mean inter-token latency.\">token rate</a> against total cluster output, walking concurrency up each configuration. Numbers beside markers are the session count; filled markers meet every limit, hollow ones break at least one. The dashed line is the 50 tok/s/user floor.",
       "prose": [
         "Every configuration trades the same way while it is healthy: serve more sessions, the fleet delivers more tokens, each user waits a little longer. Then the <a class=\"gl\" href=\"#g-inter-token-latency\" data-def=\"The average gap between consecutive output tokens in a response.\">inter-token latency</a> crosses its ceiling and the per-user rate falls off a cliff — the hollow markers.",
-        "The single-instance TP8 shape reaches only 6 concurrent sessions before the cliff; two TP8 instances reach 12; four TP4 instances reach 25. Capacity is set by how many instances share the load, not by any single engine knob.",
+        "The single-instance TP8 shape reaches only 6 concurrent sessions before the cliff; two TP8 instances reach 12; four TP4 instances reach 20. Capacity is set by how many instances share the load, not by any single engine knob.",
         "The recommendation reads the <b>usable</b> point at headroom 0.8 of each limit, not the edge: 4× TP4 + EP at 16 sessions, where it holds ~74 tok/s per user and 1,264 tok/s across the fleet. (C* is 20, not the apparent 25: at 24-25 sessions the cluster-average ITL still looks fine, but one of the four instances is already over the 20 ms ceiling.)"
       ]
     },

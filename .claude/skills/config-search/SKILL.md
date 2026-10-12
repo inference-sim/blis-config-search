@@ -235,9 +235,9 @@ Pieces:
 Determinism (INV-6): a pure function of the run-directory **contents** -- identical data renders
 byte-identical HTML regardless of where the directory lives or what it is named
 (`json.dumps(..., sort_keys=True)`; the CDN URLs are fixed; the footer identifies the run by the
-`run_id` carried inside `scenario.json`/`pareto.json`, not by the directory path or name). The one
-exception is a run directory with no `run_id` in its data: then the footer falls back to the dir
-basename and says so. `examples/sample-run/` is the
+`run_id` carried inside `scenario.json`/`pareto.json`, not by the directory path or name). A run
+directory with no `run_id` in its data shows "unidentified" in the footer -- it never falls back to
+the directory basename, so the output stays independent of location even then. `examples/sample-run/` is the
 committed fixture (now including a worked `report.json`); `scripts/test_report.py` covers the records
 mapping, FACTS, each figure, report.json tolerance, and the seam-consistency checks.
 

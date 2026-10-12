@@ -32,7 +32,7 @@ def _svg_wellformed(svg):
 
 class Records(unittest.TestCase):
     def setUp(self):
-        self.sc, self.pa, self.runs, self.rep = report.load_run_dir(FIXTURE)
+        self.sc, self.pa, self.runs, self.rep, self.nmal = report.load_run_dir(FIXTURE)
         self.recs = report.build_records(self.runs, self.sc)
 
     def test_one_record_per_run(self):
@@ -70,7 +70,7 @@ class Records(unittest.TestCase):
 
 class Facts(unittest.TestCase):
     def setUp(self):
-        sc, pa, runs, _ = report.load_run_dir(FIXTURE)
+        sc, pa, runs, _, _ = report.load_run_dir(FIXTURE)
         self.facts = report.build_facts(report.build_records(runs, sc), sc, pa)
 
     def test_counts(self):
@@ -86,7 +86,7 @@ class Facts(unittest.TestCase):
 
 class Figures(unittest.TestCase):
     def setUp(self):
-        sc, _, runs, _ = report.load_run_dir(FIXTURE)
+        sc, _, runs, _, _ = report.load_run_dir(FIXTURE)
         self.recs = report.build_records(runs, sc)
 
     def test_operating_curve(self):
@@ -115,13 +115,13 @@ class Figures(unittest.TestCase):
         self.assertIn("no runs", figures.fig_operating_curve([]))
 
     def test_render_figure_unknown_name(self):
-        sc, _, _, _ = report.load_run_dir(FIXTURE)
+        sc, _, _, _, _ = report.load_run_dir(FIXTURE)
         self.assertIn("not available", report.render_figure("no_such_figure", self.recs, sc))
 
 
 class Narrative(unittest.TestCase):
     def test_full_render_has_all_sections(self):
-        sc, pa, runs, rep = report.load_run_dir(FIXTURE)
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
         self.assertTrue(rep, "fixture should ship a report.json")
         html = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
         for needle in ('class="standfirst"', 'class="panel"', 'id="xf"',
@@ -132,7 +132,7 @@ class Narrative(unittest.TestCase):
         self.assertEqual(html.count("<figure>"), 3)
 
     def test_absent_report_json_still_renders(self):
-        sc, pa, runs, _ = report.load_run_dir(FIXTURE)
+        sc, pa, runs, _, _ = report.load_run_dir(FIXTURE)
         html = report.render_report(sc, pa, runs, {}, "/abs/sample-run")
         self.assertIn('id="xf"', html)                   # explorer still mounts
         self.assertIn("What to run", html)               # auto operating table
@@ -143,7 +143,7 @@ class Narrative(unittest.TestCase):
         # The capacity probe visits a different concurrency ladder per topology, so many
         # conc x tp pairs have no run. The explorer must (a) ship an empty-state banner and
         # (b) dim/disable zero-count options so a cross-spec selection can't blank the plot.
-        sc, pa, runs, rep = report.load_run_dir(FIXTURE)
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
         html = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
         self.assertIn("No runs match this combination", html)   # empty-state banner text
         self.assertIn(".xf-opt.empty", html)                    # disabled-option style
@@ -157,13 +157,13 @@ class Narrative(unittest.TestCase):
                         "fixture should have empty conc x tp cells to exercise the guard")
 
     def test_partial_report_json_no_crash(self):
-        sc, pa, runs, _ = report.load_run_dir(FIXTURE)
+        sc, pa, runs, _, _ = report.load_run_dir(FIXTURE)
         html = report.render_report(sc, pa, runs, {"title": "X", "sections": [
             {"num": 2, "title": "only prose", "prose": ["hi"]}]}, "/x")
         self.assertIn("only prose", html)
 
     def test_records_and_facts_valid_json_in_output(self):
-        sc, pa, runs, rep = report.load_run_dir(FIXTURE)
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
         html = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
         recs = json.loads(re.search(r"const RECORDS = (\[.*?\]);", html, re.S).group(1))
         facts = json.loads(re.search(r"const FACTS = (\{.*?\});", html, re.S).group(1))
@@ -171,7 +171,7 @@ class Narrative(unittest.TestCase):
         self.assertEqual(facts["n_configs"], 3)
 
     def test_only_two_external_refs(self):
-        sc, pa, runs, rep = report.load_run_dir(FIXTURE)
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
         html = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
         refs = sorted(set(re.findall(r"https://[^\"']+", html)))
         self.assertEqual(refs, [
@@ -179,7 +179,7 @@ class Narrative(unittest.TestCase):
             "https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"])
 
     def test_deterministic(self):
-        sc, pa, runs, rep = report.load_run_dir(FIXTURE)
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
         a = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
         b = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
         self.assertEqual(a, b)
@@ -188,7 +188,7 @@ class Narrative(unittest.TestCase):
 class Contract(unittest.TestCase):
     """Seam-consistency on pareto.json (unchanged from the search track)."""
     def setUp(self):
-        self.sc, self.pa, self.runs, _ = report.load_run_dir(FIXTURE)
+        self.sc, self.pa, self.runs, _, _ = report.load_run_dir(FIXTURE)
 
     def test_at_c_use_matches_curve(self):
         for f in self.pa["finalists"]:
@@ -207,6 +207,107 @@ class Contract(unittest.TestCase):
                    r.get("deployment", {}).get("num_instances")) for r in self.runs}
         for f in self.pa["finalists"]:
             self.assertIn((f["config"]["tp"], f["config"]["num_instances"]), shapes)
+
+
+class QaRegressions(unittest.TestCase):
+    """Regression tests for the cross-vendor qa-review findings on PR #6 (G1-G8)."""
+
+    def setUp(self):
+        self.sc, self.pa, self.runs, self.rep, _ = report.load_run_dir(FIXTURE)
+
+    # G1 — pu under speculative decoding
+    def test_g1_pu_prefers_authoritative_field(self):
+        run = {"metrics": {"tok_per_s_per_user": 90.0, "itl_mean_ms": 5.0}}
+        pu, is_step = report._per_user_rate(run, mtp=3)
+        self.assertEqual(pu, 90.0)
+        self.assertFalse(is_step)
+
+    def test_g1_pu_fallback_flagged_under_mtp(self):
+        run = {"metrics": {"itl_mean_ms": 5.0}}            # no authoritative field
+        pu, is_step = report._per_user_rate(run, mtp=3)
+        self.assertEqual(pu, 200.0)                        # 1000/5
+        self.assertTrue(is_step)                           # flagged as a step-rate undercount
+        pu0, is_step0 = report._per_user_rate(run, mtp=0)
+        self.assertFalse(is_step0)                         # no MTP -> step == token, not flagged
+
+    def test_g1_records_carry_the_flag(self):
+        recs = report.build_records(self.runs, self.sc)
+        self.assertTrue(all("pu_is_step_estimate" in r for r in recs))
+        self.assertTrue(all(r["pu_is_step_estimate"] is False for r in recs))  # fixture is mtp=0
+
+    # G2 — relocation determinism (footer no longer embeds the absolute path)
+    def test_g2_identical_contents_relocate_to_identical_html(self):
+        a = report.render_report(self.sc, self.pa, self.runs, self.rep, "/tmp/aaa/run-x")
+        b = report.render_report(self.sc, self.pa, self.runs, self.rep, "/elsewhere/deep/run-x")
+        self.assertEqual(a, b)
+        self.assertNotIn("/tmp/aaa", a)
+        self.assertNotIn("/elsewhere", a)
+
+    # G3 — malformed ledger rows are counted + surfaced, not silently dropped
+    def test_g3_malformed_rows_counted_and_surfaced(self):
+        with tempfile.TemporaryDirectory() as d:
+            shutil.copy(os.path.join(FIXTURE, "scenario.json"), os.path.join(d, "scenario.json"))
+            with open(os.path.join(d, "runs.jsonl"), "w") as f:
+                f.write('{"concurrency":1,"metrics":{"itl_mean_ms":5,"tokens_per_sec":10}}\n')
+                f.write('{ this is not json\n')
+                f.write('{"concurrency":2,"metrics":{"itl_mean_ms":6,"tokens_per_sec":20}}\n')
+            sc, pa, runs, rep, nmal = report.load_run_dir(d)
+            self.assertEqual(len(runs), 2)
+            self.assertEqual(nmal, 1)
+            html = report.render_report(sc, pa, runs, rep, d, nmal)
+            self.assertIn("1 malformed line(s)", html)
+
+    # G4 — feasibility parity: absent SLO metric is a violation, per-instance worst is checked
+    def test_g4_absent_slo_metric_is_violation(self):
+        ok, viol = report._feasible({"metrics": {"itl_p99_ms": 5}}, {}, {"ttft_p99_ms": 100})
+        self.assertFalse(ok)
+        self.assertTrue(any("ttft_p99_ms missing" in v for v in viol))
+
+    def test_g4_per_instance_worst_used_when_aggregate_missing(self):
+        run = {"metrics": {}, "metrics_all_instances": [{"itl_p99_ms": 50}, {"itl_p99_ms": 10}]}
+        ok, viol = report._feasible(run, {"itl_p99_ms_max": 20}, {})
+        self.assertFalse(ok)                               # worst instance 50 > 20
+
+    # G7/F3 — a figure keyed on an unvaried knob degrades to a placeholder (really enforced)
+    def test_g7_unvaried_knob_figure_placeholders(self):
+        recs = report.build_records(self.runs, self.sc)
+        figures.FIGURES["_qa_probe_route"] = {"builder": figures.fig_operating_curve,
+                                              "keys": ("route",)}  # route is constant in the fixture
+        try:
+            svg = report.render_figure("_qa_probe_route", recs, self.sc)
+            self.assertIn("was not varied", svg)
+            # a figure keyed on conc (always swept) still draws real content
+            self.assertIn("<path", report.render_figure("operating_curve", recs, self.sc))
+        finally:
+            del figures.FIGURES["_qa_probe_route"]
+
+    def test_g7_registry_entries_declare_keys(self):
+        for name, spec in figures.FIGURES.items():
+            self.assertIn("builder", spec)
+            self.assertIn("keys", spec)
+
+    # G8 — a literal template marker in brain prose must not crash rendering
+    def test_g8_placeholder_literal_in_prose_survives(self):
+        rep = {"title": "T", "sections": [
+            {"num": 2, "title": "x", "prose": ["a literal __BODY__ and __TITLE__ in text"]}]}
+        html = report.render_report(self.sc, self.pa, self.runs, rep, "/x")
+        self.assertIn("literal __BODY__ and __TITLE__ in text", html)
+
+    # G5 — record-level edge cases
+    def test_g5_zero_servable_scale_bars_degrade(self):
+        recs = [{"series": "A", "conc": 4, "ok": False, "viol": ["x"], "cl": 10, "pu": 5, "p95": 1,
+                 "itl": 5, "tp": 8, "ni": 1, "gpus": 8}]
+        self.assertIn("no servable", figures.fig_scale_bars(recs))
+
+    def test_g5_none_and_zero_metrics_do_not_crash(self):
+        recs = [{"series": "A", "conc": c, "ok": True, "viol": [], "cl": cl, "pu": pu, "p95": p95,
+                 "itl": itl, "tp": 8, "ni": 1, "gpus": 8}
+                for c, cl, pu, p95, itl in [(1, None, None, None, None), (2, 0, 0, 0, 0),
+                                            (4, 100, 50, 1000, 10)]]
+        # each builder tolerates None/0 without raising
+        for fn in (figures.fig_operating_curve, figures.fig_tail_scatter, figures.fig_scale_bars):
+            svg = fn(recs)
+            self.assertTrue(svg.strip().endswith("</svg>"))
 
 
 if __name__ == "__main__":

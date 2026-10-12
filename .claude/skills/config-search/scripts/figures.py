@@ -60,14 +60,14 @@ def _svg(inner, label):
 
 
 def placeholder(message):
-    """A captioned 'nothing to plot' box -- used when a knob was not varied in this run."""
+    """A captioned 'nothing to plot' box. The caller supplies the specific reason (unknown figure
+    name, or a keying knob that was not varied), so the message is shown verbatim with no fixed
+    second line that could contradict it."""
     return (f'<svg viewBox="0 0 {VIEW_W} {VIEW_H}" width="100%" role="img" '
             f'aria-label="{esc(message)}" font-family="inherit">'
             f'<rect width="{VIEW_W}" height="{VIEW_H}" fill="var(--fig-bg,#fff)"/>'
-            f'<text x="{VIEW_W/2}" y="{VIEW_H/2-8}" text-anchor="middle" font-size="15" '
-            f'fill="var(--fig-ink3,#8a8a8a)">{esc(message)}</text>'
-            f'<text x="{VIEW_W/2}" y="{VIEW_H/2+16}" text-anchor="middle" font-size="12" '
-            f'fill="var(--fig-muted,#b9c0c8)">this knob was not varied in this run</text></svg>')
+            f'<text x="{VIEW_W/2}" y="{VIEW_H/2+4}" text-anchor="middle" font-size="14" '
+            f'fill="var(--fig-ink3,#8a8a8a)">{esc(message)}</text></svg>')
 
 
 def _grid_y(ticks, x0, x1, scale):
@@ -252,7 +252,11 @@ def fig_scale_bars(records):
     if not rows or all(m == 0 for _, m, _, _ in rows):
         return placeholder("no servable runs to size")
     x0, y0t, x1, y1b = _plot_box()
-    maxv = max(max(m for _, m, _, _ in rows), *(fb for _, _, fb, _ in rows if fb)) if rows else 1
+    # The x-axis must span the largest servable concurrency AND the furthest first-break marker.
+    # Collect both into one list so the axis fits every mark; guard against an all-zero/empty set
+    # (e.g. when no run broke a limit, so every fb is None) rather than calling max() on a bare int.
+    extents = [m for _, m, _, _ in rows] + [fb for _, _, fb, _ in rows if fb]
+    maxv = max([v for v in extents if v] or [1])
     top = _nice_top(maxv * 1.1)
     inner = []
     # x gridlines
@@ -287,9 +291,23 @@ def fig_scale_bars(records):
     return _svg("".join(inner), "maximum servable concurrency per configuration")
 
 
-# builders that need a knob our v1 engine does not vary degrade to a placeholder via report.py
+# Figure registry. Each entry declares the builder plus `keys`: the RECORDS field(s) the figure's
+# story depends on. report.render_figure() checks that EVERY keyed field actually varies across the
+# runs (more than one distinct value) and otherwise returns a captioned placeholder -- so a figure
+# whose knob the search never swept degrades honestly instead of drawing a misleading flat chart.
+# A figure keyed only on "conc" is always drawable (concurrency is the primary load axis, always
+# swept); a hypothetical routing figure would set keys=("route",) and placeholder until routing varies.
 FIGURES = {
-    "operating_curve": fig_operating_curve,
-    "tail_scatter": fig_tail_scatter,
-    "scale_bars": fig_scale_bars,
+    "operating_curve": {"builder": fig_operating_curve, "keys": ("conc",)},
+    "tail_scatter":    {"builder": fig_tail_scatter,    "keys": ("conc",)},
+    "scale_bars":      {"builder": fig_scale_bars,      "keys": ("series",)},
+    # Examples ready for when the search varies these knobs (they placeholder until then):
+    # "routing_feasibility": {"builder": fig_route_heatmap, "keys": ("route",)},
+    # "spec_decode_trade":   {"builder": fig_spec_trade,   "keys": ("mtp",)},
 }
+
+
+def varies(records, key):
+    """True iff `key` takes more than one distinct (non-None) value across records."""
+    seen = {r.get(key) for r in records if r.get(key) is not None}
+    return len(seen) > 1

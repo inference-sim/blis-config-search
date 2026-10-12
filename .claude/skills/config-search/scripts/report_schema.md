@@ -62,18 +62,21 @@ CSS-only hover tooltip, and `href="#g-ID"` jumps to the matching glossary entry.
 
 ## Figures
 
-`figure` names a builder in `scripts/figures.py`. Each builder reads the flat `RECORDS` (assembled by
-`report.py` from `runs.jsonl`) and returns inline SVG. A builder whose keying knob was **not varied**
-in the run degrades to a captioned placeholder rather than a misleading empty chart.
+`figure` names a builder registered in `scripts/figures.py`'s `FIGURES` map. Each entry is
+`{"builder": fn, "keys": (RECORDS field(s) the figure's story depends on)}`. `report.render_figure`
+first checks that **every** `keys` field actually varies across the runs; if one does not (the search
+never swept it), it returns a captioned placeholder instead of a misleading flat chart. An unknown
+figure name likewise placeholders.
 
-| name | what it draws | needs |
+| name | what it draws | keys (must vary) |
 |---|---|---|
-| `operating_curve` | per-user tok/s vs cluster tok/s, one line per config, concurrency-labelled; filled = servable | `cl`, `pu`, `ok` per run (always present) |
-| `scale_bars` | max servable concurrency per config, with the first-break marker | `ok` + `conc` |
-| `tail_scatter` | per-user tok/s vs p95 latency; crosses = unservable | `p95`, `pu` |
+| `operating_curve` | per-user tok/s vs cluster tok/s, one line per config, concurrency-labelled; filled = servable | `conc` |
+| `scale_bars` | max servable concurrency per config, with the first-break marker | `series` |
+| `tail_scatter` | per-user tok/s vs p95 latency; crosses = unservable | `conc` |
 
 Builders for knobs the v1 engine does not yet vary (routing, PD split, speculative decoding, dispatch
-collective) can be added here; until the search sweeps those knobs they render the placeholder.
+collective) are added as registry entries with the appropriate `keys` (e.g. `("route",)`); until the
+search sweeps that knob the variation check renders the placeholder automatically.
 
 ## `RECORDS` field reference (what the explorer + figures consume)
 
@@ -82,6 +85,8 @@ unchanged. Knobs the engine doesn't vary come through constant (e.g. `route: "de
 the explorer automatically hides single-value dimensions.
 
 `id, src, conc, tp, dp, ni, gpus, series, route, pd, mtp, mnbt, mns, a2a, epw,`
-`pu (=1000/mean ITL), cl (=tokens_per_sec), itl (=mean ITL ms), ttft (=ttft_p99_ms),`
+`pu (per-user tok/s: authoritative tok_per_s_per_user if present, else 1000/mean-ITL),`
+`pu_is_step_estimate (True = 1000/mean-ITL fallback under speculative decoding, an undercount),`
+`cl (=tokens_per_sec), itl (=mean ITL ms), ttft (=ttft_p99_ms),`
 `hit (prefix hit or null), to (timed out), drop (unservable), p95 (=e2e_p95_ms),`
-`ok (met completion+floor+SLOs), status, viol[] (reasons when not ok)`
+`ok (met completion+floor+SLOs; absent SLO metric = violation), status, viol[] (reasons when not ok)`

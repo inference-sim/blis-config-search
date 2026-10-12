@@ -22,7 +22,7 @@
 #
 # Determinism (INV-6): a pure function of the run directory. Same run-dir path => byte-identical HTML.
 # The footer intentionally stamps the resolved ABSOLUTE local path -- the one machine-specific string.
-import argparse, json, math, os, sys
+import argparse, json, math, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -47,19 +47,21 @@ def _read_json(path, default):
 
 
 def _read_jsonl(path):
-    rows = []
+    """Return (rows, skipped_line_numbers). A malformed row is skipped but NOT swallowed silently:
+    its 1-based line number is returned so the caller can warn and surface a count in the report."""
+    rows, skipped = [], []
     try:
         with open(path, encoding="utf-8") as f:
-            for line in f:
+            for lineno, line in enumerate(f, 1):
                 line = line.strip()
                 if line:
                     try:
                         rows.append(json.loads(line))
                     except ValueError:
-                        pass  # skip a malformed row rather than fail the whole report
+                        skipped.append(lineno)
     except OSError:
         pass
-    return rows
+    return rows, skipped
 
 
 def is_run_dir(path):
@@ -69,10 +71,18 @@ def is_run_dir(path):
 
 
 def load_run_dir(path):
+    """Returns (scenario, pareto, runs, report, n_malformed). n_malformed counts non-empty
+    runs.jsonl lines that failed to parse -- surfaced in the report rather than hidden (QA G3)."""
+    runs, skipped = _read_jsonl(os.path.join(path, "runs.jsonl"))
+    if skipped:
+        lines = ", ".join(str(n) for n in skipped[:10]) + ("…" if len(skipped) > 10 else "")
+        print(f"warning: {os.path.join(path, 'runs.jsonl')}: skipped {len(skipped)} malformed "
+              f"line(s): {lines}", file=sys.stderr)
     return (_read_json(os.path.join(path, "scenario.json"), {}),
             _read_json(os.path.join(path, "pareto.json"), {}),
-            _read_jsonl(os.path.join(path, "runs.jsonl")),
-            _read_json(os.path.join(path, "report.json"), {}))
+            runs,
+            _read_json(os.path.join(path, "report.json"), {}),
+            len(skipped))
 
 
 # --- esc + small helpers -----------------------------------------------------
@@ -99,8 +109,24 @@ def _num(v):
 
 # --- RECORDS: one flat row per blis run -------------------------------------
 
+def _metric_any(run, key):
+    """A metric from the cluster aggregate, OR the worst (max) across per-instance metrics when the
+    aggregate omits it. An SLO can be met at the cluster level yet violated on one instance; checking
+    only the aggregate (QA G4) would mark such a run servable when the search would not."""
+    m = run.get("metrics") or {}
+    if m.get(key) is not None:
+        return m[key], False
+    per = [inst.get(key) for inst in (run.get("metrics_all_instances") or [])
+           if isinstance(inst, dict) and inst.get(key) is not None]
+    if per:
+        return max(per), False
+    return None, True   # metric entirely absent
+
+
 def _feasible(run, floor, slos):
-    """(ok, viol[]) -- did this run meet completion + interactivity floor + any SLOs?"""
+    """(ok, viol[]) -- did this run meet completion + interactivity floor + any SLOs?
+    A declared SLO whose metric is absent from BOTH the aggregate and every instance is treated as a
+    violation (cannot prove the SLO was met), not silently passed (QA G4)."""
     viol = []
     if run.get("returncode", 0) != 0 or run.get("error"):
         viol.append(f"run failed: {run.get('error') or 'nonzero exit'}")
@@ -113,12 +139,38 @@ def _feasible(run, floor, slos):
     if m.get("dropped_unservable"):
         viol.append(f"dropped_unservable = {m['dropped_unservable']}")
     itl_max = (floor or {}).get("itl_p99_ms_max")
-    if itl_max is not None and m.get("itl_p99_ms") is not None and m["itl_p99_ms"] > itl_max:
-        viol.append(f"itl_p99_ms = {m['itl_p99_ms']:.1f} > {itl_max}")
+    if itl_max is not None:
+        itl, missing = _metric_any(run, "itl_p99_ms")
+        if missing:
+            viol.append("itl_p99_ms missing (cannot verify interactivity floor)")
+        elif itl > itl_max:
+            viol.append(f"itl_p99_ms = {itl:.1f} > {itl_max}")
     for k, cap in (slos or {}).items():
-        if m.get(k) is not None and cap is not None and m[k] > cap:
-            viol.append(f"{k} = {m[k]:.1f} > {cap}")
+        if cap is None:
+            continue
+        val, missing = _metric_any(run, k)
+        if missing:
+            viol.append(f"{k} missing (cannot verify SLO <= {cap})")
+        elif val > cap:
+            viol.append(f"{k} = {val:.1f} > {cap}")
     return (len(viol) == 0, viol)
+
+
+def _per_user_rate(run, mtp):
+    """Per-user token rate (pu). Prefer an authoritative per-token field the engine emits
+    (tok_per_s_per_user); only fall back to 1000/mean-ITL when it is absent. Under speculative
+    decoding (mtp>0) BLIS logs ITL per decode STEP, so one entry covers several tokens and
+    1000/itl_mean is a STEP rate that undercounts the true per-user token rate (QA G1 / SKILL.md).
+    Returns (pu, is_step_rate_estimate)."""
+    m = run.get("metrics") or {}
+    authoritative = m.get("tok_per_s_per_user")
+    if authoritative is not None:
+        return round(authoritative, 2), False
+    itl_mean = m.get("itl_mean_ms")
+    if not itl_mean:
+        return None, False
+    # 1000/itl is tokens/s only when one step == one token (mtp == 0); under MTP it is a step rate.
+    return round(1000.0 / itl_mean, 2), bool(mtp)
 
 
 def build_records(runs, scenario):
@@ -137,6 +189,8 @@ def build_records(runs, scenario):
         gpus = dep.get("gpus") or (par.get("tp", 1) * (dep.get("num_instances", 1) or 1))
         tp = par.get("tp", cfg.get("tp"))
         ni = dep.get("num_instances", cfg.get("num_instances", 1))
+        mtp = cfg.get("num_speculative_tokens", 0) or 0
+        pu, pu_is_step_estimate = _per_user_rate(r, mtp)
         out.append({
             "id": r.get("config_hash") or f"run-{i}",
             "src": r.get("phase", "run"),
@@ -148,13 +202,14 @@ def build_records(runs, scenario):
             "series": _series_label(tp, ni, par),
             "route": cfg.get("routing_policy", "default"),
             "pd": "colocated" if not (cfg.get("prefill_instances") or cfg.get("decode_instances")) else "disagg",
-            "mtp": cfg.get("num_speculative_tokens", 0) or 0,
+            "mtp": mtp,
             "mnbt": eng.get("max_num_batched_tokens"),
             "mns": eng.get("max_num_seqs"),
             "a2a": "n/a" if not par.get("enable_expert_parallel") else "ep",
             "epw": par.get("tp") if par.get("enable_expert_parallel") else None,
             # metrics (reference short keys)
-            "pu": round(1000.0 / itl_mean, 2) if itl_mean else None,   # per-user tok/s = 1000/mean ITL
+            "pu": pu,                              # per-user tok/s (see _per_user_rate)
+            "pu_is_step_estimate": pu_is_step_estimate,   # True = 1000/itl fallback under MTP (undercount)
             "cl": round(m["tokens_per_sec"], 1) if m.get("tokens_per_sec") is not None else None,
             "itl": round(itl_mean, 3) if itl_mean else None,
             "ttft": m.get("ttft_p99_ms"),
@@ -206,14 +261,22 @@ def build_facts(records, scenario, pareto):
 # --- figure rendering --------------------------------------------------------
 
 def render_figure(name, records, scenario):
-    """Dispatch a figure name to figures.py; unknown/unsupported names degrade to a placeholder."""
-    floor_pu = (scenario.get("interactivity_floor") or {}).get("tok_per_s_per_user")
-    builder = figures.FIGURES.get(name)
+    """Dispatch a figure name to figures.py. Two degrade paths, both -> a captioned placeholder:
+      * unknown figure name (not in the registry);
+      * a registered figure whose keying knob was NOT varied across the runs (QA G7/F3) -- e.g. a
+        routing figure on a search that never swept routing. The claim in the docs that such figures
+        placeholder is now actually enforced here."""
+    spec = figures.FIGURES.get(name)
+    if not spec:
+        return figures.placeholder(f"figure '{name}' is not available for this run")
+    for knob in spec.get("keys", ()):
+        if not figures.varies(records, knob):
+            return figures.placeholder(f"'{knob}' was not varied, so '{name}' has nothing to compare")
+    builder = spec["builder"]
     if builder is figures.fig_operating_curve:
+        floor_pu = (scenario.get("interactivity_floor") or {}).get("tok_per_s_per_user")
         return builder(records, floor_pu=floor_pu)
-    if builder:
-        return builder(records)
-    return figures.placeholder(f"figure '{name}' is not available for this run")
+    return builder(records)
 
 
 # --- narrative body ----------------------------------------------------------
@@ -341,36 +404,54 @@ def _glossary(report):
             f'for the short definition.</p></div><dl class="gl-list">{"".join(items)}</dl></section>')
 
 
-def _footer(scenario, pareto, run_path):
+def _footer(scenario, pareto, run_path, records, n_malformed=0):
     ps = scenario.get("pinned_stack") or {}
     stack = ""
     if ps:
         stack = (f" · BLIS {esc(ps.get('blis','?'))}, kernel {esc(ps.get('kernel','?'))}, "
                  f"catalog {esc(ps.get('catalog','?'))}, registry {esc(ps.get('registry','?'))}")
-    run_id = scenario.get("run_id") or pareto.get("run_id") or os.path.basename(run_path)
+    # Stamp the run-dir BASENAME, not its absolute path: the report sits inside the run directory, so
+    # the raw files are always beside it. Using the basename keeps the HTML a pure function of the
+    # run-dir CONTENTS -- identical data renders byte-identical regardless of where the dir lives
+    # (QA G2). run_id falls back to the basename for the same reason.
+    base = os.path.basename(run_path.rstrip("/")) or run_path
+    run_id = scenario.get("run_id") or pareto.get("run_id") or base
+    # Surface skipped malformed ledger rows instead of hiding them (QA G3).
+    malformed = ""
+    if n_malformed:
+        malformed = (f' <b>Note:</b> {n_malformed} malformed line(s) in <code>runs.jsonl</code> were '
+                     f'skipped and are not reflected in the figures or counts.')
     return (f'<div class="foot"><b>These are simulator predictions</b> from the '
             f'blis-latency-kernel backend — spot-check against the real llm-d measurements in '
             f'curvebender-tools/reports before acting. Run <code>{esc(run_id)}</code>{stack}. '
-            f'Raw per-run ledger, scenario and analysis are in the run directory: '
-            f'<code>{esc(run_path)}</code>.</div>')
+            f'Raw per-run ledger, scenario and analysis sit beside this report in '
+            f'<code>{esc(base)}/</code> ({len(records)} runs).{malformed}</div>')
 
 
-def render_report(scenario, pareto, runs, report, run_path):
+def render_report(scenario, pareto, runs, report, run_path, n_malformed=0):
     records = build_records(runs, scenario)
     facts = build_facts(records, scenario, pareto)
     body = (_header(report, scenario, facts) + _hero(report) + _section_measurements(report)
             + _sections(report, records, scenario) + _what_to_run(report, records)
-            + _glossary(report) + _footer(scenario, pareto, run_path))
+            + _glossary(report) + _footer(scenario, pareto, run_path, records, n_malformed))
     with open(TEMPLATE, encoding="utf-8") as f:
         html = f.read()
     title = report.get("title") or facts.get("model") or "config-search report"
-    html = html.replace("__TITLE__", esc(title)).replace("__BODY__", body)
-    html = html.replace(RECORDS_PH, json.dumps(records, sort_keys=True))
-    html = html.replace(FACTS_PH, json.dumps(facts, sort_keys=True))
-    for ph in (RECORDS_PH, FACTS_PH, "__BODY__", "__TITLE__"):
-        if ph in html:
-            raise RuntimeError(f"template placeholder {ph!r} was not consumed")
-    return html
+    # Single-pass substitution: each placeholder is replaced exactly once, so a literal "__BODY__"
+    # or "__TITLE__" that legitimately appears in brain-authored prose (now part of `body`) is NOT
+    # re-scanned and mistaken for an unconsumed marker (QA G8). We verify the TEMPLATE had each slot
+    # before substituting, instead of scanning the finished HTML for the markers afterwards.
+    replacements = {
+        "__TITLE__": esc(title),
+        "__BODY__": body,
+        RECORDS_PH: json.dumps(records, sort_keys=True),
+        FACTS_PH: json.dumps(facts, sort_keys=True),
+    }
+    for ph in replacements:
+        if ph not in html:
+            raise RuntimeError(f"template placeholder {ph!r} is missing from {TEMPLATE}")
+    pattern = re.compile("|".join(re.escape(k) for k in replacements))
+    return pattern.sub(lambda mo: replacements[mo.group(0)], html)
 
 
 # --- multi-run card index ----------------------------------------------------
@@ -396,12 +477,12 @@ def render_card_index(cards):
 # --- entrypoints -------------------------------------------------------------
 
 def write_one(run_dir, out=None):
-    scenario, pareto, runs, report = load_run_dir(run_dir)
+    scenario, pareto, runs, report, n_malformed = load_run_dir(run_dir)
     if not runs and not pareto:
         raise SystemExit(f"{run_dir}: no runs.jsonl or pareto.json — not a config-search run directory")
     out = out or os.path.join(run_dir, "index.html")
     with open(out, "w", encoding="utf-8") as f:
-        f.write(render_report(scenario, pareto, runs, report, os.path.abspath(run_dir)))
+        f.write(render_report(scenario, pareto, runs, report, os.path.abspath(run_dir), n_malformed))
     return out
 
 
@@ -413,7 +494,7 @@ def write_tree(parent):
     for name in children:
         rd = os.path.join(parent, name)
         write_one(rd)
-        scenario, pareto, _, report = load_run_dir(rd)
+        scenario, pareto, _, report, _ = load_run_dir(rd)
         cards.append(_card_for(scenario, pareto, report, f"{name}/index.html"))
     index = os.path.join(parent, "index.html")
     with open(index, "w", encoding="utf-8") as f:

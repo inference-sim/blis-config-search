@@ -143,9 +143,12 @@ def fig_operating_curve(records, floor_pu=None):
     inner.append("".join(xticks))
 
     if floor_pu:
-        # The y-axis (pu) is on the SAME p99 basis as the floor and the servability check, so this
-        # line IS the interactivity boundary: a filled (servable) marker sits on or above it, a hollow
-        # one at or below. (report._per_user_rate matches pu to pareto's p99-based tok_per_s_per_user.)
+        # The y-axis (pu) and this line are on the SAME p99 basis (report._per_user_rate matches pu to
+        # pareto's p99-based tok_per_s_per_user), so the line marks the per-user-rate floor directly.
+        # It is NOT a strict fill boundary, though: fill reflects a run's OVERALL servability, which
+        # also includes completion and the per-instance ITL check (G4) and any SLOs. So a marker can
+        # sit above this line yet be hollow -- e.g. the fixture's 4x TP4+EP at conc 24/25 (pu 66/63,
+        # above 50) are hollow because one instance breaches the ITL cap while the cluster pu does not.
         fy = _lin(floor_pu, 0, ytop, y1b, y0t)
         if y0t <= fy <= y1b:
             inner.append(f'<line x1="{x0}" y1="{fy:.1f}" x2="{x1}" y2="{fy:.1f}" '

@@ -204,10 +204,12 @@ Inputs (all optional-tolerant -- three of four are brain-authored):
   run into a flat **`RECORDS`** row (short keys: `conc,tp,ni,series,pu,cl,itl,ttft,p95,ok,viol…`) and
   classifies each run servable/not against the interactivity floor + SLOs (a declared SLO whose
   metric is absent from both the cluster aggregate and every instance counts as a *violation*, not a
-  silent pass). `pu` (per-user tok/s) prefers the engine's authoritative `tok_per_s_per_user` field
-  when present; it only falls back to `1000 / mean ITL` when that field is absent, and flags the
-  fallback under speculative decoding (`pu_is_step_estimate`), where mean ITL is a per-*step* interval
-  that undercounts the per-token rate. It also computes a **`FACTS`** stats object the prose cites.
+  silent pass). `pu` (per-user tok/s) prefers the engine's authoritative `tok_per_s_per_user` field;
+  it falls back to `1000 / mean ITL` only when that field is absent **and** one decode step equals
+  one token (`mtp == 0`). Under speculative decoding with no authoritative field, mean ITL is a
+  per-*step* interval that would undercount the per-token rate, so `pu` is left **null** (flagged
+  `pu_is_step_estimate`) rather than publishing a known-wrong number. It also computes a **`FACTS`**
+  stats object the prose cites.
 - **`report.json`** -- the **brain-authored narrative** (standfirst, hero panel, numbered sections +
   which figure each shows, the operating-point table, the glossary). Documented in
   `scripts/report_schema.md`. **Absent -> the report still renders** the header, the explorer, and an
@@ -221,17 +223,21 @@ Pieces:
   that every keyed field actually **varies** across the runs and otherwise returns a captioned
   placeholder. So a figure keyed on a knob the search never swept (e.g. a routing figure, `keys=
   ("route",)`) placeholders honestly. The three builders that ship are all keyed on fields the v1
-  engine does vary (concurrency / topology), so they draw; routing/PD/spec-decode builders are
-  registry stubs that placeholder until the search sweeps those knobs.
+  engine does vary (concurrency / topology), so they draw. Routing/PD/spec-decode figures are **not
+  shipped yet** -- `figures.py` carries them only as commented-out registry examples; add the entry
+  (with the right `keys`) when the matching builder lands, and the variation check placeholders it
+  until the search sweeps that knob.
 - **`report/template.html`** -- the magazine shell (reference CSS, `__BODY__` mount point, the
   explorer JS). It loads **d3 + crossfilter from cdnjs**, so the *explorer* needs network to render;
   the article and baked figures render offline regardless, and the explorer silently no-ops without
   d3. (A sibling `report/index-template.html` is the card-index landing page for the multi-run case.)
 
 Determinism (INV-6): a pure function of the run-directory **contents** -- identical data renders
-byte-identical HTML regardless of where the directory lives (`json.dumps(..., sort_keys=True)`; the
-CDN URLs are fixed; the footer stamps the run-dir *basename*, not its absolute path, so relocating the
-directory does not change a byte). `examples/sample-run/` is the
+byte-identical HTML regardless of where the directory lives or what it is named
+(`json.dumps(..., sort_keys=True)`; the CDN URLs are fixed; the footer identifies the run by the
+`run_id` carried inside `scenario.json`/`pareto.json`, not by the directory path or name). The one
+exception is a run directory with no `run_id` in its data: then the footer falls back to the dir
+basename and says so. `examples/sample-run/` is the
 committed fixture (now including a worked `report.json`); `scripts/test_report.py` covers the records
 mapping, FACTS, each figure, report.json tolerance, and the seam-consistency checks.
 

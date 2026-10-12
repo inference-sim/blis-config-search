@@ -54,9 +54,12 @@ class Records(unittest.TestCase):
         self.assertEqual(r["ni"], 4)
 
     def test_feasibility_split(self):
+        # 17 servable, not 19: two 4xTP4 runs (conc 24, 25) have an aggregate ITL under 20 ms but a
+        # single instance at ~55-58 ms, so the per-instance parity check (QA G4) correctly rejects
+        # them where an aggregate-only check would have passed them.
         ok = [r for r in self.recs if r["ok"]]
-        self.assertEqual(len(ok), 19)
-        self.assertEqual(len(self.recs) - len(ok), 8)
+        self.assertEqual(len(ok), 17)
+        self.assertEqual(len(self.recs) - len(ok), 10)
         # an unservable row carries a reason
         bad = next(r for r in self.recs if not r["ok"])
         self.assertTrue(bad["viol"])
@@ -75,13 +78,15 @@ class Facts(unittest.TestCase):
 
     def test_counts(self):
         self.assertEqual(self.facts["n_points"], 27)
-        self.assertEqual(self.facts["n_admissible"], 19)
+        self.assertEqual(self.facts["n_admissible"], 17)   # per-instance parity rejects 2 (QA G4)
         self.assertEqual(self.facts["n_configs"], 3)
         self.assertEqual(self.facts["winner"], "4x TP4 + EP")
 
     def test_peak_and_servable(self):
         self.assertEqual(self.facts["peak_cluster_conc"], 32)   # highest fleet tok/s is past the cliff
-        self.assertEqual(self.facts["max_servable_conc"], 25)   # but max servable is the 4xTP4 C*
+        # max servable drops to 20: conc 24/25 have an instance over the ITL cap even though the
+        # cluster aggregate is under it, so per-instance parity (QA G4) excludes them.
+        self.assertEqual(self.facts["max_servable_conc"], 20)
 
 
 class Figures(unittest.TestCase):
@@ -222,26 +227,36 @@ class QaRegressions(unittest.TestCase):
         self.assertEqual(pu, 90.0)
         self.assertFalse(is_step)
 
-    def test_g1_pu_fallback_flagged_under_mtp(self):
+    def test_g1_pu_null_under_mtp_not_wrong_number(self):
         run = {"metrics": {"itl_mean_ms": 5.0}}            # no authoritative field
         pu, is_step = report._per_user_rate(run, mtp=3)
-        self.assertEqual(pu, 200.0)                        # 1000/5
-        self.assertTrue(is_step)                           # flagged as a step-rate undercount
+        self.assertIsNone(pu)                              # NOT the known-wrong step rate (1000/5)
+        self.assertTrue(is_step)                           # flagged so the report can explain the gap
         pu0, is_step0 = report._per_user_rate(run, mtp=0)
-        self.assertFalse(is_step0)                         # no MTP -> step == token, not flagged
+        self.assertEqual(pu0, 200.0)                       # no MTP -> step == token, real rate
+        self.assertFalse(is_step0)
 
     def test_g1_records_carry_the_flag(self):
         recs = report.build_records(self.runs, self.sc)
         self.assertTrue(all("pu_is_step_estimate" in r for r in recs))
         self.assertTrue(all(r["pu_is_step_estimate"] is False for r in recs))  # fixture is mtp=0
 
-    # G2 — relocation determinism (footer no longer embeds the absolute path)
+    # G2 — determinism depends on CONTENTS only: neither the path NOR the directory name may leak,
+    # because the footer identifies the run by the in-data run_id (present in the fixture scenario).
     def test_g2_identical_contents_relocate_to_identical_html(self):
+        self.assertTrue(self.sc.get("run_id"), "fixture scenario should carry a run_id")
         a = report.render_report(self.sc, self.pa, self.runs, self.rep, "/tmp/aaa/run-x")
-        b = report.render_report(self.sc, self.pa, self.runs, self.rep, "/elsewhere/deep/run-x")
-        self.assertEqual(a, b)
+        b = report.render_report(self.sc, self.pa, self.runs, self.rep, "/elsewhere/deep/DIFFERENT-name")
+        self.assertEqual(a, b)                             # different path AND different basename
         self.assertNotIn("/tmp/aaa", a)
-        self.assertNotIn("/elsewhere", a)
+        self.assertNotIn("run-x", a)
+        self.assertNotIn("DIFFERENT-name", b)
+
+    def test_g2_basename_fallback_only_without_run_id(self):
+        sc = {k: v for k, v in self.sc.items() if k != "run_id"}   # strip the in-data id
+        html = report.render_report(sc, {}, self.runs, {}, "/x/anon-run-dir")
+        self.assertIn("anon-run-dir", html)                # basename fallback, clearly labelled
+        self.assertIn("from directory name", html)
 
     # G3 — malformed ledger rows are counted + surfaced, not silently dropped
     def test_g3_malformed_rows_counted_and_surfaced(self):
@@ -262,6 +277,14 @@ class QaRegressions(unittest.TestCase):
         ok, viol = report._feasible({"metrics": {"itl_p99_ms": 5}}, {}, {"ttft_p99_ms": 100})
         self.assertFalse(ok)
         self.assertTrue(any("ttft_p99_ms missing" in v for v in viol))
+
+    def test_g4_aggregate_under_cap_cannot_mask_bad_instance(self):
+        # aggregate itl 10 <= 20, but one instance is 50 > 20: must be flagged (the adjudicator's gap)
+        run = {"metrics": {"itl_p99_ms": 10},
+               "metrics_all_instances": [{"itl_p99_ms": 10}, {"itl_p99_ms": 50}]}
+        ok, viol = report._feasible(run, {"itl_p99_ms_max": 20}, {})
+        self.assertFalse(ok)
+        self.assertTrue(any("50" in v for v in viol))
 
     def test_g4_per_instance_worst_used_when_aggregate_missing(self):
         run = {"metrics": {}, "metrics_all_instances": [{"itl_p99_ms": 50}, {"itl_p99_ms": 10}]}

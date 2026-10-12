@@ -75,8 +75,9 @@ figure name likewise placeholders.
 | `tail_scatter` | per-user tok/s vs p95 latency; crosses = unservable | `conc` |
 
 Builders for knobs the v1 engine does not yet vary (routing, PD split, speculative decoding, dispatch
-collective) are added as registry entries with the appropriate `keys` (e.g. `("route",)`); until the
-search sweeps that knob the variation check renders the placeholder automatically.
+collective) are **not shipped**; `figures.py` lists them only as commented-out registry examples.
+When such a builder lands, add its `FIGURES` entry with the appropriate `keys` (e.g. `("route",)`);
+until the search sweeps that knob the variation check renders the placeholder automatically.
 
 ## `RECORDS` field reference (what the explorer + figures consume)
 
@@ -85,8 +86,9 @@ unchanged. Knobs the engine doesn't vary come through constant (e.g. `route: "de
 the explorer automatically hides single-value dimensions.
 
 `id, src, conc, tp, dp, ni, gpus, series, route, pd, mtp, mnbt, mns, a2a, epw,`
-`pu (per-user tok/s: authoritative tok_per_s_per_user if present, else 1000/mean-ITL),`
-`pu_is_step_estimate (True = 1000/mean-ITL fallback under speculative decoding, an undercount),`
+`pu (per-user tok/s: authoritative tok_per_s_per_user if present; else 1000/mean-ITL when one step`
+`   == one token (mtp==0); else null -- never a known-wrong step rate),`
+`pu_is_step_estimate (True = under MTP with no authoritative field, so pu is null not a wrong number),`
 `cl (=tokens_per_sec), itl (=mean ITL ms), ttft (=ttft_p99_ms),`
 `hit (prefix hit or null), to (timed out), drop (unservable), p95 (=e2e_p95_ms),`
 `ok (met completion+floor+SLOs; absent SLO metric = violation), status, viol[] (reasons when not ok)`

@@ -110,17 +110,20 @@ def _num(v):
 # --- RECORDS: one flat row per blis run -------------------------------------
 
 def _metric_any(run, key):
-    """A metric from the cluster aggregate, OR the worst (max) across per-instance metrics when the
-    aggregate omits it. An SLO can be met at the cluster level yet violated on one instance; checking
-    only the aggregate (QA G4) would mark such a run servable when the search would not."""
-    m = run.get("metrics") or {}
-    if m.get(key) is not None:
-        return m[key], False
-    per = [inst.get(key) for inst in (run.get("metrics_all_instances") or [])
-           if isinstance(inst, dict) and inst.get(key) is not None]
-    if per:
-        return max(per), False
-    return None, True   # metric entirely absent
+    """The WORST (max) value of `key` across the cluster aggregate AND every per-instance metric.
+    A latency/count SLO can be met in the aggregate yet violated on one instance; taking the max over
+    both (not just trusting the aggregate when present) is what keeps feasibility in parity with the
+    search, which drops a run if any instance breaches (QA G4). Returns (worst, missing_everywhere)."""
+    vals = []
+    agg = (run.get("metrics") or {}).get(key)
+    if agg is not None:
+        vals.append(agg)
+    for inst in (run.get("metrics_all_instances") or []):
+        if isinstance(inst, dict) and inst.get(key) is not None:
+            vals.append(inst[key])
+    if vals:
+        return max(vals), False
+    return None, True   # metric entirely absent from aggregate and every instance
 
 
 def _feasible(run, floor, slos):
@@ -157,11 +160,13 @@ def _feasible(run, floor, slos):
 
 
 def _per_user_rate(run, mtp):
-    """Per-user token rate (pu). Prefer an authoritative per-token field the engine emits
-    (tok_per_s_per_user); only fall back to 1000/mean-ITL when it is absent. Under speculative
-    decoding (mtp>0) BLIS logs ITL per decode STEP, so one entry covers several tokens and
-    1000/itl_mean is a STEP rate that undercounts the true per-user token rate (QA G1 / SKILL.md).
-    Returns (pu, is_step_rate_estimate)."""
+    """Per-user token rate (pu). Prefer the engine's authoritative per-token field
+    (tok_per_s_per_user). Else fall back to 1000/mean-ITL -- but ONLY when it is actually a token
+    rate, i.e. one decode step == one token (mtp == 0). Under speculative decoding (mtp>0) BLIS logs
+    ITL per decode STEP, so 1000/mean-ITL is a step rate that is known to undercount the per-token
+    rate; rather than publish a wrong number we return pu=None and set step_estimate=True so the
+    report shows the value as unavailable with an explanation, not a misleading figure (QA G1).
+    Returns (pu_or_None, is_mtp_without_authoritative_field)."""
     m = run.get("metrics") or {}
     authoritative = m.get("tok_per_s_per_user")
     if authoritative is not None:
@@ -169,8 +174,9 @@ def _per_user_rate(run, mtp):
     itl_mean = m.get("itl_mean_ms")
     if not itl_mean:
         return None, False
-    # 1000/itl is tokens/s only when one step == one token (mtp == 0); under MTP it is a step rate.
-    return round(1000.0 / itl_mean, 2), bool(mtp)
+    if mtp:
+        return None, True   # step rate would undercount; do not fabricate a per-token number
+    return round(1000.0 / itl_mean, 2), False
 
 
 def build_records(runs, scenario):
@@ -410,12 +416,13 @@ def _footer(scenario, pareto, run_path, records, n_malformed=0):
     if ps:
         stack = (f" · BLIS {esc(ps.get('blis','?'))}, kernel {esc(ps.get('kernel','?'))}, "
                  f"catalog {esc(ps.get('catalog','?'))}, registry {esc(ps.get('registry','?'))}")
-    # Stamp the run-dir BASENAME, not its absolute path: the report sits inside the run directory, so
-    # the raw files are always beside it. Using the basename keeps the HTML a pure function of the
-    # run-dir CONTENTS -- identical data renders byte-identical regardless of where the dir lives
-    # (QA G2). run_id falls back to the basename for the same reason.
-    base = os.path.basename(run_path.rstrip("/")) or run_path
-    run_id = scenario.get("run_id") or pareto.get("run_id") or base
+    # Identify the run by the id carried IN the data (scenario/pareto), never by the directory name,
+    # so the HTML is a pure function of the run-dir CONTENTS: identical data renders byte-identical
+    # no matter where the directory lives or what it is called (QA G2). We only fall back to the
+    # basename when the data carries no run_id at all, and label it as a fallback.
+    data_id = scenario.get("run_id") or pareto.get("run_id")
+    run_id = data_id or (os.path.basename(run_path.rstrip("/")) or run_path)
+    id_note = "" if data_id else " (from directory name; no run_id in scenario.json)"
     # Surface skipped malformed ledger rows instead of hiding them (QA G3).
     malformed = ""
     if n_malformed:
@@ -423,9 +430,9 @@ def _footer(scenario, pareto, run_path, records, n_malformed=0):
                      f'skipped and are not reflected in the figures or counts.')
     return (f'<div class="foot"><b>These are simulator predictions</b> from the '
             f'blis-latency-kernel backend — spot-check against the real llm-d measurements in '
-            f'curvebender-tools/reports before acting. Run <code>{esc(run_id)}</code>{stack}. '
-            f'Raw per-run ledger, scenario and analysis sit beside this report in '
-            f'<code>{esc(base)}/</code> ({len(records)} runs).{malformed}</div>')
+            f'curvebender-tools/reports before acting. Run <code>{esc(run_id)}</code>{id_note}{stack}. '
+            f'Raw per-run ledger, scenario and analysis sit beside this report in the run directory '
+            f'({len(records)} runs).{malformed}</div>')
 
 
 def render_report(scenario, pareto, runs, report, run_path, n_malformed=0):

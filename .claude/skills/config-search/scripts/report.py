@@ -32,9 +32,27 @@ import figures  # noqa: E402
 REPORT_DIR = os.path.normpath(os.path.join(HERE, "..", "report"))
 TEMPLATE = os.path.join(REPORT_DIR, "template.html")
 INDEX_TEMPLATE = os.path.join(REPORT_DIR, "index-template.html")
+VENDOR_DIR = os.path.join(REPORT_DIR, "vendor")
+# The explorer's JS deps, inlined so the report is self-contained / offline (no CDN at view time).
+VENDOR_LIBS = ("d3.min.js", "crossfilter.min.js")
 RECORDS_PH = "/*__RECORDS__*/[]"
 FACTS_PH = "/*__FACTS__*/{}"
 CARDS_PH = "/*__CONFIG_SEARCH_CARDS__*/[]"
+
+
+def _vendor_js():
+    """Inline <script> blocks for the vendored explorer libs (report/vendor/*.min.js). Each lib's
+    bytes are wrapped verbatim in its own <script>...</script>; a minified lib never contains a
+    literal '</script>' so no escaping is needed, but we assert that to be safe."""
+    out = []
+    for name in VENDOR_LIBS:
+        path = os.path.join(VENDOR_DIR, name)
+        with open(path, encoding="utf-8") as f:
+            js = f.read()
+        if "</script" in js.lower():
+            raise RuntimeError(f"vendored {name} contains a literal </script>; cannot inline safely")
+        out.append(f"<!-- vendored: {name} -->\n<script>\n{js}\n</script>")
+    return "\n".join(out)
 
 
 # --- defensive loading -------------------------------------------------------
@@ -513,12 +531,15 @@ def render_report(scenario, pareto, runs, report, run_path=None, n_malformed=0):
     replacements = {
         "__TITLE__": esc(title),
         "__BODY__": body,
+        "__VENDOR_JS__": _vendor_js(),      # inline d3 + crossfilter (self-contained / offline)
         RECORDS_PH: _json_for_script(records),
         FACTS_PH: _json_for_script(facts),
     }
     for ph in replacements:
         if ph not in html:
             raise RuntimeError(f"template placeholder {ph!r} is missing from {TEMPLATE}")
+    # Single-pass over the TEMPLATE with a FUNCTION replacement: inserted text (vendor JS, prose) is
+    # never re-scanned, and backslashes in the minified libs are not treated as regex escapes.
     pattern = re.compile("|".join(re.escape(k) for k in replacements))
     return pattern.sub(lambda mo: replacements[mo.group(0)], html)
 

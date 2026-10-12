@@ -228,13 +228,16 @@ Pieces:
   (with the right `keys`) when the matching builder lands, and the variation check placeholders it
   until the search sweeps that knob.
 - **`report/template.html`** -- the magazine shell (reference CSS, `__BODY__` mount point, the
-  explorer JS). It loads **d3 + crossfilter from cdnjs**, so the *explorer* needs network to render;
-  the article and baked figures render offline regardless, and the explorer silently no-ops without
-  d3. (A sibling `report/index-template.html` is the card-index landing page for the multi-run case.)
+  explorer JS). The report is **fully self-contained / offline**: `report.py` inlines
+  `report/vendor/d3.min.js` + `crossfilter.min.js` (the explorer's only JS deps) into the HTML, so
+  there is no CDN or any other network dependency at view time. The article and baked inline-SVG
+  figures need no JS at all; the explorer additionally guards on `typeof d3 === "undefined"` so even
+  a stripped vendor block degrades to the static article. (A sibling `report/index-template.html` is
+  the card-index landing page for the multi-run case.)
 
 Determinism (INV-6): a pure function of the run-directory **contents** -- identical data renders
 byte-identical HTML regardless of where the directory lives or what it is named
-(`json.dumps(..., sort_keys=True)`; the CDN URLs are fixed; the footer identifies the run by the
+(`json.dumps(..., sort_keys=True)`; the inlined vendor libs are fixed bytes; the footer identifies the run by the
 `run_id` carried inside `scenario.json`/`pareto.json`, not by the directory path or name). A run
 directory with no `run_id` in its data shows "unidentified" in the footer -- it never falls back to
 the directory basename, so the output stays independent of location even then. `examples/sample-run/` is the

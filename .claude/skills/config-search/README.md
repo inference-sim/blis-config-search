@@ -83,9 +83,10 @@ python3 -I scripts/report.py runs/             # several run dirs -> each report
 `scripts/report.py` is a pure `run-dir -> index.html` transform (it never runs BLIS): a magazine-style
 analytical report with a numbered-finding narrative, pre-rendered inline-SVG figures
 (`scripts/figures.py`), a crossfilter explorer over every run, and a glossary. The prose comes from
-`report.json` (absent -> header + explorer + an auto operating table still render). The page loads
-d3 + crossfilter from cdnjs for the explorer, so viewing the explorer needs network; the article and
-figures render offline regardless. See `SKILL.md` and `scripts/report_schema.md`.
+`report.json` (absent -> header + explorer + an auto operating table still render). The report is
+fully self-contained and renders offline: d3 + crossfilter (the explorer's only JS deps) are inlined
+from `report/vendor/`, so there is no network dependency at view time. See `SKILL.md` and
+`scripts/report_schema.md`.
 
 Reproducibility: each `blis run` is deterministic (INV-6) and the pool writes `runs.jsonl` in a
 stable order, so the *data* is reproducible. The end-to-end *recommendation* is only as reproducible

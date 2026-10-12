@@ -181,13 +181,42 @@ class Narrative(unittest.TestCase):
         self.assertEqual(len(recs), 27)
         self.assertEqual(facts["n_configs"], 3)
 
-    def test_only_two_external_refs(self):
+    def test_self_contained_no_external_resource_loads(self):
+        # The report must be fully self-contained / offline: NO tag may load a resource over the
+        # network. d3 + crossfilter are inlined, not linked. (URLs that merely appear as string
+        # constants inside the inlined libs -- d3js.org, w3.org namespaces -- are not resource loads
+        # and are fine; we assert on the loading tags, not on substrings.)
         sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
         html = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
-        refs = sorted(set(re.findall(r"https://[^\"']+", html)))
-        self.assertEqual(refs, [
-            "https://cdnjs.cloudflare.com/ajax/libs/crossfilter/1.3.12/crossfilter.min.js",
-            "https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"])
+        loads = re.findall(r'<(?:script|link|img|iframe|source|audio|video)\b[^>]*\b'
+                           r'(?:src|href)\s*=\s*["\']https?://[^"\']+["\']', html, re.I)
+        self.assertEqual(loads, [], f"report loads external resources: {loads}")
+        self.assertNotIn("cdnjs", html)                       # no CDN dependency at all
+        self.assertIn("vendored: d3.min.js", html)            # d3 is inlined
+        self.assertIn("vendored: crossfilter.min.js", html)   # crossfilter is inlined
+
+    def test_inlined_libs_are_byte_exact_pinned_versions(self):
+        # The splice must preserve every byte of the vendored libs -- a mangled backslash or a
+        # truncation at a "</script>" would silently corrupt the explorer. Assert the inlined block
+        # bodies match the committed vendor files, and those match the pinned SHA-384 (same bytes the
+        # report previously loaded from the CDN).
+        import base64
+        import hashlib
+        pinned = {
+            "d3.min.js": "su5kReKyYlIFrI62mbQRKXHzFobMa7BHp1cK6julLPbnYcCW9NIZKJiTODjLPeDh",
+            "crossfilter.min.js": "qIMAO7hiswCdbLggCimcQKL2VYr4shEpIgnKP+9GL4YQPHJH4tQ/lLHsaLtDFulA",
+        }
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        html = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
+        for name, want in pinned.items():
+            with open(os.path.join(report.VENDOR_DIR, name), encoding="utf-8") as f:
+                vendored = f.read()
+            got = base64.b64encode(hashlib.sha384(vendored.encode()).digest()).decode()
+            self.assertEqual(got, want, f"vendored {name} drifted from the pinned version")
+            m = re.search(r"<!-- vendored: " + re.escape(name) + r" -->\n<script>\n(.*?)\n</script>",
+                          html, re.S)
+            self.assertIsNotNone(m, f"{name} not inlined in output")
+            self.assertEqual(m.group(1), vendored, f"inlined {name} differs from the vendor file")
 
     def test_deterministic(self):
         sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)

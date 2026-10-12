@@ -184,11 +184,67 @@ runs/<run-id>/
 the brain, not derived as `1000/itl_p99_ms`: BLIS appends ITL per decode *step*, so under
 speculative decoding one entry covers several tokens and the naive axis understates the per-user rate.
 
-## Report step (added later)
+## Report step
 
 The report half of this skill (disc #4, report track) reads the run directory and emits a
-self-contained interactive HTML report. **Not implemented here yet** -- `examples/sample-run/` is the
-committed fixture that defines the seam so the report work can proceed independently and be added on.
+**magazine-style analytical report** modeled on the CurveBender "glm53flash" format: a numbered-finding
+narrative, pre-rendered inline-SVG figures, a client-side **crossfilter explorer** over every run, and
+a glossary. It **never runs BLIS** at generation time -- it is a pure `run-dir -> index.html`
+transform, so a report is regenerable from the committed data alone.
+
+```
+python3 -I scripts/report.py runs/<run-id>              # -> runs/<run-id>/index.html (next to the data)
+python3 -I scripts/report.py runs/<run-id> --out p.html # custom output path
+python3 -I scripts/report.py runs/                      # a parent of several run dirs -> each report + a card index
+```
+
+Inputs (all optional-tolerant -- three of four are brain-authored):
+
+- **`scenario.json` / `pareto.json` / `runs.jsonl`** -- the search outputs. `report.py` maps each
+  run into a flat **`RECORDS`** row (short keys: `conc,tp,ni,series,pu,cl,itl,ttft,p95,ok,viol…`) and
+  classifies each run servable/not against the interactivity floor + SLOs (a declared SLO whose
+  metric is absent from both the cluster aggregate and every instance counts as a *violation*, not a
+  silent pass). `pu` (per-user tok/s) prefers the engine's authoritative `tok_per_s_per_user` field;
+  it falls back to `1000 / ITL p99` only when that field is absent **and** one decode step equals
+  one token (`mtp == 0`). The p99 basis is deliberate: it matches `pareto.json`'s `tok_per_s_per_user`
+  and the interactivity floor (p99 <= 20 ms), so the page never shows two incompatible per-user
+  numbers for a point. Under speculative decoding with no authoritative field, ITL p99 is a
+  per-*step* interval that would undercount the per-token rate, so `pu` is left **null** (flagged
+  `pu_is_step_estimate`) rather than publishing a known-wrong number. It also computes a **`FACTS`**
+  stats object the prose cites.
+- **`report.json`** -- the **brain-authored narrative** (standfirst, hero panel, numbered sections +
+  which figure each shows, the operating-point table, the glossary). Documented in
+  `scripts/report_schema.md`. **Absent -> the report still renders** the header, the explorer, and an
+  auto operating table, with no analysis prose.
+
+Pieces:
+
+- **`scripts/figures.py`** -- deterministic inline-SVG figure builders (`operating_curve`,
+  `scale_bars`, `tail_scatter`, …), themed via the stylesheet's `--fig-*` variables. Each is
+  registered with the `keys` (RECORDS fields) its story depends on; `report.render_figure` checks
+  that every keyed field actually **varies** across the runs and otherwise returns a captioned
+  placeholder. So a figure keyed on a knob the search never swept (e.g. a routing figure, `keys=
+  ("route",)`) placeholders honestly. The three builders that ship are all keyed on fields the v1
+  engine does vary (concurrency / topology), so they draw. Routing/PD/spec-decode figures are **not
+  shipped yet** -- `figures.py` carries them only as commented-out registry examples; add the entry
+  (with the right `keys`) when the matching builder lands, and the variation check placeholders it
+  until the search sweeps that knob.
+- **`report/template.html`** -- the magazine shell (reference CSS, `__BODY__` mount point, the
+  explorer JS). The report is **fully self-contained / offline**: `report.py` inlines
+  `report/vendor/d3.min.js` + `crossfilter.min.js` (the explorer's only JS deps) into the HTML, so
+  there is no CDN or any other network dependency at view time. The article and baked inline-SVG
+  figures need no JS at all; the explorer additionally guards on `typeof d3 === "undefined"` so even
+  a stripped vendor block degrades to the static article. (A sibling `report/index-template.html` is
+  the card-index landing page for the multi-run case.)
+
+Determinism (INV-6): a pure function of the run-directory **contents** -- identical data renders
+byte-identical HTML regardless of where the directory lives or what it is named
+(`json.dumps(..., sort_keys=True)`; the inlined vendor libs are fixed bytes; the footer identifies the run by the
+`run_id` carried inside `scenario.json`/`pareto.json`, not by the directory path or name). A run
+directory with no `run_id` in its data shows "unidentified" in the footer -- it never falls back to
+the directory basename, so the output stays independent of location even then. `examples/sample-run/` is the
+committed fixture (now including a worked `report.json`); `scripts/test_report.py` covers the records
+mapping, FACTS, each figure, report.json tolerance, and the seam-consistency checks.
 
 ## Examples
 

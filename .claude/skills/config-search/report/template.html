@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>__TITLE__</title>
+<style>
+:root{--bg:#fbfbfa;--panel:#fff;--ink:#14161a;--ink2:#4c535c;--ink3:#878e97;
+--line:#e4e5e3;--rule:#d8d9d7;--accent:#1b4f8f;--hero:#f4f6f8;--good:#1e5c33;
+--bad:#b2182b;--fig-bg:#fff;
+--fig-ink:#111;--fig-ink2:#555;--fig-ink3:#8a8a8a;--fig-grid:#ececec;
+--fig-grid2:#f4f4f4;--fig-axis:#333;--fig-band:#eef2f7;--fig-muted:#b9c0c8;
+--fig-ok:#eaf3ec;--fig-bar2:#5b7fa6;
+--serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Helvetica,Arial,sans-serif;
+--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#15171b;
+--panel:#1c1f24;--ink:#eceef1;--ink2:#aab1b9;--ink3:#7c838c;--line:#2b2f35;
+--rule:#343940;--accent:#6ba3f0;--hero:#1f242b;--fig-bg:#1c1f24;
+--fig-ink:#e8eaed;--fig-ink2:#a6adb5;--fig-ink3:#79808a;--fig-grid:#2c3036;
+--fig-grid2:#262a30;--fig-axis:#6e757e;--fig-band:#232a33;--fig-muted:#4e555e;
+--fig-ok:#1c2a20;--fig-bar2:#4a6a98}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--serif);
+font-size:19px;line-height:1.62;text-rendering:optimizeLegibility;
+-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:0 28px 96px}
+header{padding:64px 0 10px}
+h1{font-size:46px;line-height:1.1;letter-spacing:-0.019em;margin:0 0 16px;
+font-weight:600}
+.standfirst{font-size:21px;line-height:1.5;color:var(--ink2);max-width:33em;
+margin:0 0 6px}
+.meta{font-family:var(--sans);font-size:12.5px;color:var(--ink3);
+border-top:1px solid var(--rule);margin-top:30px;padding-top:11px;
+display:flex;gap:22px;flex-wrap:wrap}
+.meta code{font-family:var(--mono);font-size:11.5px}
+section.hero{margin:34px 0 8px}
+.panel{display:grid;grid-template-columns:repeat(3,1fr);gap:0;background:var(--hero);
+border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.pcell{padding:22px 24px 20px;border-right:1px solid var(--line)}
+.pcell:last-child{border-right:0}
+.pcell h4{font-family:var(--sans);font-size:11px;letter-spacing:0.1em;
+text-transform:uppercase;color:var(--ink3);margin:0 0 9px;font-weight:700}
+.pcell p{margin:0;font-size:16.5px;line-height:1.52}
+.pcell.run{background:color-mix(in srgb,var(--accent) 7%,var(--hero))}
+section.finding{margin:62px 0 0;padding-top:30px;border-top:1px solid var(--rule)}
+section.finding h2{font-size:31px;line-height:1.2;letter-spacing:-0.014em;
+margin:0 0 26px;font-weight:600;display:flex;gap:15px;align-items:baseline}
+h2 .num{font-family:var(--sans);font-size:14px;font-weight:700;color:var(--accent);
+border:1.5px solid var(--accent);border-radius:50%;width:27px;height:27px;
+display:inline-flex;align-items:center;justify-content:center;flex:none;
+transform:translateY(-3px)}
+figure{margin:0 0 26px}
+.figwrap{background:var(--fig-bg);border:1px solid var(--line);border-radius:3px;
+padding:14px 12px 8px}
+.figwrap svg{width:100%;height:auto;display:block}
+.fig-missing{font-family:var(--sans);font-size:13.5px;color:var(--ink3);
+padding:46px 18px;text-align:center}
+figcaption{font-family:var(--sans);font-size:13.5px;line-height:1.58;
+color:var(--ink2);margin-top:11px;max-width:60em}
+figcaption b{color:var(--ink)}
+.prose{max-width:34em}
+.prose p{margin:0 0 17px}
+.prose p:last-child{margin-bottom:0}
+table{border-collapse:collapse;width:100%;font-family:var(--sans);font-size:13.5px;
+margin:22px 0 0}
+th{text-align:left;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;
+color:var(--ink3);font-weight:700;border-bottom:1.5px solid var(--rule);
+padding:0 12px 7px;vertical-align:bottom}
+td{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+td.hero{font-size:19px;font-weight:700;color:var(--accent)}
+.short .fl{display:block;font-family:var(--mono);font-size:11.5px;
+color:var(--ink);white-space:nowrap;line-height:1.75}
+.short .fl i{color:var(--ink3);font-style:normal}
+#xf{margin-top:20px}
+.xf-bar{display:grid;
+grid-template-columns:repeat(auto-fit,minmax(118px,1fr));
+gap:14px 18px;align-items:start;
+background:var(--panel);border:1px solid var(--line);border-radius:4px;
+padding:16px 18px}
+.xf-dim{min-width:0}
+.xf-dim h5{font-family:var(--sans);font-size:10.5px;letter-spacing:0.08em;
+text-transform:uppercase;color:var(--ink3);margin:0 0 7px;font-weight:700}
+.xf-opt{font-family:var(--sans);font-size:12.5px;padding:3px 7px;margin:0 0 2px;
+border-radius:3px;cursor:pointer;display:flex;justify-content:space-between;
+gap:10px;user-select:none;border:1px solid transparent}
+.xf-opt:hover{background:var(--hero)}
+.xf-opt.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+/* an option with no runs under the current filters: dimmed, not clickable */
+.xf-opt.empty{opacity:.32;cursor:not-allowed}
+.xf-opt.empty:hover{background:none}
+.xf-opt .c{font-variant-numeric:tabular-nums;opacity:.72;font-size:11.5px}
+/* empty-state banner shown over the scatter/table when a selection matches no runs */
+.xf-none{font-family:var(--sans);font-size:13px;color:var(--ink2);
+background:var(--hero);border:1px solid var(--line);border-radius:4px;
+padding:12px 14px;margin-top:14px;display:none}
+.xf-none.show{display:block}
+.xf-none b{color:var(--ink)}
+.xf-sum{font-family:var(--sans);font-size:13.5px;color:var(--ink2);
+margin:16px 0 4px;display:flex;gap:20px;flex-wrap:wrap;align-items:center;
+justify-content:space-between}
+.xf-sum>span{flex:1 1 auto}
+.xf-sum b{color:var(--ink);font-size:17px;font-variant-numeric:tabular-nums}
+.xf-clear{font-family:var(--sans);font-size:12px;color:var(--accent);cursor:pointer;
+border:1px solid var(--accent);border-radius:3px;padding:3px 10px;background:none}
+#xf-scatter{background:var(--fig-bg);border:1px solid var(--line);border-radius:3px;
+margin-top:14px}
+#xf-table{max-height:460px;overflow:auto;margin-top:6px;border:1px solid var(--line);
+border-radius:3px}
+#xf-table table{margin:0}
+#xf-table th{position:sticky;top:0;background:var(--panel);z-index:2;
+padding:9px 11px 7px}
+#xf-table td{padding:8px 11px;font-size:12.5px}
+tr.bad td{color:var(--bad)}
+tr.bad td:first-child::before{content:"\2715\00a0";font-size:10px}
+/* Glossary links: a dotted underline on first use, a definition on hover or focus.
+   The tooltip is CSS-only so it works with JavaScript disabled and in print. */
+a.gl{color:inherit;text-decoration:none;border-bottom:1px dotted var(--ink3);
+cursor:help;position:relative}
+a.gl:hover,a.gl:focus{border-bottom-color:var(--accent);color:var(--accent);
+outline:none}
+a.gl::after{content:attr(data-def);position:absolute;left:0;top:calc(100% + 9px);
+width:max(260px,22em);background:var(--panel);color:var(--ink);
+border:1px solid var(--rule);border-radius:5px;padding:9px 12px;
+font-family:var(--sans);font-size:13px;line-height:1.45;font-style:normal;
+box-shadow:0 7px 24px rgba(0,0,0,.16);opacity:0;visibility:hidden;
+transition:opacity .13s ease .05s;z-index:40;pointer-events:none;
+text-align:left;font-weight:400}
+a.gl::before{content:"";position:absolute;left:14px;top:calc(100% + 3px);
+border:6px solid transparent;border-bottom-color:var(--rule);opacity:0;
+visibility:hidden;transition:opacity .13s ease .05s;z-index:41}
+a.gl:hover::after,a.gl:focus::after,a.gl:hover::before,a.gl:focus::before{
+opacity:1;visibility:visible}
+.gl-list{margin:18px 0 0;padding:0;columns:2;column-gap:40px}
+.gl-entry{break-inside:avoid;margin:0 0 15px;padding:0}
+.gl-entry dt{font-family:var(--sans);font-size:13.5px;font-weight:700;
+color:var(--ink);margin:0 0 3px;scroll-margin-top:24px}
+.gl-entry dd{margin:0;font-size:14.5px;line-height:1.5;color:var(--ink2)}
+.gl-entry dd b{color:var(--ink);font-weight:600}
+.gl-entry dd code{font-family:var(--mono);font-size:12px;
+background:var(--hero);padding:1px 4px;border-radius:3px}
+.gl-entry:target dt{color:var(--accent)}
+.gl-entry:target{background:var(--hero);border-radius:4px;
+box-shadow:0 0 0 10px var(--hero)}
+.gl-unused{display:none}
+@media (max-width:900px){.gl-list{columns:1}
+a.gl::after{width:min(84vw,22em)}}
+@media print{a.gl::after,a.gl::before{display:none}
+a.gl{border-bottom:none}}
+.foot{margin-top:58px;padding-top:18px;border-top:1px solid var(--rule);
+font-family:var(--sans);font-size:13px;color:var(--ink2);max-width:52em}
+.foot a{color:var(--accent)}
+svg text{font-family:var(--sans)}
+@media (max-width:900px){
+  body{font-size:17.5px} h1{font-size:34px} section.finding h2{font-size:25px}
+  .panel{grid-template-columns:1fr}
+  .pcell{border-right:0;border-bottom:1px solid var(--line)}
+  .wrap{padding:0 18px 70px}
+}
+@media print{
+  body{background:#fff} .xf-bar,#xf-table{break-inside:avoid}
+  section.finding{break-inside:avoid-page}
+}
+</style></head><body><div class="wrap">
+<!-- report.py renders the entire article body (header, hero, sections, glossary, footer) here -->
+__BODY__
+</div>
+
+<!-- d3 + crossfilter power ONLY the §1 interactive explorer. They are INLINED here (report.py splices
+     report/vendor/*.min.js) rather than loaded from a CDN, so the report is fully self-contained and
+     the explorer works offline with nothing installed. The article and all baked inline-SVG figures
+     need no JS at all; the explorer additionally guards on `typeof d3 === "undefined"` so even a
+     stripped vendor block degrades to the static article rather than erroring. -->
+__VENDOR_JS__
+<script>
+const RECORDS = /*__RECORDS__*/[];
+const FACTS = /*__FACTS__*/{};
+
+// Cross-filtered explorer over the same records that produced every figure.
+// Crossfilter holds the dimensions; d3 renders. Clicking a value filters every
+// other dimension's counts, the scatter, and the table at once. (Ported from the
+// CurveBender/granite "glm53flash" report; mounts only if #xf and d3 are present.)
+(function(){
+  if (typeof d3 === "undefined" || typeof crossfilter === "undefined") return;
+  if (!document.getElementById("xf") || !RECORDS.length) return;
+
+  // Only surface knobs that actually vary -- a dimension with one value is noise here.
+  const ALL_DIMS = [
+    {key:'conc', label:'sessions',       order:(a,b)=>a-b},
+    {key:'route',label:'routing',        order:null},
+    {key:'tp',   label:'TP',             order:(a,b)=>a-b},
+    {key:'pd',   label:'prefill/decode', order:null},
+    {key:'mtp',  label:'draft tokens',   order:(a,b)=>a-b},
+    {key:'mnbt', label:'batch tokens',   order:(a,b)=>a-b},
+    {key:'mns',  label:'max seqs',       order:(a,b)=>a-b},
+    {key:'a2a',  label:'dispatch',       order:null},
+    {key:'ok',   label:'servable',       order:null},
+  ];
+  const varies = k => new Set(RECORDS.map(r=>r[k])).size > 1;
+  const DIMS = ALL_DIMS.filter(d => d.key==='conc' || d.key==='ok' || varies(d.key));
+
+  const cf = crossfilter(RECORDS);
+  const dims={}, groups={}, sel={};
+  DIMS.forEach(d=>{ dims[d.key]=cf.dimension(r=>r[d.key]); groups[d.key]=dims[d.key].group();
+    sel[d.key]=new Set(); });
+
+  const root=d3.select('#xf');
+  const bar=root.append('div').attr('class','xf-bar');
+  const panels=bar.selectAll('div.xf-dim').data(DIMS).join('div').attr('class','xf-dim');
+  panels.append('h5').text(d=>d.label);
+  const optWrap=panels.append('div');
+
+  const sum=root.append('div').attr('class','xf-sum');
+  const sumCount=sum.append('span');
+  sum.append('button').attr('class','xf-clear').text('clear all filters')
+    .on('click',()=>{ DIMS.forEach(d=>{ sel[d.key].clear(); dims[d.key].filterAll(); }); redraw(); });
+
+  const SW=820,SH=300,SM={t:16,r:18,b:44,l:62};
+  const svg=root.append('svg').attr('id','xf-scatter')
+    .attr('viewBox',`0 0 ${SW} ${SH}`).attr('width','100%');
+  const gx=svg.append('g').attr('transform',`translate(0,${SH-SM.b})`);
+  const gy=svg.append('g').attr('transform',`translate(${SM.l},0)`);
+  const gpt=svg.append('g');
+  svg.append('text').attr('x',SM.l+(SW-SM.l-SM.r)/2).attr('y',SH-8)
+    .attr('text-anchor','middle').attr('font-size',12).attr('fill','currentColor')
+    .text('aggregate output tok/s delivered by the cluster (log scale)');
+  svg.append('text').attr('transform',`rotate(-90 14 ${SM.t+(SH-SM.t-SM.b)/2})`)
+    .attr('x',14).attr('y',SM.t+(SH-SM.t-SM.b)/2).attr('text-anchor','middle')
+    .attr('font-size',12).attr('fill','currentColor').text('tok/s per user');
+
+  const clVals=RECORDS.map(r=>r.cl).filter(v=>v>0);
+  const x=d3.scaleLog().range([SM.l,SW-SM.r])
+    .domain([(d3.min(clVals)||1)/1.3,(d3.max(clVals)||10)*1.3]);
+  const y=d3.scaleLinear().range([SH-SM.b,SM.t]).domain([0,(d3.max(RECORDS,r=>r.pu)||1)*1.08]);
+  const conc=[...new Set(RECORDS.map(r=>r.conc))].sort((a,b)=>a-b);
+  const col=d3.scaleOrdinal().domain(conc)
+    .range(['#08306b','#1a5296','#2e74b5','#5a9bd4','#8fbce0','#bcd7ec','#dceaf6']);
+  gx.call(d3.axisBottom(x).ticks(4,',').tickSize(4)).attr('font-size',11);
+  gy.call(d3.axisLeft(y).ticks(5)).attr('font-size',11);
+
+  const none=root.append('div').attr('class','xf-none')
+    .html('<b>No runs match this combination.</b> These filters span values the search never '
+      +'measured together — the capacity probe visits a different concurrency ladder per topology, '
+      +'so many config×load pairs have no run. Clear a filter to see data again.');
+  const tableWrap=root.append('div').attr('id','xf-table');
+  const COLS=[
+    ['conc','sessions',v=>v],['route','routing',v=>v],['tp','TP',v=>v],
+    ['pd','P/D',v=>v],['mtp','MTP',v=>v],['mnbt','batch',v=>d3.format(',')(v)],
+    ['mns','seqs',v=>v],['pu','tok/s user',v=>v.toFixed(1)],
+    ['cl','tok/s fleet',v=>d3.format(',.0f')(v)],['itl','ITL ms',v=>v.toFixed(1)],
+    ['hit','prefix hit',v=>v==null?'–':v.toFixed(2)],
+    ['p95','p95 s',v=>v?d3.format(',.0f')(v/1000):'–'],
+    ['to','dropped',v=>d3.format(',.0f')(v)],
+  ];
+  const table=tableWrap.append('table');
+  const numCols=['conc','tp','mtp','mnbt','mns','pu','cl','itl','hit','p95','to'];
+  table.append('thead').append('tr').selectAll('th').data(COLS).join('th')
+    .attr('class',d=>numCols.includes(d[0])?'n':null).text(d=>d[1]);
+  const tbody=table.append('tbody');
+
+  function apply(key){ const s=sel[key];
+    dims[key].filterFunction(v=>s.size===0||s.has(String(v))); }
+
+  function redraw(){
+    optWrap.each(function(d){
+      // group().all() counts respect every OTHER dimension's filter (not this dim's own), so a
+      // zero here means "clicking this option yields no runs under the current selection". We dim
+      // and disable those instead of letting a click blank the whole plot. An option already
+      // selected stays clickable so it can be toggled back off.
+      const vals=groups[d.key].all();
+      const sorted=d.order? vals.slice().sort((a,b)=>d.order(+a.key,+b.key))
+                          : vals.slice().sort((a,b)=>b.value-a.value);
+      d3.select(this).selectAll('div.xf-opt').data(sorted,g=>g.key)
+        .join(enter=>enter.append('div').attr('class','xf-opt')
+          .on('click',(ev,g)=>{ const k=String(g.key);
+            // block clicks on an empty, not-yet-selected option (would match zero runs)
+            if(g.value===0 && !sel[d.key].has(k)) return;
+            sel[d.key].has(k)?sel[d.key].delete(k):sel[d.key].add(k);
+            apply(d.key); redraw(); })
+          .call(e=>{ e.append('span').attr('class','k'); e.append('span').attr('class','c'); }))
+        .classed('on',g=>sel[d.key].has(String(g.key)))
+        .classed('empty',g=>g.value===0 && !sel[d.key].has(String(g.key)))
+        .call(n=>{ n.select('.k').text(g=>d.key==='ok'?(g.key===true?'yes':'no')
+            :(d.key==='mnbt'?d3.format(',')(+g.key):g.key));
+          n.select('.c').text(g=>g.value); });
+    });
+    const rows=dims.conc.top(Infinity).slice().sort((a,b)=>(b.pu??-Infinity)-(a.pu??-Infinity));
+    const n=rows.length,nok=rows.filter(r=>r.ok).length;
+    none.classed('show', n===0);   // selection matched no runs -> explain instead of a blank plot
+    // build_records intentionally emits null pu/cl/itl for rejected/MTP/missing-metric runs; EVERY
+    // read below must tolerate null or one such row kills the whole explorer (review F4).
+    const f1=v=>v==null?'n/a':v.toFixed(1);                 // null-safe 1-decimal
+    const fk=v=>v==null?'n/a':d3.format(',.0f')(v);         // null-safe integer
+    const bestPu=d3.max(rows,r=>r.pu), bestCl=d3.max(rows,r=>r.cl);  // d3.max skips null/undefined
+    sumCount.html(`<b>${n}</b> of ${RECORDS.length} runs selected &nbsp;&middot;&nbsp; `
+      +`<b>${nok}</b> meet every limit &nbsp;&middot;&nbsp; `
+      +(n?`best <b>${f1(bestPu)}</b> tok/s per user, `
+        +`<b>${fk(bestCl)}</b> tok/s fleet`:''));
+    // Only points with BOTH axes present can be placed on the scatter; the rest still appear in the
+    // table (which shows "–" per null cell) but are not plotted.
+    const plot=rows.filter(r=>r.cl!=null && r.pu!=null);
+    gpt.selectAll('g.p').data(plot,r=>r.id)
+      .join(enter=>enter.append('g').attr('class','p').call(g=>g.append('title')))
+      .call(g=>{ g.select('title').text(r=>
+          `${r.conc} sessions · ${r.route} · TP=${r.tp} · ${r.pd}${r.mtp?' · MTP=1':''}\n`
+          +`${f1(r.pu)} tok/s per user, ${fk(r.cl)} tok/s fleet, `
+          +`ITL ${f1(r.itl)} ms${r.hit==null?'':', prefix hit '+r.hit.toFixed(2)}`
+          +(r.ok?'':`\nNOT SERVABLE: ${(r.viol||[]).join('; ')}`));
+        g.selectAll('circle').data(r=>[r]).join('circle')
+          .attr('cx',r=>x(r.cl)).attr('cy',r=>y(r.pu)).attr('r',5)
+          .attr('fill',r=>r.ok?col(r.conc):'none')
+          .attr('stroke',r=>r.ok?'none':'#b2182b').attr('stroke-width',1.7)
+          .attr('stroke-dasharray',r=>r.ok?null:'2.5 2')
+          .attr('opacity',r=>r.ok?0.9:0.85); });
+    tbody.selectAll('tr').data(rows.slice(0,250),r=>r.id).join('tr')
+      .attr('class',r=>r.ok?null:'bad')
+      .each(function(r){ d3.select(this).selectAll('td')
+        .data(COLS.map(c=>[c,r[c[0]]]),d=>d[0][0]).join('td')
+        .attr('class',d=>numCols.includes(d[0][0])?'n':null)
+        .text(d=>d[1]===null||d[1]===undefined?'–'
+          :(typeof d[1]==='boolean'?(d[1]?'yes':'no'):d[0][2](d[1]))); });
+  }
+  redraw();
+})();
+</script>
+</body></html>

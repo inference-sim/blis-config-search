@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>config-search reports</title>
+<style>
+  :root{ --bg:#fcfcfb; --surface:#ffffff; --ink:#1a1a19; --muted:#6b6b68;
+    --line:#e4e4e1; --code-bg:#f4f4f1; --ok:#1a7f4b; --c0:#0072B2; }
+  @media (prefers-color-scheme: dark){ :root{ --bg:#141413; --surface:#1a1a19; --ink:#ededea;
+    --muted:#a3a39d; --line:#33332e; --code-bg:#22221f; --ok:#4bbf82; --c0:#4a9fd8; } }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:1000px;margin:0 auto;padding:32px 16px 80px}
+  h1{font-size:1.7rem;margin:0 0 .2em;letter-spacing:-.01em}
+  .sub{color:var(--muted);margin:0 0 1.6em}
+  a{color:inherit;text-decoration:none}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+  .card{background:var(--surface);border:1px solid var(--line);border-top:3px solid var(--c0);
+    border-radius:10px;padding:16px 18px;transition:box-shadow .1s,transform .1s}
+  .card:hover{box-shadow:0 6px 20px rgba(0,0,0,.12);transform:translateY(-1px)}
+  .card h2{font-size:1.05rem;margin:0 0 .3em;border:0;padding:0}
+  .card .meta{color:var(--muted);font-size:.85rem;margin:0 0 .8em}
+  .card .win{font-weight:600;color:var(--ok)}
+  .card .kv{font-variant-numeric:tabular-nums}
+  .card .foot{color:var(--muted);font-size:.78rem;margin-top:.8em;font-family:ui-monospace,Menlo,monospace}
+</style>
+</head>
+<body>
+<div class="wrap" id="wrap"></div>
+<script>
+const CARDS = /*__CONFIG_SEARCH_CARDS__*/[];
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const wrap=document.getElementById("wrap");
+wrap.innerHTML = `<h1>config-search reports</h1>
+  <p class="sub">${CARDS.length} scenario${CARDS.length===1?"":"s"}. Click a card for the full interactive report.</p>
+  <div class="cards">`+CARDS.map(c=>`
+    <a class="card" href="${esc(c.href)}">
+      <h2>${esc(c.model)}</h2>
+      <p class="meta">${esc(c.hw)} &middot; ${esc(c.workload)}</p>
+      <div>winner: <span class="win">${esc(c.winner)}</span></div>
+      <div class="kv">${esc(c.summary)}</div>
+      <div class="foot">${esc(c.run_id)}</div>
+    </a>`).join("")+`</div>`;
+</script>
+</body>
+</html>

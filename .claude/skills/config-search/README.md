@@ -1,12 +1,15 @@
 # config-search
 
-Find the best BLIS serving configuration for a model, a GPU budget, and a workload -- then (later)
-turn the results into an interactive HTML report. It drives the simulator many times, steering toward
-configs that **maximize throughput while staying interactive** (>= 50 tok/s per user by default), and
-writes a run directory you can inspect or re-plot without re-running anything.
+Find the best BLIS serving configuration for a model, a GPU budget, and a workload -- then turn the
+results into a magazine-style interactive HTML report. It drives the simulator many times, steering
+toward configs that **maximize throughput while staying interactive** (>= 50 tok/s per user by
+default), writes a run directory you can inspect or re-plot without re-running anything, and renders
+that directory into a shareable analytical report (numbered findings, inline-SVG figures, a crossfilter
+explorer over every run, and a glossary).
 
-This is the **sweeper / engine** half of the skill. The report half is added on later and reads the
-same run directory (see `examples/sample-run/` for the shape of that data).
+Both halves of the skill are present: the **sweeper / engine** (runs BLIS, writes the run directory)
+and the **report** (`scripts/report.py`, reads the same run directory, writes `index.html` -- it
+never runs BLIS). They meet only at the run-directory format; see `examples/sample-run/` for its shape.
 
 ## What "best" means (all overridable)
 
@@ -61,12 +64,29 @@ runs/<run-id>/
   scenario.json   # exactly what was searched (+ pinned_stack, pinned workload)
   runs.jsonl      # every kernel run: config, resolved deployment, metrics (cluster) + metrics_all_instances[]
   pareto.json     # finalists (c_star/c_use/enriched curve[]), dropped topologies, chosen winner + move trail
+  report.json     # OPTIONAL brain-authored narrative for the report (see scripts/report_schema.md)
 ```
 
 How it's produced today: `scripts/run_blis.py` + `scripts/sweep_pool.py` price configs on the kernel
 (generating a scenario per per-instance topology) and write `runs.jsonl`; the **search brain (Claude,
-per `SKILL.md`)** decides which configs to run, assembles `scenario.json`, and computes/writes
-`pareto.json`. A single-command driver that emits all three is the TODO in Status.
+per `SKILL.md`)** decides which configs to run, assembles `scenario.json`, computes/writes
+`pareto.json`, and writes the `report.json` narrative. A single-command driver that emits them is the
+TODO in Status.
+
+Then render it:
+
+```
+python3 -I scripts/report.py runs/<run-id>     # -> runs/<run-id>/index.html
+python3 -I scripts/report.py runs/             # several run dirs -> each report + a card index
+```
+
+`scripts/report.py` is a pure `run-dir -> index.html` transform (it never runs BLIS): a magazine-style
+analytical report with a numbered-finding narrative, pre-rendered inline-SVG figures
+(`scripts/figures.py`), a crossfilter explorer over every run, and a glossary. The prose comes from
+`report.json` (absent -> header + explorer + an auto operating table still render). The report is
+fully self-contained and renders offline: d3 + crossfilter (the explorer's only JS deps) are inlined
+from `report/vendor/`, so there is no network dependency at view time. See `SKILL.md` and
+`scripts/report_schema.md`.
 
 Reproducibility: each `blis run` is deterministic (INV-6) and the pool writes `runs.jsonl` in a
 stable order, so the *data* is reproducible. The end-to-end *recommendation* is only as reproducible
@@ -86,7 +106,13 @@ one place that invokes BLIS.
 First engine version, **verified end-to-end on the kernel backend**: `examples/sample-run/` is a real
 kernel mini-search (GLM-5.3-Flash, 16x H100) -- topologies priced via generated scenarios, bisected to
 C* at the interactivity floor, winner `4x TP4 + EP`. The runner parses the JSON metrics and
-per-instance objects, the parallel pool hits ~4-14x, and the unit suite passes. Caveat: outputs are
-simulator **predictions** (the kernel prices MLA/KDA from fitted coefficients) -- spot-check against
-the real llm-d measurements in `curvebender-tools/reports` before acting. Still to do: tune
-the steering rules against that real data, and wrap the capacity-probe/finalist driver as one command.
+per-instance objects, the parallel pool hits ~4-14x, and the unit suite passes. The **report step is
+implemented** (`scripts/report.py` + `scripts/figures.py` + `report/template.html`): it renders
+`examples/sample-run/` into a magazine-style `index.html` -- numbered findings, inline-SVG figures
+(operating curve, scale bars, tail scatter), a crossfilter explorer, and a glossary -- from the
+committed `report.json` narrative; `scripts/test_report.py` covers the records/FACTS mapping, each
+figure, report.json tolerance, and the seam-consistency checks.
+Caveat: outputs are simulator **predictions** (the kernel prices MLA/KDA from fitted coefficients) --
+spot-check against the real llm-d measurements in `curvebender-tools/reports` before acting. Still to
+do: tune the steering rules against that real data, and wrap the capacity-probe/finalist driver as one
+command (which would also assemble `curve[]` in code rather than by the brain).

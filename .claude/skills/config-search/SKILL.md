@@ -184,11 +184,48 @@ runs/<run-id>/
 the brain, not derived as `1000/itl_p99_ms`: BLIS appends ITL per decode *step*, so under
 speculative decoding one entry covers several tokens and the naive axis understates the per-user rate.
 
-## Report step (added later)
+## Report step
 
 The report half of this skill (disc #4, report track) reads the run directory and emits a
-self-contained interactive HTML report. **Not implemented here yet** -- `examples/sample-run/` is the
-committed fixture that defines the seam so the report work can proceed independently and be added on.
+**magazine-style analytical report** modeled on the CurveBender "glm53flash" format: a numbered-finding
+narrative, pre-rendered inline-SVG figures, a client-side **crossfilter explorer** over every run, and
+a glossary. It **never runs BLIS** at generation time -- it is a pure `run-dir -> index.html`
+transform, so a report is regenerable from the committed data alone.
+
+```
+python3 -I scripts/report.py runs/<run-id>              # -> runs/<run-id>/index.html (next to the data)
+python3 -I scripts/report.py runs/<run-id> --out p.html # custom output path
+python3 -I scripts/report.py runs/                      # a parent of several run dirs -> each report + a card index
+```
+
+Inputs (all optional-tolerant -- three of four are brain-authored):
+
+- **`scenario.json` / `pareto.json` / `runs.jsonl`** -- the search outputs. `report.py` maps each
+  run into a flat **`RECORDS`** row (short keys: `conc,tp,ni,series,pu,cl,itl,ttft,p95,ok,viol…`),
+  where `pu` (per-user tok/s) = `1000 / mean ITL`, and classifies each run servable/not against the
+  interactivity floor + SLOs. It also computes a **`FACTS`** stats object the prose cites.
+- **`report.json`** -- the **brain-authored narrative** (standfirst, hero panel, numbered sections +
+  which figure each shows, the operating-point table, the glossary). Documented in
+  `scripts/report_schema.md`. **Absent -> the report still renders** the header, the explorer, and an
+  auto operating table, with no analysis prose.
+
+Pieces:
+
+- **`scripts/figures.py`** -- deterministic inline-SVG figure builders (`operating_curve`,
+  `scale_bars`, `tail_scatter`, …), themed via the stylesheet's `--fig-*` variables. A figure whose
+  keying knob was **not varied** in this run degrades to a captioned placeholder (the v1 engine only
+  sweeps concurrency + topology, so routing/PD/spec-decode figures show the placeholder until the
+  search varies those knobs).
+- **`report/template.html`** -- the magazine shell (reference CSS, `__BODY__` mount point, the
+  explorer JS). It loads **d3 + crossfilter from cdnjs**, so the *explorer* needs network to render;
+  the article and baked figures render offline regardless, and the explorer silently no-ops without
+  d3. (A sibling `report/index-template.html` is the card-index landing page for the multi-run case.)
+
+Determinism (INV-6): a pure function of the run directory -- same run-dir path => byte-identical
+HTML (`json.dumps(..., sort_keys=True)`; the CDN URLs are fixed). The footer stamps the resolved
+absolute local path of the run dir (the one machine-specific string). `examples/sample-run/` is the
+committed fixture (now including a worked `report.json`); `scripts/test_report.py` covers the records
+mapping, FACTS, each figure, report.json tolerance, and the seam-consistency checks.
 
 ## Examples
 

@@ -1,0 +1,4 @@
+# Generated report output (regenerable from the run directory via scripts/report.py)
+examples/sample-run/index.html
+# Local search output directories
+/runs/

@@ -1,0 +1,66 @@
+{
+  "_source": "brain-authored narrative for the sample-run fixture (GLM-5.3-Flash, 16x H100, chatbot)",
+  "title": "Serving GLM-5.3-Flash on sixteen H100s",
+  "standfirst": "A configuration search over three serving shapes and 27 simulated runs on the blis-latency-kernel backend, and what they say about how to run this model on 16 H100s while holding every user above 50 tok/s.",
+  "meta": [
+    "BLIS discrete-event simulation, kernel backend",
+    "GLM-5.3-Flash · 16× H100 · chatbot · 200 requests",
+    "Interactivity floor 50 tok/s/user (ITL p99 ≤ 20 ms), headroom 0.8"
+  ],
+  "hero": [
+    {"h": "What was tested", "html": "Three topologies within 16 H100s — <a class=\"gl\" href=\"#g-tensor-parallel-width\" data-def=\"How many GPUs each copy of the model is split across.\">tensor-parallel</a> 8 as one or two instances, and TP4 as four — each probed up the concurrency axis and bisected to its interactivity limit. 27 runs in all; 19 met every service limit, 8 did not and are reported rather than dropped."},
+    {"h": "What was found", "html": "The kernel shows a <b>sharp interactivity cliff</b> for this model: per-user token rate holds flat, then collapses within one or two sessions of a configuration's limit. The limit — not the peak throughput — is what separates the three shapes."},
+    {"h": "What to run", "html": "<b>Four TP4 instances with expert parallel</b>, at a usable operating point of 20 concurrent sessions. It delivers 1,471 tok/s across the fleet (92 tok/s per GPU) while every user still sees 70 tok/s, and it scales furthest before the cliff."}
+  ],
+  "explore_prose": [
+    "Everything below comes from these 27 runs: each is one of three configurations at one concurrency level, priced on the blis-latency-kernel backend.",
+    "Click any value to filter. The counts, the scatter and the table update together — filter to the servable runs, or to a single topology, and the figures in the sections below can be checked against the raw rows here."
+  ],
+  "sections": [
+    {
+      "num": 2,
+      "title": "The operating curve, and where it stops",
+      "figure": "operating_curve",
+      "caption": "<b>Figure 1. Each configuration trades per-user speed for fleet output, until it falls off a cliff.</b> Per-user <a class=\"gl\" href=\"#g-per-user-token-rate\" data-def=\"The output tokens per second one caller sees, 1000 divided by the mean inter-token latency.\">token rate</a> against total cluster output, walking concurrency up each configuration. Numbers beside markers are the session count; filled markers meet every limit, hollow ones break at least one. The dashed line is the 50 tok/s/user floor.",
+      "prose": [
+        "Every configuration trades the same way while it is healthy: serve more sessions, the fleet delivers more tokens, each user waits a little longer. Then the <a class=\"gl\" href=\"#g-inter-token-latency\" data-def=\"The average gap between consecutive output tokens in a response.\">inter-token latency</a> crosses its ceiling and the per-user rate falls off a cliff — the hollow markers.",
+        "The single-instance TP8 shape reaches only 6 concurrent sessions before the cliff; two TP8 instances reach 12; four TP4 instances reach 25. Capacity is set by how many instances share the load, not by any single engine knob.",
+        "The recommendation reads the <b>usable</b> point at headroom 0.8 of each limit, not the edge: 4× TP4 + EP at 20 sessions, where it holds 70 tok/s per user and 1,471 tok/s across the fleet."
+      ]
+    },
+    {
+      "num": 3,
+      "title": "How far each configuration scales",
+      "figure": "scale_bars",
+      "caption": "<b>Figure 2. Configuration alone changes capacity by a factor of four.</b> Highest concurrency each configuration serves inside every limit. The cross marks the first load that breaks one. Identical hardware, identical workload.",
+      "prose": [
+        "The same three configurations, reduced to one number each: the highest concurrency that stays inside every service limit. The spread is 6 to 25 sessions — a factor of four from configuration alone, on 16 H100s and one fixed workload.",
+        "The cross marks the first load that breaks a limit. On this model every break is the same one: <a class=\"gl\" href=\"#g-inter-token-latency\" data-def=\"The average gap between consecutive output tokens in a response.\">inter-token latency</a> crossing the 20 ms p99 ceiling. There are no KV preemptions in any run — the cliff is a decode-compute ceiling, not a memory one."
+      ]
+    },
+    {
+      "num": 4,
+      "title": "Why the fastest-looking configuration can be the wrong one",
+      "figure": "tail_scatter",
+      "caption": "<b>Figure 3. Per-user rate against the slowest 95% of session latencies.</b> Every run; crosses break a service limit. A configuration pushed past its cliff reports a lower per-user rate <i>and</i> a longer tail — the two move together here, so the tail is a faithful independent check.",
+      "prose": [
+        "Ranking configurations on peak fleet throughput alone would promote the runs on the right of Figure 1 — the ones past their cliff. The tail latency is the independent check: those same runs sit low and to the right here, slow per user and slow at the tail at once.",
+        "This is why the search ranks on usable capacity at the interactivity floor, not on the highest fleet number any run produced."
+      ]
+    }
+  ],
+  "recommendation_prose": [
+    "Run four TP4 instances with expert parallel. On this workload it serves the most sessions before the interactivity cliff and wins on both the budget-max and per-GPU axes.",
+    "Then choose an operating point from the table below and read the flags off it. These are simulator predictions from the kernel backend — spot-check the flat ITL and the cliff location against the real llm-d measurements before acting."
+  ],
+  "operating_points": [
+    {"conc": 5,  "flags": {"tp": 8, "ni": 1, "mnbt": 8192, "mns": 256, "mtp": 0}, "pu": 113.1, "cl": 511.6, "itl": 8.84, "hit": null},
+    {"conc": 10, "flags": {"tp": 8, "ni": 2, "mnbt": 8192, "mns": 256, "mtp": 0}, "pu": 101.7, "cl": 983.6, "itl": 9.83, "hit": null},
+    {"conc": 20, "flags": {"tp": 4, "ni": 4, "mnbt": 8192, "mns": 256, "mtp": 0}, "pu": 70.0, "cl": 1471.5, "itl": 14.29, "hit": null}
+  ],
+  "glossary": [
+    {"id": "g-per-user-token-rate", "term": "per-user token rate", "def": "The output tokens per second one caller sees, computed as 1000 divided by the mean inter-token latency.", "long": "The interactivity axis of the search. The floor for this run is 50 tok/s/user, i.e. an ITL p99 at or below 20 ms."},
+    {"id": "g-inter-token-latency", "term": "inter-token latency", "def": "The average gap between consecutive output tokens in a response.", "long": "On this model the kernel prices it as nearly flat until a decode-compute ceiling, then it climbs sharply — the cliff in Figure 1."},
+    {"id": "g-tensor-parallel-width", "term": "tensor-parallel width", "def": "How many GPUs each copy of the model is split across.", "long": "Written into the generated scenario as <code>parallel.tp</code>. TP8 fills one H100 node; TP4 lets four instances share the 16-GPU budget."}
+  ]
+}

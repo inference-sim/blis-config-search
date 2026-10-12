@@ -98,7 +98,8 @@ class Figures(unittest.TestCase):
         svg = figures.fig_operating_curve(self.recs, floor_pu=50)
         self.assertTrue(_svg_wellformed(svg))
         self.assertIn("tok/s per user", svg)
-        self.assertIn("interactivity floor", svg)        # floor guide drawn
+        self.assertIn("floor 50", svg)                   # floor reference line drawn
+        self.assertIn("servability is p99", svg)         # labelled as mean-ref, not the p99 boundary
         self.assertIn("4x TP4 + EP", svg)                # a series labelled
 
     def test_scale_bars(self):
@@ -109,7 +110,8 @@ class Figures(unittest.TestCase):
     def test_tail_scatter(self):
         svg = figures.fig_tail_scatter(self.recs)
         self.assertTrue(_svg_wellformed(svg))
-        self.assertIn("tail", svg.lower() + "slowest")   # axis title present
+        low = svg.lower()
+        self.assertTrue("tail" in low or "slowest" in low)   # axis title / aria-label present
 
     def test_placeholder_is_wellformed(self):
         svg = figures.placeholder("routing was not varied")
@@ -336,6 +338,27 @@ class QaRegressions(unittest.TestCase):
         for fn in (figures.fig_operating_curve, figures.fig_tail_scatter, figures.fig_scale_bars):
             svg = fn(recs)
             self.assertTrue(svg.strip().endswith("</svg>"))
+
+    # jgchn review — robustness
+    def test_auto_operating_table_tolerates_none_conc(self):
+        # a servable record with conc=None must not blow up sorted() in the auto table path
+        runs = [{"concurrency": None, "metrics": {"itl_mean_ms": 5, "tokens_per_sec": 10,
+                 "itl_p99_ms": 8, "injected_requests": 1, "completed_requests": 1}},
+                {"concurrency": 4, "metrics": {"itl_mean_ms": 5, "tokens_per_sec": 40,
+                 "itl_p99_ms": 8, "injected_requests": 1, "completed_requests": 1}}]
+        html = report.render_report({"interactivity_floor": {"itl_p99_ms_max": 20}}, {}, runs, {}, "/x")
+        self.assertTrue(html.strip().endswith("</html>"))
+
+    def test_feasible_tolerates_non_numeric_metrics(self):
+        # string-valued metrics must not raise TypeError in the comparisons
+        run = {"metrics": {"injected_requests": "100", "completed_requests": "100",
+                           "itl_p99_ms": "9.0"}}
+        ok, viol = report._feasible(run, {"itl_p99_ms_max": 20}, {})
+        self.assertTrue(ok)
+        bad = {"metrics": {"injected_requests": "100", "completed_requests": "90"}}
+        ok2, viol2 = report._feasible(bad, {}, {})
+        self.assertFalse(ok2)
+        self.assertTrue(any("incomplete" in v for v in viol2))
 
 
 if __name__ == "__main__":

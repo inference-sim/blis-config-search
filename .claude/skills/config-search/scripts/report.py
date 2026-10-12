@@ -107,6 +107,19 @@ def _num(v):
     return str(v)
 
 
+def _as_num(v):
+    """Coerce a metric to float, tolerating a numeric string (e.g. "100"); None/garbage -> None.
+    Keeps feasibility comparisons from throwing on a non-numeric metric value (jgchn review)."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 # --- RECORDS: one flat row per blis run -------------------------------------
 
 def _metric_any(run, key):
@@ -115,15 +128,17 @@ def _metric_any(run, key):
     both (not just trusting the aggregate when present) is what keeps feasibility in parity with the
     search, which drops a run if any instance breaches (QA G4). Returns (worst, missing_everywhere)."""
     vals = []
-    agg = (run.get("metrics") or {}).get(key)
+    agg = _as_num((run.get("metrics") or {}).get(key))   # coerce; tolerate string/garbage (jgchn)
     if agg is not None:
         vals.append(agg)
     for inst in (run.get("metrics_all_instances") or []):
-        if isinstance(inst, dict) and inst.get(key) is not None:
-            vals.append(inst[key])
+        if isinstance(inst, dict):
+            iv = _as_num(inst.get(key))
+            if iv is not None:
+                vals.append(iv)
     if vals:
         return max(vals), False
-    return None, True   # metric entirely absent from aggregate and every instance
+    return None, True   # metric entirely absent (or non-numeric) in aggregate and every instance
 
 
 def _feasible(run, floor, slos):
@@ -134,9 +149,9 @@ def _feasible(run, floor, slos):
     if run.get("returncode", 0) != 0 or run.get("error"):
         viol.append(f"run failed: {run.get('error') or 'nonzero exit'}")
     m = run.get("metrics") or {}
-    inj, comp = m.get("injected_requests"), m.get("completed_requests")
-    if inj and comp is not None and comp < inj:
-        viol.append(f"incomplete: {comp}/{inj} completed")
+    inj, comp = _as_num(m.get("injected_requests")), _as_num(m.get("completed_requests"))
+    if inj and comp is not None and comp < inj:   # _as_num tolerates string/None metrics (jgchn review)
+        viol.append(f"incomplete: {comp:g}/{inj:g} completed")
     if m.get("timed_out_requests"):
         viol.append(f"timed_out_requests = {m['timed_out_requests']}")
     if m.get("dropped_unservable"):
@@ -256,7 +271,8 @@ def build_facts(records, scenario, pareto):
         "peak_cluster_conc": peak["conc"] if peak else None,
         "peak_cluster_pu": peak["pu"] if peak else None,
         "baseline_pu": max(pus) if pus else None,
-        "max_servable_conc": max((r["conc"] for r in servable), default=None),
+        "max_servable_conc": max((r["conc"] for r in servable if r.get("conc") is not None),
+                                  default=None),
         "winner": winner.get("chosen"),
         "model": scenario.get("model"),
         "gpu_budget": scenario.get("gpu_budget"),
@@ -350,10 +366,12 @@ _FLAG_LABELS = [("tp", "--tensor-parallel-size"), ("ni", "--num-instances"),
 def _operating_table(report, records):
     pts = report.get("operating_points")
     if not pts:
-        # auto: best servable record per concurrency, by per-user rate
+        # auto: best servable record per concurrency, by per-user rate. Skip rows with conc=None --
+        # a null load is not a meaningful operating point, and mixing None with ints breaks sorted()
+        # (jgchn review). build_facts/figures already treat conc=None as not-a-value, so this matches.
         by_conc = {}
         for r in records:
-            if r.get("ok") and r.get("pu") is not None:
+            if r.get("ok") and r.get("pu") is not None and r.get("conc") is not None:
                 cur = by_conc.get(r["conc"])
                 if cur is None or r["pu"] > cur["pu"]:
                     by_conc[r["conc"]] = r

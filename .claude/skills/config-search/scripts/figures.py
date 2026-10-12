@@ -143,13 +143,18 @@ def fig_operating_curve(records, floor_pu=None):
     inner.append("".join(xticks))
 
     if floor_pu:
+        # The y-axis is a MEAN-based per-user rate (1000/mean-ITL); servability (filled vs hollow) is
+        # judged on the p99 ITL. Those are different statistics, so a marker can sit above this
+        # reference line yet be hollow (p99 over the cap) or vice versa -- the line is a mean-rate
+        # REFERENCE, not the pass/fail boundary. Label it as such so the two are not conflated.
         fy = _lin(floor_pu, 0, ytop, y1b, y0t)
         if y0t <= fy <= y1b:
             inner.append(f'<line x1="{x0}" y1="{fy:.1f}" x2="{x1}" y2="{fy:.1f}" '
                          f'stroke="var(--fig-muted,#b9c0c8)" stroke-width="1.3" '
                          f'stroke-dasharray="5 3"/>'
                          f'<text x="{x1-2:.1f}" y="{fy-5:.1f}" text-anchor="end" font-size="10.5" '
-                         f'fill="var(--fig-ink3,#8a8a8a)">interactivity floor {_fmt(floor_pu)}</text>')
+                         f'fill="var(--fig-ink3,#8a8a8a)">floor {_fmt(floor_pu)} (mean ref; '
+                         f'servability is p99)</text>')
 
     for i, (label, pts) in enumerate(_by_config(records)):
         pp = [r for r in pts if r.get("cl") and r.get("pu") is not None]

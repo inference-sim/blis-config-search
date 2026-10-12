@@ -18,8 +18,20 @@ Files:
 
 What the search found: topologies were priced on the kernel via generated scenarios and bisected to
 C* at the 50 tok/s/user floor. The kernel shows a **sharp interactivity cliff** for this model, so C*
-is small (1x TP8+EP C*=6, 2x TP8+EP C*=12, 4x TP4+EP C*=25). The winner on both the budget-max and
-per-GPU axes is **4x TP4 + EP** (~1472 tok/s, 92/GPU at C_use=20).
+is small (1x TP8+EP C*=6, 2x TP8+EP C*=12, 4x TP4+EP C*=20). The winner on both the budget-max and
+per-GPU axes is **4x TP4 + EP** (~1264 tok/s, 79/GPU at C_use=16).
+
+> **Provenance caveat on `pareto.json` (4x TP4+EP `c_star`).** The engine's capacity probe bisects on
+> the **cluster-aggregate** ITL, which stays under 20 ms through concurrency 25, so a fresh
+> engine-driven search writes `c_star: 25` here. The report step (`report.py`), however, checks ITL
+> **per instance** (`metrics_all_instances`), and at conc 24/25 one of the four instances is already
+> at ~55 ms — so those points are not actually servable. To keep this committed fixture
+> self-consistent with the (correct) per-instance report logic, `4x TP4+EP`'s `c_star` was
+> **hand-corrected 25 → 20** (and `c_use` 20 → 16, `at_c_use` taken from the conc-16 run). This is the
+> one hand-edit in the directory; everything else is the raw engine output. The durable fix is
+> engine-side — teach the capacity probe (and `_completion_issue`) to check `metrics_all_instances`
+> the way `report.py` does, then regenerate this fixture from a real run. Until then the report and a
+> freshly-generated `pareto.json` would disagree on this one `c_star`.
 
 **On `tok_per_s_per_user` (why it is a field, not `1000/itl_p99_ms`):** BLIS appends an ITL entry per
 decode *step*, not per emitted token, so under speculative decoding/MTP one entry covers several

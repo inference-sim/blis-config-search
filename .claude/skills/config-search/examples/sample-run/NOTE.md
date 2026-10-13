@@ -1,10 +1,17 @@
 # sample-run (real kernel run)
 
-A **real** run directory produced by `config-search` on the pinned stack, priced by the
-**blis-latency-kernel** backend (BLIS PR #1851 @ 99bec1b6, kernel v0.1.0, blis-catalog 0.2.1,
-blis-registry v0.1.1). Scenario: GLM-5.3-Flash on 16x H100, chatbot, 200 requests, hold ITL p99
-<= 20 ms (>= 50 tok/s/user), headroom 0.8. It is the committed **seam fixture** the report step
-builds against.
+A **real** run directory produced by `config-search`, priced by the **blis-latency-kernel** backend.
+Scenario: GLM-5.3-Flash on 16x H100, chatbot, 200 requests, hold ITL p99 <= 20 ms (>= 50 tok/s/user),
+headroom 0.8. It is the committed **seam fixture** the report step builds against.
+
+> **Provenance: not regenerated against the current pin.** This directory was generated on an
+> **earlier** stack -- BLIS **PR #1851 @ `99bec1b6`** (kernel v0.1.0, blis-catalog 0.2.1,
+> blis-registry v0.1.1), as recorded verbatim in `scenario.json`'s `pinned_stack`. `99bec1b6`
+> predates dozens of later #1851 commits that landed in release **`v0.10.0` (@ `0d092d4`)**, so these
+> snapshots are **not** byte-identical. The skill now builds against `v0.10.0` (see `SETUP.md`); this
+> fixture has **not** been re-run on it. It is retained only as a format/seam fixture for `report.py`
+> -- the numbers are illustrative of that earlier binary, not a `v0.10.0` measurement. Regenerate from
+> a real `v0.10.0` run before treating any value here as current.
 
 Files:
 

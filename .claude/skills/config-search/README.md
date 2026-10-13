@@ -24,7 +24,7 @@ headroom, or ask for a different headline -- just say so when you invoke it.
 
 ## Prerequisites
 
-See `SETUP.md`. In short: build BLIS PR #1851 @ `99bec1b6` as `./blis` (runs on the accurate
+See `SETUP.md`. In short: build BLIS release `v0.10.0` (@ `0d092d4`) as `./blis` (runs on the accurate
 `blis-latency-kernel` backend), and point `BLIS_CATALOG` at blis-catalog `0.2.1` and `BLIS_REGISTRY`
 at blis-registry `v0.1.1`. All example models (`glm-5.3-flash`, `qwen3-14b`) already ship in `0.2.1`.
 

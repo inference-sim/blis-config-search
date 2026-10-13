@@ -16,9 +16,9 @@
 #   report.json    the brain-authored NARRATIVE (standfirst, hero, sections, glossary, operating pts).
 #                  Absent -> the report still renders header + explorer + an auto operating table.
 #
-# It NEVER runs BLIS and makes no subprocess / network calls at GENERATION time. (The rendered page
-# loads d3 + crossfilter from cdnjs for the explorer, so viewing the explorer needs network; the
-# article and the baked figures render offline regardless -- the explorer silently no-ops without d3.)
+# It NEVER runs BLIS and makes no subprocess / network calls at GENERATION time. The rendered page is
+# fully self-contained / offline: d3 + crossfilter are inlined via _vendor_js(), so the explorer, the
+# article, and the baked figures all render with no network access.
 #
 # Determinism (INV-6): a pure function of the run-directory CONTENTS. Identical data renders
 # byte-identical HTML regardless of where the directory lives or what it is named -- the footer

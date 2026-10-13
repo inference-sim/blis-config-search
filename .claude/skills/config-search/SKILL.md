@@ -32,7 +32,7 @@ knobs searched, the budget. That flexibility is the point of this skill.
 The search is priced by the **`blis-latency-kernel`** backend -- the accurate per-operator model, the
 reason to run BLIS at all here. It reads the deployment from a **scenario** + a **registry**, so:
 
-- **BLIS** PR #1851 pinned at commit **`99bec1b6`** (kernel `v0.1.0`, pinned in its `go.mod`), built
+- **BLIS** release **`v0.10.0`** (commit `0d092d4`; kernel `v0.1.0`, pinned in its `go.mod`), built
   as `./blis`. Always run with `--latency-model blis-latency-kernel`.
 - **blis-catalog @ `0.2.1`** (`--catalog`/`BLIS_CATALOG`); a model runs **iff** it is in the catalog
   (NS-6).

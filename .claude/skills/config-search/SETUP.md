@@ -7,7 +7,10 @@ What `config-search` needs on the machine before a run.
 ```bash
 git clone --branch v0.10.0 --depth 1 https://github.com/inference-sim/inference-sim.git
 cd inference-sim
-# release v0.10.0 @ 0d092d4 ("blis-latency-kernel integration"; kernel v0.1.0 in go.mod)
+# The v0.10.0 tag is NOT configured immutable upstream, so verify it still resolves
+# to the pinned commit before building; fail loudly if the tag has been moved.
+EXPECT=0d092d4ef64f605046de1181adf8e2b6ee564725   # release v0.10.0, "blis-latency-kernel integration" (kernel v0.1.0 in go.mod)
+test "$(git rev-parse HEAD)" = "$EXPECT" || { echo "v0.10.0 no longer resolves to $EXPECT -- aborting" >&2; exit 1; }
 go build -o blis main.go
 ```
 

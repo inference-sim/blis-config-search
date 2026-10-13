@@ -13,7 +13,7 @@
 # REJECTED (recorded as an error row), never silently dropped -- else two candidates could differ in
 # the ledger yet run the identical command.
 #
-# Pinned stack: BLIS PR #1851 @ 99bec1b6 (kernel v0.1.0 in go.mod), blis-catalog 0.2.1,
+# Pinned stack: BLIS v0.10.0 @ 0d092d4 (kernel v0.1.0 in go.mod), blis-catalog 0.2.1,
 # blis-registry v0.1.1 (holds the 6 coefficient sets below, incl cost-model-memory).
 import argparse, hashlib, json, os, subprocess, sys, tempfile, time
 

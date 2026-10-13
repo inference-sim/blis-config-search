@@ -5,9 +5,9 @@ What `config-search` needs on the machine before a run.
 ## 1. Build the pinned BLIS binary (kernel backend)
 
 ```bash
-git clone https://github.com/inference-sim/inference-sim.git
+git clone --branch v0.10.0 --depth 1 https://github.com/inference-sim/inference-sim.git
 cd inference-sim
-git fetch origin pull/1851/head && git checkout 99bec1b6   # exact pin (kernel v0.1.0 in go.mod)
+# release v0.10.0 @ 0d092d4 ("blis-latency-kernel integration"; kernel v0.1.0 in go.mod)
 go build -o blis main.go
 ```
 

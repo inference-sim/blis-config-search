@@ -1,7 +1,7 @@
 # sample-run (real kernel run)
 
 A **real** run directory produced by `config-search` on the pinned stack, priced by the
-**blis-latency-kernel** backend (BLIS PR #1851 @ 99bec1b6, kernel v0.1.0, blis-catalog 0.2.1,
+**blis-latency-kernel** backend (BLIS v0.10.0 @ 0d092d4, kernel v0.1.0, blis-catalog 0.2.1,
 blis-registry v0.1.1). Scenario: GLM-5.3-Flash on 16x H100, chatbot, 200 requests, hold ITL p99
 <= 20 ms (>= 50 tok/s/user), headroom 0.8. It is the committed **seam fixture** the report step
 builds against.

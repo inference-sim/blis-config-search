@@ -179,7 +179,7 @@ const FACTS = /*__FACTS__*/{};
 // Cross-filtered explorer over the same records that produced every figure.
 // Crossfilter holds the dimensions; d3 renders. Clicking a value filters every
 // other dimension's counts, the scatter, and the table at once. (Ported from the
-// CurveBender/granite "glm53flash" report; mounts only if #xf and d3 are present.)
+// internal "glm53flash" reference report; mounts only if #xf and d3 are present.)
 (function(){
   if (typeof d3 === "undefined" || typeof crossfilter === "undefined") return;
   if (!document.getElementById("xf") || !RECORDS.length) return;

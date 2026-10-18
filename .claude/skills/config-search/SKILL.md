@@ -187,7 +187,7 @@ speculative decoding one entry covers several tokens and the naive axis understa
 ## Report step
 
 The report half of this skill (disc #4, report track) reads the run directory and emits a
-**magazine-style analytical report** modeled on the CurveBender "glm53flash" format: a numbered-finding
+**magazine-style analytical report** modeled on the internal "glm53flash" reference report format: a numbered-finding
 narrative, pre-rendered inline-SVG figures, a client-side **crossfilter explorer** over every run, and
 a glossary. It **never runs BLIS** at generation time -- it is a pure `run-dir -> index.html`
 transform, so a report is regenerable from the committed data alone.
@@ -261,4 +261,4 @@ See `README.md`. Headline example: **GLM-5.3-Flash on 16x H100, ShareGPT chatbot
 - **Sizing to the edge** -- recommend `C_use = h x C*`, not `C*`.
 - **Letting parallelism make the search non-deterministic** -- always decide from a stable batch order.
 - **Trusting a prediction as ground truth** -- label outputs as simulator predictions; where real data
-  exists (e.g. the curvebender campaign reports), spot-check against it.
+  exists (e.g. the internal calibration reports), spot-check against it.

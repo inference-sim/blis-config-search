@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>config-search · deployment briefs</title>
+<!--
+  MOCKUP D — "Featured brief + gallery"
+  Leads with ONE scenario's deployment brief (its own winner). Default = most recently
+  generated REAL scenario in the filter; clicking a card promotes it. No cross-model
+  ranking, and mock scenarios are never featured. Compact gallery of the rest below.
+  Spec-sheet palette (IBM Plex, teal signal, graph-paper ground, hairlines). Static.
+-->
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+:root{
+  --paper:#f7f9f6; --panel:#ffffff; --ink:#171c1a; --muted:#5b6660;
+  --line:#e3e7df; --line-strong:#c3ccbf; --code-bg:#f1f4ef;
+  --accent:#1f6e5c; --accent-ink:#0f4438; --accent-soft:#d9e9e1; --on-accent:#ffffff;
+  --mock-ink:#6b4508; --mock-bg:#f6e8ca; --mock-line:#d8b984;
+  --font-sans:'IBM Plex Sans',-apple-system,'Segoe UI',system-ui,sans-serif;
+  --font-mono:'IBM Plex Mono','SFMono-Regular',ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+  --paper:#141413; --panel:#1a1a19; --ink:#ededea; --muted:#a3a39d;
+  --line:#2c2c28; --line-strong:#4a4a42; --code-bg:#22221f;
+  --accent:#4bbf96; --accent-ink:#8fdcc0; --accent-soft:#17352c; --on-accent:#0c1f19;
+  --mock-ink:#e3b96a; --mock-bg:#2a2013; --mock-line:#7a5c29; color-scheme:dark;
+}}
+:root[data-theme=dark]{
+  --paper:#141413; --panel:#1a1a19; --ink:#ededea; --muted:#a3a39d;
+  --line:#2c2c28; --line-strong:#4a4a42; --code-bg:#22221f;
+  --accent:#4bbf96; --accent-ink:#8fdcc0; --accent-soft:#17352c; --on-accent:#0c1f19;
+  --mock-ink:#e3b96a; --mock-bg:#2a2013; --mock-line:#7a5c29; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font-sans);font-size:15px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:28px 28px;background-position:-1px -1px;background-attachment:fixed}
+a{color:inherit;text-decoration:none}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.wrap{max-width:1200px;margin:0 auto;padding:28px 24px 80px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* masthead */
+.mast{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;
+  border-bottom:1.5px solid var(--line-strong);padding-bottom:14px}
+.mast h1{font-size:22px;font-weight:600;letter-spacing:-.015em;margin:0}
+.mast h1 b{color:var(--accent)}
+.mast .dek{color:var(--muted);font-size:13.5px;margin:4px 0 0;max-width:62ch}
+.mast .disclaim{margin:8px 0 0;font-size:12.5px;color:var(--mock-ink);background:var(--mock-bg);border:1px solid var(--mock-line);
+  border-radius:4px;padding:4px 9px;display:inline-block}
+.tools{display:flex;gap:10px;align-items:center}
+.theme{font:500 12px var(--font-mono);background:var(--panel);color:var(--muted);border:1px solid var(--line-strong);
+  border-radius:4px;padding:5px 9px;cursor:pointer}
+.theme:hover{color:var(--ink)}
+
+/* control bar */
+.bar{display:flex;flex-wrap:wrap;gap:6px 22px;align-items:flex-start;padding:12px 0 14px;border-bottom:1px solid var(--line)}
+.grp{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.glabel{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700;min-width:0}
+.chips{display:inline-flex;flex-wrap:wrap;gap:4px}
+.chip{font:500 12px var(--font-mono);display:inline-flex;gap:7px;align-items:baseline;padding:4px 9px;cursor:pointer;
+  background:var(--panel);color:var(--ink);border:1px solid var(--line-strong);border-radius:4px;user-select:none}
+.chip:hover{border-color:var(--accent)}
+.chip .n{font-size:10.5px;color:var(--muted)}
+.chip.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.chip.on .n{color:inherit;opacity:.85}
+.chip.zero{opacity:.35;cursor:not-allowed}
+.chip.zero:hover{border-color:var(--line-strong)}
+.barend{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted)}
+.barend .live b{font:600 14px var(--font-mono);color:var(--ink)}
+.clear{background:none;border:0;color:var(--accent);font:600 12px var(--font-sans);cursor:pointer;padding:2px 0}
+.clear[hidden]{display:none}
+
+/* hero brief */
+.brief{margin:26px 0 34px;background:var(--panel);border:1px solid var(--line-strong);border-top:4px solid var(--accent);
+  border-radius:8px;overflow:hidden;box-shadow:0 1px 0 var(--line)}
+.brief-top{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 28px;
+  border-bottom:1px solid var(--line);background:var(--code-bg)}
+.kicker{font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:700;color:var(--accent-ink)}
+.kicker span{color:var(--muted);font-weight:500;letter-spacing:.04em;text-transform:none;margin-left:8px}
+.brief-top .meta{font:12px var(--font-mono);color:var(--muted)}
+.brief-body{display:grid;grid-template-columns:1.25fr 1fr;gap:0}
+.brief-l{padding:26px 28px 28px;border-right:1px solid var(--line)}
+.brief-r{padding:26px 28px 28px;display:flex;flex-direction:column;gap:18px}
+.eyebrow{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:0 0 6px}
+.reco{font:600 clamp(34px,5vw,56px)/1.05 var(--font-mono);letter-spacing:-.03em;color:var(--accent);margin:0}
+.reco-sub{font:12.5px var(--font-mono);color:var(--muted);margin-top:10px}
+.why{margin:22px 0 0;padding-left:14px;border-left:3px solid var(--accent);font-size:15.5px;line-height:1.5;max-width:52ch}
+.why small{display:block;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:3px}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--line);border-radius:6px}
+.metrics .m{padding:12px 14px;border-right:1px solid var(--line)}
+.metrics .m:last-child{border-right:0}
+.metrics b{font:600 26px/1.1 var(--font-mono);display:block;letter-spacing:-.02em}
+.metrics span{font-size:11px;color:var(--muted)}
+.specs{display:grid;grid-template-columns:auto 1fr;gap:5px 16px;margin:0;font-size:13px}
+.specs dt{color:var(--muted);font-size:11px;letter-spacing:.07em;text-transform:uppercase;font-weight:600;padding-top:2px}
+.specs dd{margin:0;font-family:var(--font-mono);font-size:12.5px}
+.cta{display:inline-flex;align-items:center;justify-content:center;gap:10px;background:var(--accent);color:var(--on-accent);
+  font-weight:600;font-size:15px;padding:12px 20px;border-radius:6px;border:1px solid var(--accent);margin-top:auto;
+  transition:transform .12s,box-shadow .12s}
+.cta:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(0,0,0,.18)}
+.cta .p{font:500 11.5px var(--font-mono);opacity:.8}
+.mock{font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mock-ink);
+  background:var(--mock-bg);border:1px solid var(--mock-line);border-radius:3px;padding:2px 6px;white-space:nowrap}
+.mockbanner{padding:8px 28px;background:var(--mock-bg);color:var(--mock-ink);border-bottom:1px solid var(--mock-line);font-size:12.5px}
+.nomatch{padding:56px 28px;text-align:center;color:var(--muted)}
+.nomatch b{display:block;color:var(--ink);font-size:16px;margin-bottom:4px}
+
+/* gallery */
+.sechead{display:flex;align-items:baseline;justify-content:space-between;margin:0 0 12px;
+  border-bottom:1px solid var(--line-strong);padding-bottom:8px}
+.sechead h2{font-size:12px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:var(--muted);margin:0}
+.sechead .mono{font-size:12px;color:var(--muted)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.card{display:flex;flex-direction:column;gap:8px;background:var(--panel);border:1px solid var(--line);
+  border-left:3px solid var(--accent);border-radius:6px;padding:12px 14px;transition:transform .12s,box-shadow .12s,border-color .12s}
+.card{cursor:default}
+.card:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(0,0,0,.1);border-color:var(--line-strong);border-left-color:var(--accent)}
+.card.is-mock{border-left-color:var(--mock-line)}
+.card .top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.card h3{font-size:14px;font-weight:600;margin:0;letter-spacing:-.01em}
+.card .sp{font:11.5px var(--font-mono);color:var(--muted)}
+.card .win{font:600 17px var(--font-mono);color:var(--accent);letter-spacing:-.01em}
+.card .nums{display:flex;gap:14px;font:12px var(--font-mono);color:var(--muted)}
+.card .nums b{color:var(--ink);font-weight:600}
+.card.is-mock .win{color:var(--ink)}
+.card.is-feat{border-color:var(--accent)}
+.card .acts{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:auto}
+.card .go,.card .promote{font:600 12px var(--font-sans);color:var(--accent);background:none;border:0;padding:0;cursor:pointer}
+.card .go:hover,.card .promote:hover{text-decoration:underline}
+.card .nogo{font-size:12px;color:var(--mock-ink)}
+.note{margin:0 0 14px;padding:10px 14px;border:1px solid var(--mock-line);background:var(--mock-bg);color:var(--mock-ink);border-radius:6px;font-size:13px}
+.card .vs{font:11px var(--font-mono);color:var(--muted)}
+.lonely{border:1px dashed var(--line-strong);border-radius:6px;padding:22px;color:var(--muted);font-size:13.5px;text-align:center;background:var(--panel)}
+.lonely b{color:var(--ink)}
+
+/* how it works */
+.how{margin-top:46px;display:grid;grid-template-columns:repeat(3,1fr);gap:0;background:var(--panel);
+  border:1px solid var(--line);border-radius:8px}
+.how > div{padding:18px 22px;border-right:1px solid var(--line)}
+.how > div:last-child{border-right:0}
+.how h4{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent-ink);font-weight:700;margin:0 0 8px}
+.how h4 i{font:600 11px var(--font-mono);font-style:normal;color:var(--muted);margin-right:8px}
+.how p{margin:0;font-size:13.5px;color:var(--muted)}
+.how code{font:12px var(--font-mono);background:var(--code-bg);border:1px solid var(--line);border-radius:3px;padding:0 5px;color:var(--ink)}
+.how .trust{background:var(--code-bg)}
+.foot{margin-top:18px;font-size:12px;color:var(--muted);text-align:center}
+
+@media(max-width:900px){
+  .brief-body{grid-template-columns:1fr}.brief-l{border-right:0;border-bottom:1px solid var(--line)}
+  .how{grid-template-columns:1fr}.how>div{border-right:0;border-bottom:1px solid var(--line)}.how>div:last-child{border-bottom:0}
+  .barend{margin-left:0;width:100%}
+}
+@media(max-width:560px){
+  .wrap{padding:20px 16px 60px}.brief-l,.brief-r{padding:20px}.brief-top,.mockbanner{padding-left:20px;padding-right:20px}
+  .metrics b{font-size:21px}.mast{flex-direction:column;align-items:flex-start}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="mast">
+    <div>
+      <h1><b>config-search</b> · deployment briefs</h1>
+      <p class="dek">What to run, per model, GPU budget and workload. Each brief links to a full interactive report of the Pareto-optimal serving configurations.</p>
+      <p class="disclaim"><b>Simulator predictions, not measurements.</b> Validate on real hardware before committing capacity.</p>
+    </div>
+    <div class="tools"><button class="theme" id="theme" type="button" aria-label="Toggle color theme">theme</button></div>
+  </header>
+
+  <nav class="bar" id="bar" aria-label="Filter scenarios"></nav>
+
+  <section id="brief" aria-live="polite"></section>
+
+  <section id="more"></section>
+
+  <section class="how" aria-label="How reports are made">
+    <div>
+      <h4><i>01</i>How a report is made</h4>
+      <p>A search sweeps tp / instances / PD / EP and engine knobs in the BLIS simulator, keeps the Pareto-optimal set, and <code>report.py</code> turns the run directory into one self-contained <code>index.html</code>. No server at view time.</p>
+    </div>
+    <div>
+      <h4><i>02</i>Add your own</h4>
+      <p>Run config-search locally for your model and workload, commit the run dir, and open a PR. CI rebuilds every report and this gallery, then publishes to GitHub Pages.</p>
+    </div>
+    <div class="trust">
+      <h4><i>03</i>Trust note</h4>
+      <p>Every number is a <b>simulator prediction</b> at a usable operating point, not a live measurement. Validate on real hardware before committing capacity. Scenarios tagged <span class="mock">mock</span> are placeholders, not BLIS output.</p>
+    </div>
+  </section>
+  <p class="foot mono">config-search gallery · mockup D</p>
+</div>
+
+<script src="data.js"></script>
+<script>
+/*LOGIC*/
+const S = window.SCENARIOS;
+const FACETS = [
+  {key:"model", label:"Model"},
+  {key:"hardware", label:"Hardware"},
+  {key:"workload", label:"Workload"},
+  {key:"gpu_budget", label:"GPU budget", fmt:v=>v+"×"},
+];
+const sel = {}; FACETS.forEach(f=>sel[f.key]=new Set());
+function passes(s, exceptKey){
+  return FACETS.every(f=> f.key===exceptKey || sel[f.key].size===0 || sel[f.key].has(s[f.key]));
+}
+function filtered(){ return S.filter(s=>passes(s,null)); }
+// No cross-scenario ranking: tok/s/GPU is not comparable across models/workloads.
+// Hero = user-picked REAL scenario if still in filter, else most recently generated REAL one.
+let featuredId = null;
+const byRecent = (a,b)=> String(b.generated).localeCompare(String(a.generated)) || String(a.run_id).localeCompare(String(b.run_id));
+function split(rows){
+  const real = rows.filter(s=>s.synthetic===false).sort(byRecent);
+  const mock = rows.filter(s=>s.synthetic!==false).sort(byRecent);
+  const hero = real.find(s=>s.run_id===featuredId) || real[0] || null;
+  const rest = [...real, ...mock].filter(s=>s!==hero);
+  return {hero, rest, onlyMock: rows.length>0 && !hero};
+}
+/*ENDLOGIC*/
+
+const $ = id => document.getElementById(id);
+const esc = t => String(t).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const f0 = n => Number(n).toFixed(0);
+
+function renderBar(rows){
+  const any = FACETS.some(f=>sel[f.key].size);
+  let h = "";
+  FACETS.forEach(f=>{
+    const vals = [...new Set(S.map(s=>s[f.key]))].sort((a,b)=>typeof a==="number"?a-b:String(a).localeCompare(b));
+    h += `<div class="grp" role="group" aria-label="${f.label}"><span class="glabel">${f.label}</span><span class="chips">`;
+    vals.forEach(v=>{
+      const n = S.filter(s=>passes(s,f.key) && s[f.key]===v).length;
+      const on = sel[f.key].has(v);
+      h += `<button type="button" class="chip${on?" on":""}${n===0&&!on?" zero":""}" aria-pressed="${on}" ${n===0&&!on?"disabled":""} data-k="${f.key}" data-v="${esc(v)}">${f.fmt?f.fmt(v):esc(v)} <span class="n">${n}</span></button>`;
+    });
+    h += `</span></div>`;
+  });
+  h += `<div class="barend"><span class="live"><b>${rows.length}</b> of ${S.length} scenarios</span><button type="button" class="clear" id="clear" ${any?"":"hidden"}>Clear filters</button></div>`;
+  $("bar").innerHTML = h;
+  $("bar").querySelectorAll(".chip").forEach(c=>c.onclick=()=>{
+    const k=c.dataset.k, v=k==="gpu_budget"?Number(c.dataset.v):c.dataset.v;
+    sel[k].has(v)?sel[k].delete(v):sel[k].add(v); render();
+  });
+  $("clear").onclick=()=>{FACETS.forEach(f=>sel[f.key].clear());render();};
+}
+
+function renderHero(s, total, onlyMock){
+  if(!s){
+    $("brief").innerHTML = onlyMock
+      ? `<div class="brief"><div class="nomatch"><b>No real scenario in this filter.</b>Only mock placeholders match, so nothing is featured. Clear a filter to see a real brief.</div></div>`
+      : `<div class="brief"><div class="nomatch"><b>No scenario matches these filters.</b>Clear a filter to see a brief.</div></div>`;
+    return;
+  }
+  const w = s.winner;
+  const scope = featuredId===s.run_id ? "selected scenario" : "latest real scenario";
+  $("brief").innerHTML = `<article class="brief">
+    <div class="brief-top"><div class="kicker">Deployment brief<span>${scope}</span></div>
+      <div class="meta">${esc(s.run_id)}</div></div>
+    ${s.synthetic?`<div class="mockbanner"><span class="mock">mock</span>&nbsp; Illustrative placeholder data, not a BLIS prediction.</div>`:""}
+    <div class="brief-body">
+      <div class="brief-l">
+        <p class="eyebrow">Run this</p>
+        <h2 class="reco">${esc(w.label)}</h2>
+        <div class="reco-sub">${w.gpus} GPUs · tp${w.tp} × ${w.ni} instance${w.ni>1?"s":""}${w.ep?" · expert-parallel":""}${w.quant?" · "+esc(w.quant):""}</div>
+        <p class="why"><small>Why it won</small>${esc(s.reason)}</p>
+      </div>
+      <div class="brief-r">
+        <div>
+          <p class="eyebrow">Predicted at c=${w.c_use} concurrent</p>
+          <div class="metrics">
+            <div class="m"><b>${f0(w.tps)}</b><span>tok/s</span></div>
+            <div class="m"><b>${f0(w.tps_per_gpu)}</b><span>tok/s/GPU</span></div>
+            <div class="m"><b>${f0(w.per_user)}</b><span>tok/s/user</span></div>
+          </div>
+        </div>
+        <dl class="specs">
+          <dt>Model</dt><dd>${esc(s.model)}</dd>
+          <dt>Hardware</dt><dd>${esc(s.hardware)} · ${s.gpu_budget}× GPU budget</dd>
+          <dt>Workload</dt><dd>${esc(s.workload)} · ${esc(s.isl_osl)}</dd>
+          <dt>Floor</dt><dd>${esc(s.floor)}</dd>
+          <dt>Searched</dt><dd>${s.n_servable}/${s.n_runs} servable · ${esc(s.generated)}</dd>
+        </dl>
+        <a class="cta" href="${esc(s.run_id)}/index.html">Read the full report <span>→</span></a>
+      </div>
+    </div></article>`;
+}
+
+function renderMore(rest, hero, onlyMock){
+  const m = $("more");
+  if(!rest.length){
+    m.innerHTML = hero ? `<div class="lonely"><b>This is the only scenario in the current filter.</b><br>Broaden the filter above to see other briefs.</div>` : "";
+    return;
+  }
+  const note = onlyMock ? `<p class="note"><span class="mock">mock</span>&nbsp; These are illustrative placeholders, not BLIS predictions, so none is featured.</p>` : "";
+  m.innerHTML = `<div class="sechead"><h2>${hero?"Other scenarios in filter":"Scenarios in filter"}</h2><span class="mono">${rest.length} ${hero?"more":"shown"}${hero?" · click a card to feature it":""}</span></div>${note}
+  <div class="cards">` + rest.map(s=>{
+    const w=s.winner;
+    return `<article class="card${s.synthetic?" is-mock":""}">
+      <div class="top"><h3>${esc(s.model)}</h3>${s.synthetic?`<span class="mock">mock</span>`:""}</div>
+      <div class="sp">${esc(s.hardware)} · ${s.gpu_budget}× · ${esc(s.workload)}</div>
+      <div class="win">${esc(w.label)}</div>
+      <div class="nums"><span><b>${f0(w.tps)}</b> tok/s</span><span><b>${f0(w.tps_per_gpu)}</b> /GPU</span><span><b>${f0(w.per_user)}</b> /user</span></div>
+      <div class="vs">${esc(s.floor)}</div>
+      <div class="acts">${s.synthetic
+        ? `<span class="nogo">Placeholder · not featured</span>`
+        : `<button type="button" class="promote" data-id="${esc(s.run_id)}">Feature this brief ↑</button><a class="go" href="${esc(s.run_id)}/index.html">Open report →</a>`}</div></article>`;
+  }).join("") + `</div>`;
+  m.querySelectorAll(".promote").forEach(b=>b.onclick=()=>{featuredId=b.dataset.id;render();$("brief").scrollIntoView({behavior:"smooth",block:"start"});});
+}
+
+function render(){
+  const rows = filtered(), {hero,rest,onlyMock} = split(rows);
+  renderBar(rows); renderHero(hero, rows.length, onlyMock); renderMore(rest, hero, onlyMock);
+}
+
+// theme toggle (system default; click cycles light/dark override)
+$("theme").onclick=()=>{
+  const r=document.documentElement;
+  const dark = r.dataset.theme ? r.dataset.theme==="dark" : matchMedia("(prefers-color-scheme:dark)").matches;
+  r.dataset.theme = dark ? "light" : "dark";
+};
+render();
+</script>
+</body>
+</html>

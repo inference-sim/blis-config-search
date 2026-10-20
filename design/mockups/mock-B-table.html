@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>config-search · scenario leaderboard</title>
+<!--
+  MOCKUP B — "Cross-scenario leaderboard table"
+  Primary surface: one dense sortable table, one row per scenario (expandable to finalists).
+  Facets are a compact bar above the table. Static, no server, no deps beyond Google Fonts.
+-->
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+:root{
+  --paper:#f7f9f6; --panel:#ffffff; --ink:#171c1a; --muted:#5b6660;
+  --line:#e3e7df; --line-strong:#c3ccbf; --code-bg:#f1f4ef; --row-hover:#f3f7f2;
+  --accent:#1f6e5c; --accent-ink:#0f4438; --accent-soft:#d9e9e1;
+  --warn-ink:#7a4a12; --warn-bg:#f6e8ca; --warn-line:#d8b984;
+  --mock-ink:#6b4508; --mock-bg:#f6e8ca; --mock-line:#d8b984;
+  --font-sans:'IBM Plex Sans',-apple-system,'Segoe UI',system-ui,sans-serif;
+  --font-mono:'IBM Plex Mono','SFMono-Regular',ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+  --paper:#141413; --panel:#1a1a19; --ink:#ededea; --muted:#a3a39d;
+  --line:#2c2c28; --line-strong:#4a4a42; --code-bg:#22221f; --row-hover:#20231f;
+  --accent:#4bbf96; --accent-ink:#8fdcc0; --accent-soft:#17352c;
+  --warn-ink:#e3b96a; --warn-bg:#2a2013; --warn-line:#7a5c29;
+  --mock-ink:#e3b96a; --mock-bg:#2a2013; --mock-line:#7a5c29;
+  color-scheme:dark;
+}}
+:root[data-theme=dark]{
+  --paper:#141413; --panel:#1a1a19; --ink:#ededea; --muted:#a3a39d;
+  --line:#2c2c28; --line-strong:#4a4a42; --code-bg:#22221f; --row-hover:#20231f;
+  --accent:#4bbf96; --accent-ink:#8fdcc0; --accent-soft:#17352c;
+  --warn-ink:#e3b96a; --warn-bg:#2a2013; --warn-line:#7a5c29;
+  --mock-ink:#e3b96a; --mock-bg:#2a2013; --mock-line:#7a5c29; color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font-sans);
+  font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:28px 28px;background-position:-1px -1px;background-attachment:fixed}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:1360px;margin:0 auto;padding:28px 16px 70px}
+@media(min-width:700px){.wrap{padding:34px 28px 80px}}
+
+/* masthead */
+.mast{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  border-bottom:1.5px solid var(--line-strong);padding-bottom:16px;margin-bottom:20px}
+.mast h1{font-size:24px;font-weight:600;letter-spacing:-0.015em;margin:0}
+.mast h1 b{font-weight:700}
+.mast .mright{display:flex;gap:10px;align-items:center}
+.themebtn{font:inherit;font-size:12px;font-weight:600;color:var(--muted);background:var(--panel);border:1px solid var(--line-strong);border-radius:3px;padding:3px 9px;cursor:pointer}
+.themebtn:hover{color:var(--ink)}
+.themebtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mast .dek{color:var(--muted);font-size:13.5px;margin:5px 0 0;max-width:62ch}
+.trust{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+  border:1px solid var(--line-strong);border-radius:3px;padding:3px 8px;white-space:nowrap}
+
+/* summary strip (filter-scoped counts only; no cross-model winner) */
+.summary{display:flex;flex-wrap:wrap;gap:6px 22px;align-items:baseline;background:var(--panel);border:1px solid var(--line);
+  border-radius:8px;padding:10px 16px;margin-bottom:12px;font-size:13px;color:var(--muted)}
+.summary .sv{font-family:var(--font-mono);font-weight:600;font-size:17px;color:var(--ink);font-variant-numeric:tabular-nums;margin-right:5px}
+.summary .sm{display:inline-flex;align-items:baseline}
+.mockflag{display:inline-block;font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--mock-ink);background:var(--mock-bg);border:1px solid var(--mock-line);border-radius:3px;padding:1px 6px;vertical-align:middle;white-space:nowrap}
+.lnk{color:var(--accent);cursor:pointer;font-weight:600;background:none;border:0;font:inherit;font-weight:600;padding:0}
+
+/* facet bar */
+.facets{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:12px;
+  display:grid;grid-template-columns:repeat(4,auto);gap:8px 26px;justify-content:start;align-items:start}
+.fgroup{display:flex;flex-wrap:wrap;align-items:center;gap:5px;min-width:0}
+.flabel{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-right:3px}
+.fchip{font-family:var(--font-mono);font-size:12px;color:var(--ink);background:var(--code-bg);border:1px solid var(--line);
+  border-radius:4px;padding:3px 8px;cursor:pointer;user-select:none;display:inline-flex;gap:6px;align-items:baseline;font-variant-numeric:tabular-nums}
+.fchip:hover{border-color:var(--line-strong)}
+.fchip .n{font-size:10.5px;color:var(--muted)}
+.fchip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+:root[data-theme=dark] .fchip.on,
+.fchip.on.dk{color:#06241b}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) .fchip.on{color:#06241b}:root:not([data-theme=light]) .fchip.on .n{color:#06241b}}
+.fchip.on .n{color:inherit;opacity:.85}
+.fchip.empty{opacity:.35;cursor:not-allowed}
+.fchip:focus-visible,.th:focus-visible,tr.row:focus-visible,.exp:focus-visible,.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(max-width:1000px){.facets{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.facets{grid-template-columns:1fr}}
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:0 2px 8px;font-size:12.5px;color:var(--muted)}
+.toolbar .lnk[hidden]{display:none}
+.toolbar .tright{display:flex;gap:16px;align-items:center}
+
+/* table */
+.tablewrap{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow-x:auto}
+table{border-collapse:separate;border-spacing:0;width:100%;min-width:1160px}
+thead th{position:sticky;top:0;background:var(--panel);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--muted);font-weight:700;text-align:left;padding:10px 12px;border-bottom:1.5px solid var(--line-strong);
+  white-space:nowrap;user-select:none;cursor:pointer;vertical-align:bottom}
+thead th.num{text-align:right}
+thead th:hover{color:var(--ink)}
+thead th .arrow{display:inline-block;width:1em;color:var(--line-strong);font-size:10px}
+thead th[aria-sort=ascending] .arrow,thead th[aria-sort=descending] .arrow{color:var(--accent)}
+thead th[aria-sort=ascending],thead th[aria-sort=descending]{color:var(--ink);box-shadow:inset 0 -2px 0 var(--accent)}
+thead th.nosort{cursor:default}
+tbody td{padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:middle}
+td.num{text-align:right;font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+td.num .u{color:var(--muted);font-size:10.5px;margin-left:3px}
+tr.row{cursor:pointer;transition:background .08s}
+tr.row:hover{background:var(--row-hover)}
+tr.row.mockrow td:first-child{box-shadow:inset 3px 0 0 var(--mock-line)}
+tr.row:not(.mockrow) td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+.mname{font-weight:600;letter-spacing:-.005em}
+.exp{background:none;border:1px solid var(--line);color:var(--muted);width:20px;height:20px;border-radius:3px;cursor:pointer;
+  font-size:10px;line-height:1;margin-right:8px;padding:0;font-family:var(--font-mono);vertical-align:middle}
+.exp:hover{border-color:var(--accent);color:var(--accent)}
+.cfgcell{font-family:var(--font-mono);font-weight:600;color:var(--accent)}
+td.best{color:var(--accent);font-weight:600;position:relative}
+td.best::before{content:"";position:absolute;inset:4px 4px;background:var(--accent-soft);border-radius:4px;z-index:0}
+td.best>span{position:relative;z-index:1}
+td.best .u{position:relative}
+.chip{font-family:var(--font-mono);font-size:11px;color:var(--muted);background:var(--code-bg);border:1px solid var(--line);border-radius:3px;padding:1px 6px}
+.srv{display:inline-flex;align-items:center;gap:7px}
+.srv i{display:inline-block;width:38px;height:4px;background:var(--line);border-radius:2px;overflow:hidden;position:relative}
+.srv i b{position:absolute;left:0;top:0;bottom:0;background:var(--accent);opacity:.75}
+td.rep a{color:var(--accent);font-weight:600;font-size:13px}
+td.rep a::after{content:" →"}
+tr.sub td{background:var(--code-bg);font-size:12.5px;color:var(--muted);padding-top:6px;padding-bottom:6px}
+tr.sub td.num{color:var(--ink)}
+tr.sub .pick{color:var(--accent);font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+tr.sub td:first-child{padding-left:48px}
+.emptyrow td{text-align:center;color:var(--muted);padding:48px 0;white-space:normal}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:10px 2px 0;align-items:center}
+.legend .sw{display:inline-block;width:14px;height:10px;border-radius:2px;background:var(--accent-soft);border:1px solid var(--accent);vertical-align:-1px;margin-right:5px}
+.legend .sw.m{background:var(--mock-bg);border-color:var(--mock-line)}
+
+/* phone: stacked cards */
+.sortsel{display:none;font:inherit;font-size:12.5px;color:var(--ink);background:var(--panel);border:1px solid var(--line-strong);border-radius:4px;padding:3px 6px}
+@media(max-width:700px){
+  .sortsel{display:inline-block}
+  .tablewrap{background:none;border:0;overflow:visible}
+  table,tbody{display:block;min-width:0}
+  thead{display:none}
+  tbody tr.row,tbody tr.sub{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;background:var(--panel);
+    border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:8px}
+  tbody tr.row.mockrow{border-left:3px solid var(--mock-line)}
+  tbody tr.row:not(.mockrow){border-left:3px solid var(--accent)}
+  tbody td{display:block;border:0;padding:0;white-space:normal;box-shadow:none!important;text-align:left}
+  td.num{text-align:left}
+  tbody td::before{content:attr(data-label);display:block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;font-family:var(--font-sans)}
+  td.first,td.cfgcell,td.rep{grid-column:1/-1}
+  td.first::before,td.rep::before{display:none}
+  td.first{font-size:15px}
+  td:empty{display:none}
+  td.best::before{position:static;background:none;inset:auto;border-radius:0;z-index:auto}
+  td.best{box-shadow:none}
+  td.best>span{background:var(--accent-soft);border-radius:3px;padding:0 5px}
+  tr.sub{margin:-4px 0 8px 14px;background:var(--code-bg)!important}
+  tr.sub td:first-child{padding-left:0}
+  .emptyrow{display:block}
+  .emptyrow td{display:block}
+  .emptyrow td::before{display:none}
+}
+
+/* how it works */
+.how{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;margin-top:28px;background:var(--panel);border:1px solid var(--line);border-radius:8px}
+.how>div{padding:16px 20px;border-right:1px solid var(--line)}
+.how>div:last-child{border-right:0}
+.how h3{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:0 0 7px}
+.how p{margin:0;font-size:13px;color:var(--ink)}
+.how code{font-family:var(--font-mono);font-size:12px;background:var(--code-bg);border:1px solid var(--line);border-radius:3px;padding:0 4px}
+@media(max-width:800px){.how{grid-template-columns:1fr}.how>div{border-right:0;border-bottom:1px solid var(--line)}.how>div:last-child{border-bottom:0}}
+.notebar{margin-top:14px;border:1px solid var(--warn-line);background:var(--warn-bg);color:var(--warn-ink);border-radius:6px;padding:11px 16px;font-size:13px}
+.notebar b{font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="mast">
+    <div>
+      <h1><b>config-search</b> · scenario leaderboard</h1>
+      <p class="dek">Every scenario, one row: the Pareto-optimal serving config BLIS recommends for a model, hardware, GPU budget and workload. Sort any column; click a row for the full interactive report.</p>
+    </div>
+    <span class="mright"><span class="trust">Simulator predictions · not measured</span><button class="themebtn" id="theme" type="button" aria-label="Toggle color theme">theme: system</button></span>
+  </header>
+
+  <section class="summary" id="summary" aria-live="polite"></section>
+
+  <section class="facets" id="facets" aria-label="Filters"></section>
+
+  <div class="toolbar">
+    <span id="status" class="mono"></span>
+    <label class="tright" style="gap:6px"><select class="sortsel" id="sortsel" aria-label="Sort scenarios by"></select></label>
+    <span class="tright">
+      <button class="lnk" id="expandall" type="button">expand all finalists</button>
+      <button class="lnk" id="reset" type="button" hidden>clear filters</button>
+    </span>
+  </div>
+
+  <div class="tablewrap">
+    <table id="tbl">
+      <thead id="thead"></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="legend">
+    <span><span class="sw"></span>best value in column (real BLIS rows only)</span>
+    <span><span class="sw m"></span><span class="mockflag">mock</span> illustrative scenario, not BLIS output</span>
+    <span>tok/s columns are at the usable operating point (headroom-adjusted)</span>
+  </div>
+
+  <section class="how">
+    <div><h3>How a report is made</h3><p>config-search sweeps tp, instances, PD and EP in the BLIS simulator, keeps the Pareto frontier under your interactivity floor, and <code>report.py</code> turns the run dir into a single self-contained <code>index.html</code>. No server runs at view time.</p></div>
+    <div><h3>Add your own scenario</h3><p>Run the skill locally, commit the run directory, open a PR. CI regenerates every report and this table. Rows appear here the moment the PR merges.</p></div>
+    <div><h3>How to read the numbers</h3><p>Recommended config is the most output tok/s on the budget that still holds the per-user floor on every instance. Expand a row to see the other finalists it beat.</p></div>
+  </section>
+  <div class="notebar"><b>Trust note.</b> All figures are BLIS simulator predictions, not benchmarks of a live cluster. Validate a short-listed config on real hardware before committing capacity. Rows flagged <span class="mockflag">mock</span> are placeholder data for this design exploration.</div>
+</div>
+
+<script src="data.js"></script>
+<script>
+/*CORE-START*/
+const FACETS=[
+  {key:"model",label:"Model"},
+  {key:"hardware",label:"Hardware"},
+  {key:"workload",label:"Workload"},
+  {key:"gpu_budget",label:"GPU budget",fmt:v=>v+"×"},
+];
+// column defs: get() returns a sortable value; best = "max"|"min"|null
+const COLS=[
+  {id:"model",label:"Model",get:s=>s.model,type:"str"},
+  {id:"hardware",label:"Hardware",get:s=>s.hardware,type:"str"},
+  {id:"gpu_budget",label:"GPUs",get:s=>s.gpu_budget,num:true},
+  {id:"workload",label:"Workload",get:s=>s.workload,type:"str"},
+  {id:"config",label:"Recommended config",get:s=>s.winner.label,type:"str"},
+  {id:"tps",label:"tok/s",get:s=>s.winner.tps,num:true,best:"max"},
+  {id:"tps_per_gpu",label:"tok/s/GPU",get:s=>s.winner.tps_per_gpu,num:true,best:"max"},
+  {id:"per_user",label:"tok/s/user",get:s=>s.winner.per_user,num:true,best:"max"},
+  {id:"itl_p99",label:"ITL p99",get:s=>s.winner.itl_p99,num:true,best:"min"},
+  {id:"servable",label:"Servable",get:s=>s.n_servable/s.n_runs,num:true},
+  {id:"load",label:"Load (c)",get:s=>s.winner.c_use,num:true},
+  {id:"report",label:"Report",get:s=>s.run_id,nosort:true},
+];
+function makeSel(){const o={};FACETS.forEach(f=>o[f.key]=new Set());return o}
+function passes(s,sel,exceptKey){
+  return FACETS.every(f=>f.key===exceptKey||sel[f.key].size===0||sel[f.key].has(s[f.key]));
+}
+function filterRows(S,sel){return S.filter(s=>passes(s,sel,null))}
+function facetCount(S,sel,key,v){return S.filter(s=>passes(s,sel,key)&&s[key]===v).length}
+function sortRows(rows,colId,dir){
+  const c=COLS.find(x=>x.id===colId);
+  if(!c||c.nosort) return rows.slice();
+  const m=dir==="asc"?1:-1;
+  // stable: decorate with index; ties fall back to original order
+  return rows.map((r,i)=>[r,i]).sort((a,b)=>{
+    const x=c.get(a[0]),y=c.get(b[0]);
+    const d=c.num?(x-y):String(x).localeCompare(String(y));
+    return d? d*m : a[1]-b[1];
+  }).map(p=>p[0]);
+}
+function bestIds(rows){ // colId -> run_id of best REAL row (ties: first). Synthetic rows never win; needs >1 real row.
+  const out={};
+  const real=rows.filter(r=>!r.synthetic);
+  if(real.length<2) return out;
+  COLS.filter(c=>c.best).forEach(c=>{
+    let b=real[0];
+    real.forEach(r=>{const v=c.get(r),bv=c.get(b); if(c.best==="max"?v>bv:v<bv) b=r;});
+    out[c.id]=b.run_id;
+  });
+  return out;
+}
+function summaryCounts(rows){ // filter-scoped counts only; no cross-model ranking
+  const u=k=>new Set(rows.map(s=>s[k])).size;
+  return {scenarios:rows.length,runs:rows.reduce((a,s)=>a+s.n_servable,0),models:u("model"),hardware:u("hardware"),
+    mock:rows.filter(s=>s.synthetic).length};
+}
+function esc(v){return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function hrefFor(id){return encodeURIComponent(id)+"/index.html"}
+/*CORE-END*/
+
+if(typeof document!=="undefined"){
+const S=window.SCENARIOS;
+const sel=makeSel();
+let sortCol="tps",sortDir="desc";
+const expanded=new Set();
+const $=id=>document.getElementById(id);
+const f1=(v)=>v.toFixed(1), f0=v=>v.toFixed(0);
+const mockTag=s=>s.synthetic?` <span class="mockflag">mock</span>`:"";
+
+function renderSummary(rows){
+  const c=summaryCounts(rows), m=(n,l)=>`<span class="sm"><span class="sv">${n}</span>${l}</span>`;
+  $("summary").innerHTML=
+    m(c.scenarios,c.scenarios===1?"scenario":"scenarios")+m(c.runs,c.runs===1?"servable run":"servable runs")+
+    m(c.models,c.models===1?"model":"models")+m(c.hardware,c.hardware===1?"hardware type":"hardware types")+
+    `<span>in view${c.scenarios<S.length?` (of ${S.length})`:""}</span>`+
+    (c.mock?`<span><span class="mockflag">mock</span> ${c.mock} illustrative</span>`:"")+
+    `<span style="flex-basis:100%;font-size:12px">Each row carries its own recommended config. Throughput is not comparable across models or workloads.</span>`;
+}
+
+function renderFacets(){
+  const el=$("facets");
+  el.innerHTML=FACETS.map(f=>{
+    const vals=[...new Set(S.map(s=>s[f.key]))].sort((a,b)=>typeof a==="number"?a-b:String(a).localeCompare(b));
+    return `<div class="fgroup" role="group" aria-label="${f.label}"><span class="flabel">${f.label}</span>`+
+      vals.map(v=>{
+        const n=facetCount(S,sel,f.key,v), on=sel[f.key].has(v);
+        const cls="fchip"+(on?" on":"")+(n===0&&!on?" empty":"");
+        return `<span class="${cls}" role="button" tabindex="0" aria-pressed="${on}" data-k="${esc(f.key)}" data-v="${esc(v)}">${f.fmt?f.fmt(v):v}<span class="n">${n}</span></span>`;
+      }).join("")+`</div>`;
+  }).join("");
+  el.querySelectorAll(".fchip").forEach(c=>{
+    const act=()=>{
+      if(c.classList.contains("empty")) return;
+      const k=c.dataset.k, v=k==="gpu_budget"?Number(c.dataset.v):c.dataset.v;
+      sel[k].has(v)?sel[k].delete(v):sel[k].add(v); render();
+    };
+    c.onclick=act;
+    c.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();act();}};
+  });
+}
+
+function renderHead(){
+  $("thead").innerHTML="<tr>"+COLS.map(c=>{
+    const active=c.id===sortCol;
+    const aria=c.nosort?"":` aria-sort="${active?(sortDir==="asc"?"ascending":"descending"):"none"}"`;
+    const arrow=c.nosort?"":`<span class="arrow">${active?(sortDir==="asc"?"▲":"▼"):"↕"}</span>`;
+    return `<th class="${c.num?"num":""}${c.nosort?" nosort":" th"}" data-c="${c.id}"${aria}${c.nosort?"":' tabindex="0" role="columnheader button"'}>${arrow}${c.label}</th>`;
+  }).join("")+"</tr>";
+  const ss=$("sortsel");
+  ss.innerHTML=COLS.filter(c=>!c.nosort).map(c=>`<option value="${c.id}">Sort: ${esc(c.label)}</option>`).join("");
+  ss.value=sortCol;
+  ss.onchange=()=>{ if(ss.value===sortCol) return; sortCol=ss.value;const c=COLS.find(x=>x.id===sortCol);sortDir=(c.num&&c.best!=="min")?"desc":"asc";render();};
+  $("thead").querySelectorAll("th.th").forEach(th=>{
+    const act=()=>{
+      const id=th.dataset.c;
+      if(sortCol===id) sortDir=sortDir==="asc"?"desc":"asc";
+      else{sortCol=id;const c=COLS.find(x=>x.id===id);sortDir=(c.num&&c.best!=="min")?"desc":(c.num?"asc":"asc");}
+      render();
+    };
+    th.onclick=act;
+    th.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();act();}};
+  });
+}
+
+function renderBody(rows){
+  const tb=$("tbody");
+  if(!rows.length){tb.innerHTML=`<tr class="emptyrow"><td colspan="${COLS.length}">No scenarios match this filter. <button class="lnk" id="reset2" type="button" style="background:none;border:0;color:var(--accent);font:inherit;font-weight:600;cursor:pointer">Clear filters</button></td></tr>`;
+    const r2=$("reset2"); if(r2) r2.onclick=clearAll; return;}
+  const sorted=sortRows(rows,sortCol,sortDir);
+  const best=bestIds(sorted);
+  const bc=(id,s)=>!s.synthetic&&best[id]===s.run_id?" best":"";
+  const L=id=>esc(COLS.find(c=>c.id===id).label);
+  tb.innerHTML=sorted.map(s=>{
+    const w=s.winner, open=expanded.has(s.run_id), href=hrefFor(s.run_id);
+    const pct=Math.round(100*s.n_servable/s.n_runs);
+    let h=`<tr class="row${s.synthetic?" mockrow":""}" tabindex="0" data-href="${href}" aria-label="Open report for ${esc(s.model)} on ${esc(s.hardware)}">
+      <td class="first"><button class="exp" type="button" data-id="${esc(s.run_id)}" aria-expanded="${open}" aria-label="Toggle finalists">${open?"−":"+"}</button><span class="mname">${esc(s.model)}</span>${mockTag(s)}</td>
+      <td data-label="${L("hardware")}">${esc(s.hardware)}</td>
+      <td class="num" data-label="${L("gpu_budget")}">${s.gpu_budget}</td>
+      <td data-label="${L("workload")}">${esc(s.workload)} <span class="chip">${esc(s.isl_osl)}</span></td>
+      <td class="cfgcell" data-label="${L("config")}">${esc(w.label)}</td>
+      <td class="num${bc("tps",s)}" data-label="${L("tps")}"><span>${f0(w.tps)}</span></td>
+      <td class="num${bc("tps_per_gpu",s)}" data-label="${L("tps_per_gpu")}"><span>${f1(w.tps_per_gpu)}</span></td>
+      <td class="num${bc("per_user",s)}" data-label="${L("per_user")}"><span>${f1(w.per_user)}</span></td>
+      <td class="num${bc("itl_p99",s)}" data-label="${L("itl_p99")}"><span>${f1(w.itl_p99)}</span><span class="u">ms</span></td>
+      <td class="num" data-label="${L("servable")}"><span class="srv"><i><b style="width:${pct}%"></b></i>${s.n_servable}/${s.n_runs}</span></td>
+      <td class="num" data-label="${L("load")}">${w.c_use}</td>
+      <td class="rep"><a href="${href}">report</a></td>
+    </tr>`;
+    if(open){
+      const fin=s.finalists.slice().sort((a,b)=>b.tps-a.tps);
+      h+=fin.map(f=>{
+        const isW=f.label===w.label;
+        return `<tr class="sub"><td class="first">${isW?'<span class="pick">recommended</span>':"finalist"}</td><td></td><td class="num" data-label="${L("gpu_budget")}">${f.gpus}</td><td></td>
+          <td class="mono cfgcell" style="color:inherit" data-label="${L("config")}">${esc(f.label)}</td>
+          <td class="num" data-label="${L("tps")}">${f0(f.tps)}</td><td class="num" data-label="${L("tps_per_gpu")}">${f1(f.tps_per_gpu)}</td><td class="num" data-label="${L("per_user")}">${f1(f.per_user)}</td>
+          <td class="num" data-label="${L("itl_p99")}">${f1(f.itl_p99)}<span class="u">ms</span></td><td></td><td class="num" data-label="${L("load")}">${f.c_use}</td><td></td></tr>`;
+      }).join("");
+    }
+    return h;
+  }).join("");
+  tb.querySelectorAll("tr.row").forEach(tr=>{
+    tr.onclick=e=>{ if(e.target.closest(".exp")) return; location.href=tr.dataset.href; };
+    tr.onkeydown=e=>{ if(e.target!==tr) return; if(e.key==="Enter"){location.href=tr.dataset.href;} };
+  });
+  tb.querySelectorAll(".exp").forEach(b=>b.onclick=e=>{
+    e.stopPropagation(); const id=b.dataset.id;
+    expanded.has(id)?expanded.delete(id):expanded.add(id); render();
+  });
+}
+
+function clearAll(){FACETS.forEach(f=>sel[f.key].clear());render();}
+
+function render(){
+  const rows=filterRows(S,sel);
+  renderSummary(rows);
+  renderFacets();
+  renderHead();
+  renderBody(rows);
+  const any=FACETS.some(f=>sel[f.key].size);
+  $("reset").hidden=!any;
+  $("reset").onclick=clearAll;
+  const nMock=rows.filter(r=>r.synthetic).length;
+  $("status").textContent=`${rows.length} of ${S.length} scenarios`+(nMock?` · ${nMock} mock`:"");
+  const allOpen=rows.length&&rows.every(r=>expanded.has(r.run_id));
+  $("expandall").textContent=allOpen?"collapse all finalists":"expand all finalists";
+  $("expandall").onclick=()=>{rows.forEach(r=>allOpen?expanded.delete(r.run_id):expanded.add(r.run_id));render();};
+}
+function initTheme(){
+  const root=document.documentElement, btn=$("theme");
+  const modes=["system","light","dark"];
+  let i=0;
+  try{const sv=localStorage.getItem("cs-theme"); if(modes.includes(sv)) i=modes.indexOf(sv);}catch(e){}
+  const apply=()=>{
+    const m=modes[i];
+    if(m==="system") delete root.dataset.theme; else root.dataset.theme=m;
+    btn.textContent="theme: "+m;
+    try{localStorage.setItem("cs-theme",m);}catch(e){}
+  };
+  btn.onclick=()=>{i=(i+1)%3;apply();};
+  apply();
+}
+initTheme();
+render();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+{
+  "_source": "SYNTHETIC mock narrative for the gallery demo",
+  "hero": [
+    {
+      "h": "What this is",
+      "html": "A <b>mock</b> scenario included so the gallery's filtering and report links are browsable end to end. The numbers are illustrative, not simulator output."
+    },
+    {
+      "h": "What to run",
+      "html": "<b>8x TP2</b> \u2014 3120 tok/s (195/GPU), 64 tok/s/user at c=40.",
+      "run": true
+    }
+  ],
+  "meta": [
+    "MOCK \u2014 not a BLIS measurement",
+    "qwen3-14b \u00b7 16\u00d7 H100 \u00b7 codegen"
+  ],
+  "operating_points": [
+    {
+      "cl": 3120.0,
+      "conc": 40,
+      "flags": {
+        "ni": 8,
+        "tp": 2
+      },
+      "hit": null,
+      "itl": 15.2,
+      "pu": 64.0
+    }
+  ],
+  "recommendation_prose": [
+    "Mock scenario \u2014 balanced 2k/2k codegen rewards many narrow replicas under a tight floor.",
+    "These are placeholder numbers for a design demo \u2014 do not deploy from them."
+  ],
+  "standfirst": "Illustrative placeholder scenario \u2014 Mock scenario \u2014 balanced 2k/2k codegen rewards many narrow replicas under a tight floor.",
+  "title": "Serving qwen3-14b on 16\u00d7 H100 (MOCK)"
+}

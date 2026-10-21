@@ -1,0 +1,37 @@
+{
+  "_source": "SYNTHETIC mock narrative for the gallery demo",
+  "hero": [
+    {
+      "h": "What this is",
+      "html": "A <b>mock</b> scenario included so the gallery's filtering and report links are browsable end to end. The numbers are illustrative, not simulator output."
+    },
+    {
+      "h": "What to run",
+      "html": "<b>4x TP2</b> \u2014 1842 tok/s (230/GPU), 68 tok/s/user at c=24.",
+      "run": true
+    }
+  ],
+  "meta": [
+    "MOCK \u2014 not a BLIS measurement",
+    "qwen3-14b \u00b7 8\u00d7 H100 \u00b7 chatbot"
+  ],
+  "operating_points": [
+    {
+      "cl": 1842.0,
+      "conc": 24,
+      "flags": {
+        "ni": 4,
+        "tp": 2
+      },
+      "hit": null,
+      "itl": 14.7,
+      "pu": 68.0
+    }
+  ],
+  "recommendation_prose": [
+    "Mock scenario \u2014 narrowest TP that still fits KV spreads load across four replicas.",
+    "These are placeholder numbers for a design demo \u2014 do not deploy from them."
+  ],
+  "standfirst": "Illustrative placeholder scenario \u2014 Mock scenario \u2014 narrowest TP that still fits KV spreads load across four replicas.",
+  "title": "Serving qwen3-14b on 8\u00d7 H100 (MOCK)"
+}

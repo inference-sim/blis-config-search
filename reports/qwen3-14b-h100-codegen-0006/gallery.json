@@ -1,0 +1,8 @@
+{
+  "generated": "2026-10-20",
+  "isl_osl": "2k / 2k",
+  "n_runs": 26,
+  "n_servable": 12,
+  "reason": "Mock scenario \u2014 balanced 2k/2k codegen rewards many narrow replicas under a tight floor.",
+  "synthetic": true
+}

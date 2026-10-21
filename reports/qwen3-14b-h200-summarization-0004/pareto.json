@@ -1,0 +1,73 @@
+{
+  "_source": "SYNTHETIC mock \u2014 illustrative, NOT a BLIS measurement",
+  "dropped": [],
+  "finalists": [
+    {
+      "at_c_use": {
+        "itl_p99_ms": 13.8,
+        "preemption_count": 0,
+        "tok_per_s_per_user": 71.0,
+        "tokens_per_sec": 610.0,
+        "tokens_per_sec_per_gpu": 152.5,
+        "ttft_p99_ms": 0.0
+      },
+      "c_star": 11,
+      "c_use": 9,
+      "config": {
+        "num_instances": 1,
+        "tp": 4
+      },
+      "curve": [
+        {
+          "concurrency": 9,
+          "itl_p99_ms": 13.8,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 71.0,
+          "tokens_per_sec": 610.0
+        }
+      ],
+      "gpus": 4,
+      "label": "1x TP4"
+    },
+    {
+      "at_c_use": {
+        "itl_p99_ms": 18.9,
+        "preemption_count": 0,
+        "tok_per_s_per_user": 52.0,
+        "tokens_per_sec": 1060.0,
+        "tokens_per_sec_per_gpu": 265.0,
+        "ttft_p99_ms": 0.0
+      },
+      "c_star": 22,
+      "c_use": 18,
+      "config": {
+        "num_instances": 2,
+        "tp": 2
+      },
+      "curve": [
+        {
+          "concurrency": 18,
+          "itl_p99_ms": 18.9,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 52.0,
+          "tokens_per_sec": 1060.0
+        }
+      ],
+      "gpus": 4,
+      "label": "2x TP2"
+    }
+  ],
+  "headroom": 0.8,
+  "interactivity_floor": {
+    "itl_p99_ms_max": 25.0,
+    "tok_per_s_per_user": 40
+  },
+  "objective": "dual-pareto",
+  "winner": {
+    "budget_max": "2x TP2",
+    "chosen": "2x TP2",
+    "efficiency_per_gpu": "2x TP2",
+    "move_trail": [],
+    "reason": "Mock scenario \u2014 long-input summarization is prefill-heavy; replicas win on throughput."
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "_source": "SYNTHETIC mock scenario for the gallery demo \u2014 NOT a BLIS run",
+  "gpu_budget": 8,
+  "hardware": "h100",
+  "headroom": 0.8,
+  "interactivity_floor": {
+    "itl_p99_ms_max": 20.0,
+    "tok_per_s_per_user": 50
+  },
+  "latency_model": "blis-latency-kernel",
+  "model": "qwen3-14b",
+  "objective": "dual-pareto",
+  "run_id": "qwen3-14b-h100-chatbot-0002",
+  "seed": 0,
+  "slos": {},
+  "workload": {
+    "preset": "chatbot"
+  }
+}

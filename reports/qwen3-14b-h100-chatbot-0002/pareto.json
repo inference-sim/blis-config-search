@@ -1,0 +1,100 @@
+{
+  "_source": "SYNTHETIC mock \u2014 illustrative, NOT a BLIS measurement",
+  "dropped": [],
+  "finalists": [
+    {
+      "at_c_use": {
+        "itl_p99_ms": 11.4,
+        "preemption_count": 0,
+        "tok_per_s_per_user": 88.0,
+        "tokens_per_sec": 1190.0,
+        "tokens_per_sec_per_gpu": 148.8,
+        "ttft_p99_ms": 0.0
+      },
+      "c_star": 18,
+      "c_use": 14,
+      "config": {
+        "num_instances": 2,
+        "tp": 4
+      },
+      "curve": [
+        {
+          "concurrency": 14,
+          "itl_p99_ms": 11.4,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 88.0,
+          "tokens_per_sec": 1190.0
+        }
+      ],
+      "gpus": 8,
+      "label": "2x TP4"
+    },
+    {
+      "at_c_use": {
+        "itl_p99_ms": 14.7,
+        "preemption_count": 0,
+        "tok_per_s_per_user": 68.0,
+        "tokens_per_sec": 1842.0,
+        "tokens_per_sec_per_gpu": 230.3,
+        "ttft_p99_ms": 0.0
+      },
+      "c_star": 30,
+      "c_use": 24,
+      "config": {
+        "num_instances": 4,
+        "tp": 2
+      },
+      "curve": [
+        {
+          "concurrency": 24,
+          "itl_p99_ms": 14.7,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 68.0,
+          "tokens_per_sec": 1842.0
+        }
+      ],
+      "gpus": 8,
+      "label": "4x TP2"
+    },
+    {
+      "at_c_use": {
+        "itl_p99_ms": 17.2,
+        "preemption_count": 0,
+        "tok_per_s_per_user": 59.0,
+        "tokens_per_sec": 1610.0,
+        "tokens_per_sec_per_gpu": 201.3,
+        "ttft_p99_ms": 0.0
+      },
+      "c_star": 25,
+      "c_use": 20,
+      "config": {
+        "num_instances": 8,
+        "tp": 1
+      },
+      "curve": [
+        {
+          "concurrency": 20,
+          "itl_p99_ms": 17.2,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 59.0,
+          "tokens_per_sec": 1610.0
+        }
+      ],
+      "gpus": 8,
+      "label": "8x TP1"
+    }
+  ],
+  "headroom": 0.8,
+  "interactivity_floor": {
+    "itl_p99_ms_max": 20.0,
+    "tok_per_s_per_user": 50
+  },
+  "objective": "dual-pareto",
+  "winner": {
+    "budget_max": "4x TP2",
+    "chosen": "4x TP2",
+    "efficiency_per_gpu": "4x TP2",
+    "move_trail": [],
+    "reason": "Mock scenario \u2014 narrowest TP that still fits KV spreads load across four replicas."
+  }
+}

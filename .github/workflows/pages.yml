@@ -1,0 +1,68 @@
+name: pages
+
+# Build the static config-search gallery from committed run directories and publish it to
+# GitHub Pages. The build is a pure JSON -> HTML transform (scripts/build_gallery.py, which
+# renders report.py reports); it NEVER runs BLIS or the config-search LLM search, so a PR
+# cannot make CI execute contributor-supplied work beyond this fixed build.
+#
+# On a pull request: build only, to catch breakage. Nothing is published, and the job holds
+# read-only permissions. Publishing happens only on push to main (i.e. after a maintainer
+# reviews and merges the PR) — the human gate that keeps untrusted PRs off the live site.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the gallery site
+        run: python3 -I scripts/build_gallery.py --out site
+      - name: Sanity-check the build
+        run: |
+          test -f site/index.html
+          test -f site/data.js
+          # every scenario in data.js must have a rendered report next to it
+          python3 -I - <<'PY'
+          import json, re, os, sys
+          js = open("site/data.js", encoding="utf-8").read()
+          data = json.loads(re.search(r"window\.SCENARIOS\s*=\s*(\[.*\]);", js, re.S).group(1))
+          missing = [s["run_id"] for s in data if not os.path.isfile(f"site/{s['run_id']}/index.html")]
+          if missing:
+              sys.exit("missing reports: " + ", ".join(missing))
+          print(f"ok: {len(data)} scenarios, every report present")
+          PY
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  # Publish only on push to main. Separate job so the elevated Pages permissions never apply
+  # to the PR build above.
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

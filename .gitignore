@@ -1,2 +1,10 @@
 __pycache__/
 *.pyc
+
+# Built gallery site — a pure function of reports/ + gallery/; CI rebuilds and publishes it.
+# Regenerate locally with: python3 -I scripts/build_gallery.py
+/site/
+
+# Reports are regenerated into their run dirs on build; the committed source of truth is the
+# JSON (scenario.json / pareto.json / runs.jsonl / report.json / gallery.json), not the HTML.
+reports/*/index.html

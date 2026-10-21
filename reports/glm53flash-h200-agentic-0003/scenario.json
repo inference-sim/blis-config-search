@@ -1,0 +1,19 @@
+{
+  "_source": "SYNTHETIC mock scenario for the gallery demo \u2014 NOT a BLIS run",
+  "gpu_budget": 8,
+  "hardware": "h200",
+  "headroom": 0.8,
+  "interactivity_floor": {
+    "itl_p99_ms_max": 20.0,
+    "tok_per_s_per_user": 50
+  },
+  "latency_model": "blis-latency-kernel",
+  "model": "glm-5.3-flash",
+  "objective": "dual-pareto",
+  "run_id": "glm53flash-h200-agentic-0003",
+  "seed": 0,
+  "slos": {},
+  "workload": {
+    "preset": "agentic"
+  }
+}

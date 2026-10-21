@@ -170,6 +170,13 @@ svg.chart .axlabel{font-family:var(--font-sans);font-size:11px;fill:var(--muted)
 /* the violet "knee" marker: the interactivity cliff, from the deck */
 svg.chart .knee line{stroke:var(--violet);stroke-width:1.1;opacity:0.55}
 svg.chart .knee .kneelab{font-family:var(--font-sans);font-size:8px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;fill:var(--violet)}
+/* cross-scenario Pareto overview on the Reports tab: one wide deck card, clickable points */
+.overview-wrap{margin:0 0 20px}
+.vc.overview{max-width:680px}
+.vc.overview svg.chart a{cursor:pointer}
+.vc.overview svg.chart .opt{transition:r .08s}
+.vc.overview svg.chart a:hover .opt,.vc.overview svg.chart a:focus-visible .opt{r:7}
+.vc.overview svg.chart a:focus-visible{outline:none}
 
 /* ---- submit ---- */
 .formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;max-width:1000px;margin-bottom:8px}

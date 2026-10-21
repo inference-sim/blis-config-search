@@ -2,13 +2,13 @@ import { useEffect, useState } from 'react'
 import type { Catalog, Mode, Scenario } from './types'
 import { loadCatalog, loadMode, loadScenarios } from './load'
 import { useHashRoute } from './route'
-import { Rail } from './components/Rail'
 import { Reports } from './components/Reports'
 import { ScenarioDetail } from './components/ScenarioDetail'
 import { Models } from './components/Models'
 import { Workloads } from './components/Workloads'
 import { Gpus } from './components/Gpus'
 import { Submit } from './components/Submit'
+import { Footer } from './components/Footer'
 import type { Tab } from './lib'
 
 const TAB_LABELS: [Tab, string][] = [
@@ -71,19 +71,28 @@ export function App() {
     }
   }
 
+  // The scenario-detail view is addressed by runId; keep the Reports tab marked active under it.
+  const activeTab: Tab = route.runId ? 'reports' : route.tab
+
   return (
-    <div className="layout">
-      <Rail catalog={data?.catalog ?? null} mode={data?.mode ?? null} hasMock={!!data?.scenarios.some((s) => s.synthetic)} />
-      <main className="main">
-        <nav className="tabs" aria-label="Sections">
-          {TAB_LABELS.map(([t, label]) => (
-            <a key={t} href={`#/${t}`} className={`tab${route.tab === t ? ' on' : ''}`} aria-current={route.tab === t ? 'page' : undefined}>
-              {label}
-            </a>
-          ))}
-        </nav>
-        {body}
-      </main>
+    <div className="page">
+      <header className="masthead">
+        <div className="mastinner">
+          <div className="masttitle">
+            <h1><b>config-search</b> · deployment reports</h1>
+            <p className="dek">Pareto-optimal BLIS serving configurations for a model, GPU budget and workload — each a full interactive report. Simulator predictions; validate before deploying.</p>
+          </div>
+          <nav className="tabs" aria-label="Sections">
+            {TAB_LABELS.map(([t, label]) => (
+              <a key={t} href={`#/${t}`} className={`tab${activeTab === t ? ' on' : ''}`} aria-current={activeTab === t ? 'page' : undefined}>
+                {label}
+              </a>
+            ))}
+          </nav>
+        </div>
+      </header>
+      <main className="main">{body}</main>
+      <Footer catalog={data?.catalog ?? null} mode={data?.mode ?? null} hasMock={!!data?.scenarios.some((s) => s.synthetic)} />
     </div>
   )
 }

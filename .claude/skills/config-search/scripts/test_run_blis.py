@@ -110,6 +110,37 @@ class ScenarioYaml(unittest.TestCase):
         self.assertIn("cost-model-memory", y)
 
 
+class PoolSizing(unittest.TestCase):
+    """The pool must hold EVERY instance, and a multi-node cluster must name a fabric. Sizing the
+    pool from one instance capped searches at a single node (BLIS refuses extra instances)."""
+
+    def test_pool_nodes_covers_all_instances(self):
+        par = {"tp": 4, "pp": 1, "dp": 1}
+        self.assertEqual(run_blis.pool_nodes(par, 1), 1)    # 4 GPUs -> 1 node
+        self.assertEqual(run_blis.pool_nodes(par, 2), 1)    # 8 GPUs -> 1 node
+        self.assertEqual(run_blis.pool_nodes(par, 8), 4)    # 32 GPUs -> 4 nodes
+        self.assertEqual(run_blis.pool_nodes({"tp": 8, "pp": 1, "dp": 1}, 16), 16)  # 128 GPUs
+
+    def test_multinode_scenario_names_a_fabric(self):
+        par, eng = {"tp": 8, "pp": 1, "dp": 1}, {"block_size": 16}
+        many = run_blis.scenario_yaml("m", "h100", "0.29.0", par, eng, "n", num_instances=16)
+        self.assertIn("nodes: 16", many)
+        self.assertIn("fabric: ", many)                     # required once nodes > 1
+        one = run_blis.scenario_yaml("m", "h100", "0.29.0", par, eng, "n", num_instances=1)
+        self.assertIn("nodes: 1", one)
+        self.assertNotIn("fabric:", one)                    # single node prices no cross-node traffic
+
+    def test_instance_count_changes_the_scenario_identity(self):
+        """Two runs differing only in instance count need different files, else the second reuses
+        a pool too small for it."""
+        import tempfile
+        d = tempfile.mkdtemp()
+        par, eng = {"tp": 4, "pp": 1, "dp": 1}, {"block_size": 16}
+        a = run_blis.write_scenario(d, "m", "h100", "0.29.0", par, eng, 1)
+        b = run_blis.write_scenario(d, "m", "h100", "0.29.0", par, eng, 8)
+        self.assertNotEqual(a, b)
+
+
 class BuildCmd(unittest.TestCase):
     def test_kernel_flags_and_cli_knobs(self):
         cmd = run_blis.build_cmd("blis", "cat", "reg", "scn", "s.yaml", "chatbot", 100, 0, None, None,

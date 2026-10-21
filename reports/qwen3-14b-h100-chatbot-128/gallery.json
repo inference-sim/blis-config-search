@@ -1,0 +1,8 @@
+{
+  "generated": "2026-10-21",
+  "isl_osl": "",
+  "n_runs": 28,
+  "n_servable": 28,
+  "reason": "16x TP8 gives the most tok/s/GPU while holding the 50 tok/s/user floor; usable load c=26 (C*=32).",
+  "synthetic": false
+}

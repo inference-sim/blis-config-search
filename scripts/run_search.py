@@ -29,25 +29,28 @@ SKILL = os.path.join(ROOT, ".claude", "skills", "config-search", "scripts")
 sys.path.insert(0, SKILL)
 import run_blis  # noqa: E402
 
-VALID_TP = [1, 2, 4, 8]
-GPUS_PER_NODE = 8  # single-node H100; v0.10.0 bounds num_instances by the pool's node layout
+VALID_TP = [1, 2, 4, 8]  # tp is bounded by one node (8 H100s); scale out with instances
+MAX_CANDIDATES = 8
 
 
 def candidate_topologies(gpu_budget):
-    """Feasible single-node candidate set. v0.10.0 rejects num_instances beyond what the
-    scenario's pool holds (one node = 8 GPUs), and the skill's generated scenario is one node.
-    So we fill exactly one node per candidate: tp in {1,2,4,8}, num_instances = 8 / tp. The
-    budget caps the node's GPU use (min(budget, 8)). (Multi-node sweeps need the scenario's
-    `nodes:` raised — a larger skill change tracked separately.)"""
-    node_gpus = min(gpu_budget, GPUS_PER_NODE)
+    """Candidate topologies that use the WHOLE budget, across as many nodes as needed.
+
+    For each tp that fits in a node and divides the budget, fill the budget with instances
+    (num_instances = budget / tp). run_blis sizes the scenario's pool for all instances and
+    names a fabric once it spans nodes, so a 128-GPU budget really explores 128 GPUs. Wider
+    tp = fewer, larger instances; narrower tp = more replicas — the trade-off the search is for.
+    For a very large budget the instance counts get big, so cap the candidate list."""
     out = []
     for tp in VALID_TP:
-        if tp > node_gpus:
+        if tp > gpu_budget:
             continue
-        ni = node_gpus // tp
+        ni = gpu_budget // tp
         if ni >= 1:
             out.append({"tp": tp, "num_instances": ni})
-    return out
+    # keep the widest-tp (fewest instances) candidates first — they run fastest — and bound the set
+    out.sort(key=lambda t: -t["tp"])
+    return out[:MAX_CANDIDATES]
 
 
 def per_user(metrics):

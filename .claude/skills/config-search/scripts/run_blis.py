@@ -30,6 +30,8 @@ CLI_FLAGS = {"num_instances": "--num-instances", "concurrency": "--concurrency",
              "preemption_policy": "--preemption-policy"}
 PARALLEL_DEFAULTS = {"tp": 1, "pp": 1, "dp": 1, "enable_expert_parallel": False}
 GPUS_PER_NODE = 8   # single-node H100; a per-instance footprint beyond this spans nodes (needs a fabric)
+# Cross-node cost resolves from the fabric (a catalog networks/ entry), required once nodes > 1.
+DEFAULT_FABRIC = "ib-400g"   # InfiniBand NDR 400 Gb/s; the standard H100 multi-node interconnect
 # NON-PRECISION engine defaults only. quantization/cache_dtype are intentionally NOT defaulted: an
 # empty precision lets the checkpoint format govern (e.g. qwen3-14b stays BF16), so forcing FP8 here
 # would silently mis-price every non-FP8 model.
@@ -142,20 +144,37 @@ def _completion_issue(m):
     return None
 
 
-def scenario_yaml(model, hardware, engine_version, parallel, engine, name):
+def pool_nodes(parallel, num_instances=1):
+    """Nodes the colocated pool must hold for `num_instances` copies of this instance shape.
+
+    BLIS v0.10.0 validates `--num-instances` against the pool's rank capacity: a pool of
+    `nodes` x 8 GPUs holds floor(nodes*8 / footprint) instances, and asking for more is refused
+    ("N instance(s) requested, but ...'s colocated pool holds M rank(s) at its layout"). Sizing
+    the pool from ONE instance's footprint therefore capped every search at a single node's
+    worth of instances; size it for the whole fleet instead."""
+    total = footprint_gpus(parallel) * max(1, num_instances)
+    return max(1, -(-total // GPUS_PER_NODE))           # ceil(total / 8)
+
+
+def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances=1,
+                  fabric=DEFAULT_FABRIC):
     """Render a two-doc Scenario+Deployment YAML (no external yaml dep). Omitted engine keys (e.g.
     quantization when unset) let the checkpoint/engine govern."""
     def block(d, indent):
         pad = " " * indent
         return "\n".join(f"{pad}{k}: {json.dumps(v)}" for k, v in d.items())
-    nodes = max(1, -(-footprint_gpus(parallel) // 8))   # ceil(footprint/8); single-node H100 = 8 GPUs
+    nodes = pool_nodes(parallel, num_instances)
+    # A multi-node cluster MUST name a fabric: BLIS resolves cross-node cost from the fabric,
+    # not the chip, and refuses the scenario otherwise ("scenario.cluster.fabric: required for
+    # a N-node cluster"). Single-node clusters omit it (no cross-node traffic to price).
+    fabric_line = f"\n  fabric: {fabric}" if nodes > 1 else ""
     return f"""kind: Scenario
 name: {name}
 engine_version: "{engine_version}"
 model: {model}
 coefficients: [{", ".join(COEFFICIENTS)}]
 cluster:
-  hardware: {hardware}
+  hardware: {hardware}{fabric_line}
   nodes: {nodes}
   gpus_per_node: 8
 ---
@@ -171,15 +190,21 @@ pools:
 """
 
 
-def write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine):
+def write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine, num_instances=1,
+                   fabric=DEFAULT_FABRIC):
     """Write a scenario ATOMICALLY (temp + os.replace) so concurrent pool workers never read a
-    half-written file for the same hashed deployment; return its file name."""
-    key = json.dumps([model, hardware, engine_version, parallel, engine], sort_keys=True)
+    half-written file for the same hashed deployment; return its file name.
+
+    `num_instances` participates in the hash because it sets the pool's node count — two runs
+    that differ only in instance count need DIFFERENT scenario files, or the second reuses a
+    pool too small for it and BLIS refuses the run."""
+    key = json.dumps([model, hardware, engine_version, parallel, engine, num_instances, fabric], sort_keys=True)
     name = f"{model}-{hardware}-{hashlib.sha1(key.encode()).hexdigest()[:10]}"
     os.makedirs(scenarios_dir, exist_ok=True)
     path = os.path.join(scenarios_dir, name + ".yaml")
     if not os.path.exists(path):
-        body = scenario_yaml(model, hardware, engine_version, parallel, engine, name)
+        body = scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances,
+                             fabric)
         fd, tmp = tempfile.mkstemp(dir=scenarios_dir, prefix=".tmp-", suffix=".yaml")
         try:
             with os.fdopen(fd, "w") as f:
@@ -245,7 +270,8 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
         return rec
     num_instances = cli.get("num_instances", 1)
     fp = footprint_gpus(parallel)
-    scenario_name = write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine)
+    scenario_name = write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine,
+                                   num_instances)
     cmd = build_cmd(blis, catalog, registry, scenarios_dir, scenario_name, workload,
                     num_requests, seed, horizon, defaults, cli)
     t0 = time.time()

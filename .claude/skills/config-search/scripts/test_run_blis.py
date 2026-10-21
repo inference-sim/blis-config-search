@@ -114,7 +114,10 @@ class BuildCmd(unittest.TestCase):
     def test_kernel_flags_and_cli_knobs(self):
         cmd = run_blis.build_cmd("blis", "cat", "reg", "scn", "s.yaml", "chatbot", 100, 0, None, None,
                                  {"num_instances": 2, "concurrency": 64, "scheduler": "fcfs"})
-        self.assertIn("blis-latency-kernel", cmd)
+        # v0.10.0 selects the kernel backend from the scenario's `coefficients:` list, NOT a
+        # `--latency-model` CLI flag (the flag was removed and is rejected as unknown).
+        self.assertNotIn("--latency-model", cmd)
+        self.assertNotIn("blis-latency-kernel", cmd)
         for a, b in (("--scenario", "s.yaml"), ("--scenarios", "scn"), ("--registry", "reg"),
                      ("--num-instances", "2"), ("--concurrency", "64"), ("--scheduler", "fcfs")):
             self.assertEqual(cmd[cmd.index(a) + 1], b)

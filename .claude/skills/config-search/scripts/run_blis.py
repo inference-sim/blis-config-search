@@ -200,7 +200,11 @@ def resolve_defaults(blis, defaults):
 
 def build_cmd(blis, catalog, registry, scenarios_dir, scenario_name, workload, num_requests, seed,
               horizon, defaults, cli):
-    cmd = [blis, "run", "--latency-model", "blis-latency-kernel",
+    # BLIS v0.10.0 (the pinned release) selects the kernel cost-model backend from the
+    # scenario's `coefficients:` list (written into the generated scenario), not a CLI flag.
+    # The old `--latency-model blis-latency-kernel` flag was removed in the release and is
+    # rejected ("unknown flag"), so it must not be passed.
+    cmd = [blis, "run",
            "--scenario", scenario_name, "--scenarios", scenarios_dir, "--registry", registry]
     if catalog:
         cmd += ["--catalog", catalog]

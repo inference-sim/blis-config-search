@@ -33,7 +33,8 @@ The search is priced by the **`blis-latency-kernel`** backend -- the accurate pe
 reason to run BLIS at all here. It reads the deployment from a **scenario** + a **registry**, so:
 
 - **BLIS** release **`v0.10.0`** (commit `0d092d4`; kernel `v0.1.0`, pinned in its `go.mod`), built
-  as `./blis`. Always run with `--latency-model blis-latency-kernel`.
+  as `./blis`. The kernel backend is selected by the scenario's `coefficients:` list, **not** a
+  `--latency-model` flag (v0.10.0 removed that flag; passing it errors "unknown flag").
 - **blis-catalog @ `0.2.1`** (`--catalog`/`BLIS_CATALOG`); a model runs **iff** it is in the catalog
   (NS-6).
 - **blis-registry @ `v0.1.1`** (`--registry`) -- holds the 6 coefficient sets a scenario names,
@@ -128,7 +129,7 @@ Two scripts, verified end-to-end against the pinned kernel binary:
 
 - **`python3 -I scripts/run_blis.py`** -- the single source of truth for one run. From a candidate's
   per-instance topology (tp/pp/dp/ep + engine knobs) it **generates a scenario YAML** into
-  `--scenarios`, then runs `./blis run --latency-model blis-latency-kernel --scenario <generated>
+  `--scenarios`, then runs `./blis run --scenario <generated>
   --scenarios <dir> --registry <blis-registry>` with the still-CLI knobs (`--num-instances`,
   `--concurrency`, `--workload`, `--num-requests`, `--seed`). It parses the `=== Simulation Metrics
   ===` JSON -- the `cluster` aggregate into `metrics` and the per-instance objects into

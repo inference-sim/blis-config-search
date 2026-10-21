@@ -14,8 +14,10 @@ test "$(git rev-parse HEAD)" = "$EXPECT" || { echo "v0.10.0 no longer resolves t
 go build -o blis main.go
 ```
 
-Point the skill at this `./blis` (the `--blis` arg, default `./blis`). The search always runs on
-`--latency-model blis-latency-kernel`; `run_blis.py` adds that flag.
+Point the skill at this `./blis` (the `--blis` arg, default `./blis`). The kernel cost-model
+backend is selected by the scenario's `coefficients:` list (the generated scenario names the six
+`cost-model-*` sets), so **no `--latency-model` CLI flag is passed** — v0.10.0 removed that flag
+and rejects it as unknown. `run_blis.py` writes the coefficients into the generated scenario.
 
 ## 2. Catalog + registry (both required by the kernel)
 

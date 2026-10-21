@@ -160,17 +160,18 @@ four explored directions (`mock-A`…`mock-D`), `EVAL.md` (the bake-off), and th
 4. `pages.yml`: PR build-only job (no publish) + main build+publish job, least privilege.
 5. Enable Pages on the repo; verify the deployed site links resolve to reports.
 
-## 8. Open questions
+## 8. Open questions — RESOLVED
 
-- **Q1.** Publish root — a built `site/` in CI (reports copied), or serve `reports/` + a
-  root `gallery/` in place (no copy)? In-place is simpler but mixes data and presentation.
-- **Q2.** Should the gallery also expose each report's crossfilter *inline* (cross-scenario),
-  or keep cross-scenario filtering to the winner only (current design) and leave per-run
-  exploration to the report? Current design: winners only in the gallery.
-- **Q3.** How strictly to treat committed `index.html` — regenerate it in CI from the
-  committed JSON (guarantees it is report.py output, ignores contributor HTML entirely), or
-  trust+content-scan the committed file? Regenerating in CI is the safer default and keeps
-  INV-6; it costs a `report.py` run per report (pure transform, no BLIS).
+- **Q1 (publish root).** RESOLVED: build a `site/` in CI (reports copied/rendered into it).
+  `site/` is the Pages publish root and is gitignored; the committed source of truth is the
+  `reports/*/` JSON. Keeps data and presentation separate.
+- **Q2 (per-run crossfilter in the gallery).** RESOLVED by v2: the gallery filters on winners
+  across scenarios, AND the in-app scenario-detail view (§10) now carries the full per-run
+  crossfilter explorer over that scenario's `records.json`. Both, not either.
+- **Q3 (committed index.html).** RESOLVED: the build **regenerates** each report in CI from the
+  committed JSON via `report.py` (ignoring any committed HTML), so published HTML is always
+  report.py output. `build_gallery._decorate_report` then injects the gallery back-link and the
+  mock banner. Pure transform, no BLIS.
 ```
 
 ---

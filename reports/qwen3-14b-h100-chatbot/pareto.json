@@ -1,0 +1,298 @@
+{
+  "dropped": [],
+  "finalists": [
+    {
+      "at_c_use": {
+        "itl_p99_ms": 12.138,
+        "preemption_count": 0,
+        "tok_per_s_per_user": 82.4,
+        "tokens_per_sec": 3436.0,
+        "tokens_per_sec_per_gpu": 429.5,
+        "ttft_p99_ms": 0.0
+      },
+      "c_star": 32,
+      "c_use": 26,
+      "config": {
+        "num_instances": 1,
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 1,
+          "itl_p99_ms": 4.499,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 222.3,
+          "tokens_per_sec": 220.3
+        },
+        {
+          "concurrency": 2,
+          "itl_p99_ms": 4.522,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 221.1,
+          "tokens_per_sec": 432.0
+        },
+        {
+          "concurrency": 4,
+          "itl_p99_ms": 4.563,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 219.2,
+          "tokens_per_sec": 829.7
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 8.073979999999887,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 123.9,
+          "tokens_per_sec": 1489.7
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 11.43,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 87.5,
+          "tokens_per_sec": 2744.4
+        },
+        {
+          "concurrency": 24,
+          "itl_p99_ms": 12.138,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 82.4,
+          "tokens_per_sec": 3436.0
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 13.064,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 76.5,
+          "tokens_per_sec": 4480.6
+        }
+      ],
+      "gpus": 8,
+      "label": "1x TP8"
+    },
+    {
+      "at_c_use": {
+        "itl_p99_ms": 13.676839999999993,
+        "preemption_count": 0,
+        "tok_per_s_per_user": 73.1,
+        "tokens_per_sec": 2546.9,
+        "tokens_per_sec_per_gpu": 318.4,
+        "ttft_p99_ms": 0.0
+      },
+      "c_star": 32,
+      "c_use": 26,
+      "config": {
+        "num_instances": 2,
+        "tp": 4
+      },
+      "curve": [
+        {
+          "concurrency": 1,
+          "itl_p99_ms": 6.416,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 155.9,
+          "tokens_per_sec": 154.9
+        },
+        {
+          "concurrency": 2,
+          "itl_p99_ms": 6.447,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 155.1,
+          "tokens_per_sec": 306.1
+        },
+        {
+          "concurrency": 4,
+          "itl_p99_ms": 6.484,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 154.2,
+          "tokens_per_sec": 589.3
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 6.57,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 152.2,
+          "tokens_per_sec": 1070.1
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 11.292799999999826,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 88.6,
+          "tokens_per_sec": 2003.5
+        },
+        {
+          "concurrency": 24,
+          "itl_p99_ms": 13.676839999999993,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 73.1,
+          "tokens_per_sec": 2546.9
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 15.165,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 65.9,
+          "tokens_per_sec": 3369.1
+        }
+      ],
+      "gpus": 8,
+      "label": "2x TP4"
+    },
+    {
+      "at_c_use": {
+        "itl_p99_ms": 10.603,
+        "preemption_count": 0,
+        "tok_per_s_per_user": 94.3,
+        "tokens_per_sec": 1647.2,
+        "tokens_per_sec_per_gpu": 205.9,
+        "ttft_p99_ms": 0.0
+      },
+      "c_star": 32,
+      "c_use": 26,
+      "config": {
+        "num_instances": 4,
+        "tp": 2
+      },
+      "curve": [
+        {
+          "concurrency": 1,
+          "itl_p99_ms": 10.234,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 97.7,
+          "tokens_per_sec": 97.4
+        },
+        {
+          "concurrency": 2,
+          "itl_p99_ms": 10.232,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 97.7,
+          "tokens_per_sec": 192.8
+        },
+        {
+          "concurrency": 4,
+          "itl_p99_ms": 10.285,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 97.2,
+          "tokens_per_sec": 373.3
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 10.374740000000001,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 96.4,
+          "tokens_per_sec": 680.4
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 10.489,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 95.3,
+          "tokens_per_sec": 1291.3
+        },
+        {
+          "concurrency": 24,
+          "itl_p99_ms": 10.603,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 94.3,
+          "tokens_per_sec": 1647.2
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 10.711,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 93.4,
+          "tokens_per_sec": 2210.9
+        }
+      ],
+      "gpus": 8,
+      "label": "4x TP2"
+    },
+    {
+      "at_c_use": {
+        "itl_p99_ms": 17.682,
+        "preemption_count": 0,
+        "tok_per_s_per_user": 56.6,
+        "tokens_per_sec": 987.1,
+        "tokens_per_sec_per_gpu": 123.4,
+        "ttft_p99_ms": 0.0
+      },
+      "c_star": 32,
+      "c_use": 26,
+      "config": {
+        "num_instances": 8,
+        "tp": 1
+      },
+      "curve": [
+        {
+          "concurrency": 1,
+          "itl_p99_ms": 17.333,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 57.7,
+          "tokens_per_sec": 57.7
+        },
+        {
+          "concurrency": 2,
+          "itl_p99_ms": 17.329,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 57.7,
+          "tokens_per_sec": 114.1
+        },
+        {
+          "concurrency": 4,
+          "itl_p99_ms": 17.324,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 57.7,
+          "tokens_per_sec": 221.3
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 17.404,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 57.5,
+          "tokens_per_sec": 404.7
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 17.535,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 57.0,
+          "tokens_per_sec": 771.7
+        },
+        {
+          "concurrency": 24,
+          "itl_p99_ms": 17.682,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 56.6,
+          "tokens_per_sec": 987.1
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 17.85522,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 56.0,
+          "tokens_per_sec": 1322.3
+        }
+      ],
+      "gpus": 8,
+      "label": "8x TP1"
+    }
+  ],
+  "headroom": 0.8,
+  "interactivity_floor": {
+    "itl_p99_ms_max": 20.0,
+    "tok_per_s_per_user": 50.0
+  },
+  "objective": "dual-pareto",
+  "winner": {
+    "budget_max": "1x TP8",
+    "chosen": "1x TP8",
+    "efficiency_per_gpu": "1x TP8",
+    "move_trail": [
+      "enumerated single-node topologies within budget",
+      "probed a concurrency ramp per topology with real BLIS runs",
+      "ranked finalists on usable capacity (headroom 0.8)"
+    ],
+    "reason": "1x TP8 gives the most tok/s/GPU while holding the 50 tok/s/user floor; usable load c=26 (C*=32)."
+  }
+}

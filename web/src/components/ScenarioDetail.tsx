@@ -137,6 +137,87 @@ export function Lines({ recs, shownRecs, get, xl, yl, label, colors, showKnee = 
   )
 }
 
+/* ---------------- per-chart explanations ----------------
+   Each figure gets a static "how to read it" line plus a finding DERIVED from the runs
+   currently in view, so the prose cites this scenario's own numbers instead of generic text.
+   Every helper tolerates empty/!finite data and returns null rather than inventing a claim. */
+
+function fmtList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? ''
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+}
+
+/** Scatter: the throughput/interactivity trade-off — name the best fleet point that still holds
+ *  the floor, and what pushing past it costs. */
+function explainScatter(recs: RunRecord[]): string | null {
+  const ok = recs.filter((r) => r.ok && finite(r.cl) && finite(r.pu))
+  const bad = recs.filter((r) => !r.ok && finite(r.cl) && finite(r.pu))
+  if (ok.length === 0) return bad.length ? 'No run in view holds the interactivity floor — every point here breaks it.' : null
+  const best = ok.reduce((a, b) => ((b.cl as number) > (a.cl as number) ? b : a))
+  let s = `The furthest-right filled point is ${best.series} at ${fnum(best.conc, 0)} concurrent `
+    + `sessions: ${fnum(best.cl)} tok/s across the fleet while each user still sees ${fnum(best.pu)} tok/s.`
+  if (bad.length) {
+    const over = bad.reduce((a, b) => ((b.cl as number) > (a.cl as number) ? b : a))
+    const drop = finite(best.pu) && finite(over.pu) ? Math.round((1 - (over.pu as number) / (best.pu as number)) * 100) : null
+    s += ` Hollow points push further on fleet throughput — up to ${fnum(over.cl)} tok/s — but`
+      + (drop !== null && drop > 0 ? ` per-user speed falls ${drop}% to ${fnum(over.pu)} tok/s,` : ' per-user speed collapses,')
+      + ' which is why peak throughput alone is the wrong thing to rank on.'
+  } else {
+    s += ' No run in view breaks the floor, so the frontier is still rising — the limit is past the loads swept here.'
+  }
+  return s
+}
+
+/** Per-user-vs-load: where each config's cliff is, i.e. how far it scales before it breaks. */
+function explainPerUser(recs: RunRecord[], seriesList: string[]): string | null {
+  const limits: { s: string; last: number; knee: number | null }[] = []
+  for (const s of seriesList) {
+    const rows = recs.filter((r) => r.series === s && finite(r.conc)).sort((a, b) => (a.conc as number) - (b.conc as number))
+    if (!rows.length) continue
+    const okRows = rows.filter((r) => r.ok)
+    const firstBad = rows.find((r) => !r.ok)
+    limits.push({
+      s,
+      last: okRows.length ? (okRows[okRows.length - 1].conc as number) : 0,
+      knee: firstBad ? (firstBad.conc as number) : null,
+    })
+  }
+  if (!limits.length) return null
+  const parts = limits
+    .sort((a, b) => b.last - a.last)
+    .map((l) => `${l.s} holds to ${l.last} session${l.last === 1 ? '' : 's'}${l.knee !== null ? ` (breaks at ${l.knee})` : ''}`)
+  const spread = limits.length > 1 && limits[0].last > 0
+    ? ` That is a ${(limits[0].last / Math.max(1, limits[limits.length - 1].last)).toFixed(1)}× spread in how many sessions a configuration carries — from configuration alone, on the same hardware and workload.`
+    : ''
+  const anyKnee = limits.some((l) => l.knee !== null)
+  return `${fmtList(parts)}.${spread}`
+    + (anyKnee
+      ? ' The violet knee marks the first load that breaks the floor: per-user speed holds roughly flat, then falls away within a session or two.'
+      : ' No configuration in view reached its knee, so each one still has headroom above the loads swept here.')
+}
+
+/** ITL-vs-load: latency is the mechanism behind the cliff — quantify flat vs post-knee. */
+function explainItl(recs: RunRecord[]): string | null {
+  const withItl = recs.filter((r) => finite(r.itl) && finite(r.conc))
+  if (!withItl.length) return null
+  const ok = withItl.filter((r) => r.ok)
+  const bad = withItl.filter((r) => !r.ok)
+  if (!ok.length) return 'Every run in view is already over the latency ceiling.'
+  const itls = ok.map((r) => r.itl as number)
+  const lo = Math.min(...itls)
+  const hi = Math.max(...itls)
+  let s = `While a configuration is healthy its inter-token latency barely moves — ${fnum(lo, 1)}`
+    + `${hi > lo ? `–${fnum(hi, 1)}` : ''} ms across the servable loads in view.`
+  if (bad.length) {
+    const worst = Math.max(...bad.map((r) => r.itl as number))
+    s += ` Past the knee it climbs to ${fnum(worst, 1)} ms — roughly ${Math.max(2, Math.round(worst / Math.max(lo, 0.001)))}× the healthy value.`
+      + ' Adding load beyond that point buys little throughput and costs every user noticeably.'
+  } else {
+    s += ' Nothing in view crosses the ceiling, so the decode path is not yet the binding constraint.'
+  }
+  return s
+}
+
 export function Explorer({ recs, runId }: { recs: RunRecord[]; runId: string }) {
   const [f, setF] = useState<RecFilters>({ series: '', band: '', servable: '' })
   const series = useMemo(() => [...new Set(recs.map((r) => r.series))].sort(), [recs])
@@ -188,7 +269,10 @@ export function Explorer({ recs, runId }: { recs: RunRecord[]; runId: string }) 
           <div className="vc-h"><h4 className="vc-t">Throughput ↔ interactivity</h4><span className="vc-r">{regime}</span></div>
           <p className="vc-s">cluster tok/s vs per-user tok/s · one point per run</p>
           <Scatter pts={pts} xl="cluster tok/s" yl="tok/s per user" label="Scatter of cluster throughput against per-user throughput" />
-          <p className="vc-k">up and to the right is faster for everyone; hollow = breaks the floor</p>
+          <p className="vc-k"><b>How to read it.</b> Each point is one run: x is what the whole fleet delivers, y is what one
+            caller feels. Up and to the right is better for everyone; filled points hold the interactivity floor, hollow
+            ones break it.</p>
+          {explainScatter(shown) && <p className="vc-x">{explainScatter(shown)}</p>}
           <div className="legend">
             <span><i className="dot filled" /> servable</span><span><i className="dot hollow" /> not servable</span>
             {series.map((s) => <span key={s}><i className="sw2" style={{ background: colors.get(s) }} />{s}</span>)}
@@ -200,13 +284,19 @@ export function Explorer({ recs, runId }: { recs: RunRecord[]; runId: string }) 
           <div className="vc-h"><h4 className="vc-t">Per-user rate vs load</h4><span className="vc-r">interactivity</span></div>
           <p className="vc-s">tok/s per user as concurrency climbs</p>
           <Lines recs={recs} shownRecs={shown} get={(r) => r.pu} xl="concurrency" yl="tok/s per user" label="Per-user throughput by concurrency" colors={colors} showKnee />
-          <p className="vc-k">the knee marks where a config first breaks the floor</p>
+          <p className="vc-k"><b>How to read it.</b> One line per configuration, walking the load up. Flat is good — it means
+            adding sessions has not yet slowed anyone down. The violet line marks that configuration's knee, the first load
+            that breaks the floor.</p>
+          {explainPerUser(shown, series) && <p className="vc-x">{explainPerUser(shown, series)}</p>}
         </figure>
         <figure className="vc">
           <div className="vc-h"><h4 className="vc-t">Inter-token latency vs load</h4><span className="vc-r">latency</span></div>
           <p className="vc-s">ITL (ms) as concurrency climbs</p>
           <Lines recs={recs} shownRecs={shown} get={(r) => r.itl} xl="concurrency" yl="ITL (ms)" label="Inter-token latency by concurrency" colors={colors} showKnee />
-          <p className="vc-k">latency stays flat, then climbs sharply past the knee</p>
+          <p className="vc-k"><b>How to read it.</b> Inter-token latency is the gap between output tokens — the mechanism behind
+            the cliff above. Lower is better, and the floor is a ceiling on this number, so a line crossing its knee is what
+            makes the per-user rate fall.</p>
+          {explainItl(shown) && <p className="vc-x">{explainItl(shown)}</p>}
         </figure>
       </div>
 

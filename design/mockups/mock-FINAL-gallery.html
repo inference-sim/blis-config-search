@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>config-search · scenario gallery</title>
+<!--
+  FINAL gallery — table (default) + Pareto plot view over the SAME filtered rows.
+  Table: one row per scenario (expandable to finalists). Plot: hand-built SVG scatter.
+  No cross-model crown in either view. Static, no server, no deps beyond Google Fonts.
+-->
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+:root{
+  --paper:#f7f9f6; --panel:#ffffff; --ink:#171c1a; --muted:#5b6660;
+  --line:#e3e7df; --line-strong:#c3ccbf; --code-bg:#f1f4ef; --row-hover:#f3f7f2;
+  --accent:#1f6e5c; --accent-ink:#0f4438; --accent-soft:#d9e9e1;
+  --warn-ink:#7a4a12; --warn-bg:#f6e8ca; --warn-line:#d8b984;
+  --mock-ink:#6b4508; --mock-bg:#f6e8ca; --mock-line:#d8b984;
+  --plot-s1:#2f6fb5; --plot-s2:#b5730a; --plot-s3:#b1467e; --plot-s4:#6b5bc4; --plot-other:#8a938a;
+  --plot-grid:#eef1ec; --plot-axis:#a8b0a5;
+  --font-sans:'IBM Plex Sans',-apple-system,'Segoe UI',system-ui,sans-serif;
+  --font-mono:'IBM Plex Mono','SFMono-Regular',ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+  --paper:#141413; --panel:#1a1a19; --ink:#ededea; --muted:#a3a39d;
+  --line:#2c2c28; --line-strong:#4a4a42; --code-bg:#22221f; --row-hover:#20231f;
+  --accent:#4bbf96; --accent-ink:#8fdcc0; --accent-soft:#17352c;
+  --warn-ink:#e3b96a; --warn-bg:#2a2013; --warn-line:#7a5c29;
+  --mock-ink:#e3b96a; --mock-bg:#2a2013; --mock-line:#7a5c29;
+  --plot-s1:#6aa6ee; --plot-s2:#e0a03a; --plot-s3:#e276ac; --plot-s4:#a99bf0; --plot-other:#9aa39a;
+  --plot-grid:#262622; --plot-axis:#5b5b52;
+  color-scheme:dark;
+}}
+:root[data-theme=dark]{
+  --paper:#141413; --panel:#1a1a19; --ink:#ededea; --muted:#a3a39d;
+  --line:#2c2c28; --line-strong:#4a4a42; --code-bg:#22221f; --row-hover:#20231f;
+  --accent:#4bbf96; --accent-ink:#8fdcc0; --accent-soft:#17352c;
+  --warn-ink:#e3b96a; --warn-bg:#2a2013; --warn-line:#7a5c29;
+  --mock-ink:#e3b96a; --mock-bg:#2a2013; --mock-line:#7a5c29; color-scheme:dark;
+  --plot-s1:#6aa6ee; --plot-s2:#e0a03a; --plot-s3:#e276ac; --plot-s4:#a99bf0; --plot-other:#9aa39a;
+  --plot-grid:#262622; --plot-axis:#5b5b52;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font-sans);
+  font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:28px 28px;background-position:-1px -1px;background-attachment:fixed}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+a{color:inherit;text-decoration:none}
+.wrap{max-width:1360px;margin:0 auto;padding:28px 16px 70px}
+@media(min-width:700px){.wrap{padding:34px 28px 80px}}
+
+/* masthead */
+.mast{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  border-bottom:1.5px solid var(--line-strong);padding-bottom:16px;margin-bottom:20px}
+.mast h1{font-size:24px;font-weight:600;letter-spacing:-0.015em;margin:0}
+.mast h1 b{font-weight:700}
+.mast .mright{display:flex;gap:10px;align-items:center}
+.themebtn{font:inherit;font-size:12px;font-weight:600;color:var(--muted);background:var(--panel);border:1px solid var(--line-strong);border-radius:3px;padding:3px 9px;cursor:pointer}
+.themebtn:hover{color:var(--ink)}
+.themebtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mast .dek{color:var(--muted);font-size:13.5px;margin:5px 0 0;max-width:62ch}
+.trust{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+  border:1px solid var(--line-strong);border-radius:3px;padding:3px 8px;white-space:nowrap}
+
+/* summary strip (filter-scoped counts only; no cross-model winner) */
+.summary{display:flex;flex-wrap:wrap;gap:6px 22px;align-items:baseline;background:var(--panel);border:1px solid var(--line);
+  border-radius:8px;padding:10px 16px;margin-bottom:12px;font-size:13px;color:var(--muted)}
+.summary .sv{font-family:var(--font-mono);font-weight:600;font-size:17px;color:var(--ink);font-variant-numeric:tabular-nums;margin-right:5px}
+.summary .sm{display:inline-flex;align-items:baseline}
+.mockflag{display:inline-block;font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--mock-ink);background:var(--mock-bg);border:1px solid var(--mock-line);border-radius:3px;padding:1px 6px;vertical-align:middle;white-space:nowrap}
+.lnk{color:var(--accent);cursor:pointer;font-weight:600;background:none;border:0;font:inherit;font-weight:600;padding:0}
+
+/* facet bar */
+.facets{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px;margin-bottom:12px;
+  display:grid;grid-template-columns:repeat(4,auto);gap:8px 26px;justify-content:start;align-items:start}
+.fgroup{display:flex;flex-wrap:wrap;align-items:center;gap:5px;min-width:0}
+.flabel{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-right:3px}
+.fchip{font-family:var(--font-mono);font-size:12px;color:var(--ink);background:var(--code-bg);border:1px solid var(--line);
+  border-radius:4px;padding:3px 8px;cursor:pointer;user-select:none;display:inline-flex;gap:6px;align-items:baseline;font-variant-numeric:tabular-nums}
+.fchip:hover{border-color:var(--line-strong)}
+.fchip .n{font-size:10.5px;color:var(--muted)}
+.fchip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+:root[data-theme=dark] .fchip.on,
+.fchip.on.dk{color:#06241b}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) .fchip.on{color:#06241b}:root:not([data-theme=light]) .fchip.on .n{color:#06241b}}
+.fchip.on .n{color:inherit;opacity:.85}
+.fchip.empty{opacity:.35;cursor:not-allowed}
+.fchip:focus-visible,.th:focus-visible,tr.row:focus-visible,.exp:focus-visible,.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(max-width:1000px){.facets{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.facets{grid-template-columns:1fr}}
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:0 2px 8px;font-size:12.5px;color:var(--muted)}
+.toolbar .lnk[hidden]{display:none}
+.toolbar .tright{display:flex;gap:16px;align-items:center}
+
+/* table */
+.tablewrap{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow-x:auto}
+table{border-collapse:separate;border-spacing:0;width:100%;min-width:1160px}
+thead th{position:sticky;top:0;background:var(--panel);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--muted);font-weight:700;text-align:left;padding:10px 12px;border-bottom:1.5px solid var(--line-strong);
+  white-space:nowrap;user-select:none;cursor:pointer;vertical-align:bottom}
+thead th.num{text-align:right}
+thead th:hover{color:var(--ink)}
+thead th .arrow{display:inline-block;width:1em;color:var(--line-strong);font-size:10px}
+thead th[aria-sort=ascending] .arrow,thead th[aria-sort=descending] .arrow{color:var(--accent)}
+thead th[aria-sort=ascending],thead th[aria-sort=descending]{color:var(--ink);box-shadow:inset 0 -2px 0 var(--accent)}
+thead th.nosort{cursor:default}
+tbody td{padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:middle}
+td.num{text-align:right;font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+td.num .u{color:var(--muted);font-size:10.5px;margin-left:3px}
+tr.row{cursor:pointer;transition:background .08s}
+tr.row:hover{background:var(--row-hover)}
+tr.row.mockrow td:first-child{box-shadow:inset 3px 0 0 var(--mock-line)}
+tr.row:not(.mockrow) td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+.mname{font-weight:600;letter-spacing:-.005em}
+.exp{background:none;border:1px solid var(--line);color:var(--muted);width:20px;height:20px;border-radius:3px;cursor:pointer;
+  font-size:10px;line-height:1;margin-right:8px;padding:0;font-family:var(--font-mono);vertical-align:middle}
+.exp:hover{border-color:var(--accent);color:var(--accent)}
+.cfgcell{font-family:var(--font-mono);font-weight:600;color:var(--accent)}
+td.best{color:var(--accent);font-weight:600;position:relative}
+td.best::before{content:"";position:absolute;inset:4px 4px;background:var(--accent-soft);border-radius:4px;z-index:0}
+td.best>span{position:relative;z-index:1}
+td.best .u{position:relative}
+.chip{font-family:var(--font-mono);font-size:11px;color:var(--muted);background:var(--code-bg);border:1px solid var(--line);border-radius:3px;padding:1px 6px}
+.srv{display:inline-flex;align-items:center;gap:7px}
+.srv i{display:inline-block;width:38px;height:4px;background:var(--line);border-radius:2px;overflow:hidden;position:relative}
+.srv i b{position:absolute;left:0;top:0;bottom:0;background:var(--accent);opacity:.75}
+td.rep a{color:var(--accent);font-weight:600;font-size:13px}
+td.rep a::after{content:" →"}
+tr.sub td{background:var(--code-bg);font-size:12.5px;color:var(--muted);padding-top:6px;padding-bottom:6px}
+tr.sub td.num{color:var(--ink)}
+tr.sub .pick{color:var(--accent);font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+tr.sub td:first-child{padding-left:48px}
+.emptyrow td{text-align:center;color:var(--muted);padding:48px 0;white-space:normal}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:10px 2px 0;align-items:center}
+.legend .sw{display:inline-block;width:14px;height:10px;border-radius:2px;background:var(--accent-soft);border:1px solid var(--accent);vertical-align:-1px;margin-right:5px}
+.legend .sw.m{background:var(--mock-bg);border-color:var(--mock-line)}
+
+/* phone: stacked cards */
+.sortsel{display:none;font:inherit;font-size:12.5px;color:var(--ink);background:var(--panel);border:1px solid var(--line-strong);border-radius:4px;padding:3px 6px}
+@media(max-width:700px){
+  .sortsel{display:inline-block}
+  .tablewrap{background:none;border:0;overflow:visible}
+  table,tbody{display:block;min-width:0}
+  thead{display:none}
+  tbody tr.row,tbody tr.sub{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;background:var(--panel);
+    border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:8px}
+  tbody tr.row.mockrow{border-left:3px solid var(--mock-line)}
+  tbody tr.row:not(.mockrow){border-left:3px solid var(--accent)}
+  tbody td{display:block;border:0;padding:0;white-space:normal;box-shadow:none!important;text-align:left}
+  td.num{text-align:left}
+  tbody td::before{content:attr(data-label);display:block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;font-family:var(--font-sans)}
+  td.first,td.cfgcell,td.rep{grid-column:1/-1}
+  td.first::before,td.rep::before{display:none}
+  td.first{font-size:15px}
+  td:empty{display:none}
+  td.best::before{position:static;background:none;inset:auto;border-radius:0;z-index:auto}
+  td.best{box-shadow:none}
+  td.best>span{background:var(--accent-soft);border-radius:3px;padding:0 5px}
+  tr.sub{margin:-4px 0 8px 14px;background:var(--code-bg)!important}
+  tr.sub td:first-child{padding-left:0}
+  .emptyrow{display:block}
+  .emptyrow td{display:block}
+  .emptyrow td::before{display:none}
+}
+
+/* view toggle (segmented) */
+.seg{display:inline-flex;border:1px solid var(--line-strong);border-radius:4px;overflow:hidden;background:var(--panel)}
+.seg button{font:inherit;font-size:12px;font-weight:600;color:var(--muted);background:none;border:0;padding:4px 12px;cursor:pointer}
+.seg button+button{border-left:1px solid var(--line-strong)}
+.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed=true]{background:var(--accent);color:#fff}
+:root[data-theme=dark] .seg button[aria-pressed=true]{color:#06241b}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) .seg button[aria-pressed=true]{color:#06241b}}
+.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+body[data-view=plot] .tableonly{display:none!important}
+body:not([data-view=plot]) #plotview{display:none}
+.plotonly{display:none}
+body[data-view=plot] .plotonly{display:inline-flex}
+.toggle{align-items:center;gap:6px;font-size:12.5px;cursor:pointer;user-select:none;color:var(--muted)}
+.toggle input{accent-color:var(--accent);margin:0}
+
+/* plot view */
+.plotcard{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px 18px 14px;min-width:0}
+.plotcard h2{font-size:16px;font-weight:600;letter-spacing:-0.01em;margin:0}
+.plotcard .psub{margin:3px 0 8px;font-size:13px;color:var(--muted);max-width:70ch}
+.mockstrip{display:none;margin:6px 0 4px;padding:6px 10px;border:1px dashed var(--mock-line);background:var(--mock-bg);color:var(--mock-ink);border-radius:4px;font-size:12.5px}
+.mockstrip.on{display:block}
+.mockstrip b{font-family:var(--font-mono);font-weight:600}
+.plotbox{position:relative;width:100%}
+svg.plot{display:block;width:100%;height:auto;overflow:visible}
+.plot text{font-family:var(--font-mono);fill:var(--muted);font-size:11px}
+.plot .axtitle{font-family:var(--font-sans);font-size:12px;font-weight:600;fill:var(--ink);letter-spacing:0.01em}
+.plot .grid{stroke:var(--plot-grid);stroke-width:1}
+.plot .axis{stroke:var(--plot-axis);stroke-width:1.2}
+.plot .better{font-family:var(--font-sans);font-size:11px;fill:var(--accent);font-weight:600;letter-spacing:.04em}
+.plot .pt{cursor:pointer;outline:none}
+.plot .pt .mk{transition:transform .12s;transform-box:fill-box;transform-origin:center}
+.plot .pt.hl .mk,.plot .pt:focus-visible .mk{transform:scale(1.35)}
+.plot.has-hl .pt:not(.hl){opacity:.38}
+.plot .pt .lbl{font-size:10.5px;fill:var(--muted)}
+.plot .pt.hl .lbl{fill:var(--ink);font-weight:600}
+.plot .emptymsg{font-family:var(--font-sans);font-size:14px;fill:var(--muted)}
+#tip{position:absolute;z-index:5;pointer-events:none;background:var(--panel);border:1px solid var(--line-strong);
+  border-top:3px solid var(--accent);border-radius:6px;padding:9px 12px 10px;min-width:210px;max-width:260px;
+  box-shadow:0 10px 28px rgba(0,0,0,.18);opacity:0;transition:opacity .08s;font-size:12.5px;left:0;top:0}
+#tip.on{opacity:1}
+#tip .t1{font-weight:600;font-size:13.5px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+#tip .t2{font-family:var(--font-mono);color:var(--accent);font-weight:600;font-size:13px;margin-top:1px}
+#tip .t3{color:var(--muted);font-size:11.5px;margin:2px 0 6px}
+#tip dl{display:grid;grid-template-columns:auto auto;gap:1px 14px;margin:0;font-family:var(--font-mono);font-size:12px}
+#tip dt{color:var(--muted)} #tip dd{margin:0;text-align:right;font-weight:500}
+#tip .go{margin-top:7px;padding-top:6px;border-top:1px solid var(--line);font-size:11.5px;color:var(--accent);font-weight:600}
+.real{font-size:9.5px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--accent-ink);background:var(--accent-soft);
+  border:1px solid var(--accent);border-radius:3px;padding:1px 6px;white-space:nowrap;line-height:1.5}
+#plegend{display:flex;flex-wrap:wrap;gap:6px 22px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+#plegend .grp{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center}
+#plegend .eyebrow{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-right:2px}
+#plegend .it{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11.5px;color:var(--ink)}
+#plegend .it.off{opacity:.35}
+#plegend .it i{font-style:normal;color:var(--muted)}
+#plegend svg{width:14px;height:14px;overflow:visible}
+.plotempty{margin-top:8px;font-size:13px;color:var(--muted)}
+@media(max-width:560px){.plotcard{padding:14px 10px 12px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* how it works */
+.how{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;margin-top:28px;background:var(--panel);border:1px solid var(--line);border-radius:8px}
+.how>div{padding:16px 20px;border-right:1px solid var(--line)}
+.how>div:last-child{border-right:0}
+.how h3{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:0 0 7px}
+.how p{margin:0;font-size:13px;color:var(--ink)}
+.how code{font-family:var(--font-mono);font-size:12px;background:var(--code-bg);border:1px solid var(--line);border-radius:3px;padding:0 4px}
+@media(max-width:800px){.how{grid-template-columns:1fr}.how>div{border-right:0;border-bottom:1px solid var(--line)}.how>div:last-child{border-bottom:0}}
+.notebar{margin-top:14px;border:1px solid var(--warn-line);background:var(--warn-bg);color:var(--warn-ink);border-radius:6px;padding:11px 16px;font-size:13px}
+.notebar b{font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="mast">
+    <div>
+      <h1><b>config-search</b> · scenario gallery</h1>
+      <p class="dek">Every scenario, one row: the Pareto-optimal serving config BLIS recommends for a model, hardware, GPU budget and workload. Switch between a sortable table and a Pareto plot; click a row or point for the full interactive report.</p>
+    </div>
+    <span class="mright"><span class="trust">Simulator predictions · not measured</span><button class="themebtn" id="theme" type="button" aria-label="Toggle color theme">theme: system</button></span>
+  </header>
+
+  <section class="summary" id="summary" aria-live="polite"></section>
+
+  <section class="facets" id="facets" aria-label="Filters"></section>
+
+  <div class="toolbar">
+    <span id="status" class="mono"></span>
+    <label class="tright tableonly" style="gap:6px"><select class="sortsel" id="sortsel" aria-label="Sort scenarios by"></select></label>
+    <span class="tright">
+      <label class="toggle plotonly"><input type="checkbox" id="fin"> show all finalists</label>
+      <span class="seg" id="viewseg" role="group" aria-label="View"><button type="button" data-v="table" aria-pressed="true">Table</button><button type="button" data-v="plot" aria-pressed="false">Plot</button></span>
+      <button class="lnk tableonly" id="expandall" type="button">expand all finalists</button>
+      <button class="lnk" id="reset" type="button" hidden>clear filters</button>
+    </span>
+  </div>
+
+  <div class="tablewrap tableonly">
+    <table id="tbl">
+      <thead id="thead"></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <section class="plotcard" id="plotview" aria-label="Pareto plot view">
+    <h2>Throughput vs interactivity</h2>
+    <p class="psub">Each point is one scenario's recommended config at its usable operating point. Right = more cluster throughput, up = faster per user. Models are not ranked against each other.</p>
+    <div class="mockstrip" id="mockstrip"></div>
+    <div class="plotbox" id="plotbox">
+      <svg class="plot" id="plot" role="img" aria-label="Scatter plot of each scenario's winning config: total cluster tokens per second on X, tokens per second per user on Y"></svg>
+      <div id="tip" role="status"></div>
+    </div>
+    <div id="plegend"></div>
+  </section>
+
+  <div class="legend tableonly">
+    <span><span class="sw"></span>best value in column (real BLIS rows only)</span>
+    <span><span class="sw m"></span><span class="mockflag">mock</span> illustrative scenario, not BLIS output</span>
+    <span>tok/s columns are at the usable operating point (headroom-adjusted)</span>
+  </div>
+
+  <section class="how">
+    <div><h3>How a report is made</h3><p>config-search sweeps tp, instances, PD and EP in the BLIS simulator, keeps the Pareto frontier under your interactivity floor, and <code>report.py</code> turns the run dir into a single self-contained <code>index.html</code>. No server runs at view time.</p></div>
+    <div><h3>Add your own scenario</h3><p>Run the skill locally, commit the run directory, open a PR. CI regenerates every report and this table. Rows appear here the moment the PR merges.</p></div>
+    <div><h3>How to read the numbers</h3><p>Recommended config is the most output tok/s on the budget that still holds the per-user floor on every instance. Expand a row to see the other finalists it beat.</p></div>
+  </section>
+  <div class="notebar"><b>Trust note.</b> All figures are BLIS simulator predictions, not benchmarks of a live cluster. Validate a short-listed config on real hardware before committing capacity. Rows flagged <span class="mockflag">mock</span> are placeholder data for this design exploration.</div>
+</div>
+
+<script src="data.js"></script>
+<script>
+/*CORE-START*/
+const FACETS=[
+  {key:"model",label:"Model"},
+  {key:"hardware",label:"Hardware"},
+  {key:"workload",label:"Workload"},
+  {key:"gpu_budget",label:"GPU budget",fmt:v=>v+"×"},
+];
+// column defs: get() returns a sortable value; best = "max"|"min"|null
+const COLS=[
+  {id:"model",label:"Model",get:s=>s.model,type:"str"},
+  {id:"hardware",label:"Hardware",get:s=>s.hardware,type:"str"},
+  {id:"gpu_budget",label:"GPUs",get:s=>s.gpu_budget,num:true},
+  {id:"workload",label:"Workload",get:s=>s.workload,type:"str"},
+  {id:"config",label:"Recommended config",get:s=>s.winner.label,type:"str"},
+  {id:"tps",label:"tok/s",get:s=>s.winner.tps,num:true,best:"max"},
+  {id:"tps_per_gpu",label:"tok/s/GPU",get:s=>s.winner.tps_per_gpu,num:true,best:"max"},
+  {id:"per_user",label:"tok/s/user",get:s=>s.winner.per_user,num:true,best:"max"},
+  {id:"itl_p99",label:"ITL p99",get:s=>s.winner.itl_p99,num:true,best:"min"},
+  {id:"servable",label:"Servable",get:s=>s.n_servable/s.n_runs,num:true},
+  {id:"load",label:"Load (c)",get:s=>s.winner.c_use,num:true},
+  {id:"report",label:"Report",get:s=>s.run_id,nosort:true},
+];
+function makeSel(){const o={};FACETS.forEach(f=>o[f.key]=new Set());return o}
+function passes(s,sel,exceptKey){
+  return FACETS.every(f=>f.key===exceptKey||sel[f.key].size===0||sel[f.key].has(s[f.key]));
+}
+function filterRows(S,sel){return S.filter(s=>passes(s,sel,null))}
+function facetCount(S,sel,key,v){return S.filter(s=>passes(s,sel,key)&&s[key]===v).length}
+function sortRows(rows,colId,dir){
+  const c=COLS.find(x=>x.id===colId);
+  if(!c||c.nosort) return rows.slice();
+  const m=dir==="asc"?1:-1;
+  // stable: decorate with index; ties fall back to original order
+  return rows.map((r,i)=>[r,i]).sort((a,b)=>{
+    const x=c.get(a[0]),y=c.get(b[0]);
+    const d=c.num?(x-y):String(x).localeCompare(String(y));
+    return d? d*m : a[1]-b[1];
+  }).map(p=>p[0]);
+}
+function bestIds(rows){ // colId -> run_id of best REAL row (ties: first). Synthetic rows never win; needs >1 real row.
+  const out={};
+  const real=rows.filter(r=>!r.synthetic);
+  if(real.length<2) return out;
+  COLS.filter(c=>c.best).forEach(c=>{
+    let b=real[0];
+    real.forEach(r=>{const v=c.get(r),bv=c.get(b); if(c.best==="max"?v>bv:v<bv) b=r;});
+    out[c.id]=b.run_id;
+  });
+  return out;
+}
+function summaryCounts(rows){ // filter-scoped counts only; no cross-model ranking
+  const u=k=>new Set(rows.map(s=>s[k])).size;
+  return {scenarios:rows.length,runs:rows.reduce((a,s)=>a+s.n_servable,0),models:u("model"),hardware:u("hardware"),
+    mock:rows.filter(s=>s.synthetic).length};
+}
+function esc(v){return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function hrefFor(id){return encodeURIComponent(id)+"/index.html"}
+
+// ---- plot logic (pure) ----
+// "nice" axis: zero-based, step in {1,2,2.5,5}x10^k, never NaN, never zero-span.
+function niceScale(max,n){
+  n=n||5;
+  if(!(max>0)||!isFinite(max)) max=1;
+  const raw=max/n, mag=Math.pow(10,Math.floor(Math.log10(raw))), norm=raw/mag;
+  const step=(norm<=1?1:norm<=2?2:norm<=2.5?2.5:norm<=5?5:10)*mag;
+  const count=Math.max(1,Math.ceil(max/step-1e-9));
+  const ticks=[]; for(let i=0;i<=count;i++) ticks.push(Math.round(i*step*1e9)/1e9);
+  return {max:ticks[ticks.length-1],step,ticks};
+}
+// data -> pixel. Degenerate (zero / non-finite) span maps to the range midpoint.
+function linScale(d0,d1,r0,r1){
+  const span=d1-d0;
+  return v=>(!isFinite(span)||span===0||!isFinite(v))?(r0+r1)/2:r0+(v-d0)/span*(r1-r0);
+}
+function plotData(rows,withFinalists){
+  const winners=rows.map(s=>({s,x:s.winner.tps,y:s.winner.per_user}));
+  const finals=[];
+  if(withFinalists) rows.forEach(s=>s.finalists.forEach(f=>{
+    if(f.label!==s.winner.label) finals.push({s,f,x:f.tps,y:f.per_user});
+  }));
+  const all=winners.concat(finals);
+  const mx=Math.max(0,...all.map(p=>p.x).filter(Number.isFinite));
+  const my=Math.max(0,...all.map(p=>p.y).filter(Number.isFinite));
+  return {winners,finals,xs:niceScale(mx*1.06),ys:niceScale(my*1.1)};
+}
+// marker radius from tok/s/GPU: sqrt-area scaling, always finite, 5..10px
+function sizeOf(v,max){
+  if(!isFinite(v)||!(max>0)||v<=0) return 5;
+  return 5+5*Math.sqrt(Math.min(1,v/max));
+}
+function maxPerGpu(rows){return Math.max(0,...rows.map(s=>s.winner.tps_per_gpu).filter(Number.isFinite));}
+function isMockPoint(p){return !!p.s.synthetic;}
+function encodings(S){
+  const MODELS=[...new Set(S.map(s=>s.model))].sort(), HWS=[...new Set(S.map(s=>s.hardware))].sort();
+  const RAMP=["var(--plot-s1)","var(--plot-s2)","var(--plot-s3)","var(--plot-s4)"], SHAPES=["circle","diamond","square","triangle"];
+  return {MODELS,HWS,colorOf:m=>RAMP[MODELS.indexOf(m)]||"var(--plot-other)",
+    shapeOf:h=>SHAPES[Math.max(0,HWS.indexOf(h))%SHAPES.length]};
+}
+function markerSVG(kind,r,color,mock){
+  const c=color, st=mock
+    ? `fill="${c}" fill-opacity=".16" stroke="${c}" stroke-width="1.8" stroke-dasharray="3 2"`
+    : `fill="${c}" stroke="var(--panel)" stroke-width="1.5"`;
+  const k=r*1.18;
+  if(kind==="circle") return `<circle r="${r}" ${st}/>`;
+  if(kind==="diamond") return `<path d="M0 ${-k*1.2}L${k*1.2} 0L0 ${k*1.2}L${-k*1.2} 0Z" ${st}/>`;
+  if(kind==="square") return `<rect x="${-r}" y="${-r}" width="${2*r}" height="${2*r}" rx="1.5" ${st}/>`;
+  return `<path d="M0 ${-k*1.15}L${k*1.1} ${k*.85}L${-k*1.1} ${k*.85}Z" ${st}/>`;
+}
+/*CORE-END*/
+
+if(typeof document!=="undefined"){
+const S=window.SCENARIOS;
+const sel=makeSel();
+let sortCol="tps",sortDir="desc";
+const expanded=new Set();
+const $=id=>document.getElementById(id);
+const f1=(v)=>v.toFixed(1), f0=v=>v.toFixed(0);
+const mockTag=s=>s.synthetic?` <span class="mockflag">mock</span>`:"";
+
+function renderSummary(rows){
+  const c=summaryCounts(rows), m=(n,l)=>`<span class="sm"><span class="sv">${n}</span>${l}</span>`;
+  $("summary").innerHTML=
+    m(c.scenarios,c.scenarios===1?"scenario":"scenarios")+m(c.runs,c.runs===1?"servable run":"servable runs")+
+    m(c.models,c.models===1?"model":"models")+m(c.hardware,c.hardware===1?"hardware type":"hardware types")+
+    `<span>in view${c.scenarios<S.length?` (of ${S.length})`:""}</span>`+
+    (c.mock?`<span><span class="mockflag">mock</span> ${c.mock} illustrative</span>`:"")+
+    `<span style="flex-basis:100%;font-size:12px">Each row carries its own recommended config. Throughput is not comparable across models or workloads.</span>`;
+}
+
+function renderFacets(){
+  const el=$("facets");
+  el.innerHTML=FACETS.map(f=>{
+    const vals=[...new Set(S.map(s=>s[f.key]))].sort((a,b)=>typeof a==="number"?a-b:String(a).localeCompare(b));
+    return `<div class="fgroup" role="group" aria-label="${f.label}"><span class="flabel">${f.label}</span>`+
+      vals.map(v=>{
+        const n=facetCount(S,sel,f.key,v), on=sel[f.key].has(v);
+        const cls="fchip"+(on?" on":"")+(n===0&&!on?" empty":"");
+        return `<span class="${cls}" role="button" tabindex="0" aria-pressed="${on}" data-k="${esc(f.key)}" data-v="${esc(v)}">${f.fmt?f.fmt(v):v}<span class="n">${n}</span></span>`;
+      }).join("")+`</div>`;
+  }).join("");
+  el.querySelectorAll(".fchip").forEach(c=>{
+    const act=()=>{
+      if(c.classList.contains("empty")) return;
+      const k=c.dataset.k, v=k==="gpu_budget"?Number(c.dataset.v):c.dataset.v;
+      sel[k].has(v)?sel[k].delete(v):sel[k].add(v); render();
+    };
+    c.onclick=act;
+    c.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();act();}};
+  });
+}
+
+function renderHead(){
+  $("thead").innerHTML="<tr>"+COLS.map(c=>{
+    const active=c.id===sortCol;
+    const aria=c.nosort?"":` aria-sort="${active?(sortDir==="asc"?"ascending":"descending"):"none"}"`;
+    const arrow=c.nosort?"":`<span class="arrow">${active?(sortDir==="asc"?"▲":"▼"):"↕"}</span>`;
+    return `<th class="${c.num?"num":""}${c.nosort?" nosort":" th"}" data-c="${c.id}"${aria}${c.nosort?"":' tabindex="0" role="columnheader button"'}>${arrow}${c.label}</th>`;
+  }).join("")+"</tr>";
+  const ss=$("sortsel");
+  ss.innerHTML=COLS.filter(c=>!c.nosort).map(c=>`<option value="${c.id}">Sort: ${esc(c.label)}</option>`).join("");
+  ss.value=sortCol;
+  ss.onchange=()=>{ if(ss.value===sortCol) return; sortCol=ss.value;const c=COLS.find(x=>x.id===sortCol);sortDir=(c.num&&c.best!=="min")?"desc":"asc";render();};
+  $("thead").querySelectorAll("th.th").forEach(th=>{
+    const act=()=>{
+      const id=th.dataset.c;
+      if(sortCol===id) sortDir=sortDir==="asc"?"desc":"asc";
+      else{sortCol=id;const c=COLS.find(x=>x.id===id);sortDir=(c.num&&c.best!=="min")?"desc":(c.num?"asc":"asc");}
+      render();
+    };
+    th.onclick=act;
+    th.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();act();}};
+  });
+}
+
+function renderBody(rows){
+  const tb=$("tbody");
+  if(!rows.length){tb.innerHTML=`<tr class="emptyrow"><td colspan="${COLS.length}">No scenarios match this filter. <button class="lnk" id="reset2" type="button" style="background:none;border:0;color:var(--accent);font:inherit;font-weight:600;cursor:pointer">Clear filters</button></td></tr>`;
+    const r2=$("reset2"); if(r2) r2.onclick=clearAll; return;}
+  const sorted=sortRows(rows,sortCol,sortDir);
+  const best=bestIds(sorted);
+  const bc=(id,s)=>!s.synthetic&&best[id]===s.run_id?" best":"";
+  const L=id=>esc(COLS.find(c=>c.id===id).label);
+  tb.innerHTML=sorted.map(s=>{
+    const w=s.winner, open=expanded.has(s.run_id), href=hrefFor(s.run_id);
+    const pct=Math.round(100*s.n_servable/s.n_runs);
+    let h=`<tr class="row${s.synthetic?" mockrow":""}" tabindex="0" data-href="${href}" aria-label="Open report for ${esc(s.model)} on ${esc(s.hardware)}">
+      <td class="first"><button class="exp" type="button" data-id="${esc(s.run_id)}" aria-expanded="${open}" aria-label="Toggle finalists">${open?"−":"+"}</button><span class="mname">${esc(s.model)}</span>${mockTag(s)}</td>
+      <td data-label="${L("hardware")}">${esc(s.hardware)}</td>
+      <td class="num" data-label="${L("gpu_budget")}">${s.gpu_budget}</td>
+      <td data-label="${L("workload")}">${esc(s.workload)} <span class="chip">${esc(s.isl_osl)}</span></td>
+      <td class="cfgcell" data-label="${L("config")}">${esc(w.label)}</td>
+      <td class="num${bc("tps",s)}" data-label="${L("tps")}"><span>${f0(w.tps)}</span></td>
+      <td class="num${bc("tps_per_gpu",s)}" data-label="${L("tps_per_gpu")}"><span>${f1(w.tps_per_gpu)}</span></td>
+      <td class="num${bc("per_user",s)}" data-label="${L("per_user")}"><span>${f1(w.per_user)}</span></td>
+      <td class="num${bc("itl_p99",s)}" data-label="${L("itl_p99")}"><span>${f1(w.itl_p99)}</span><span class="u">ms</span></td>
+      <td class="num" data-label="${L("servable")}"><span class="srv"><i><b style="width:${pct}%"></b></i>${s.n_servable}/${s.n_runs}</span></td>
+      <td class="num" data-label="${L("load")}">${w.c_use}</td>
+      <td class="rep"><a href="${href}">report</a></td>
+    </tr>`;
+    if(open){
+      const fin=s.finalists.slice().sort((a,b)=>b.tps-a.tps);
+      h+=fin.map(f=>{
+        const isW=f.label===w.label;
+        return `<tr class="sub"><td class="first">${isW?'<span class="pick">recommended</span>':"finalist"}</td><td></td><td class="num" data-label="${L("gpu_budget")}">${f.gpus}</td><td></td>
+          <td class="mono cfgcell" style="color:inherit" data-label="${L("config")}">${esc(f.label)}</td>
+          <td class="num" data-label="${L("tps")}">${f0(f.tps)}</td><td class="num" data-label="${L("tps_per_gpu")}">${f1(f.tps_per_gpu)}</td><td class="num" data-label="${L("per_user")}">${f1(f.per_user)}</td>
+          <td class="num" data-label="${L("itl_p99")}">${f1(f.itl_p99)}<span class="u">ms</span></td><td></td><td class="num" data-label="${L("load")}">${f.c_use}</td><td></td></tr>`;
+      }).join("");
+    }
+    return h;
+  }).join("");
+  tb.querySelectorAll("tr.row").forEach(tr=>{
+    tr.onclick=e=>{ if(e.target.closest(".exp")) return; location.href=tr.dataset.href; };
+    tr.onkeydown=e=>{ if(e.target!==tr) return; if(e.key==="Enter"){location.href=tr.dataset.href;} };
+  });
+  tb.querySelectorAll(".exp").forEach(b=>b.onclick=e=>{
+    e.stopPropagation(); const id=b.dataset.id;
+    expanded.has(id)?expanded.delete(id):expanded.add(id); render();
+  });
+}
+
+
+/* ---------------- plot view ---------------- */
+const ENC=encodings(S), colorOf=ENC.colorOf, shapeOf=ENC.shapeOf;
+let view="table", showFin=false, hoverId=null, lastPtr="mouse", geom=null, rowsNow=[];
+const fmt0=v=>Number(v).toLocaleString("en-US",{maximumFractionDigits:0});
+const fmt1=v=>Number(v).toLocaleString("en-US",{minimumFractionDigits:1,maximumFractionDigits:1});
+
+function renderPlot(rows){
+  const box=$("plotbox"), svg=$("plot");
+  const W=Math.max(280,Math.floor(box.clientWidth||720));
+  const H=W<520?Math.round(W*0.95):Math.max(380,Math.min(500,Math.round(W*0.56)));
+  const m={l:W<520?48:60,r:W<520?26:40,t:16,b:50};
+  const iw=W-m.l-m.r, ih=H-m.t-m.b;
+  const D=plotData(rows,showFin), pgMax=maxPerGpu(rows);
+  const sx=linScale(0,D.xs.max,m.l,m.l+iw), sy=linScale(0,D.ys.max,m.t+ih,m.t);
+  const tickX=v=>v>=1000?fmt0(v):(D.xs.step<1?v.toFixed(1):String(v));
+  const tickY=v=>D.ys.step<1?v.toFixed(1):fmt0(v);
+  const xt=W<520?D.xs.ticks.filter((_,i)=>i%2===0||D.xs.ticks.length<=5):D.xs.ticks;
+  let g="";
+  D.ys.ticks.forEach(v=>{const y=sy(v);
+    g+=`<line class="grid" x1="${m.l}" x2="${m.l+iw}" y1="${y}" y2="${y}"/>`;
+    g+=`<text x="${m.l-8}" y="${y+3.5}" text-anchor="end">${tickY(v)}</text>`;});
+  xt.forEach(v=>{const x=sx(v);
+    g+=`<line class="grid" x1="${x}" x2="${x}" y1="${m.t}" y2="${m.t+ih}"/>`;
+    g+=`<text x="${x}" y="${m.t+ih+17}" text-anchor="middle">${tickX(v)}</text>`;});
+  g+=`<line class="axis" x1="${m.l}" x2="${m.l+iw}" y1="${m.t+ih}" y2="${m.t+ih}"/>`;
+  g+=`<line class="axis" x1="${m.l}" x2="${m.l}" y1="${m.t}" y2="${m.t+ih}"/>`;
+  g+=`<text class="axtitle" x="${m.l+iw/2}" y="${H-8}" text-anchor="middle">Total cluster throughput (tok/s) →</text>`;
+  g+=`<text class="axtitle" transform="translate(13 ${m.t+ih/2}) rotate(-90)" text-anchor="middle">Per-user speed (tok/s/user) →</text>`;
+  if(iw>380) g+=`<text class="better" x="${m.l+iw-6}" y="${m.t+14}" text-anchor="end">BETTER ↗</text>`;
+  svg.setAttribute("viewBox",`0 0 ${W} ${H}`); svg.setAttribute("width",W); svg.setAttribute("height",H);
+  if(!rows.length){
+    g+=`<text class="emptymsg" x="${m.l+iw/2}" y="${m.t+ih/2}" text-anchor="middle">No scenarios match these filters.</text>`;
+    svg.innerHTML=g; return {sx,sy,W,H};
+  }
+  if(showFin) rows.forEach(s=>{
+    const pts=s.finalists.slice().sort((a,b)=>a.tps-b.tps).map(f=>[sx(f.tps),sy(f.per_user)]);
+    if(pts.length>1) g+=`<polyline points="${pts.map(p=>p.map(n=>n.toFixed(1)).join(",")).join(" ")}" fill="none" stroke="${colorOf(s.model)}" stroke-opacity=".4" stroke-width="1.4" stroke-dasharray="${s.synthetic?"4 3":"none"}"/>`;
+  });
+  D.finals.forEach(p=>{
+    g+=`<g transform="translate(${sx(p.x).toFixed(1)} ${sy(p.y).toFixed(1)})"><title>${esc(p.s.model+" · "+p.f.label+" — "+fmt0(p.f.tps)+" tok/s, "+fmt1(p.f.per_user)+" tok/s/user")}</title>`
+       +markerSVG(shapeOf(p.s.hardware),3.2,colorOf(p.s.model),isMockPoint(p))+`</g>`;
+  });
+  D.winners.forEach(p=>{
+    const s=p.s, cx=sx(p.x), cy=sy(p.y), col=colorOf(s.model), kind=shapeOf(s.hardware);
+    const flip=cx>m.l+iw-54, r=sizeOf(s.winner.tps_per_gpu,pgMax);
+    g+=`<a class="pt" href="${hrefFor(s.run_id)}" data-id="${esc(s.run_id)}" tabindex="0"
+        aria-label="${esc(s.model+" on "+s.hardware+", "+s.gpu_budget+" GPUs, "+s.workload+(s.synthetic?" (mock)":"")+": "+s.winner.label+", "+fmt0(s.winner.tps)+" tok/s, "+fmt1(s.winner.per_user)+" tok/s per user. Open report.")}">
+      <g transform="translate(${cx.toFixed(1)} ${cy.toFixed(1)})">
+        <circle r="${(r+8).toFixed(1)}" fill="transparent"/>
+        ${s.synthetic?"":`<circle r="${(r+4).toFixed(1)}" fill="${col}" fill-opacity=".18"/>`}
+        <g class="mk">${markerSVG(kind,r,col,s.synthetic)}</g>
+        <text class="lbl" x="${flip?-(r+7):r+7}" y="3.5" text-anchor="${flip?"end":"start"}">${s.gpu_budget}×</text>
+      </g></a>`;
+  });
+  svg.innerHTML=g;
+  svg.querySelectorAll(".pt").forEach(a=>{
+    const id=a.dataset.id;
+    a.addEventListener("mouseenter",()=>setHover(id));
+    a.addEventListener("mouseleave",clearHover);
+    a.addEventListener("focus",()=>setHover(id));
+    a.addEventListener("blur",clearHover);
+    a.addEventListener("pointerdown",e=>{lastPtr=e.pointerType});
+    a.addEventListener("click",e=>{if(lastPtr==="touch"&&hoverId!==id){e.preventDefault();setHover(id);}});
+  });
+  return {sx,sy,W,H};
+}
+function setHover(id){
+  hoverId=id;
+  $("plot").classList.add("has-hl");
+  $("plot").querySelectorAll(".pt").forEach(e=>e.classList.toggle("hl",e.dataset.id===id));
+  showTip(id);
+}
+function clearHover(){
+  hoverId=null;
+  $("plot").classList.remove("has-hl");
+  $("plot").querySelectorAll(".pt.hl").forEach(e=>e.classList.remove("hl"));
+  $("tip").classList.remove("on");
+}
+function showTip(id){
+  const s=rowsNow.find(r=>r.run_id===id), tip=$("tip");
+  if(!s||!geom){tip.classList.remove("on");return;}
+  const w=s.winner;
+  tip.innerHTML=`
+    <div class="t1"><span>${esc(s.model)} · ${esc(s.hardware)}</span>${s.synthetic?`<span class="mockflag">mock</span>`:`<span class="real">real run</span>`}</div>
+    <div class="t2">${esc(w.label)}</div>
+    <div class="t3">${s.gpu_budget} GPU budget · ${esc(s.workload)} · ${esc(s.isl_osl)}</div>
+    <dl><dt>cluster</dt><dd>${fmt1(w.tps)} tok/s</dd><dt>per GPU</dt><dd>${fmt1(w.tps_per_gpu)} tok/s</dd>
+    <dt>per user</dt><dd>${fmt1(w.per_user)} tok/s</dd><dt>ITL p99</dt><dd>${fmt1(w.itl_p99)} ms</dd></dl>
+    <div class="go">Click to open report →</div>`;
+  const cx=geom.sx(w.tps), cy=geom.sy(w.per_user);
+  tip.style.left="0px"; tip.style.top="0px";
+  const tw=tip.offsetWidth||0, th=tip.offsetHeight||0;
+  let left=cx+18; if(left+tw>geom.W-4) left=cx-tw-18;
+  left=Math.max(4,Math.min(left,geom.W-tw-4));
+  const top=Math.max(4,Math.min(cy-th/2,geom.H-th-4));
+  tip.style.left=left+"px"; tip.style.top=top+"px";
+  tip.classList.add("on");
+}
+function glyphSVG(kind,mock){
+  return `<svg viewBox="-7 -7 14 14">${markerSVG(kind,5,"var(--ink)",mock).replace('stroke="var(--panel)"','stroke="none"')}</svg>`;
+}
+function renderLegend(rows){
+  const cnt=(k,v)=>rows.filter(s=>s[k]===v).length;
+  let h=`<div class="grp"><span class="eyebrow">Model</span>`;
+  ENC.MODELS.forEach(m=>{const n=cnt("model",m);
+    h+=`<span class="it${n?"":" off"}"><svg viewBox="-7 -7 14 14"><circle r="5" fill="${colorOf(m)}"/></svg>${esc(m)} <i>${n}</i></span>`;});
+  h+=`</div><div class="grp"><span class="eyebrow">Hardware</span>`;
+  ENC.HWS.forEach(x=>{const n=cnt("hardware",x);
+    h+=`<span class="it${n?"":" off"}">${glyphSVG(shapeOf(x),false)}${esc(x)} <i>${n}</i></span>`;});
+  h+=`</div><div class="grp"><span class="eyebrow">Source</span>
+    <span class="it">${glyphSVG("circle",false)}real BLIS run</span>
+    <span class="it">${glyphSVG("circle",true)}mock (dashed, hollow)</span>
+    <span class="it"><i>label = GPU budget · size = tok/s/GPU</i></span></div>`;
+  $("plegend").innerHTML=h;
+}
+function renderPlotView(rows){
+  rowsNow=rows;
+  const mocks=rows.filter(s=>s.synthetic).length, strip=$("mockstrip");
+  if(mocks){strip.classList.add("on");
+    strip.innerHTML=mocks===rows.length
+      ?`<b>MOCK DATA.</b> Every point in view is a synthetic placeholder, not a BLIS result.`
+      :`<b>${mocks} of ${rows.length}</b> points in view are MOCK (dashed, hollow markers). Only solid markers are real BLIS runs.`;
+  } else strip.classList.remove("on");
+  geom=renderPlot(rows);
+  renderLegend(rows);
+  hoverId=null;
+}
+function setView(v,persist){
+  view=(v==="plot")?"plot":"table";
+  document.body.dataset.view=view;
+  document.querySelectorAll("#viewseg button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.v===view)));
+  if(persist){try{localStorage.setItem("cs-view",view);}catch(e){}}
+  render();
+}
+function initView(){
+  let v="table";
+  try{const sv=localStorage.getItem("cs-view"); if(sv==="plot"||sv==="table") v=sv;}catch(e){}
+  document.querySelectorAll("#viewseg button").forEach(b=>b.onclick=()=>{if(b.dataset.v!==view) setView(b.dataset.v,true);});
+  $("fin").onchange=e=>{showFin=e.target.checked;render();};
+  let rt; window.addEventListener("resize",()=>{clearTimeout(rt);rt=setTimeout(()=>{if(view==="plot")render();},80);});
+  view=v; document.body.dataset.view=v;
+  document.querySelectorAll("#viewseg button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.v===v)));
+}
+
+function clearAll(){FACETS.forEach(f=>sel[f.key].clear());render();}
+
+function render(){
+  const rows=filterRows(S,sel);
+  renderSummary(rows);
+  renderFacets();
+  if(view==="plot") renderPlotView(rows);
+  else{ renderHead(); renderBody(rows); }
+  const any=FACETS.some(f=>sel[f.key].size);
+  $("reset").hidden=!any;
+  $("reset").onclick=clearAll;
+  const nMock=rows.filter(r=>r.synthetic).length;
+  $("status").textContent=`${rows.length} of ${S.length} scenarios`+(nMock?` · ${nMock} mock`:"");
+  const allOpen=rows.length&&rows.every(r=>expanded.has(r.run_id));
+  $("expandall").textContent=allOpen?"collapse all finalists":"expand all finalists";
+  $("expandall").onclick=()=>{rows.forEach(r=>allOpen?expanded.delete(r.run_id):expanded.add(r.run_id));render();};
+}
+function initTheme(){
+  const root=document.documentElement, btn=$("theme");
+  const modes=["system","light","dark"];
+  let i=0;
+  try{const sv=localStorage.getItem("cs-theme"); if(modes.includes(sv)) i=modes.indexOf(sv);}catch(e){}
+  const apply=()=>{
+    const m=modes[i];
+    if(m==="system") delete root.dataset.theme; else root.dataset.theme=m;
+    btn.textContent="theme: "+m;
+    try{localStorage.setItem("cs-theme",m);}catch(e){}
+  };
+  btn.onclick=()=>{i=(i+1)%3;apply();};
+  apply();
+}
+initTheme();
+initView();
+render();
+}
+</script>
+</body>
+</html>

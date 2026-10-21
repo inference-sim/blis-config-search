@@ -141,6 +141,36 @@ def validate_and_project(run_dir):
     return run_id, row
 
 
+# A fixed banner/back-link injected into each rendered report. report.py stays a pure,
+# gallery-agnostic transform (and lives in the read-only skill); these are gallery concerns,
+# so the build adds them after the fact, right inside the report's .wrap container.
+_BACK_LINK = ('<div style="font:600 13px/1.4 system-ui,sans-serif;margin:16px 0 0">'
+              '<a href="../index.html#/reports" style="color:#1f6e5c;text-decoration:none">← back to the gallery</a></div>')
+_MOCK_BANNER = ('<div role="note" style="font:600 13px/1.5 system-ui,sans-serif;margin:14px 0 0;'
+                'padding:10px 14px;border:1px solid #d8b984;background:#f6e8ca;color:#6b4508;border-radius:6px">'
+                'MOCK scenario — illustrative placeholder data for the gallery demo, not a BLIS measurement. '
+                'Do not deploy from these numbers.</div>')
+
+
+def _decorate_report(path, synthetic):
+    """Inject a back-to-gallery link (all reports) and a MOCK banner (synthetic only) just
+    inside the report's .wrap container, without touching report.py."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            html = f.read()
+    except OSError:
+        return
+    anchor = '<div class="wrap">'
+    i = html.find(anchor)
+    if i == -1:
+        return
+    inject = _BACK_LINK + (_MOCK_BANNER if synthetic else "")
+    at = i + len(anchor)
+    html = html[:at] + inject + html[at:]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(html)
+
+
 def build(reports_dir, out_dir, include_mock=True):
     reports_dir = os.path.abspath(reports_dir)
     out_dir = os.path.abspath(out_dir)
@@ -166,6 +196,7 @@ def build(reports_dir, out_dir, include_mock=True):
         os.makedirs(dest, exist_ok=True)
         scenario, pareto, runs, report, _ = report_py.load_run_dir(rd)
         report_py.write_one(rd, out=os.path.join(dest, "index.html"))
+        _decorate_report(os.path.join(dest, "index.html"), row["synthetic"])
         for fn in REPORT_DATA_FILES:
             src = os.path.join(rd, fn)
             if os.path.exists(src):

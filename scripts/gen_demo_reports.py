@@ -148,10 +148,69 @@ def report_json(m):
     }
 
 
-def gallery_json(m):
-    """Display sidecar the gallery build reads for fields not in scenario/pareto."""
+def gallery_json(m, runs=None):
+    """Display sidecar the gallery build reads for fields not in scenario/pareto.
+    n_runs / n_servable are taken from the synthesized sweep when present, so the card's
+    "N/M servable" count matches what the detail explorer actually shows."""
+    if runs is not None:
+        n_runs = len(runs)
+        n_serv = sum(1 for r in runs if r["metrics"]["itl_p99_ms"] <= m["floor_itl"])
+    else:
+        n_runs, n_serv = m["n_runs"], m["n_servable"]
     return {"synthetic": True, "isl_osl": m["isl_osl"], "generated": m["generated"],
-            "n_runs": m["n_runs"], "n_servable": m["n_servable"], "reason": m["reason"]}
+            "n_runs": n_runs, "n_servable": n_serv, "reason": m["reason"]}
+
+
+def runs_jsonl(m):
+    """Synthesize a plausible multi-point sweep per finalist so the scenario-detail explorer
+    (which cross-filters per-run RECORDS) is populated for mock scenarios too. Each finalist
+    is swept over a concurrency ramp; per-user rate holds near its c_use value, then falls off
+    a cliff past c_star, matching the interactivity-cliff story the real data shows. Clearly
+    mock — these rows live only in a MOCK-marked run dir and never claim to be BLIS output."""
+    floor_itl = m["floor_itl"]
+    rows = []
+    for f in m["finalists"]:
+        c_use = f["c_use"]
+        c_star = round(c_use / m["headroom"])
+        # concurrency ramp: a few below c_use, c_use, c_star, and two past the cliff
+        ramp = sorted(set([1, max(2, c_use // 2), c_use, c_star,
+                           round(c_star * 1.2), round(c_star * 1.5)]))
+        for c in ramp:
+            frac = c / c_star if c_star else 1.0
+            # tokens/s rises with load then saturates; per-user holds then collapses past c_star
+            tps = round(f["tps"] * min(1.08, frac if frac < 1 else 1.0 + 0.08 * (1 - min(1, (c - c_star) / c_star))), 1)
+            if c <= c_star:
+                itl = round(f["itl_p99"] * (0.7 + 0.3 * frac), 3)
+                per_user = round(f["per_user"] * (1.15 - 0.15 * frac), 1)
+            else:  # past the cliff: ITL blows up, per-user collapses
+                over = (c - c_star) / c_star
+                itl = round(f["itl_p99"] * (1.0 + 6 * over), 3)
+                per_user = round(max(5.0, f["per_user"] * (1.0 - 1.8 * over)), 1)
+            servable = itl <= floor_itl
+            rows.append({
+                "config": {"tp": f["tp"], "num_instances": f["ni"], "concurrency": c},
+                "concurrency": c,
+                "config_hash": f"{m['run_id'][:6]}-{f['label'].replace(' ', '')}-{c}",
+                "phase": "probe" if c < c_use else ("finalist" if c <= c_star else "overload"),
+                "deployment": {
+                    "parallel": {"tp": f["tp"], "pp": 1, "dp": 1, "enable_expert_parallel": "EP" in f["label"]},
+                    "engine": {"block_size": 16, "max_num_batched_tokens": 8192, "max_num_seqs": 256,
+                               "max_model_len": 32768, "gpu_memory_utilization": 0.9},
+                    "num_instances": f["ni"], "gpus": f["gpus"],
+                    "scenario": f"{m['model']}-{m['hardware']}-mock.yaml",
+                },
+                "returncode": 0,
+                "metrics": {
+                    "instance_id": "cluster", "completed_requests": 200,
+                    "tokens_per_sec": tps, "itl_p99_ms": itl, "itl_mean_ms": round(itl * 0.85, 3),
+                    "tok_per_s_per_user": per_user,
+                    "ttft_p99_ms": round(200 + 30 * c, 1), "e2e_p95_ms": round(2000 + 40 * c, 1),
+                    "preemption_count": 0,
+                },
+                "tok_per_s_per_user": per_user,
+                "error": None,
+            })
+    return rows
 
 
 def write_json(path, obj):
@@ -176,7 +235,12 @@ def main():
         write_json(os.path.join(d, "scenario.json"), scenario_json(m))
         write_json(os.path.join(d, "pareto.json"), pareto_json(m))
         write_json(os.path.join(d, "report.json"), report_json(m))
-        write_json(os.path.join(d, "gallery.json"), gallery_json(m))
+        runs = runs_jsonl(m)
+        write_json(os.path.join(d, "gallery.json"), gallery_json(m, runs))
+        # runs.jsonl: synthesized sweep so the scenario-detail explorer is populated
+        with open(os.path.join(d, "runs.jsonl"), "w", encoding="utf-8") as f:
+            for row in runs:
+                f.write(json.dumps(row, sort_keys=True) + "\n")
         open(os.path.join(d, "MOCK"), "w").close()
         print(f"wrote {m['run_id']}/ (mock)")
 

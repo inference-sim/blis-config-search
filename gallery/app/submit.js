@@ -41,16 +41,18 @@ export function mount(root) {
   if (!st.hardware || !H.some(h => h.name === st.hardware)) st.hardware = (H.find(h => h.name === "h100") || H[0] || {}).name || "";
 
   const opts = (arr, cur) => arr.map(x => `<option value="${esc(x.name)}"${x.name === cur ? " selected" : ""}>${esc(x.name)}</option>`).join("");
-  const dis = local ? "" : " disabled";
+  // The form is a BUILDER in both modes — fields stay editable so a visitor can compose their
+  // Scenario and watch the YAML update live. Only *execution* is gated: pages mode has no run
+  // button and makes no network call; local mode adds the run button + /api/search POST.
   root.innerHTML = `
     <h2 class="vt">Submit a scenario <span class="modebadge ${local ? "local" : ""}">${local ? "local mode" : "read-only (Pages)"}</span></h2>
     <p class="dek">${local
       ? "Build a Scenario and run the search on your machine. <b>Runs locally against your own LLM</b> through the companion server; nothing is sent to a hosted service."
-      : "Build a Scenario to see the exact <code>scenario.yaml</code> to submit. This published site cannot run searches: execution is disabled. Open a pull request and CI runs it after a maintainer approves."}</p>
+      : "Build a Scenario below to see the exact <code>scenario.yaml</code> to submit — the fields are editable. This published site cannot <i>run</i> searches: execution is disabled. Open a pull request and CI runs it after a maintainer approves."}</p>
     <div class="sgrid">
       <section class="card" aria-label="Scenario form">
         <form class="form" id="frm" onsubmit="return false">
-          <fieldset style="border:0;padding:0;margin:0;min-width:0;display:grid;gap:12px"${dis}>
+          <fieldset style="border:0;padding:0;margin:0;min-width:0;display:grid;gap:12px">
             <div class="field"><label for="f-model">Model</label><select id="f-model">${opts(M, st.model)}</select></div>
             <div class="field"><label for="f-workload">Workload preset</label><select id="f-workload">${opts(W, st.workload)}</select></div>
             <div class="field"><label for="f-hw">Hardware</label><select id="f-hw">${opts(H, st.hardware)}</select></div>

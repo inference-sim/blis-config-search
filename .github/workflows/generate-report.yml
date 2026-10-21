@@ -49,7 +49,7 @@ jobs:
         with:
           ref: ${{ github.event.inputs.pr_branch }}
 
-      - name: Validate the submission path
+      - name: Validate the submission path and target branch
         run: |
           sub="${{ github.event.inputs.submission }}"
           case "$sub" in
@@ -59,6 +59,13 @@ jobs:
           test -f "$sub" || { echo "no such submission: $sub" >&2; exit 1; }
           # reject path traversal / absolute paths
           case "$sub" in *..*|/*) echo "unsafe path" >&2; exit 1 ;; esac
+          # NEVER commit generated reports straight to a protected branch — they must land on
+          # a PR branch so the normal review + merge -> publish gate applies. Refuse main.
+          branch="${{ github.event.inputs.pr_branch }}"
+          case "$branch" in
+            main|master|HEAD|"") echo "pr_branch must be a PR feature branch, not '$branch'" >&2; exit 1 ;;
+          esac
+          case "$branch" in *..*|/*) echo "unsafe branch name" >&2; exit 1 ;; esac
           echo "submission=$sub" >> "$GITHUB_ENV"
 
       - uses: actions/setup-go@v5

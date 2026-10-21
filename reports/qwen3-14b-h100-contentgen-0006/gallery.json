@@ -1,8 +1,8 @@
 {
   "generated": "2026-10-20",
   "isl_osl": "1k / 1k",
-  "n_runs": 26,
-  "n_servable": 12,
+  "n_runs": 12,
+  "n_servable": 8,
   "reason": "Mock scenario \u2014 balanced 1k/1k content generation rewards many narrow replicas under a tight floor.",
   "synthetic": true
 }

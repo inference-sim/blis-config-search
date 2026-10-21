@@ -49,33 +49,29 @@ def _load_json(path, default=None):
 
 
 def _git_describe(repo):
-    """Best-effort tag/commit of a sibling repo, without shelling into it unsafely."""
-    head = os.path.join(repo, ".git", "HEAD")
-    if not os.path.exists(head):
+    """Authoritative version string for a sibling repo: the exact tag if HEAD is tagged,
+    else `<nearest-tag>-<n>-g<sha>` (git's own "commits ahead" form), else a short sha.
+    Uses `git describe` (read-only) so packed-refs and the ahead-of-tag case are handled
+    correctly — a hand-rolled ref walk missed both and could mislabel a moved HEAD as a tag."""
+    if not os.path.isdir(os.path.join(repo, ".git")):
         return "absent"
-    # resolve HEAD -> ref -> sha; keep it simple and dependency-free
+    import subprocess
     try:
-        with open(head, encoding="utf-8") as f:
-            ref = f.read().strip()
-        if ref.startswith("ref: "):
-            refpath = os.path.join(repo, ".git", ref[5:])
-            sha = open(refpath, encoding="utf-8").read().strip()[:10] if os.path.exists(refpath) else "?"
-        else:
-            sha = ref[:10]
-    except OSError:
-        sha = "?"
-    # look for a tag pointing at this sha
-    tags_dir = os.path.join(repo, ".git", "refs", "tags")
-    tag = None
-    if os.path.isdir(tags_dir):
-        for t in sorted(os.listdir(tags_dir)):
-            try:
-                if open(os.path.join(tags_dir, t), encoding="utf-8").read().strip()[:10] == sha:
-                    tag = t
-                    break
-            except OSError:
-                pass
-    return tag or sha
+        out = subprocess.run(["git", "-C", repo, "describe", "--tags", "--always", "--dirty"],
+                             capture_output=True, text=True, timeout=10)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    # fallback: short HEAD sha via rev-parse
+    try:
+        out = subprocess.run(["git", "-C", repo, "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True, timeout=10)
+        if out.returncode == 0:
+            return out.stdout.strip() or "?"
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "?"
 
 
 # ---- config.json shape extraction (handles nested text_config/language_config) ----
@@ -178,7 +174,9 @@ def _workload_entry(path, name):
     out = w.get("output") or {}
     return {
         "name": name,
-        "prefix_tokens": w.get("prefix_tokens"),
+        # absent prefix_tokens means no shared prefix, i.e. 0 (BLIS default); the multidoc
+        # preset omits the field where the others write 0 — normalize so the tab is consistent
+        "prefix_tokens": w.get("prefix_tokens", 0),
         "isl_mean": pr.get("tokens"), "isl_stdev": pr.get("tokens_stdev"),
         "isl_min": pr.get("tokens_min"), "isl_max": pr.get("tokens_max"),
         "osl_mean": out.get("tokens"), "osl_stdev": out.get("tokens_stdev"),

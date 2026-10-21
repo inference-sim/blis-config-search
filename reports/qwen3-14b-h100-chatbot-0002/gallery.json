@@ -1,8 +1,8 @@
 {
   "generated": "2026-10-19",
   "isl_osl": "ShareGPT",
-  "n_runs": 22,
-  "n_servable": 14,
+  "n_runs": 18,
+  "n_servable": 12,
   "reason": "Mock scenario \u2014 narrowest TP that still fits KV spreads load across four replicas.",
   "synthetic": true
 }

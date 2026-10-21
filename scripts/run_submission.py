@@ -15,11 +15,15 @@ script. This entrypoint therefore:
   2. requires an agent runner to perform the actual search, and
   3. fails LOUDLY if no runner is configured, rather than emitting a placeholder report.
 
-The runner is selected by --runner (or $CONFIG_SEARCH_RUNNER): an executable that receives the
-validated scenario on argv/stdin and is expected to produce reports/<run_id>/ (scenario.json,
-runs.jsonl, pareto.json, report.json). This keeps the non-hermetic LLM step pluggable and
-explicit — CI wires in the maintainers' approved agent runner there. BLIS itself (invoked by
-the skill's run_blis.py/sweep_pool.py) is deterministic and LLM-free.
+Runner contract (selected by --runner or $CONFIG_SEARCH_RUNNER):
+  * invoked as a single executable with no arguments;
+  * receives the VALIDATED scenario as a JSON object on STDIN (not YAML, not argv);
+  * reads BLIS_BIN / BLIS_CATALOG / BLIS_REGISTRY / OUT_DIR from the environment;
+  * must write a complete run directory to $OUT_DIR/<run_id>/ (scenario.json, runs.jsonl,
+    pareto.json, report.json) and exit 0 on success, non-zero on failure.
+This keeps the non-hermetic LLM step pluggable and explicit — CI wires in the maintainers'
+approved agent runner there. BLIS itself (invoked by the skill's run_blis.py/sweep_pool.py)
+is deterministic and LLM-free.
 
 This script never fabricates results and never publishes; the workflow commits reports/ to the
 PR branch for the normal review + merge -> publish path.

@@ -156,8 +156,10 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_static(self):
         # Minimal, path-traversal-safe static file server rooted at site/.
         rel = self.path.split("?", 1)[0].lstrip("/") or "index.html"
-        full = os.path.normpath(os.path.join(SITE, rel))
-        if not full.startswith(SITE + os.sep) and full != SITE:
+        # realpath resolves symlinks too, so a symlink inside site/ can't escape the root.
+        site_root = os.path.realpath(SITE)
+        full = os.path.realpath(os.path.join(site_root, rel))
+        if not (full == site_root or full.startswith(site_root + os.sep)):
             return self._send(403, {"error": "forbidden"})
         if os.path.isdir(full):
             full = os.path.join(full, "index.html")

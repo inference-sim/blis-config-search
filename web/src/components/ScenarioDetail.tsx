@@ -253,6 +253,12 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
     )
   }
   const w = s.winner
+  // The two best alternatives to the recommended config, ranked by efficiency (tok/s/GPU
+  // then total tok/s), shown side-by-side under the recommendation.
+  const runnersUp = s.finalists
+    .filter((f) => f.label !== w.label)
+    .sort((a, b) => b.tps_per_gpu - a.tps_per_gpu || b.tps - a.tps)
+    .slice(0, 2)
   return (
     <div>
       <p className="crumb"><a href="#/reports">← all reports</a></p>
@@ -264,36 +270,44 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
       </div>
       {s.synthetic && <div className="warnnote">Mock scenario: synthetic placeholder data, not a real simulation run.</div>}
 
-      <section className="briefing" aria-label="Briefing">
-        <div className="seclabel2">Recommended config</div>
-        <div className="reclabel">{w.label}</div>
-        <div className="stats">
-          <div><dt>cluster tok/s</dt><dd className="num best">{fnum(w.tps)}</dd></div>
-          <div><dt>tok/s/GPU</dt><dd className="num best">{fnum(w.tps_per_gpu)}</dd></div>
-          <div><dt>tok/s/user</dt><dd className="num best">{fnum(w.per_user)}</dd></div>
-          <div><dt>ITL p99 (ms)</dt><dd className="num best">{fnum(w.itl_p99, 2)}</dd></div>
+      <section className="briefing" aria-label="Top configs to try">
+        <div className="seclabel2">Top configs to try</div>
+        {/* Row 1: the recommended config, prominent. Row 2: the next two runners-up,
+            ranked by tok/s/GPU (efficiency), side by side. */}
+        <div className="reccard">
+          <div className="recrank">RECOMMENDED</div>
+          <div className="rechead">
+            <div className="reclabel">{w.label}</div>
+            <div className="recnote">{s.reason}</div>
+          </div>
+          <div className="recstats">
+            <div><dt>cluster tok/s</dt><dd className="num best">{fnum(w.tps)}</dd></div>
+            <div><dt>tok/s/GPU</dt><dd className="num best">{fnum(w.tps_per_gpu)}</dd></div>
+            <div><dt>tok/s/user</dt><dd className="num best">{fnum(w.per_user)}</dd></div>
+            <div><dt>ITL p99 (ms)</dt><dd className="num best">{fnum(w.itl_p99, 2)}</dd></div>
+            <div><dt>GPUs · load</dt><dd className="num"><span className="num">{fnum(w.gpus, 0)}</span> · c<span className="num">{fnum(w.c_use, 0)}</span></dd></div>
+          </div>
         </div>
-        <p className="dek"><b>Floor held:</b> <span className="mono">{s.floor}</span>{s.headroom != null && <> (headroom <span className="num">{fnum(s.headroom, 2)}</span>)</>}. {s.reason}{' '}
-          <span className="num">{s.n_servable}</span> of <span className="num">{s.n_runs}</span> simulated runs are servable.</p>
-        <div className="tbl-title">Finalists</div>
-        <div className="tscroll hscroll">
-          <table className="readout">
-            <thead><tr className="col">{['config', 'GPUs', 'conc', 'tok/s', 'tok/s/GPU', 'tok/s/user', 'ITL p99 ms'].map((h) => <th key={h}>{h}</th>)}</tr></thead>
-            <tbody>
-              {s.finalists.map((f) => (
-                <tr key={f.label} className={f.label === w.label ? 'sel' : undefined}>
-                  <td className="mono">{f.label}{f.label === w.label && <span className="ver">recommended</span>}</td>
-                  <td className="num"><span className="num">{fnum(f.gpus, 0)}</span></td>
-                  <td className="num"><span className="num">{fnum(f.c_use, 0)}</span></td>
-                  <td className="num"><span className="num">{fnum(f.tps)}</span></td>
-                  <td className="num"><span className="num">{fnum(f.tps_per_gpu)}</span></td>
-                  <td className="num"><span className="num">{fnum(f.per_user)}</span></td>
-                  <td className="num"><span className="num">{fnum(f.itl_p99, 2)}</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {runnersUp.length > 0 && (
+          <div className="runnerups">
+            {runnersUp.map((f, i) => (
+              <div className="runcard" key={f.label}>
+                <div className="runrank">#{i + 2} alternative</div>
+                <div className="runlabel">{f.label}</div>
+                <div className="runstats">
+                  <div><dt>tok/s</dt><dd className="num">{fnum(f.tps)}</dd></div>
+                  <div><dt>tok/s/GPU</dt><dd className="num">{fnum(f.tps_per_gpu)}</dd></div>
+                  <div><dt>tok/s/user</dt><dd className="num">{fnum(f.per_user)}</dd></div>
+                  <div><dt>ITL p99</dt><dd className="num">{fnum(f.itl_p99, 2)}</dd></div>
+                  <div><dt>GPUs · load</dt><dd className="num"><span className="num">{fnum(f.gpus, 0)}</span> · c<span className="num">{fnum(f.c_use, 0)}</span></dd></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="dek"><b>Floor held:</b> <span className="mono">{s.floor}</span>{s.headroom != null && <> (headroom <span className="num">{fnum(s.headroom, 2)}</span>)</>}.{' '}
+          <span className="num">{s.n_servable}</span> of <span className="num">{s.n_runs}</span> simulated runs are servable.
+          {s.finalists.length > runnersUp.length + 1 && <> All <span className="num">{s.finalists.length}</span> finalists are in the run table below.</>}</p>
       </section>
 
       <section aria-label="Pareto explorer">

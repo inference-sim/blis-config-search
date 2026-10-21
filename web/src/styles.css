@@ -171,11 +171,25 @@ dl.metrics dd,.stats dd{margin:0;font-family:var(--font-mono);font-variant-numer
 .footmeta .ghlink{display:inline-flex;align-items:center;gap:6px;color:var(--accent);font-weight:500}
 
 /* ---- scenario detail ---- */
-.briefing{background:var(--panel);border:1px solid var(--line-strong);border-radius:8px;padding:6px 20px 20px;margin-top:14px}
-.reclabel{font-family:var(--font-mono);font-size:22px;font-weight:600;color:var(--accent-ink);margin-bottom:10px}
-.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:0 0 14px}
-.stats div{border:1px solid var(--line);border-radius:6px;padding:10px 12px;background:var(--paper)}
-.stats dd{font-size:22px}
+.briefing{margin-top:14px}
+/* Row 1: the recommended config, prominent, teal-accented */
+.reccard{background:var(--panel);border:1px solid var(--accent);border-top:3px solid var(--accent);border-radius:8px;padding:14px 20px 16px}
+.recrank{font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent-ink)}
+.rechead{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin:4px 0 12px}
+.reclabel{font-family:var(--font-mono);font-size:24px;font-weight:600;color:var(--accent-ink);letter-spacing:-0.01em}
+.recnote{font-size:12.5px;color:var(--muted);line-height:1.4;flex:1 1 280px;min-width:0}
+.recstats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.recstats div{border:1px solid var(--accent-soft);border-left:2px solid var(--accent);border-radius:5px;padding:9px 12px;background:var(--accent-soft)}
+.recstats dt{font-size:10px;color:var(--accent-ink);text-transform:uppercase;letter-spacing:.04em;opacity:.85}
+.recstats dd{margin:2px 0 0;font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:20px;font-weight:600;color:var(--accent-ink)}
+/* Row 2: the two runner-up alternatives side by side */
+.runnerups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}
+.runcard{background:var(--panel);border:1px solid var(--line-strong);border-radius:7px;padding:12px 16px 14px}
+.runrank{font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted)}
+.runlabel{font-family:var(--font-mono);font-size:17px;font-weight:600;color:var(--ink);margin:3px 0 10px}
+.runstats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.runstats dt{font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+.runstats dd{margin:1px 0 0;font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:15px;font-weight:500}
 .charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px}
 .chartbox{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;min-width:0}
 .chartbox figcaption{font-size:12.5px;font-weight:600;margin-bottom:6px}
@@ -229,6 +243,7 @@ ol.steps li{margin:4px 0}
   .specgrid{grid-template-columns:minmax(0,1fr);gap:16px}
   .facetrail{position:static}
   .facet{display:inline-block;margin-right:18px;vertical-align:top}
-  .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .recstats,.runstats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .runnerups{grid-template-columns:minmax(0,1fr)}
   .charts{grid-template-columns:minmax(0,1fr)}
 }

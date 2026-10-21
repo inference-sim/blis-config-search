@@ -1,0 +1,89 @@
+import { useEffect, useState } from 'react'
+import type { Catalog, Mode, Scenario } from './types'
+import { loadCatalog, loadMode, loadScenarios } from './load'
+import { useHashRoute } from './route'
+import { Rail } from './components/Rail'
+import { Reports } from './components/Reports'
+import { ScenarioDetail } from './components/ScenarioDetail'
+import { Models } from './components/Models'
+import { Workloads } from './components/Workloads'
+import { Gpus } from './components/Gpus'
+import { Submit } from './components/Submit'
+import type { Tab } from './lib'
+
+const TAB_LABELS: [Tab, string][] = [
+  ['reports', 'Reports'],
+  ['models', 'Models'],
+  ['workloads', 'Workloads'],
+  ['gpus', 'GPUs'],
+  ['submit', 'Submit'],
+]
+
+interface Data {
+  scenarios: Scenario[]
+  catalog: Catalog
+  mode: Mode
+}
+
+export function App() {
+  const route = useHashRoute()
+  const [data, setData] = useState<Data | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let live = true
+    Promise.all([loadScenarios(), loadCatalog(), loadMode()])
+      .then(([scenarios, catalog, mode]) => live && setData({ scenarios, catalog, mode }))
+      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)))
+    return () => {
+      live = false
+    }
+  }, [])
+
+  let body
+  if (error) {
+    body = (
+      <div className="viewerror">
+        <h3>Could not load data</h3>
+        <pre>{error}</pre>
+      </div>
+    )
+  } else if (!data) {
+    body = <div className="loading">Loading…</div>
+  } else if (route.runId) {
+    body = <ScenarioDetail runId={route.runId} scenarios={data.scenarios} />
+  } else {
+    switch (route.tab) {
+      case 'models':
+        body = <Models catalog={data.catalog} scenarios={data.scenarios} />
+        break
+      case 'workloads':
+        body = <Workloads catalog={data.catalog} scenarios={data.scenarios} />
+        break
+      case 'gpus':
+        body = <Gpus catalog={data.catalog} scenarios={data.scenarios} />
+        break
+      case 'submit':
+        body = <Submit catalog={data.catalog} mode={data.mode} />
+        break
+      default:
+        body = <Reports scenarios={data.scenarios} params={route.params} />
+    }
+  }
+
+  return (
+    <div className="layout">
+      <Rail catalog={data?.catalog ?? null} mode={data?.mode ?? null} />
+      <main className="main">
+        <nav className="tabs" aria-label="Sections">
+          {TAB_LABELS.map(([t, label]) => (
+            <a key={t} href={`#/${t}`} className={`tab${route.tab === t ? ' on' : ''}`} aria-current={route.tab === t ? 'page' : undefined}>
+              {label}
+            </a>
+          ))}
+        </nav>
+        {body}
+      </main>
+    </div>
+  )
+}

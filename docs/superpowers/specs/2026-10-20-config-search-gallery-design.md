@@ -310,3 +310,46 @@ pins.env                     single source of truth for upstream repo tags/commi
 5. Submit tab, both modes; `serve_local.py` for local mode.
 6. `generate-report.yml` with the maintainer-approval gate; dry-run tested.
 7. Agent review loop until the panel agrees the site serves the purpose.
+
+---
+
+# v3 — spec-sheet redesign on Vite + React (2026-10-21)
+
+Course-correction after review: adopt the sibling **`../accuracy-dashboard`** design language
+and stack, keep the gallery cards + exec summary, and guarantee server-free static hosting.
+
+## 16. What changed from v2
+
+- **Design language** → the accuracy-dashboard spec-sheet: a **left sidebar rail** (title,
+  catalog version pills, trust note) + a **main area with tabs** + dense `table.readout`
+  tables. **Light theme only** (`color-scheme: light`; no dark mode, no toggle). Same IBM
+  Plex + teal token system.
+- **Stack** → ported from the vanilla no-build SPA to **Vite + React + TypeScript + vitest**
+  (same stack as accuracy-dashboard), in `web/`. The old `gallery/app/*` vanilla modules and
+  `gallery/index.template.html` are **removed**.
+- **Dropdowns** → a copied **custom `Dropdown` component** (styled button + popup listbox);
+  **no native `<select>` anywhere** — the native open-list can't be themed.
+- **Reports layout** (reconciled with the user): top **exec "configs to try" summary**, then a
+  cross-filter bar (custom dropdowns, live counts), then the **gallery of scenario cards**. A
+  card opens the in-app **scenario detail** (briefing + Pareto explorer with 3 inline-SVG
+  charts, cross-filtered) + a link to the full report.
+- **Static hosting, no server** → Vite `base: './'` makes every asset + data request relative,
+  so the built `web/dist/` is plain files that serve from any static host, including a GitHub
+  Pages **project subpath**, with no Python/Node server at view time. (`fetch` of the staged
+  JSON is a same-origin relative request the static host serves; it only fails under bare
+  `file://`, which Pages never is.) Verified rendering at `/<repo>/` subpath.
+
+## 17. Pipeline (v3)
+
+```
+scripts/build_gallery.py   reports/ -> site/  (DATA PRODUCER ONLY now: data.js, catalog.js,
+                           mode.js, per-run records.json, each report index.html)
+web/scripts/stage-data.mjs site/ -> web/public/data/  (scenarios.json, catalog.json,
+                           mode.json, reports/<run_id>/{index.html,records.json})
+web/ (Vite+React+TS)       npm run build -> web/dist/  (prebuild runs stage:data)
+.github/workflows/pages.yml  PR: build+validate; main: build (NO_MOCK=1) + publish web/dist
+```
+
+The Python build + the three safety properties (strict run-dir validation, reports
+regenerated from committed JSON, maintainer-merge gate) are unchanged; only the presentation
+layer and its hosting were reworked.

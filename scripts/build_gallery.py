@@ -216,17 +216,20 @@ def build(reports_dir, out_dir, include_mock=True):
     with open(os.path.join(out_dir, "data.js"), "w", encoding="utf-8") as f:
         f.write(data_js)
 
-    with open(TEMPLATE, encoding="utf-8") as f:
-        shell = f.read()
-    with open(os.path.join(out_dir, "index.html"), "w", encoding="utf-8") as f:
-        f.write(shell)
-
-    # Copy the SPA tab modules (if present) next to the shell.
-    app_src = os.path.join(ROOT, "gallery", "app")
-    if os.path.isdir(app_src):
-        for fn in sorted(os.listdir(app_src)):
-            if fn.endswith((".js", ".css")):
-                shutil.copyfile(os.path.join(app_src, fn), os.path.join(out_dir, fn))
+    # Legacy standalone shell: the webpage is now the Vite+React SPA in web/, which consumes
+    # this build's data.js/catalog.js/reports via web/scripts/stage-data.mjs. The old vanilla
+    # shell is written only when its template is still present, so build_gallery stays a pure
+    # data producer either way.
+    if os.path.isfile(TEMPLATE):
+        with open(TEMPLATE, encoding="utf-8") as f:
+            shell = f.read()
+        with open(os.path.join(out_dir, "index.html"), "w", encoding="utf-8") as f:
+            f.write(shell)
+        app_src = os.path.join(ROOT, "gallery", "app")
+        if os.path.isdir(app_src):
+            for fn in sorted(os.listdir(app_src)):
+                if fn.endswith((".js", ".css")):
+                    shutil.copyfile(os.path.join(app_src, fn), os.path.join(out_dir, fn))
 
     return built, scenarios
 

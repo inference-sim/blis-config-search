@@ -1,7 +1,11 @@
-# config-search webpage
+# config-search — data producer
 
-A static, multi-tab webpage that surfaces BLIS `config-search` reports and the BLIS catalog.
-No server at view time; on GitHub Pages it is read-only and reports are added by PR.
+> **The webpage moved to [`../web/`](../web/)** (Vite + React + TypeScript, spec-sheet design
+> matching `../../accuracy-dashboard`). This directory and `scripts/build_gallery.py` are now
+> the **data producer**: they turn committed run dirs into the dataset + per-scenario reports
+> that `web/scripts/stage-data.mjs` stages into the SPA. See `../web/README.md` to run the site.
+
+The notes below describe the report/data model and the safety/CI model, which are unchanged.
 
 ## Tabs
 

@@ -91,8 +91,9 @@ function BrushHistogram({ recs, sel, metric, onRange }: {
   )
 }
 
-export function Crossfilter({ recs, sel, setSel, shownCount }: {
+export function Crossfilter({ recs, sel, setSel, shownCount, onPickSeries }: {
   recs: RunRecord[]; sel: Selection; setSel: (s: Selection) => void; shownCount: number
+  onPickSeries?: (value: string, on: boolean) => void
 }) {
   const metrics = varyingMetrics(recs)
   const fields = visibleFacets(recs)
@@ -107,6 +108,7 @@ export function Crossfilter({ recs, sel, setSel, shownCount }: {
     const cur = sel.facets[k] ?? []
     const next = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]
     setSel({ ...sel, facets: { ...sel.facets, [k]: next } })
+    if (k === 'series') onPickSeries?.(v, !cur.includes(v))
   }
   return (
     <div className="xf" onKeyDown={(e) => { if (e.key === 'Escape' && active) setSel({ facets: {}, ranges: {} }) }}>

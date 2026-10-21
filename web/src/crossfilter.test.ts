@@ -42,3 +42,25 @@ describe('selection', () => {
     expect(visibleFacets([])).toEqual([])
   })
 })
+
+import { emphasis, resolveHighlight, toggleHighlight } from './lib'
+describe('series highlight', () => {
+  it('emphasis picks on/off/neutral', () => {
+    expect(emphasis('A', 'A')).toBe('on')
+    expect(emphasis('A', 'B')).toBe('off')
+    expect(emphasis(null, 'A')).toBe('neutral')
+  })
+  it('toggling the same series twice clears it; another series switches', () => {
+    const once = toggleHighlight(null, 'A')
+    expect(once).toBe('A')
+    expect(toggleHighlight(once, 'B')).toBe('B')
+    expect(toggleHighlight(once, 'A')).toBeNull()
+  })
+  it('sticky beats hover, and a series absent from view is ignored', () => {
+    expect(resolveHighlight('A', 'B', ['A', 'B'])).toBe('A')
+    expect(resolveHighlight(null, 'B', ['A', 'B'])).toBe('B')
+    expect(resolveHighlight('Z', null, ['A', 'B'])).toBeNull()
+    expect(resolveHighlight('Z', 'B', ['A', 'B'])).toBe('B')
+    expect(resolveHighlight('A', null, [])).toBeNull()
+  })
+})

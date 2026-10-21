@@ -1,13 +1,38 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type KeyboardEvent } from 'react'
 import type { RunRecord, Scenario } from '../types'
 import { reportHref } from '../load'
-import { EMPTY_SEL, dash, finite, fnum, selectRecords, type Selection } from '../lib'
+import { EMPTY_SEL, dash, emphasis, finite, fnum, resolveHighlight, selectRecords, toggleHighlight, type Selection } from '../lib'
 import { Crossfilter } from './Crossfilter'
 import { MockBadge } from './Reports'
 
 const PALETTE = ['#1f6e5c', '#34366e', '#b5651d', '#a3301f', '#6b7d1f', '#7a4a8c', '#2a7f9e', '#8a6d00']
 
+/** Highlight wiring shared by every chart: `active` is the already-resolved emphasised series. */
+export interface HL {
+  active: string | null
+  onHover: (s: string | null) => void
+  onToggle: (s: string) => void
+  onClear: () => void
+}
+const GREY = '#9aa1a6'
+const NO_HL: HL = { active: null, onHover: () => {}, onToggle: () => {}, onClear: () => {} }
+/** Props that make an SVG group a focusable, clickable, hoverable per-series button. */
+function seriesProps(hl: HL, name: string) {
+  return {
+    tabIndex: 0, role: 'button' as const, className: 'hl-target',
+    'aria-label': `${name}${hl.active === name ? ' (highlighted)' : ''} — press Enter to toggle highlight`,
+    'aria-pressed': hl.active === name,
+    onPointerEnter: () => hl.onHover(name), onPointerLeave: () => hl.onHover(null),
+    onFocus: () => hl.onHover(name), onBlur: () => hl.onHover(null),
+    onClick: (e: { stopPropagation: () => void }) => { e.stopPropagation(); hl.onToggle(name) },
+    onKeyDown: (e: KeyboardEvent<SVGGElement>) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); hl.onToggle(name) }
+    },
+  }
+}
+
 interface Pt {
+  series: string
   x: number
   y: number
   ok: boolean
@@ -53,22 +78,32 @@ function Empty({ msg }: { msg: string }) {
   return <div className="chartempty">{msg}</div>
 }
 
-export function Scatter({ pts, xl, yl, label }: { pts: Pt[]; xl: string; yl: string; label: string }) {
+export function Scatter({ pts, xl, yl, label, hl = NO_HL }: { pts: Pt[]; xl: string; yl: string; label: string; hl?: HL }) {
   if (pts.length === 0) return <Empty msg="No points to plot for the current filters." />
   const xmax = Math.max(...pts.map((p) => p.x), 1) * 1.05
   const ymax = Math.max(...pts.map((p) => p.y), 1) * 1.05
   const px = (x: number) => M.l + (x / xmax) * (W - M.l - M.r)
   const py = (y: number) => H - M.b - (y / ymax) * (H - M.t - M.b)
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label={label}>
+    <svg viewBox={`0 0 ${W} ${H}`} className={`chart${hl.active ? ' hl-on' : ''}`} role="group" aria-label={label}
+      data-highlight={hl.active ?? ''} onClick={hl.onClear}>
       <Axes xmax={xmax} ymax={ymax} xl={xl} yl={yl} />
       {/* deck marker: series-filled when servable, panel-filled (hollow) when not, always
-          stroked in the series colour — the instrument-panel look from the BLIS deck */}
-      {pts.map((p, i) => (
-        <circle key={i} cx={px(p.x)} cy={py(p.y)} r={4} fill={p.ok ? p.color : 'var(--panel)'} stroke={p.color} strokeWidth={1.5}>
-          <title>{p.title}</title>
-        </circle>
-      ))}
+          stroked in the series colour — the instrument-panel look from the BLIS deck.
+          Highlighted series stay coloured and draw last; the rest fade to grey context. */}
+      {[...pts.keys()].sort((i, j) => Number(emphasis(hl.active, pts[i].series) === 'on') - Number(emphasis(hl.active, pts[j].series) === 'on')).map((i) => {
+        const p = pts[i]
+        const em = emphasis(hl.active, p.series)
+        const col = em === 'off' ? GREY : p.color
+        return (
+          <g key={i} {...seriesProps(hl, p.series)} data-series={p.series} data-em={em}>
+            <circle cx={px(p.x)} cy={py(p.y)} r={em === 'on' ? 5.5 : 4} fill={p.ok ? col : 'var(--panel)'} stroke={col}
+              strokeWidth={em === 'on' ? 2 : 1.5} opacity={em === 'off' ? 0.25 : 1} className="pt">
+              <title>{p.title}</title>
+            </circle>
+          </g>
+        )
+      })}
     </svg>
   )
 }
@@ -82,9 +117,9 @@ function kneeConc(recs: RunRecord[], series: string): number | null {
   return firstBad ? (firstBad.conc as number) : null
 }
 
-export function Lines({ recs, shownRecs, get, xl, yl, label, colors, showKnee = false }: {
+export function Lines({ recs, shownRecs, get, xl, yl, label, colors, showKnee = false, hl = NO_HL }: {
   recs: RunRecord[]; shownRecs: RunRecord[]; get: (r: RunRecord) => number | null
-  xl: string; yl: string; label: string; colors: Map<string, string>; showKnee?: boolean
+  xl: string; yl: string; label: string; colors: Map<string, string>; showKnee?: boolean; hl?: HL
 }) {
   const bySeries = new Map<string, { x: number; y: number; ok: boolean }[]>()
   for (const r of shownRecs) {
@@ -102,7 +137,8 @@ export function Lines({ recs, shownRecs, get, xl, yl, label, colors, showKnee = 
   const px = (x: number) => M.l + (x / xmax) * pw
   const py = (y: number) => H - M.b - (y / ymax) * (H - M.t - M.b)
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label={label}>
+    <svg viewBox={`0 0 ${W} ${H}`} className={`chart${hl.active ? ' hl-on' : ''}`} role="group" aria-label={label}
+      data-highlight={hl.active ?? ''} onClick={hl.onClear}>
       <Axes xmax={xmax} ymax={ymax} xl={xl} yl={yl} />
       {/* violet knee markers: where each series first breaks the floor (deck convention) */}
       {showKnee && [...bySeries.keys()].map((name) => {
@@ -110,23 +146,26 @@ export function Lines({ recs, shownRecs, get, xl, yl, label, colors, showKnee = 
         if (k == null || k > xmax) return null
         const x = px(k)
         return (
-          <g key={`knee-${name}`} className="knee">
+          <g key={`knee-${name}`} className="knee" opacity={emphasis(hl.active, name) === 'off' ? 0.25 : 1}>
             <line x1={x} x2={x} y1={M.t} y2={H - M.b} />
             <text x={x} y={M.t - 2} textAnchor="middle" className="kneelab">knee</text>
           </g>
         )
       })}
-      {[...bySeries.entries()].map(([name, pts]) => {
+      {[...bySeries.entries()].sort(([a], [b]) => Number(emphasis(hl.active, a) === 'on') - Number(emphasis(hl.active, b) === 'on')).map(([name, pts]) => {
         const sorted = [...pts].sort((a, b) => a.x - b.x)
-        const c = colors.get(name) ?? PALETTE[0]
+        const em = emphasis(hl.active, name)
+        const c = em === 'off' ? GREY : (colors.get(name) ?? PALETTE[0])
+        const op = em === 'off' ? 0.25 : 1
         return (
-          <g key={name}>
+          <g key={name} {...seriesProps(hl, name)} data-series={name} data-em={em}>
             {sorted.length > 1 && (
-              <polyline fill="none" stroke={c} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round"
-                points={sorted.map((p) => `${px(p.x)},${py(p.y)}`).join(' ')} />
+              <polyline fill="none" stroke={c} strokeWidth={em === 'on' ? 3 : 2} strokeLinejoin="round" strokeLinecap="round"
+                opacity={op} className="ln" points={sorted.map((p) => `${px(p.x)},${py(p.y)}`).join(' ')} />
             )}
             {sorted.map((p, i) => (
-              <circle key={i} cx={px(p.x)} cy={py(p.y)} r={2.8} fill={p.ok ? c : 'var(--panel)'} stroke={c} strokeWidth={1.3}>
+              <circle key={i} cx={px(p.x)} cy={py(p.y)} r={em === 'on' ? 4.2 : 2.8} fill={p.ok ? c : 'var(--panel)'} stroke={c}
+                strokeWidth={em === 'on' ? 1.8 : 1.3} opacity={op} className="pt">
                 <title>{`${name} · conc ${fnum(p.x, 0)} · ${fnum(p.y)}${p.ok ? '' : ' · not servable'}`}</title>
               </circle>
             ))}
@@ -218,14 +257,22 @@ function explainItl(recs: RunRecord[]): string | null {
   return s
 }
 
-export function Explorer({ recs, runId }: { recs: RunRecord[]; runId: string }) {
+export function Explorer({ recs, runId, winner = null }: { recs: RunRecord[]; runId: string; winner?: string | null }) {
   const [sel, setSel] = useState<Selection>(EMPTY_SEL)
+  const [sticky, setSticky] = useState<string | null>(null)
+  const [hover, setHover] = useState<string | null>(null)
   const series = useMemo(() => [...new Set(recs.map((r) => r.series))].sort(), [recs])
   const colors = useMemo(() => new Map(series.map((s, i) => [s, PALETTE[i % PALETTE.length]])), [series])
   const shown = useMemo(() => selectRecords(recs, sel), [recs, sel])
   // Regime tag (deck convention): a run that broke the floor with KV preemptions is KV-bound;
   // otherwise the cliff is a decode-compute ceiling. Records don't carry preemptions, so label
   // honestly from what we have — "compute-bound" when the floor break is latency-only.
+  const shownSeries = useMemo(() => [...new Set(shown.map((r) => r.series))], [shown])
+  const active = resolveHighlight(sticky, hover, shownSeries)
+  const hl: HL = {
+    active, onHover: setHover, onClear: () => setSticky(null),
+    onToggle: (s) => setSticky((cur) => toggleHighlight(resolveHighlight(cur, null, shownSeries), s)),
+  }
   const regime = useMemo(() => (recs.some((r) => !r.ok && (r.viol ?? []).some((v) => /kv|preempt|memory/i.test(v))) ? 'KV-bound' : 'compute-bound'), [recs])
 
   if (recs.length === 0) {
@@ -241,34 +288,48 @@ export function Explorer({ recs, runId }: { recs: RunRecord[]; runId: string }) 
     y: r.pu as number,
     ok: r.ok,
     color: colors.get(r.series) ?? PALETTE[0],
+    series: r.series,
     title: `${r.series} · conc ${r.conc ?? dash} · ${fnum(r.cl)} tok/s · ${fnum(r.pu)} tok/s/user · ${r.ok ? 'servable' : r.status}`,
   }))
   const hidden = shown.length - pts.length
 
   return (
     <div>
-      <Crossfilter recs={recs} sel={sel} setSel={setSel} shownCount={shown.length} />
+      <Crossfilter recs={recs} sel={sel} setSel={setSel} shownCount={shown.length}
+        onPickSeries={(v, on) => setSticky((cur) => (on ? v : cur === v ? null : cur))} />
 
       <div className="charts">
         <figure className="vc">
           <div className="vc-h"><h4 className="vc-t">Throughput ↔ interactivity</h4><span className="vc-r">{regime}</span></div>
           <p className="vc-s">cluster tok/s vs per-user tok/s · one point per run</p>
-          <Scatter pts={pts} xl="cluster tok/s" yl="tok/s per user" label="Scatter of cluster throughput against per-user throughput" />
+          <Scatter pts={pts} xl="cluster tok/s" yl="tok/s per user" label="Scatter of cluster throughput against per-user throughput" hl={hl} />
           <p className="vc-k"><b>How to read it.</b> Each point is one run: x is what the whole fleet delivers, y is what one
             caller feels. Up and to the right is better for everyone; filled points hold the interactivity floor, hollow
             ones break it.</p>
           {explainScatter(shown) && <p className="vc-x">{explainScatter(shown)}</p>}
           <div className="legend">
             <span><i className="dot filled" /> servable</span><span><i className="dot hollow" /> not servable</span>
-            {series.map((s) => <span key={s}><i className="sw2" style={{ background: colors.get(s) }} />{s}</span>)}
+            {series.map((s) => (
+              <button type="button" key={s} className={`lg${active === s ? ' on' : ''}`} aria-pressed={sticky === s}
+                onClick={() => hl.onToggle(s)} onPointerEnter={() => setHover(s)} onPointerLeave={() => setHover(null)}>
+                <i className="sw2" style={{ background: colors.get(s) }} />{s}
+                {s === winner && <em className="recmark" title="Recommended configuration">recommended</em>}
+              </button>
+            ))}
           </div>
+          {active !== null && (
+            <div className="hl-bar" role="status">
+              <span>Highlighting <b className="mono">{active}</b>{sticky === null && ' (hover)'} — emphasis only, filters unchanged.</span>
+              {sticky !== null && <button type="button" className="hl-clear" onClick={hl.onClear}>clear highlight</button>}
+            </div>
+          )}
           {hidden > 0 && <p className="pts-note">{hidden} run{hidden === 1 ? ' has' : 's have'} no throughput values and {hidden === 1 ? 'is' : 'are'} not plotted.</p>}
           {pts.length === 1 && <p className="pts-note">Only one point matches; a trade-off frontier needs two or more.</p>}
         </figure>
         <figure className="vc">
           <div className="vc-h"><h4 className="vc-t">Per-user rate vs load</h4><span className="vc-r">interactivity</span></div>
           <p className="vc-s">tok/s per user as concurrency climbs</p>
-          <Lines recs={recs} shownRecs={shown} get={(r) => r.pu} xl="concurrency" yl="tok/s per user" label="Per-user throughput by concurrency" colors={colors} showKnee />
+          <Lines recs={recs} shownRecs={shown} get={(r) => r.pu} xl="concurrency" yl="tok/s per user" label="Per-user throughput by concurrency" colors={colors} showKnee hl={hl} />
           <p className="vc-k"><b>How to read it.</b> One line per configuration, walking the load up. Flat is good — it means
             adding sessions has not yet slowed anyone down. The violet line marks that configuration's knee, the first load
             that breaks the floor.</p>
@@ -277,7 +338,7 @@ export function Explorer({ recs, runId }: { recs: RunRecord[]; runId: string }) 
         <figure className="vc">
           <div className="vc-h"><h4 className="vc-t">Inter-token latency vs load</h4><span className="vc-r">latency</span></div>
           <p className="vc-s">ITL (ms) as concurrency climbs</p>
-          <Lines recs={recs} shownRecs={shown} get={(r) => r.itl} xl="concurrency" yl="ITL (ms)" label="Inter-token latency by concurrency" colors={colors} showKnee />
+          <Lines recs={recs} shownRecs={shown} get={(r) => r.itl} xl="concurrency" yl="ITL (ms)" label="Inter-token latency by concurrency" colors={colors} showKnee hl={hl} />
           <p className="vc-k"><b>How to read it.</b> Inter-token latency is the gap between output tokens — the mechanism behind
             the cliff above. Lower is better, and the floor is a ceiling on this number, so a line crossing its knee is what
             makes the per-user rate fall.</p>
@@ -294,7 +355,8 @@ export function Explorer({ recs, runId }: { recs: RunRecord[]; runId: string }) 
           </thead>
           <tbody>
             {shown.map((r) => (
-              <tr key={r.id} className={r.ok ? undefined : 'bad'}>
+              <tr key={r.id} className={`hl-row${r.ok ? '' : ' bad'}${active === r.series ? ' hl' : ''}`}
+                onPointerEnter={() => setHover(r.series)} onPointerLeave={() => setHover(null)} onClick={() => hl.onToggle(r.series)}>
                 <td className="mono">{r.series}</td>
                 <td className="num"><span className="num">{fnum(r.conc, 0)}</span></td>
                 <td className="num"><span className="num">{fnum(r.gpus, 0)}</span></td>
@@ -387,7 +449,7 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
 
       <section aria-label="Pareto explorer">
         <div className="seclabel2">Pareto explorer</div>
-        <Explorer recs={recs} runId={s.run_id} />
+        <Explorer recs={recs} runId={s.run_id} winner={w.label} />
       </section>
     </div>
   )

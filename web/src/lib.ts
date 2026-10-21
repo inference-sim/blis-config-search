@@ -244,3 +244,20 @@ export function histogram(values: (number | null | undefined)[], bins = 12): His
 export function varyingMetrics(recs: RunRecord[]): MetricKey[] {
   return METRICS.map((m) => m.key).filter((k) => histogram(recs.map((r) => r[k])) !== null)
 }
+
+// ---- series highlight (emphasis only, never a filter) ----
+/** Sticky click highlight wins over transient hover; either is ignored if its series is not in view. */
+export function resolveHighlight(sticky: string | null, hover: string | null, inView: readonly string[]): string | null {
+  if (sticky !== null && inView.includes(sticky)) return sticky
+  if (hover !== null && inView.includes(hover)) return hover
+  return null
+}
+/** Clicking the already-highlighted series clears it. */
+export function toggleHighlight(cur: string | null, series: string): string | null {
+  return cur === series ? null : series
+}
+/** 'on' = the highlighted series, 'off' = faded context, 'neutral' = nothing highlighted. */
+export function emphasis(active: string | null, series: string): 'on' | 'off' | 'neutral' {
+  if (active === null) return 'neutral'
+  return active === series ? 'on' : 'off'
+}

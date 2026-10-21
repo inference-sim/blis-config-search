@@ -4,6 +4,7 @@
   --paper:#f7f9f6; --panel:#fff; --ink:#171c1a; --muted:#5b6660;
   --line:#e3e7df; --line-strong:#c3ccbf; --accent:#1f6e5c; --accent-ink:#0f4438;
   --accent-soft:#d9e9e1; --warn-ink:#7a4a12; --warn-bg:#f3e3c9; --warn-line:#d8b984;
+  --violet:#5a4a9c; /* the deck's "knee"/cliff marker hue */
   --font-sans:'IBM Plex Sans',-apple-system,'Segoe UI',system-ui,sans-serif;
   --font-mono:'IBM Plex Mono','SFMono-Regular',ui-monospace,Menlo,monospace;
 }
@@ -156,7 +157,19 @@ svg.chart .axlabel{font-family:var(--font-sans);font-size:11px;fill:var(--muted)
 .legend{margin-top:8px;font-size:11px;color:var(--muted);display:flex;gap:14px;flex-wrap:wrap;align-items:center}
 .legend .dot{display:inline-block;width:9px;height:9px;border-radius:50%;border:1.6px solid var(--ink);margin-right:4px;vertical-align:middle}
 .legend .dot.filled{background:var(--ink)}
+.legend .dot.hollow{background:var(--panel)}
 .legend .sw2{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:middle}
+
+/* ---- deck-style instrument-panel chart cards (matches the BLIS deck validation figures) ---- */
+.vc{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px 11px;min-width:0;display:flex;flex-direction:column}
+.vc-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.vc-t{margin:0;font-size:12.5px;font-weight:600;letter-spacing:-0.01em;color:var(--ink)}
+.vc-r{font-size:9.5px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+.vc-s{margin:3px 0 6px;font-size:11px;color:var(--muted)}
+.vc-k{margin:7px 0 0;font-size:11px;color:var(--muted);line-height:1.45}
+/* the violet "knee" marker: the interactivity cliff, from the deck */
+svg.chart .knee line{stroke:var(--violet);stroke-width:1.1;opacity:0.55}
+svg.chart .knee .kneelab{font-family:var(--font-sans);font-size:8px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;fill:var(--violet)}
 
 /* ---- submit ---- */
 .formgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;max-width:1000px;margin-bottom:8px}

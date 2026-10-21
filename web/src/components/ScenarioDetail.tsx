@@ -62,8 +62,10 @@ export function Scatter({ pts, xl, yl, label }: { pts: Pt[]; xl: string; yl: str
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label={label}>
       <Axes xmax={xmax} ymax={ymax} xl={xl} yl={yl} />
+      {/* deck marker: series-filled when servable, panel-filled (hollow) when not, always
+          stroked in the series colour — the instrument-panel look from the BLIS deck */}
       {pts.map((p, i) => (
-        <circle key={i} cx={px(p.x)} cy={py(p.y)} r={4.5} fill={p.ok ? p.color : 'var(--panel)'} stroke={p.color} strokeWidth={1.6}>
+        <circle key={i} cx={px(p.x)} cy={py(p.y)} r={4} fill={p.ok ? p.color : 'var(--panel)'} stroke={p.color} strokeWidth={1.5}>
           <title>{p.title}</title>
         </circle>
       ))}
@@ -71,33 +73,61 @@ export function Scatter({ pts, xl, yl, label }: { pts: Pt[]; xl: string; yl: str
   )
 }
 
-export function Lines({ recs, get, xl, yl, label, colors }: { recs: RunRecord[]; get: (r: RunRecord) => number | null; xl: string; yl: string; label: string; colors: Map<string, string> }) {
-  const bySeries = new Map<string, { x: number; y: number }[]>()
-  for (const r of recs) {
+// The "knee": the first concurrency at which a series stops being servable — the interactivity
+// cliff the deck marks with a violet vertical line. Computed per series from the run records.
+function kneeConc(recs: RunRecord[], series: string): number | null {
+  const rows = recs.filter((r) => r.series === series && finite(r.conc))
+    .sort((a, b) => (a.conc as number) - (b.conc as number))
+  const firstBad = rows.find((r) => !r.ok)
+  return firstBad ? (firstBad.conc as number) : null
+}
+
+export function Lines({ recs, shownRecs, get, xl, yl, label, colors, showKnee = false }: {
+  recs: RunRecord[]; shownRecs: RunRecord[]; get: (r: RunRecord) => number | null
+  xl: string; yl: string; label: string; colors: Map<string, string>; showKnee?: boolean
+}) {
+  const bySeries = new Map<string, { x: number; y: number; ok: boolean }[]>()
+  for (const r of shownRecs) {
     const y = get(r)
     if (!finite(r.conc) || !finite(y)) continue
     const a = bySeries.get(r.series) ?? []
-    a.push({ x: r.conc, y })
+    a.push({ x: r.conc, y: y as number, ok: r.ok })
     bySeries.set(r.series, a)
   }
   const all = [...bySeries.values()].flat()
   if (all.length === 0) return <Empty msg="No concurrency data to plot for the current filters." />
   const xmax = Math.max(...all.map((p) => p.x), 1) * 1.05
   const ymax = Math.max(...all.map((p) => p.y), 1) * 1.05
-  const px = (x: number) => M.l + (x / xmax) * (W - M.l - M.r)
+  const pw = W - M.l - M.r
+  const px = (x: number) => M.l + (x / xmax) * pw
   const py = (y: number) => H - M.b - (y / ymax) * (H - M.t - M.b)
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label={label}>
       <Axes xmax={xmax} ymax={ymax} xl={xl} yl={yl} />
+      {/* violet knee markers: where each series first breaks the floor (deck convention) */}
+      {showKnee && [...bySeries.keys()].map((name) => {
+        const k = kneeConc(recs, name)
+        if (k == null || k > xmax) return null
+        const x = px(k)
+        return (
+          <g key={`knee-${name}`} className="knee">
+            <line x1={x} x2={x} y1={M.t} y2={H - M.b} />
+            <text x={x} y={M.t - 2} textAnchor="middle" className="kneelab">knee</text>
+          </g>
+        )
+      })}
       {[...bySeries.entries()].map(([name, pts]) => {
         const sorted = [...pts].sort((a, b) => a.x - b.x)
         const c = colors.get(name) ?? PALETTE[0]
         return (
           <g key={name}>
-            {sorted.length > 1 && <polyline fill="none" stroke={c} strokeWidth={1.6} points={sorted.map((p) => `${px(p.x)},${py(p.y)}`).join(' ')} />}
+            {sorted.length > 1 && (
+              <polyline fill="none" stroke={c} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round"
+                points={sorted.map((p) => `${px(p.x)},${py(p.y)}`).join(' ')} />
+            )}
             {sorted.map((p, i) => (
-              <circle key={i} cx={px(p.x)} cy={py(p.y)} r={2.8} fill={c}>
-                <title>{`${name} · conc ${fnum(p.x, 0)} · ${fnum(p.y)}`}</title>
+              <circle key={i} cx={px(p.x)} cy={py(p.y)} r={2.8} fill={p.ok ? c : 'var(--panel)'} stroke={c} strokeWidth={1.3}>
+                <title>{`${name} · conc ${fnum(p.x, 0)} · ${fnum(p.y)}${p.ok ? '' : ' · not servable'}`}</title>
               </circle>
             ))}
           </g>
@@ -112,6 +142,10 @@ export function Explorer({ recs, runId }: { recs: RunRecord[]; runId: string }) 
   const series = useMemo(() => [...new Set(recs.map((r) => r.series))].sort(), [recs])
   const colors = useMemo(() => new Map(series.map((s, i) => [s, PALETTE[i % PALETTE.length]])), [series])
   const shown = useMemo(() => filterRecords(recs, f), [recs, f])
+  // Regime tag (deck convention): a run that broke the floor with KV preemptions is KV-bound;
+  // otherwise the cliff is a decode-compute ceiling. Records don't carry preemptions, so label
+  // honestly from what we have — "compute-bound" when the floor break is latency-only.
+  const regime = useMemo(() => (recs.some((r) => !r.ok && (r.viol ?? []).some((v) => /kv|preempt|memory/i.test(v))) ? 'KV-bound' : 'compute-bound'), [recs])
 
   if (recs.length === 0) {
     return (
@@ -150,9 +184,11 @@ export function Explorer({ recs, runId }: { recs: RunRecord[]; runId: string }) 
       </div>
 
       <div className="charts">
-        <figure className="chartbox">
-          <figcaption>Pareto: cluster tok/s vs per-user tok/s</figcaption>
+        <figure className="vc">
+          <div className="vc-h"><h4 className="vc-t">Throughput ↔ interactivity</h4><span className="vc-r">{regime}</span></div>
+          <p className="vc-s">cluster tok/s vs per-user tok/s · one point per run</p>
           <Scatter pts={pts} xl="cluster tok/s" yl="tok/s per user" label="Scatter of cluster throughput against per-user throughput" />
+          <p className="vc-k">up and to the right is faster for everyone; hollow = breaks the floor</p>
           <div className="legend">
             <span><i className="dot filled" /> servable</span><span><i className="dot hollow" /> not servable</span>
             {series.map((s) => <span key={s}><i className="sw2" style={{ background: colors.get(s) }} />{s}</span>)}
@@ -160,13 +196,17 @@ export function Explorer({ recs, runId }: { recs: RunRecord[]; runId: string }) 
           {hidden > 0 && <p className="pts-note">{hidden} run{hidden === 1 ? ' has' : 's have'} no throughput values and {hidden === 1 ? 'is' : 'are'} not plotted.</p>}
           {pts.length === 1 && <p className="pts-note">Only one point matches; a trade-off frontier needs two or more.</p>}
         </figure>
-        <figure className="chartbox">
-          <figcaption>Per-user tok/s vs concurrency</figcaption>
-          <Lines recs={shown} get={(r) => r.pu} xl="concurrency" yl="tok/s per user" label="Per-user throughput by concurrency" colors={colors} />
+        <figure className="vc">
+          <div className="vc-h"><h4 className="vc-t">Per-user rate vs load</h4><span className="vc-r">interactivity</span></div>
+          <p className="vc-s">tok/s per user as concurrency climbs</p>
+          <Lines recs={recs} shownRecs={shown} get={(r) => r.pu} xl="concurrency" yl="tok/s per user" label="Per-user throughput by concurrency" colors={colors} showKnee />
+          <p className="vc-k">the knee marks where a config first breaks the floor</p>
         </figure>
-        <figure className="chartbox">
-          <figcaption>ITL (ms) vs concurrency</figcaption>
-          <Lines recs={shown} get={(r) => r.itl} xl="concurrency" yl="ITL (ms)" label="Inter-token latency by concurrency" colors={colors} />
+        <figure className="vc">
+          <div className="vc-h"><h4 className="vc-t">Inter-token latency vs load</h4><span className="vc-r">latency</span></div>
+          <p className="vc-s">ITL (ms) as concurrency climbs</p>
+          <Lines recs={recs} shownRecs={shown} get={(r) => r.itl} xl="concurrency" yl="ITL (ms)" label="Inter-token latency by concurrency" colors={colors} showKnee />
+          <p className="vc-k">latency stays flat, then climbs sharply past the knee</p>
         </figure>
       </div>
 

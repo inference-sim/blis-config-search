@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Local companion server for the config-search webpage (LOCAL mode only).
 
-    python3 -I scripts/build_gallery.py --mode local   # build the site in local mode
-    python3 -I scripts/serve_local.py                  # serve it + accept submissions
+    cd web && SITE_MODE=local npm run build            # build the local-mode SPA (web/dist)
+    python3 -I scripts/serve_local.py                  # serve web/dist + accept submissions
 
-Serves the built `site/` AND exposes a tiny submission API the Submit tab calls when the
-site was built with `--mode local`. This is the "run the search yourself" path from the
+Serves the built SPA in `web/dist/` AND exposes a tiny submission API the Submit tab calls
+when the site was built in local mode. This is the "run the search yourself" path from the
 spec (§12): it runs ONLY on a user's own machine, against their own LLM, and is never part
 of the GitHub Pages deployment (the Pages build is `--mode pages` and has no server).
 
@@ -37,7 +37,10 @@ except ImportError:
     yaml = None
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-SITE = os.path.join(ROOT, "site")
+# The webpage is the built Vite SPA in web/dist/ (the old static site/ is just the data
+# producer's output). Serve web/dist so ONE server both serves the page and answers
+# /api/search — otherwise the page and the API are on different origins and "Run" fails.
+SITE = os.environ.get("CS_SITE_DIR") or os.path.join(ROOT, "web", "dist")
 SUBMISSIONS = os.path.join(ROOT, "submissions")
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -46,14 +49,20 @@ KNOWN_WORKLOADS = {"chatbot", "summarization", "contentgen", "multidoc"}
 
 
 def _catalog_models():
-    """Model short-names the site knows about, read from the built catalog.js (best effort)."""
-    path = os.path.join(SITE, "catalog.js")
-    try:
-        txt = open(path, encoding="utf-8").read()
-        obj = json.loads(txt[txt.index("{"):txt.rindex("}") + 1])
-        return {m["name"] for m in obj.get("models", [])}
-    except Exception:
-        return set()
+    """Model short-names the site knows about. The Vite build stages the catalog as
+    web/dist/data/catalog.json; the old static build wrote catalog.js. Try both."""
+    candidates = [
+        os.path.join(SITE, "data", "catalog.json"),   # Vite SPA build
+        os.path.join(SITE, "catalog.js"),             # legacy static build
+    ]
+    for path in candidates:
+        try:
+            txt = open(path, encoding="utf-8").read()
+            obj = json.loads(txt[txt.index("{"):txt.rindex("}") + 1])
+            return {m["name"] for m in obj.get("models", [])}
+        except Exception:
+            continue
+    return set()
 
 
 def validate_scenario(body):
@@ -186,7 +195,8 @@ def main(argv=None):
     ap.add_argument("--host", default="127.0.0.1")
     args = ap.parse_args(argv)
     if not os.path.isdir(SITE):
-        raise SystemExit("site/ not found — run: python3 -I scripts/build_gallery.py --mode local")
+        raise SystemExit(f"{SITE} not found — build the local-mode SPA first:\n"
+                         "  cd web && SITE_MODE=local npm run build")
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"config-search local server on http://{args.host}:{args.port}  (serving {os.path.relpath(SITE, ROOT)}/)")
     print("  POST /api/search accepts a Scenario; the search runs via the config-search skill in your Claude session.")

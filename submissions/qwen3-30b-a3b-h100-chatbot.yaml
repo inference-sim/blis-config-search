@@ -1,0 +1,10 @@
+model: qwen3-30b-a3b
+hardware: h100
+gpu_budget: 32
+workload:
+  preset: chatbot
+objective: dual-pareto
+interactivity_floor:
+  tok_per_s_per_user: 50.0
+headroom: 0.8
+seed: 0

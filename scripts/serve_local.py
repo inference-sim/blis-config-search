@@ -150,16 +150,39 @@ class Handler(BaseHTTPRequestHandler):
         with open(out, "w", encoding="utf-8") as f:
             f.write(scenario_yaml(scenario))
 
-        # The search brain is an LLM driving the skill; hand back the exact command rather
-        # than silently spawning anything. The user runs it in their own Claude session.
-        cmd = f"/config-search --scenario {os.path.relpath(out, ROOT)}"
+        # Run the deterministic mini-search (real BLIS runs) for this scenario, then restage the
+        # SPA data so the new report shows up. This is local-only; the public Pages site never
+        # runs this. If the pinned binary is missing or nothing is servable, report it cleanly.
+        import subprocess
+        search = os.path.join(ROOT, "scripts", "run_search.py")
+        proc = subprocess.run([sys.executable, "-I", search, "--submission", out],
+                              capture_output=True, text=True, cwd=ROOT)
+        log = (proc.stdout + proc.stderr).strip()
+        if proc.returncode != 0:
+            return self._send(200, {
+                "ok": False, "submission": os.path.relpath(out, ROOT),
+                "error": "search did not produce a report",
+                "log": log,
+                "hint": "If the binary is missing, build it (see SETUP.md). The scenario YAML is saved.",
+            })
+        # Rebuild the SPA so web/dist (what this server serves) includes the new run dir.
+        # `npm run build` runs prebuild=stage:data, which re-runs build_gallery + staging, then
+        # vite emits dist/. REUSE_SITE=1 keeps the data producer from rebuilding the whole site
+        # tree twice (run_search already wrote the new report into reports/).
+        build = subprocess.run(["npm", "run", "build"],
+                               capture_output=True, text=True, cwd=os.path.join(ROOT, "web"),
+                               env={**os.environ, "SITE_MODE": "local"})
+        if build.returncode != 0:
+            return self._send(200, {
+                "ok": False, "submission": os.path.relpath(out, ROOT),
+                "error": "report generated but site rebuild failed",
+                "log": log + "\n--- build ---\n" + (build.stdout + build.stderr)[-800:],
+            })
         return self._send(200, {
             "ok": True,
             "submission": os.path.relpath(out, ROOT),
-            "scenario_yaml": scenario_yaml(scenario),
-            "next": "Run the config-search skill against this scenario in your local Claude "
-                    "session, then rebuild the site to see the new report.",
-            "command": cmd,
+            "log": log,
+            "next": "Report generated and the site rebuilt. Refresh the Reports tab to see it.",
         })
 
     def _serve_static(self):

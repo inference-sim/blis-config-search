@@ -1,8 +1,0 @@
-{
-  "generated": "2026-10-20",
-  "isl_osl": "16k / 256",
-  "n_runs": 12,
-  "n_servable": 8,
-  "reason": "Mock scenario \u2014 long-input summarization is prefill-heavy; replicas win on throughput.",
-  "synthetic": true
-}

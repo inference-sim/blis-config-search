@@ -1,6 +1,6 @@
 import type { Catalog, Mode } from '../types'
 
-export function Rail({ catalog, mode }: { catalog: Catalog | null; mode: Mode | null }) {
+export function Rail({ catalog, mode, hasMock = false }: { catalog: Catalog | null; mode: Mode | null; hasMock?: boolean }) {
   const versions = catalog ? Object.entries(catalog.versions) : []
   return (
     <aside className="rail">
@@ -31,7 +31,7 @@ export function Rail({ catalog, mode }: { catalog: Catalog | null; mode: Mode | 
 
       <div className="seclabel">Note</div>
       <p className="railnote">
-        Numbers are <b>simulator predictions, not measured</b> results. Scenarios badged <span className="mock">mock</span> are synthetic placeholders.
+        Numbers are <b>simulator predictions, not measured</b> results.{hasMock && <> Scenarios badged <span className="mock">mock</span> are synthetic placeholders.</>}
       </p>
       {mode && <div className="kv"><span className="k">mode</span><span className="v">{mode}</span></div>}
     </aside>

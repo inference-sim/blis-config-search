@@ -73,7 +73,7 @@ export function App() {
 
   return (
     <div className="layout">
-      <Rail catalog={data?.catalog ?? null} mode={data?.mode ?? null} />
+      <Rail catalog={data?.catalog ?? null} mode={data?.mode ?? null} hasMock={!!data?.scenarios.some((s) => s.synthetic)} />
       <main className="main">
         <nav className="tabs" aria-label="Sections">
           {TAB_LABELS.map(([t, label]) => (

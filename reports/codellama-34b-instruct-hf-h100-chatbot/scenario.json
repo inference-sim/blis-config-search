@@ -1,0 +1,16 @@
+{
+  "gpu_budget": 16,
+  "hardware": "h100",
+  "headroom": 0.8,
+  "interactivity_floor": {
+    "itl_p99_ms_max": 20.0,
+    "tok_per_s_per_user": 50.0
+  },
+  "model": "codellama-34b-instruct-hf",
+  "objective": "dual-pareto",
+  "run_id": "codellama-34b-instruct-hf-h100-chatbot",
+  "seed": 0,
+  "workload": {
+    "preset": "chatbot"
+  }
+}

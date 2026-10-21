@@ -1,0 +1,91 @@
+{
+  "dropped": [],
+  "finalists": [
+    {
+      "at_c_use": {
+        "itl_p99_ms": 8.222,
+        "preemption_count": 0,
+        "tok_per_s_per_user": 121.6,
+        "tokens_per_sec": 228.5,
+        "tokens_per_sec_per_gpu": 28.6,
+        "ttft_p99_ms": 0.0
+      },
+      "c_star": 4,
+      "c_use": 3,
+      "config": {
+        "num_instances": 1,
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 1,
+          "itl_p99_ms": 7.664,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 130.5,
+          "tokens_per_sec": 126.6
+        },
+        {
+          "concurrency": 2,
+          "itl_p99_ms": 8.222,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 121.6,
+          "tokens_per_sec": 228.5
+        },
+        {
+          "concurrency": 4,
+          "itl_p99_ms": 9.302,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 107.5,
+          "tokens_per_sec": 385.5
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 69.129,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 14.5,
+          "tokens_per_sec": 576.5
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 116.545,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 8.6,
+          "tokens_per_sec": 829.4
+        },
+        {
+          "concurrency": 24,
+          "itl_p99_ms": 122.89847999999982,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 8.1,
+          "tokens_per_sec": 943.6
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 135.553,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 7.4,
+          "tokens_per_sec": 1074.4
+        }
+      ],
+      "gpus": 8,
+      "label": "1x TP8"
+    }
+  ],
+  "headroom": 0.8,
+  "interactivity_floor": {
+    "itl_p99_ms_max": 20.0,
+    "tok_per_s_per_user": 50.0
+  },
+  "objective": "dual-pareto",
+  "winner": {
+    "budget_max": "1x TP8",
+    "chosen": "1x TP8",
+    "efficiency_per_gpu": "1x TP8",
+    "move_trail": [
+      "enumerated single-node topologies within budget",
+      "probed a concurrency ramp per topology with real BLIS runs",
+      "ranked finalists on usable capacity (headroom 0.8)"
+    ],
+    "reason": "1x TP8 gives the most tok/s/GPU while holding the 50 tok/s/user floor; usable load c=3 (C*=4)."
+  }
+}

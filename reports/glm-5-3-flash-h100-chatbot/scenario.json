@@ -1,0 +1,16 @@
+{
+  "gpu_budget": 128,
+  "hardware": "h100",
+  "headroom": 0.8,
+  "interactivity_floor": {
+    "itl_p99_ms_max": 20.0,
+    "tok_per_s_per_user": 50.0
+  },
+  "model": "glm-5.3-flash",
+  "objective": "dual-pareto",
+  "run_id": "glm-5-3-flash-h100-chatbot",
+  "seed": 0,
+  "workload": {
+    "preset": "chatbot"
+  }
+}

@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import type { RunRecord, Scenario } from '../types'
 import { reportHref } from '../load'
-import { BANDS, dash, filterRecords, finite, fnum, type Band, type RecFilters } from '../lib'
-import { Dropdown } from './Dropdown'
+import { EMPTY_SEL, dash, finite, fnum, selectRecords, type Selection } from '../lib'
+import { Crossfilter } from './Crossfilter'
 import { MockBadge } from './Reports'
 
 const PALETTE = ['#1f6e5c', '#34366e', '#b5651d', '#a3301f', '#6b7d1f', '#7a4a8c', '#2a7f9e', '#8a6d00']
@@ -219,10 +219,10 @@ function explainItl(recs: RunRecord[]): string | null {
 }
 
 export function Explorer({ recs, runId }: { recs: RunRecord[]; runId: string }) {
-  const [f, setF] = useState<RecFilters>({ series: '', band: '', servable: '' })
+  const [sel, setSel] = useState<Selection>(EMPTY_SEL)
   const series = useMemo(() => [...new Set(recs.map((r) => r.series))].sort(), [recs])
   const colors = useMemo(() => new Map(series.map((s, i) => [s, PALETTE[i % PALETTE.length]])), [series])
-  const shown = useMemo(() => filterRecords(recs, f), [recs, f])
+  const shown = useMemo(() => selectRecords(recs, sel), [recs, sel])
   // Regime tag (deck convention): a run that broke the floor with KV preemptions is KV-bound;
   // otherwise the cliff is a decode-compute ceiling. Records don't carry preemptions, so label
   // honestly from what we have — "compute-bound" when the floor break is latency-only.
@@ -247,22 +247,7 @@ export function Explorer({ recs, runId }: { recs: RunRecord[]; runId: string }) 
 
   return (
     <div>
-      <div className="chips filterbar" role="group" aria-label="Run filters">
-        <span className="flt">series
-          <Dropdown ariaLabel="Filter by series / topology" value={f.series} onChange={(v) => setF({ ...f, series: v })}
-            options={[{ value: '', label: `all series (${recs.length})` }, ...series.map((s) => ({ value: s, label: `${s} (${recs.filter((r) => r.series === s).length})` }))]} />
-        </span>
-        <span className="flt">concurrency
-          <Dropdown ariaLabel="Filter by concurrency band" value={f.band} onChange={(v) => setF({ ...f, band: v as Band })}
-            options={BANDS.map((b) => ({ value: b.value, label: b.label }))} />
-        </span>
-        <div className="tierseg" role="group" aria-label="Servable">
-          {([['', 'all'], ['ok', 'servable'], ['bad', 'not servable']] as const).map(([v, l]) => (
-            <button type="button" key={v} className={`segbtn${f.servable === v ? ' on' : ''}`} aria-pressed={f.servable === v} onClick={() => setF({ ...f, servable: v })}>{l}</button>
-          ))}
-        </div>
-        <span className="facet">{shown.length} of {recs.length} runs</span>
-      </div>
+      <Crossfilter recs={recs} sel={sel} setSel={setSel} shownCount={shown.length} />
 
       <div className="charts">
         <figure className="vc">

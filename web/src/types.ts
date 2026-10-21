@@ -65,6 +65,8 @@ export interface RunRecord {
   mtp: number
   mnbt: number | null
   mns: number | null
+  epw?: number | string | null
+  a2a?: string | null
   pu: number | null
   cl: number | null
   itl: number | null

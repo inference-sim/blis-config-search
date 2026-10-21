@@ -68,6 +68,6 @@
     "chosen": "8x TP2",
     "efficiency_per_gpu": "8x TP2",
     "move_trail": [],
-    "reason": "Mock scenario \u2014 balanced 2k/2k codegen rewards many narrow replicas under a tight floor."
+    "reason": "Mock scenario \u2014 balanced 1k/1k content generation rewards many narrow replicas under a tight floor."
   }
 }

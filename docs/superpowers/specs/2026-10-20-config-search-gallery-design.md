@@ -172,3 +172,140 @@ four explored directions (`mock-A`…`mock-D`), `EVAL.md` (the bake-off), and th
   trust+content-scan the committed file? Regenerating in CI is the safer default and keeps
   INV-6; it costs a `report.py` run per report (pure transform, no BLIS).
 ```
+
+---
+
+# v2 — the full webpage (multi-tab SPA)
+
+**Status:** building · **Date:** 2026-10-21
+
+v1 shipped the gallery + static build + PR/CI. v2 grows it into the full site the project
+needs: a multi-tab shell, richer per-scenario exploration, the BLIS catalog surfaces
+(models / workloads / GPUs), a Scenario-submission flow that is interactive locally and
+read-only on GitHub Pages, and the CI that actually runs the search on merged PRs.
+
+## 9. Information architecture — tabs
+
+One static SPA shell (`gallery/app.*`, hash-routed, no framework/build step — vanilla JS
+modules, same spec-sheet design tokens). Tabs:
+
+1. **Reports** (default) — the v1 gallery (table + Pareto plot over the cross-filter). A row
+   now opens an in-app **scenario detail** (§10), with a link to the full standalone report.
+2. **Models** — every model BLIS can run (from blis-catalog): params, architecture
+   (dense/MoE, experts), heads, context, quantization. Filterable; each links to the reports
+   that used it.
+3. **Workloads** — the workload presets (from inference-sim): ISL/OSL, arrival shape, trace
+   source. Each links to reports using it.
+4. **GPUs** — the hardware BLIS knows (from inference-sim hardware config): memory, bandwidth,
+   FLOPs. Each links to reports on it.
+5. **Submit** — build a Scenario (model + workload + hardware + GPU budget + floor). Behavior
+   is **mode-dependent** (§12): interactive locally, read-only (PR instructions) on Pages.
+
+The catalog tabs are generated at build time from the sibling repos (§11) into `catalog.js`,
+so they are static data at view time — no network, no runtime fetch.
+
+## 10. Scenario detail (per-scenario Pareto cross-filtering)
+
+Selecting a report row opens a detail view that surfaces the scenario's own run data richly,
+not just the winner:
+
+- **Briefing** (executive): the recommended config, headline metrics (tok/s, tok/s/GPU,
+  tok/s/user, ITL p99), the floor it holds, the "why it won" reason, and the finalists it
+  beat — scannable in one screen.
+- **Pareto charts with cross-filtering** (technical): the full set of the scenario's runs
+  (`runs.jsonl` projected to RECORDS) in an interactive explorer — the same d3+crossfilter
+  machinery `report.py` already bakes into each report, now reachable from the gallery.
+  Cross-filter dimensions: config/topology, concurrency, servable/not, bottleneck. Charts:
+  operating curve (per-user vs cluster tok/s), scale bars, tail scatter. Filtering any
+  dimension updates every chart + the run table together.
+- **Open the full report →** the standalone `report.py` `index.html` (deep narrative +
+  glossary) remains the canonical artifact.
+
+Implementation: the detail view reuses the report's RECORDS + explorer so there is one
+cross-filter implementation, not two. `build_gallery.py` emits each scenario's RECORDS into
+the dataset (or the detail view lazy-loads the report's data files, already copied to
+`site/<run_id>/`).
+
+## 11. Catalog ingestion (sibling repos → static data)
+
+`scripts/build_catalog.py` reads the three read-only sibling repos and emits
+`site/catalog.js` (`window.CATALOG = {models, hardware, workloads, registry, versions}`):
+
+- **Models** ← blis-catalog (pinned tag). Per model: name, params, architecture, experts,
+  heads, context, quantization — whatever the catalog entry carries, projected to a stable
+  shape; unknown fields dropped, never invented.
+- **Hardware** ← inference-sim hardware config. Per GPU: name, memory, bandwidth, FLOPs.
+- **Workloads** ← inference-sim presets. Per preset: name, ISL/OSL, arrival, trace source.
+- **Registry** ← blis-registry (pinned tag): the coefficient/cost-model sets by name.
+- **Versions** ← the pinned tags/commits (SETUP.md / .env), shown in a footer so the catalog
+  is traceable to exact upstream versions.
+
+The exact pins live in a single `.env`-style source (mirroring the leaderboard) so the
+catalog and the docs can't drift. The ingestion is read-only and pure; it never mutates the
+sibling repos. If a sibling repo is absent at build time, the tab degrades to "catalog
+unavailable — built without <repo>" rather than failing the whole build.
+
+## 12. Submission flow — two modes
+
+A single Scenario form, two behaviors chosen by a build-time flag baked into the site
+(`window.MODE = "local" | "pages"`):
+
+- **local** (`build_gallery.py --mode local`, for `python3 -m http.server` on a dev box):
+  the form is live. The user picks model/workload/hardware/budget/floor; on submit the page
+  POSTs to a **local companion server** (`scripts/serve_local.py`) that invokes the
+  config-search skill against a user-provided LLM endpoint, streams progress, and drops a new
+  run dir into `reports/`. This is the only part that needs an LLM, and it runs only on the
+  user's own machine with their own key. Clearly labeled "runs on your machine".
+- **pages** (default, for GitHub Pages): the form is shown but **disabled** — it renders the
+  exact Scenario the user built as a ready-to-copy `scenario.yaml` plus step-by-step "open a
+  PR to run this" instructions and a prefilled GitHub PR link. No compute, no LLM, no network
+  calls. This showcases the capability without exposing any execution surface.
+
+The mode is a static constant in the built site; the Pages build can never emit `local` mode.
+
+## 13. Backend — PR → CI → reports
+
+Two workflows:
+
+- **`pages.yml`** (v1, extended) — on PR: build the site (gallery + catalog) and validate; no
+  publish. On push to main: build + publish to Pages. Least privilege as in v1.
+- **`generate-report.yml`** (new) — the report-generation backend. Triggered on a PR that adds
+  a `scenario.yaml` under `submissions/` (or by a maintainer via `workflow_dispatch` /a label).
+  It:
+  1. Builds the pinned BLIS stack (inference-sim v0.10.0 + catalog 0.2.1 + registry v0.1.1),
+     exactly as SETUP.md pins them.
+  2. Runs config-search for the submitted Scenario — **the search/LLM step is gated to run
+     only after a maintainer approves** (GitHub `environment` protection / approval), never
+     automatically on an untrusted PR. BLIS itself is deterministic and LLM-free; the search
+     brain (LLM) is the only non-hermetic part and is what the approval gates.
+  3. Writes the resulting run dir into `reports/`, regenerates the report, and commits it back
+     to the PR branch (or opens a follow-up PR) so the normal review + merge → publish path
+     applies. Nothing reaches the live site without the human merge gate.
+
+**Threat model holds:** the public site is still static (no runtime LLM/prompt surface); the
+only place prose from a submitter meets an LLM is inside CI, behind an explicit maintainer
+approval, on infrastructure the maintainers control — never the public Pages site.
+
+## 14. Repository layout (v2 additions)
+
+```
+gallery/app/                 the SPA shell + tab modules (vanilla JS, spec-sheet CSS)
+  index.template.html        shell with tab nav + mount points
+  app.js  reports.js  models.js  workloads.js  gpus.js  submit.js  detail.js  explorer.js
+scripts/build_catalog.py     sibling repos → site/catalog.js  (read-only, pure, pinned)
+scripts/build_gallery.py     reports/ → site/ (extended: emits mode, RECORDS, includes catalog)
+scripts/serve_local.py       local companion server (local mode only; invokes the skill)
+submissions/<name>.yaml      PR-submitted Scenarios the generate-report workflow consumes
+pins.env                     single source of truth for upstream repo tags/commits
+.github/workflows/generate-report.yml   PR scenario → (approved) search → report → PR
+```
+
+## 15. Build order (v2)
+
+1. Catalog ingestion (`build_catalog.py`) from the three repos + a test; emit `catalog.js`.
+2. SPA shell + tab nav; port the v1 gallery into the Reports tab unchanged.
+3. Models / Workloads / GPUs tabs from `catalog.js`; cross-link to reports.
+4. Scenario detail view with the report's crossfilter explorer reused in-app.
+5. Submit tab, both modes; `serve_local.py` for local mode.
+6. `generate-report.yml` with the maintainer-approval gate; dry-run tested.
+7. Agent review loop until the panel agrees the site serves the purpose.

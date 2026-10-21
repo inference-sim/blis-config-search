@@ -1,6 +1,6 @@
 {
   "generated": "2026-10-20",
-  "isl_osl": "8k / 512",
+  "isl_osl": "10k / 1.5k",
   "n_runs": 34,
   "n_servable": 20,
   "reason": "Mock scenario \u2014 doubling the budget scales the 4\u00d7 TP4 winner linearly to eight instances.",

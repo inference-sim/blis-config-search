@@ -7,31 +7,31 @@
     },
     {
       "h": "What to run",
-      "html": "<b>8x TP2</b> \u2014 3120 tok/s (195/GPU), 64 tok/s/user at c=40.",
+      "html": "<b>2x TP4 + EP</b> \u2014 940 tok/s (118/GPU), 72 tok/s/user at c=12.",
       "run": true
     }
   ],
   "meta": [
     "MOCK \u2014 not a BLIS measurement",
-    "qwen3-14b \u00b7 16\u00d7 H100 \u00b7 codegen"
+    "glm-5.3-flash \u00b7 8\u00d7 H200 \u00b7 multidoc"
   ],
   "operating_points": [
     {
-      "cl": 3120.0,
-      "conc": 40,
+      "cl": 940.0,
+      "conc": 12,
       "flags": {
-        "ni": 8,
-        "tp": 2
+        "ni": 2,
+        "tp": 4
       },
       "hit": null,
-      "itl": 15.2,
-      "pu": 64.0
+      "itl": 13.0,
+      "pu": 72.0
     }
   ],
   "recommendation_prose": [
-    "Mock scenario \u2014 balanced 2k/2k codegen rewards many narrow replicas under a tight floor.",
+    "Mock scenario \u2014 H200 KV headroom lets two TP4 instances share the long-context load.",
     "These are placeholder numbers for a design demo \u2014 do not deploy from them."
   ],
-  "standfirst": "Illustrative placeholder scenario \u2014 Mock scenario \u2014 balanced 2k/2k codegen rewards many narrow replicas under a tight floor.",
-  "title": "Serving qwen3-14b on 16\u00d7 H100 (MOCK)"
+  "standfirst": "Illustrative placeholder scenario \u2014 Mock scenario \u2014 H200 KV headroom lets two TP4 instances share the long-context load.",
+  "title": "Serving glm-5.3-flash on 8\u00d7 H200 (MOCK)"
 }

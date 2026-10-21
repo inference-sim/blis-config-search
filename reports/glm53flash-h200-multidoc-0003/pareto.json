@@ -68,6 +68,6 @@
     "chosen": "2x TP4 + EP",
     "efficiency_per_gpu": "2x TP4 + EP",
     "move_trail": [],
-    "reason": "Mock scenario \u2014 H200 KV headroom lets two TP4 instances share the agentic load."
+    "reason": "Mock scenario \u2014 H200 KV headroom lets two TP4 instances share the long-context load."
   }
 }

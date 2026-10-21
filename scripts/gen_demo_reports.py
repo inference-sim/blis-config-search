@@ -40,12 +40,12 @@ MOCKS = [
         ],
     },
     {
-        "run_id": "glm53flash-h200-agentic-0003", "model": "glm-5.3-flash", "hardware": "h200",
-        "gpu_budget": 8, "workload": "agentic", "isl_osl": "8k / 512",
+        "run_id": "glm53flash-h200-multidoc-0003", "model": "glm-5.3-flash", "hardware": "h200",
+        "gpu_budget": 8, "workload": "multidoc", "isl_osl": "10k / 1.5k",
         "floor_rate": 50, "floor_itl": 20.0, "headroom": 0.8,
         "n_runs": 18, "n_servable": 9, "generated": "2026-10-19",
         "winner": "2x TP4 + EP",
-        "reason": "Mock scenario — H200 KV headroom lets two TP4 instances share the agentic load.",
+        "reason": "Mock scenario — H200 KV headroom lets two TP4 instances share the long-context load.",
         "finalists": [
             {"label": "1x TP8 + EP", "tp": 8, "ni": 1, "gpus": 8, "c_use": 6, "tps": 540.0, "tps_per_gpu": 67.5, "per_user": 108.0, "itl_p99": 9.0},
             {"label": "2x TP4 + EP", "tp": 4, "ni": 2, "gpus": 8, "c_use": 12, "tps": 940.0, "tps_per_gpu": 117.5, "per_user": 72.0, "itl_p99": 13.0},
@@ -64,8 +64,8 @@ MOCKS = [
         ],
     },
     {
-        "run_id": "glm53flash-h100-agentic-0005", "model": "glm-5.3-flash", "hardware": "h100",
-        "gpu_budget": 32, "workload": "agentic", "isl_osl": "8k / 512",
+        "run_id": "glm53flash-h100-multidoc-0005", "model": "glm-5.3-flash", "hardware": "h100",
+        "gpu_budget": 32, "workload": "multidoc", "isl_osl": "10k / 1.5k",
         "floor_rate": 50, "floor_itl": 20.0, "headroom": 0.8,
         "n_runs": 34, "n_servable": 20, "generated": "2026-10-20",
         "winner": "8x TP4 + EP",
@@ -76,12 +76,12 @@ MOCKS = [
         ],
     },
     {
-        "run_id": "qwen3-14b-h100-codegen-0006", "model": "qwen3-14b", "hardware": "h100",
-        "gpu_budget": 16, "workload": "codegen", "isl_osl": "2k / 2k",
+        "run_id": "qwen3-14b-h100-contentgen-0006", "model": "qwen3-14b", "hardware": "h100",
+        "gpu_budget": 16, "workload": "contentgen", "isl_osl": "1k / 1k",
         "floor_rate": 60, "floor_itl": 16.0, "headroom": 0.8,
         "n_runs": 26, "n_servable": 12, "generated": "2026-10-20",
         "winner": "8x TP2",
-        "reason": "Mock scenario — balanced 2k/2k codegen rewards many narrow replicas under a tight floor.",
+        "reason": "Mock scenario — balanced 1k/1k content generation rewards many narrow replicas under a tight floor.",
         "finalists": [
             {"label": "4x TP4", "tp": 4, "ni": 4, "gpus": 16, "c_use": 24, "tps": 2180.0, "tps_per_gpu": 136.3, "per_user": 78.0, "itl_p99": 12.1},
             {"label": "8x TP2", "tp": 2, "ni": 8, "gpus": 16, "c_use": 40, "tps": 3120.0, "tps_per_gpu": 195.0, "per_user": 64.0, "itl_p99": 15.2},

@@ -13,7 +13,7 @@
   ],
   "meta": [
     "MOCK \u2014 not a BLIS measurement",
-    "glm-5.3-flash \u00b7 32\u00d7 H100 \u00b7 agentic"
+    "glm-5.3-flash \u00b7 32\u00d7 H100 \u00b7 multidoc"
   ],
   "operating_points": [
     {

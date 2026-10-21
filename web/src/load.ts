@@ -1,6 +1,6 @@
 // Same-origin relative fetches of the staged data. With Vite `base: './'` these resolve
 // against the page, so they work at any path on a static host (GitHub Pages) with no server.
-import type { Scenario, Catalog, Mode, RunRecord } from './types'
+import type { Scenario, Catalog, Mode } from './types'
 
 // Vite rewrites import.meta.env.BASE_URL to the configured base ('./'); join cleanly.
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
@@ -26,14 +26,9 @@ export async function loadMode(): Promise<Mode> {
     return 'pages'
   }
 }
-// Per-scenario run records for the detail explorer; empty array if absent.
-export async function loadRecords(runId: string): Promise<RunRecord[]> {
-  try {
-    return await getJson<RunRecord[]>(`reports/${encodeURIComponent(runId)}/records.json`)
-  } catch {
-    return []
-  }
-}
+// (Per-run records are now inlined into scenarios.json by stage-data.mjs, so no separate
+// records fetch is needed — the detail explorer reads scenario.records directly.)
+
 // The self-contained report lives beside its data; link target (new tab).
 export const reportHref = (runId: string) =>
   `${BASE}/data/reports/${encodeURIComponent(runId)}/index.html`

@@ -1,0 +1,8 @@
+{
+  "generated": "2026-10-21",
+  "isl_osl": "4k / 512",
+  "n_runs": 12,
+  "n_servable": 9,
+  "reason": "Mock scenario \u2014 a 70B dense model on H200 fits TP4; four replicas carry the summarization load before the ITL ceiling.",
+  "synthetic": true
+}

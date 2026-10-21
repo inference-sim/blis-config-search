@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { RunRecord, Scenario } from '../types'
-import { loadRecords, reportHref } from '../load'
+import { reportHref } from '../load'
 import { BANDS, dash, filterRecords, finite, fnum, type Band, type RecFilters } from '../lib'
 import { Dropdown } from './Dropdown'
 import { MockBadge } from './Reports'
@@ -240,15 +240,9 @@ export function Explorer({ recs, runId }: { recs: RunRecord[]; runId: string }) 
 
 export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios: Scenario[] }) {
   const s = scenarios.find((x) => x.run_id === runId)
-  const [recs, setRecs] = useState<RunRecord[] | null>(null)
-  useEffect(() => {
-    let live = true
-    setRecs(null)
-    loadRecords(runId).then((r) => live && setRecs(Array.isArray(r) ? r : [])).catch(() => live && setRecs([]))
-    return () => {
-      live = false
-    }
-  }, [runId])
+  // Records are inlined on the scenario (stage-data.mjs), so the explorer renders from the
+  // one scenarios.json load — no per-scenario fetch, no loading state, works everywhere.
+  const recs: RunRecord[] = s?.records ?? []
 
   if (!s) {
     return (
@@ -304,7 +298,7 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
 
       <section aria-label="Pareto explorer">
         <div className="seclabel2">Pareto explorer</div>
-        {recs === null ? <div className="loading">Loading runs…</div> : <Explorer recs={recs} runId={s.run_id} />}
+        <Explorer recs={recs} runId={s.run_id} />
       </section>
     </div>
   )

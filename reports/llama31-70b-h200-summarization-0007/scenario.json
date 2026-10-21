@@ -1,0 +1,19 @@
+{
+  "_source": "SYNTHETIC mock scenario for the gallery demo \u2014 NOT a BLIS run",
+  "gpu_budget": 16,
+  "hardware": "h200",
+  "headroom": 0.8,
+  "interactivity_floor": {
+    "itl_p99_ms_max": 22.0,
+    "tok_per_s_per_user": 45
+  },
+  "latency_model": "blis-latency-kernel",
+  "model": "llama-3.1-70b-instruct",
+  "objective": "dual-pareto",
+  "run_id": "llama31-70b-h200-summarization-0007",
+  "seed": 0,
+  "slos": {},
+  "workload": {
+    "preset": "summarization"
+  }
+}

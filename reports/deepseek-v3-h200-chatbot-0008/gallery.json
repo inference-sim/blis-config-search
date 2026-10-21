@@ -1,0 +1,8 @@
+{
+  "generated": "2026-10-21",
+  "isl_osl": "ShareGPT",
+  "n_runs": 12,
+  "n_servable": 8,
+  "reason": "Mock scenario \u2014 a 256-expert MoE wants expert parallelism; two TP8+EP instances beat four narrow replicas on both throughput and per-user rate.",
+  "synthetic": true
+}

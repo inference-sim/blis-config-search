@@ -87,6 +87,30 @@ MOCKS = [
             {"label": "8x TP2", "tp": 2, "ni": 8, "gpus": 16, "c_use": 40, "tps": 3120.0, "tps_per_gpu": 195.0, "per_user": 64.0, "itl_p99": 15.2},
         ],
     },
+    {
+        "run_id": "llama31-70b-h200-summarization-0007", "model": "llama-3.1-70b-instruct", "hardware": "h200",
+        "gpu_budget": 16, "workload": "summarization", "isl_osl": "4k / 512",
+        "floor_rate": 45, "floor_itl": 22.0, "headroom": 0.8,
+        "n_runs": 24, "n_servable": 13, "generated": "2026-10-21",
+        "winner": "4x TP4",
+        "reason": "Mock scenario — a 70B dense model on H200 fits TP4; four replicas carry the summarization load before the ITL ceiling.",
+        "finalists": [
+            {"label": "2x TP8", "tp": 8, "ni": 2, "gpus": 16, "c_use": 10, "tps": 820.0, "tps_per_gpu": 51.3, "per_user": 96.0, "itl_p99": 11.0},
+            {"label": "4x TP4", "tp": 4, "ni": 4, "gpus": 16, "c_use": 18, "tps": 1380.0, "tps_per_gpu": 86.3, "per_user": 58.0, "itl_p99": 18.5},
+        ],
+    },
+    {
+        "run_id": "deepseek-v3-h200-chatbot-0008", "model": "deepseek-v3", "hardware": "h200",
+        "gpu_budget": 16, "workload": "chatbot", "isl_osl": "ShareGPT",
+        "floor_rate": 50, "floor_itl": 20.0, "headroom": 0.8,
+        "n_runs": 30, "n_servable": 16, "generated": "2026-10-21",
+        "winner": "2x TP8 + EP",
+        "reason": "Mock scenario — a 256-expert MoE wants expert parallelism; two TP8+EP instances beat four narrow replicas on both throughput and per-user rate.",
+        "finalists": [
+            {"label": "1x TP8 + EP", "tp": 8, "ni": 1, "gpus": 8, "c_use": 8, "tps": 760.0, "tps_per_gpu": 95.0, "per_user": 104.0, "itl_p99": 9.6},
+            {"label": "2x TP8 + EP", "tp": 8, "ni": 2, "gpus": 16, "c_use": 16, "tps": 1480.0, "tps_per_gpu": 92.5, "per_user": 82.0, "itl_p99": 12.4},
+        ],
+    },
 ]
 
 

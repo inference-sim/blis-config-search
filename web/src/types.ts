@@ -46,6 +46,8 @@ export interface Scenario {
   winner: Winner
   finalists: Finalist[]
   reason: string
+  // Per-run records for the detail explorer, inlined by stage-data.mjs (no separate fetch).
+  records: RunRecord[]
 }
 
 // One run row for the per-scenario detail explorer (report.build_records projection).

@@ -57,14 +57,17 @@ function main() {
 
   const scenarios = liftWindowJson('data.js', 'SCENARIOS')
   const catalog = liftWindowJson('catalog.js', 'CATALOG')
-  writeFileSync(join(OUT, 'scenarios.json'), JSON.stringify(scenarios))
-  writeFileSync(join(OUT, 'catalog.json'), JSON.stringify(catalog))
-  writeFileSync(join(OUT, 'mode.json'), JSON.stringify({ mode: MODE }))
 
-  // Each scenario's self-contained report + its records.json for the detail explorer.
+  // INLINE each scenario's per-run records into scenarios.json (they total ~40 KB), so the
+  // detail explorer's cross-filter charts render from the SINGLE scenarios.json load with NO
+  // per-scenario fetch. This is what makes the charts appear reliably in every viewing
+  // context (the old separate records.json fetch was the fragile link). The full report and
+  // its data files are still copied for the "full report ↗" link.
   let reports = 0
   for (const s of scenarios) {
     const src = join(SITE, s.run_id)
+    const recPath = join(src, 'records.json')
+    s.records = existsSync(recPath) ? JSON.parse(readFileSync(recPath, 'utf8')) : []
     if (!existsSync(src)) continue
     const dst = join(OUT, 'reports', s.run_id)
     mkdirSync(dst, { recursive: true })
@@ -73,7 +76,11 @@ function main() {
     }
     reports++
   }
-  console.log(`stage-data: ${scenarios.length} scenarios, ${reports} reports, `
+
+  writeFileSync(join(OUT, 'scenarios.json'), JSON.stringify(scenarios))
+  writeFileSync(join(OUT, 'catalog.json'), JSON.stringify(catalog))
+  writeFileSync(join(OUT, 'mode.json'), JSON.stringify({ mode: MODE }))
+  console.log(`stage-data: ${scenarios.length} scenarios (records inlined), ${reports} reports, `
     + `${catalog.models?.length ?? 0} models staged to web/public/data/ (mode=${MODE})`)
 }
 

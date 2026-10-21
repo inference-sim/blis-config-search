@@ -1,0 +1,73 @@
+{
+  "_source": "SYNTHETIC mock \u2014 illustrative, NOT a BLIS measurement",
+  "dropped": [],
+  "finalists": [
+    {
+      "at_c_use": {
+        "itl_p99_ms": 11.0,
+        "preemption_count": 0,
+        "tok_per_s_per_user": 96.0,
+        "tokens_per_sec": 820.0,
+        "tokens_per_sec_per_gpu": 51.3,
+        "ttft_p99_ms": 0.0
+      },
+      "c_star": 12,
+      "c_use": 10,
+      "config": {
+        "num_instances": 2,
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 10,
+          "itl_p99_ms": 11.0,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 96.0,
+          "tokens_per_sec": 820.0
+        }
+      ],
+      "gpus": 16,
+      "label": "2x TP8"
+    },
+    {
+      "at_c_use": {
+        "itl_p99_ms": 18.5,
+        "preemption_count": 0,
+        "tok_per_s_per_user": 58.0,
+        "tokens_per_sec": 1380.0,
+        "tokens_per_sec_per_gpu": 86.3,
+        "ttft_p99_ms": 0.0
+      },
+      "c_star": 22,
+      "c_use": 18,
+      "config": {
+        "num_instances": 4,
+        "tp": 4
+      },
+      "curve": [
+        {
+          "concurrency": 18,
+          "itl_p99_ms": 18.5,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 58.0,
+          "tokens_per_sec": 1380.0
+        }
+      ],
+      "gpus": 16,
+      "label": "4x TP4"
+    }
+  ],
+  "headroom": 0.8,
+  "interactivity_floor": {
+    "itl_p99_ms_max": 22.0,
+    "tok_per_s_per_user": 45
+  },
+  "objective": "dual-pareto",
+  "winner": {
+    "budget_max": "4x TP4",
+    "chosen": "4x TP4",
+    "efficiency_per_gpu": "4x TP4",
+    "move_trail": [],
+    "reason": "Mock scenario \u2014 a 70B dense model on H200 fits TP4; four replicas carry the summarization load before the ITL ceiling."
+  }
+}

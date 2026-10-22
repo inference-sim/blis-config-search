@@ -124,6 +124,19 @@ describe('what to run: operating points', () => {
     expect(rows[0].textContent).toContain('83.7')
   })
 
+  it('carries all three latency metrics as columns (TPOT, TTFT, E2E)', () => {
+    render(<ScenarioDetail runId="a" scenarios={[scen([
+      rec({ id: 'a', conc: 128, itl: 11.95, ttft: 455.8, e2e: 12836 }),
+    ])]} />)
+    const heads = [...screen.getByTestId('operating-table').querySelectorAll('thead .hcol')]
+      .map((e) => e.getAttribute('aria-label') ?? '')
+    expect(heads.some((h) => h.startsWith('TPOT ms:'))).toBe(true)
+    expect(heads.some((h) => h.startsWith('TTFT ms:'))).toBe(true)
+    expect(heads.some((h) => h.startsWith('E2E ms:'))).toBe(true)
+    // the E2E value is rendered in the row
+    expect(screen.getByTestId('operating-table').textContent).toContain('12,836')
+  })
+
   it('names the config and its knob delta per row', () => {
     render(<ScenarioDetail runId="a" scenarios={[scen([
       rec({ id: 'a', conc: 128, variant: 'least-loaded routing', route: 'least-loaded' }),
@@ -501,7 +514,7 @@ describe('ScenarioDetail', () => {
     const base = (over: Partial<RunRecord>): RunRecord => ({
       id: '', src: '', conc: 128, tp: 4, dp: 2, ni: 64, gpus: 512, series: 'A', variant: '',
       route: '', pd: '', mtp: 0, mnbt: null, mns: null, pu: 80, cl: 1000, itl: 10, ttft: 100,
-      hit: null, p95: null, ok: true, status: 'complete', viol: [], tpg: 50, ...over,
+      e2e: 5000, hit: null, p95: null, ok: true, status: 'complete', viol: [], tpg: 50, ...over,
     })
     return [
       base({ id: 'a1', series: 'A', conc: 128 }), base({ id: 'a2', series: 'A', conc: 256, pu: 60 }),
@@ -517,6 +530,20 @@ describe('ScenarioDetail', () => {
     expect(document.querySelector('.charts-legend .legend')).toBeTruthy()
     expect([...legends[0].querySelectorAll('.lg')].map((b) => b.textContent)).toEqual(
       expect.arrayContaining([expect.stringContaining('A'), expect.stringContaining('B')]))
+  })
+
+  it('lets the user switch the latency chart between TPOT / TTFT / E2E', () => {
+    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, twoSeries())]} />)
+    const picker = document.querySelector('.vc-pick select') as HTMLSelectElement
+    expect(picker).toBeTruthy()
+    // the options are the three latency metrics; default is TPOT
+    expect([...picker.options].map((o) => o.textContent)).toEqual(['TPOT p99 (ms)', 'TTFT p99 (ms)', 'E2E p99 (ms)'])
+    expect(picker.value).toBe('tpot')
+    // the latency figure's subtitle reflects the selected metric
+    const fig = picker.closest('figure') as Element
+    expect(fig.querySelector('.vc-s')?.textContent).toContain('TPOT')
+    fireEvent.change(picker, { target: { value: 'e2e' } })
+    expect(fig.querySelector('.vc-s')?.textContent).toContain('E2E')
   })
 
   it('#3 shows the interactivity floor as a spec-chip in the header', () => {

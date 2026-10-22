@@ -227,6 +227,10 @@ svg.chart .axlabel{font-family:var(--font-sans);font-size:11px;fill:var(--muted)
 .vc-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
 .vc-t{margin:0;font-size:12.5px;font-weight:600;letter-spacing:-0.01em;color:var(--ink)}
 .vc-r{font-size:9.5px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+/* latency-metric picker in the chart header */
+.vc-pick select{font:inherit;font-size:11px;color:var(--ink);background:var(--panel);
+border:1px solid var(--line-strong);border-radius:4px;padding:1px 4px;cursor:pointer}
+.vc-pick select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .vc-s{margin:3px 0 6px;font-size:11px;color:var(--muted)}
 .vc-k{margin:7px 0 0;font-size:11px;color:var(--muted);line-height:1.45}
 /* the violet "knee" marker: the interactivity cliff, from the deck */

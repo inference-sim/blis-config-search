@@ -182,7 +182,7 @@ export function PointDetail({ r, onClose, pinned = true, scenarioHasCmd = true }
             ['Speed per user', finite(r.pu) ? `${fnum(r.pu, 1)} tok/s` : null],
             ['Fleet output', finite(r.cl) ? `${fnum(r.cl, 0)} tok/s` : null],
             ['Per GPU', finite(r.tpg) ? `${fnum(r.tpg, 1)} tok/s` : null],
-            ['ITL / TPOT p99', ms(r.itl)], ['TTFT p99', ms(r.ttft)],
+            ['TPOT p99', ms(r.itl)], ['TTFT p99', ms(r.ttft)],
             ['E2E p99', ms(r.e2e)], ['Queue delay p99', ms(r.sched)],
             ['Servable', r.ok ? 'yes' : 'no'],
           ])}
@@ -213,14 +213,9 @@ const COL_HELP: Record<string, string> = {
   'tok/s per user': 'Output tokens per second a single session sees — the interactivity each caller feels.',
   'tok/s fleet': 'Total output tokens per second across every instance and GPU in the deployment — the whole config’s serving capacity.',
   'tok/s GPU': 'Fleet throughput divided by total GPUs — how efficiently each GPU is used.',
-  'ITL ms': 'Inter-token latency (p99): the gap between output tokens. Lower feels snappier.',
+  'TPOT ms': 'Time per output token (p99), a.k.a. inter-token latency: the gap between output tokens. Lower feels snappier.',
   'TTFT ms': 'Time to first token (p99): how long a caller waits before the reply starts streaming.',
-  // full per-run table below uses slightly different labels for the same quantities
-  series: 'The serving topology — GPUs × tensor-parallel × expert-parallel × instances.',
-  conc: 'Concurrent sessions — simultaneous users/requests — this run was swept at.',
-  GPUs: 'Total GPUs the deployment consumes (tensor × pipeline parallel × instances).',
-  'cluster tok/s': 'Total output tokens per second across the whole deployment — its serving capacity.',
-  'tok/s/user': 'Output tokens per second a single session sees — the interactivity each caller feels.',
+  'E2E ms': 'End-to-end latency (p99): total time from request to the last output token.',
   status: 'Whether the run held the interactivity floor, or which constraint it broke.',
 }
 /** A header term with its glossary tooltip. The whole label (term + the "?" icon) opens a real
@@ -320,8 +315,9 @@ export function OperatingTable({ recs, onPick, picked = null, active = null }: {
       case 'tok/s per user': return r.pu
       case 'tok/s fleet': return r.cl
       case 'tok/s GPU': return r.tpg
-      case 'ITL ms': return r.itl
+      case 'TPOT ms': return r.itl
       case 'TTFT ms': return r.ttft
+      case 'E2E ms': return r.e2e
       default: return undefined
     }
   }
@@ -345,8 +341,9 @@ export function OperatingTable({ recs, onPick, picked = null, active = null }: {
             <SortTh term="tok/s per user" sortKey="tok/s per user" sort={sort} onToggle={toggle} num />
             <SortTh term="tok/s fleet" sortKey="tok/s fleet" sort={sort} onToggle={toggle} num />
             <SortTh term="tok/s GPU" sortKey="tok/s GPU" sort={sort} onToggle={toggle} num />
-            <SortTh term="ITL ms" sortKey="ITL ms" sort={sort} onToggle={toggle} num />
+            <SortTh term="TPOT ms" sortKey="TPOT ms" sort={sort} onToggle={toggle} num />
             <SortTh term="TTFT ms" sortKey="TTFT ms" sort={sort} onToggle={toggle} num />
+            <SortTh term="E2E ms" sortKey="E2E ms" sort={sort} onToggle={toggle} num />
           </tr>
         </thead>
         <tbody>
@@ -361,6 +358,7 @@ export function OperatingTable({ recs, onPick, picked = null, active = null }: {
               <td className="num"><span className="num">{fnum(r.tpg)}</span></td>
               <td className="num"><span className="num">{fnum(r.itl, 2)}</span></td>
               <td className="num"><span className="num">{fnum(r.ttft, 0)}</span></td>
+              <td className="num"><span className="num">{fnum(r.e2e, 0)}</span></td>
             </tr>
           ))}
         </tbody>
@@ -649,20 +647,36 @@ function explainPerUser(recs: RunRecord[], seriesList: string[]): string | null 
       : ' No configuration in view reached its knee, so each one still has headroom above the loads swept here.')
 }
 
-/** ITL-vs-load: latency is the mechanism behind the cliff — quantify flat vs post-knee. */
-function explainItl(recs: RunRecord[]): string | null {
-  const withItl = recs.filter((r) => finite(r.itl) && finite(r.conc))
-  if (!withItl.length) return null
-  const ok = withItl.filter((r) => r.ok)
-  const bad = withItl.filter((r) => !r.ok)
+/** The latency metrics the LATENCY chart can plot. TPOT (time per output token) is this
+ *  codebase's name for inter-token latency — `itl` is the field, "TPOT" the label the rest of
+ *  the UI uses. Each carries how to read it off a record and the words for the explainer. */
+interface LatMetric {
+  key: string
+  label: string        // short, for the selector + axis
+  get: (r: RunRecord) => number | null
+  phrase: string       // used in the derived explainer sentence
+}
+const LAT_METRICS: LatMetric[] = [
+  { key: 'tpot', label: 'TPOT p99 (ms)', get: (r) => r.itl, phrase: 'time per output token' },
+  { key: 'ttft', label: 'TTFT p99 (ms)', get: (r) => r.ttft ?? null, phrase: 'time to first token' },
+  { key: 'e2e', label: 'E2E p99 (ms)', get: (r) => r.e2e ?? null, phrase: 'end-to-end latency' },
+]
+
+/** Latency-vs-load: latency is the mechanism behind the cliff — quantify flat vs post-knee, for
+ *  whichever latency metric the user has selected. */
+function explainLatency(recs: RunRecord[], m: LatMetric): string | null {
+  const withM = recs.filter((r) => finite(m.get(r)) && finite(r.conc))
+  if (!withM.length) return null
+  const ok = withM.filter((r) => r.ok)
+  const bad = withM.filter((r) => !r.ok)
   if (!ok.length) return 'Every run in view is already over the latency ceiling.'
-  const itls = ok.map((r) => r.itl as number)
-  const lo = Math.min(...itls)
-  const hi = Math.max(...itls)
-  let s = `While a configuration is healthy its inter-token latency barely moves — ${fnum(lo, 1)}`
+  const vals = ok.map((r) => m.get(r) as number)
+  const lo = Math.min(...vals)
+  const hi = Math.max(...vals)
+  let s = `While a configuration is healthy its ${m.phrase} barely moves — ${fnum(lo, 1)}`
     + `${hi > lo ? `–${fnum(hi, 1)}` : ''} ms across the servable loads in view.`
   if (bad.length) {
-    const worst = Math.max(...bad.map((r) => r.itl as number))
+    const worst = Math.max(...bad.map((r) => m.get(r) as number))
     s += ` Past the knee it climbs to ${fnum(worst, 1)} ms — roughly ${Math.max(2, Math.round(worst / Math.max(lo, 0.001)))}× the healthy value.`
       + ' Adding load beyond that point buys little throughput and costs every user noticeably.'
   } else {
@@ -684,6 +698,9 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
   const [hover, setHover] = useState<string | null>(null)
   // The run whose deployment the inline panel is showing, by RunRecord.id.
   const [picked, setPicked] = useState<string | null>(null)
+  // Which latency metric the LATENCY chart plots (TPOT / TTFT / E2E). Default TPOT.
+  const [latKey, setLatKey] = useState<string>(LAT_METRICS[0].key)
+  const latMetric = LAT_METRICS.find((m) => m.key === latKey) ?? LAT_METRICS[0]
   // Sort for the full per-run log. Unsorted = the order build_gallery emitted (series, then load).
   const { sort: runSort, toggle: toggleRunSort } = useSort()
   const series = useMemo(() => [...new Set(recs.map((r) => r.series))].sort(), [recs])
@@ -770,8 +787,9 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
       case 'tok/s per user': return r.pu
       case 'tok/s fleet': return r.cl
       case 'tok/s GPU': return r.tpg
-      case 'ITL ms': return r.itl
+      case 'TPOT ms': return r.itl
       case 'TTFT ms': return r.ttft
+      case 'E2E ms': return r.e2e
       case 'status': return r.ok ? '' : r.viol.length ? r.viol.join(', ') : r.status
       default: return undefined
     }
@@ -807,14 +825,22 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
           {explainPerUser(shown, series) && <p className="vc-x">{explainPerUser(shown, series)}</p>}
         </figure>
         <figure className="vc">
-          <div className="vc-h"><h4 className="vc-t">Inter-token latency vs load</h4><span className="vc-r">latency</span></div>
-          <p className="vc-s">ITL (ms) as concurrency climbs</p>
-          <Lines recs={recs} shownRecs={shown} get={(r) => r.itl} xl="concurrency" yl="ITL (ms)" label="Inter-token latency by concurrency" colors={colors} showKnee hl={hl}
+          <div className="vc-h">
+            <h4 className="vc-t">Latency vs load</h4>
+            <label className="vc-pick">
+              <span className="sr">Latency metric</span>
+              <select value={latKey} onChange={(e) => setLatKey(e.target.value)}>
+                {LAT_METRICS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+              </select>
+            </label>
+          </div>
+          <p className="vc-s">{latMetric.label} as concurrency climbs</p>
+          <Lines recs={recs} shownRecs={shown} get={latMetric.get} xl="concurrency" yl={latMetric.label} label={`${latMetric.label} by concurrency`} colors={colors} showKnee hl={hl}
             onPick={pickRun} picked={picked} />
-          <p className="vc-k"><b>How to read it.</b> Inter-token latency is the gap between output tokens — the mechanism behind
-            the cliff above. Lower is better, and the floor is a ceiling on this number, so a line crossing its knee is what
-            makes the per-user rate fall.</p>
-          {explainItl(shown) && <p className="vc-x">{explainItl(shown)}</p>}
+          <p className="vc-k"><b>How to read it.</b> {latMetric.label.replace(/ \(ms\)$/, '')} as the load climbs — the latency behind
+            the per-user cliff above. Lower is better, and the floor is a ceiling on this number, so a line crossing its knee is
+            what makes the per-user rate fall.</p>
+          {explainLatency(shown, latMetric) && <p className="vc-x">{explainLatency(shown, latMetric)}</p>}
         </figure>
       </div>
 
@@ -865,8 +891,9 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
               <SortTh term="tok/s per user" sortKey="tok/s per user" sort={runSort} onToggle={toggleRunSort} num />
               <SortTh term="tok/s fleet" sortKey="tok/s fleet" sort={runSort} onToggle={toggleRunSort} num />
               <SortTh term="tok/s GPU" sortKey="tok/s GPU" sort={runSort} onToggle={toggleRunSort} num />
-              <SortTh term="ITL ms" sortKey="ITL ms" sort={runSort} onToggle={toggleRunSort} num />
+              <SortTh term="TPOT ms" sortKey="TPOT ms" sort={runSort} onToggle={toggleRunSort} num />
               <SortTh term="TTFT ms" sortKey="TTFT ms" sort={runSort} onToggle={toggleRunSort} num />
+              <SortTh term="E2E ms" sortKey="E2E ms" sort={runSort} onToggle={toggleRunSort} num />
               <SortTh term="status" sortKey="status" sort={runSort} onToggle={toggleRunSort} />
             </tr>
           </thead>
@@ -882,10 +909,11 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
                 <td className="num"><span className="num">{fnum(r.tpg)}</span></td>
                 <td className="num"><span className="num">{fnum(r.itl, 2)}</span></td>
                 <td className="num"><span className="num">{fnum(r.ttft, 0)}</span></td>
+                <td className="num"><span className="num">{fnum(r.e2e, 0)}</span></td>
                 <td>{r.ok ? 'servable' : r.viol.length ? r.viol.join(', ') : r.status}</td>
               </tr>
             ))}
-            {shown.length === 0 && <tr><td colSpan={8} className="pts-empty">No runs match these filters.</td></tr>}
+            {shown.length === 0 && <tr><td colSpan={9} className="pts-empty">No runs match these filters.</td></tr>}
           </tbody>
         </table>
       </div>

@@ -1,0 +1,48 @@
+name: checks
+
+# The hermetic test gate: runs on every PR and every push to main. No BLIS, no network
+# beyond npm install, no port binding. If this is red, pages.yml should not publish — so keep
+# this fast and deterministic. Two parallel jobs (Python and web) since they share no toolchain.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyyaml
+      - name: Build + catalog + backend tests
+        run: |
+          python3 -I scripts/test_build.py
+          python3 -I scripts/test_backend.py
+      - name: Skill report/runner tests (data producer contract)
+        run: |
+          python3 -I .claude/skills/config-search/scripts/test_report.py
+          python3 -I .claude/skills/config-search/scripts/test_run_blis.py
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyyaml
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Install, typecheck, test, build
+        working-directory: web
+        run: |
+          npm ci
+          npm run stage:data          # exercises the Python data producer + staging seam
+          npm run typecheck
+          npm run test
+          npm run build

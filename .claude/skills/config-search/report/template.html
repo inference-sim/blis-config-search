@@ -73,12 +73,68 @@ td.hero{font-size:19px;font-weight:700;color:var(--accent)}
 color:var(--ink);white-space:nowrap;line-height:1.75}
 .short .fl i{color:var(--ink3);font-style:normal}
 #xf{margin-top:20px}
-.xf-bar{display:grid;
-grid-template-columns:repeat(auto-fit,minmax(118px,1fr));
-gap:14px 18px;align-items:start;
+/* The explorer is two-part, as in the reference report: brush a RANGE on an outcome metric
+   (.xf-hist row) or click a LEVEL of a deployment knob (.xf-bar). Both drive one selection. */
+.xf-head{font-family:var(--sans);font-size:10.5px;letter-spacing:0.08em;
+text-transform:uppercase;color:var(--ink3);margin:18px 0 7px;font-weight:700}
+.xf-head span{text-transform:none;letter-spacing:0;font-weight:400;color:var(--ink3)}
+.xf-hist{display:grid;
+grid-template-columns:repeat(auto-fit,minmax(176px,1fr));
+gap:10px 16px;align-items:start;
 background:var(--panel);border:1px solid var(--line);border-radius:4px;
-padding:16px 18px}
+padding:14px 18px}
+.xf-h{min-width:0}
+.xf-h h6{font-family:var(--sans);font-size:11px;color:var(--ink2);margin:0 0 2px;
+font-weight:600;display:flex;justify-content:space-between;gap:8px}
+.xf-h h6 b{color:var(--accent);font-variant-numeric:tabular-nums;font-weight:600}
+.xf-h h6 b.off{color:var(--ink3);font-weight:400}
+.xf-h svg{display:block;width:100%;height:58px;overflow:visible}
+.xf-h .bar{fill:var(--fig-bar2);opacity:.5}
+.xf-h .bar.sel{opacity:1}
+.xf-h .selection{fill:var(--accent);fill-opacity:.1;stroke:var(--accent);
+stroke-width:1;shape-rendering:crispEdges}
+.xf-h .handle{fill:var(--accent);fill-opacity:.55;stroke:none}
+.xf-h .axlab{font-family:var(--sans);font-size:9.5px;fill:var(--ink3)}
+.xf-bar{background:var(--panel);border:1px solid var(--line);border-radius:4px;
+padding:4px 18px 16px}
+/* "show N more filters" disclosure, between the primary facets and the detail block */
+.xf-more{padding-top:13px;border-top:1px solid var(--line);margin-top:6px}
+.xf-more button{font-family:var(--sans);font-size:11.5px;color:var(--accent);cursor:pointer;
+background:none;border:0;padding:3px 0;text-align:left}
+.xf-more button span{color:var(--ink3)}
+.xf-more button:hover{text-decoration:underline}
+.xf-detail{display:none}
+.xf-detail.show{display:block}
+/* a facet GROUP (Load / Topology / Routing / Engine) */
+.xf-grp{padding-top:13px}
+.xf-grp + .xf-grp{border-top:1px solid var(--line);margin-top:4px}
+.xf-grp h4{font-family:var(--sans);font-size:9.5px;letter-spacing:0.1em;
+text-transform:uppercase;color:var(--accent);margin:0 0 9px;font-weight:700;opacity:.85}
+/* Flex, not grid. `repeat(auto-fit, minmax(118px,1fr))` created a track per POSSIBLE facet and
+   left the unused ones as 0px columns that still sized the row — a 2-facet group measured 180px
+   tall for 78px of content. Flex wrapping gives each facet its content height and packs the row. */
+.xf-grid-dims{display:flex;flex-wrap:wrap;gap:14px 24px;align-items:flex-start}
+/* NB: declare .xf-dim's own rules BEFORE the layout ones. A later `.xf-dim{min-width:0}` has the
+   same specificity as `.xf-grid-dims > .xf-dim` on that property and silently won, collapsing
+   every facet to zero width. */
 .xf-dim{min-width:0}
+.xf-grid-dims > .xf-dim{flex:1 1 118px;max-width:100%;min-width:118px;align-self:flex-start}
+/* a wrapping facet (many short levels) earns more width so its options form few rows */
+.xf-grid-dims > .xf-dim.xf-flow{flex:3 1 320px;min-width:260px}
+/* facets whose levels are PHRASES ("batch tokens 2,048", "64x TP2xDP4 + EP") need room, or every
+   level wraps mid-phrase and becomes hard to read next to the numeric facets */
+.xf-grid-dims > .xf-dim.xf-wide{flex:2 1 230px;min-width:200px}
+/* the options holder is a block inside the flex ITEM, not a flex child of the row */
+.xf-grid-dims > .xf-dim > div{width:100%}
+/* A facet with many short numeric levels ("sessions" has a dozen) would run one option per row
+   and cost a screen of scroll before the real knobs. Opt those into a wrapping flow instead,
+   driven by a class rather than :only-child — the latter silently stopped matching the moment a
+   second facet joined the group.
+   The class is `xf-flow`, NOT `wrap`: `.wrap` is the page's own container class
+   (`padding: 0 28px 96px`), so a facet carrying it inherited 96px of bottom padding and measured
+   181px tall for 78px of content. */
+.xf-dim.xf-flow > div{display:flex;flex-wrap:wrap;gap:0 6px}
+.xf-dim.xf-flow .xf-opt{flex:0 0 auto;min-width:58px}
 .xf-dim h5{font-family:var(--sans);font-size:10.5px;letter-spacing:0.08em;
 text-transform:uppercase;color:var(--ink3);margin:0 0 7px;font-weight:700}
 .xf-opt{font-family:var(--sans);font-size:12.5px;padding:3px 7px;margin:0 0 2px;
@@ -103,8 +159,62 @@ justify-content:space-between}
 .xf-sum b{color:var(--ink);font-size:17px;font-variant-numeric:tabular-nums}
 .xf-clear{font-family:var(--sans);font-size:12px;color:var(--accent);cursor:pointer;
 border:1px solid var(--accent);border-radius:3px;padding:3px 10px;background:none}
+/* y-axis view switcher: segmented control over the latency/throughput metrics */
+.xf-views{display:flex;gap:0;flex-wrap:wrap;margin:14px 0 0;
+font-family:var(--sans);font-size:12px}
+.xf-views .lb{color:var(--ink3);font-size:10.5px;letter-spacing:0.08em;
+text-transform:uppercase;font-weight:700;align-self:center;margin-right:10px}
+.xf-view{padding:4px 11px;border:1px solid var(--line-strong,var(--rule));cursor:pointer;
+background:var(--panel);color:var(--ink2);user-select:none;margin-left:-1px}
+.xf-view:first-of-type{border-radius:3px 0 0 3px;margin-left:0}
+.xf-view:last-child{border-radius:0 3px 3px 0}
+.xf-view:hover{background:var(--hero);color:var(--ink)}
+.xf-view.on{background:var(--accent);border-color:var(--accent);color:#fff;z-index:1}
+.xf-view .u{opacity:.66;font-size:10.5px;margin-left:5px}
 #xf-scatter{background:var(--fig-bg);border:1px solid var(--line);border-radius:3px;
-margin-top:14px}
+margin-top:10px}
+#xf-scatter g.p{cursor:pointer}
+#xf-scatter g.p.sel circle{stroke:var(--ink);stroke-width:2.4}
+/* hover card — replaces the browser's unstyled SVG <title> tooltip */
+.xf-tip{position:fixed;z-index:50;pointer-events:none;opacity:0;transition:opacity .09s;
+background:var(--panel);border:1px solid var(--rule);border-radius:5px;
+box-shadow:0 6px 24px rgba(0,0,0,.17);padding:9px 11px;max-width:290px;
+font-family:var(--sans);font-size:12px;line-height:1.5;color:var(--ink2)}
+.xf-tip.show{opacity:1}
+.xf-tip h6{font-family:var(--mono);font-size:12px;color:var(--ink);margin:0 0 5px;
+font-weight:600;letter-spacing:-0.01em}
+/* the knob delta from this topology's baseline, spelled out ("batch tokens 2,048") */
+.xf-tip .var{font-size:11px;color:var(--accent);margin:-3px 0 6px}
+.xf-tip dl{display:grid;grid-template-columns:auto 1fr;gap:1px 10px;margin:0}
+.xf-tip dt{color:var(--ink3)}
+.xf-tip dd{margin:0;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink)}
+.xf-tip .bad{color:var(--bad);margin:5px 0 0;font-size:11.5px}
+.xf-tip .cta{color:var(--ink3);font-size:11px;margin:6px 0 0;font-style:italic}
+/* click-to-inspect panel: the exact deployment BLIS consumed */
+.xf-panel{display:none;margin-top:12px;background:var(--panel);
+border:1px solid var(--line);border-radius:4px;padding:16px 18px}
+.xf-panel.show{display:block}
+.xf-panel .ph{display:flex;justify-content:space-between;align-items:baseline;gap:14px;
+border-bottom:1px solid var(--line);padding-bottom:9px;margin-bottom:12px}
+.xf-panel .ph h5{font-family:var(--mono);font-size:14px;margin:0;color:var(--ink);
+font-weight:600}
+.xf-panel .ph .x{font-family:var(--sans);font-size:11.5px;color:var(--accent);
+cursor:pointer;border:1px solid var(--accent);border-radius:3px;padding:2px 9px;
+background:none;flex:none}
+.xf-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:14px 20px}
+.xf-grid section{min-width:0}
+.xf-grid h6{font-family:var(--sans);font-size:10px;letter-spacing:0.08em;
+text-transform:uppercase;color:var(--ink3);margin:0 0 6px;font-weight:700}
+.xf-grid dl{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;margin:0;
+font-family:var(--sans);font-size:12px}
+.xf-grid dt{color:var(--ink3);white-space:nowrap}
+.xf-grid dd{margin:0;text-align:right;color:var(--ink);font-family:var(--mono);
+font-size:11.5px;font-variant-numeric:tabular-nums}
+.xf-cmd{margin-top:14px}
+.xf-cmd pre{background:var(--hero);border:1px solid var(--line);border-radius:3px;
+padding:10px 12px;margin:0;overflow-x:auto;font-family:var(--mono);font-size:11px;
+line-height:1.65;color:var(--ink);white-space:pre-wrap;word-break:break-all}
+.xf-cmd .none{font-family:var(--sans);font-size:11.5px;color:var(--ink3);font-style:italic}
 #xf-table{max-height:460px;overflow:auto;margin-top:6px;border:1px solid var(--line);
 border-radius:3px}
 #xf-table table{margin:0}
@@ -158,7 +268,7 @@ svg text{font-family:var(--sans)}
   .wrap{padding:0 18px 70px}
 }
 @media print{
-  body{background:#fff} .xf-bar,#xf-table{break-inside:avoid}
+  body{background:#fff} .xf-bar,.xf-hist,#xf-table{break-inside:avoid}
   section.finding{break-inside:avoid-page}
 }
 </style></head><body><div class="wrap">
@@ -185,35 +295,230 @@ const FACTS = /*__FACTS__*/{};
   if (!document.getElementById("xf") || !RECORDS.length) return;
 
   // Only surface knobs that actually vary -- a dimension with one value is noise here.
+  // epw/dp/a2a are the MoE axes the search now explores (expert-parallel width is derived as
+  // tp x dp); they auto-hide on a dense run set, where they are constant.
+  // PROGRESSIVE DISCLOSURE. `primary` is what dominates an LLM serving decision — the GPU count,
+  // how the model is sharded (TP / DP / EP), how many replicas, and the load — so those facets
+  // are always visible. `detail` is the engine and routing knobs: real levers (routing swung
+  // throughput 2.3x) but second-order, and showing all of them at once turned the panel into a
+  // wall of knobs. They sit behind "more filters".
   const ALL_DIMS = [
-    {key:'conc', label:'sessions',       order:(a,b)=>a-b},
-    {key:'route',label:'routing',        order:null},
-    {key:'tp',   label:'TP',             order:(a,b)=>a-b},
-    {key:'pd',   label:'prefill/decode', order:null},
-    {key:'mtp',  label:'draft tokens',   order:(a,b)=>a-b},
-    {key:'mnbt', label:'batch tokens',   order:(a,b)=>a-b},
-    {key:'mns',  label:'max seqs',       order:(a,b)=>a-b},
-    {key:'a2a',  label:'dispatch',       order:null},
-    {key:'ok',   label:'servable',       order:null},
+    {key:'conc', label:'sessions',       order:(a,b)=>a-b,  grp:'Load',       tier:'primary'},
+    // `series` is the topology; `variant` is its knob delta. Both are primary: once the search
+    // refines knobs, several runs legitimately share a series name, and the variant facet is how
+    // you tell those apart without hunting through the table.
+    {key:'series',label:'configuration', order:null,        grp:'Topology',   tier:'primary'},
+    {key:'variant',label:'knob delta',   order:null,        grp:'Topology',   tier:'primary'},
+    {key:'gpus', label:'GPUs',           order:(a,b)=>a-b,  grp:'Topology',   tier:'primary'},
+    {key:'tp',   label:'TP',             order:(a,b)=>a-b,  grp:'Topology',   tier:'primary'},
+    {key:'dp',   label:'DP',             order:(a,b)=>a-b,  grp:'Topology',   tier:'primary'},
+    {key:'epw',  label:'EP width',       order:(a,b)=>a-b,  grp:'Topology',   tier:'primary'},
+    {key:'ni',   label:'instances',      order:(a,b)=>a-b,  grp:'Topology',   tier:'primary'},
+    {key:'ok',   label:'servable',       order:null,        grp:'Load',       tier:'primary'},
+    {key:'nodes',label:'nodes',          order:(a,b)=>a-b,  grp:'Topology',   tier:'detail'},
+    {key:'pd',   label:'prefill/decode', order:null,        grp:'Topology',   tier:'detail'},
+    {key:'route',label:'routing',        order:null,        grp:'Routing',    tier:'detail'},
+    {key:'scorers',label:'route scorers',order:null,        grp:'Routing',    tier:'detail'},
+    {key:'schedp',label:'scheduler',     order:null,        grp:'Routing',    tier:'detail'},
+    {key:'admit',label:'admission',      order:null,        grp:'Routing',    tier:'detail'},
+    {key:'a2a',  label:'MoE dispatch',   order:null,        grp:'Engine',     tier:'detail'},
+    {key:'mnbt', label:'batch tokens',   order:(a,b)=>a-b,  grp:'Engine',     tier:'detail'},
+    {key:'mns',  label:'max seqs',       order:(a,b)=>a-b,  grp:'Engine',     tier:'detail'},
+    {key:'bs',   label:'block size',     order:(a,b)=>a-b,  grp:'Engine',     tier:'detail'},
+    {key:'gmu',  label:'gpu mem util',   order:(a,b)=>a-b,  grp:'Engine',     tier:'detail'},
+    {key:'mtp',  label:'draft tokens',   order:(a,b)=>a-b,  grp:'Engine',     tier:'detail'},
   ];
+  // Y-axis views for the scatter. EVERY latency metric here is p99 — the basis the interactivity
+  // floor uses — so switching the axis never swaps a mean for a tail under the reader.
+  // TPOT is not a fifth view: time-per-output-token IS the inter-token latency, so it is named on
+  // the ITL view rather than offered as a separate (identical) axis.
+  const VIEWS = [
+    {key:'pu',   label:'Speed per user', short:'per user', unit:'tok/s', log:false, hi:true,
+     note:'output tokens per second each user sees — 1000 / ITL p99'},
+    {key:'itl',  label:'ITL / TPOT',     short:'ITL',      unit:'ms',    log:false, hi:false,
+     note:'inter-token latency p99, a.k.a. TPOT (time per output token)'},
+    {key:'ttft', label:'TTFT',           short:'TTFT',     unit:'ms',    log:true,  hi:false,
+     note:'time to first token, p99 — how long a user waits before anything appears'},
+    {key:'e2e',  label:'E2E',            short:'E2E',      unit:'ms',    log:true,  hi:false,
+     note:'end-to-end request latency, p99'},
+    {key:'sched',label:'Queue delay',    short:'queue',    unit:'ms',    log:true,  hi:false,
+     note:'scheduling delay p99 — time spent queued before admission'},
+  ];
+  // Continuous outcome metrics, brushed as a RANGE rather than clicked as a level. These are the
+  // reference report's "filter by outcome" row; `log` for the heavy-tailed latency axes.
+  const ALL_HISTS = [
+    {key:'pu',   label:'Speed per user', unit:'tok/s', log:false},
+    {key:'tpg',  label:'Output per GPU', unit:'tok/s', log:false},
+    {key:'ttft', label:'TTFT p99',       unit:'ms',    log:true},
+    {key:'itl',  label:'ITL p99',        unit:'ms',    log:false},
+    {key:'sched',label:'Queue delay',    unit:'ms',    log:true},
+  ];
+  // Level labels for facet values that do not read as themselves. crossfilter groups null as its
+  // own level, so epw (null on every EP-off run) rendered a BLANK clickable row with a count --
+  // a filter you could not read. '' is the key for null/undefined after String().
+  const LEVEL_LABELS = {
+    epw: {'':'off', 'null':'off', 'undefined':'off'},
+    ok:  {'true':'yes', 'false':'no'},
+    a2a: {'n/a':'EP off', 'ep':'expert-parallel'},
+    // an empty variant means "every knob at its default" — say so rather than show a blank row
+    variant: {'':'all defaults', 'null':'all defaults', 'undefined':'all defaults'},
+  };
+  const levelLabel = (key, raw) => {
+    const k = raw===null||raw===undefined ? '' : String(raw);
+    const tbl = LEVEL_LABELS[key];
+    if (tbl && tbl[k]!==undefined) return tbl[k];
+    if (k==='') return 'n/a';                       // any other null level still gets a name
+    return key==='mnbt' ? d3.format(',')(+k) : k;
+  };
   const varies = k => new Set(RECORDS.map(r=>r[k])).size > 1;
   const DIMS = ALL_DIMS.filter(d => d.key==='conc' || d.key==='ok' || varies(d.key));
+  // A histogram needs at least two distinct NUMERIC values to have a range worth brushing.
+  const nums = k => RECORDS.map(r=>r[k]).filter(v=>typeof v==='number' && isFinite(v));
+  const HISTS = ALL_HISTS.filter(h => new Set(nums(h.key)).size > 1);
 
   const cf = crossfilter(RECORDS);
   const dims={}, groups={}, sel={};
   DIMS.forEach(d=>{ dims[d.key]=cf.dimension(r=>r[d.key]); groups[d.key]=dims[d.key].group();
     sel[d.key]=new Set(); });
+  // Each brushed metric gets its own crossfilter dimension and an active [lo,hi] range (null =
+  // unbrushed). A null metric never satisfies a range, so brushing excludes unmeasured runs --
+  // which is correct: you cannot select on an outcome that was not measured.
+  const hdims={}, hrange={};
+  HISTS.forEach(h=>{ hdims[h.key]=cf.dimension(r=>r[h.key]); hrange[h.key]=null; });
 
   const root=d3.select('#xf');
+  root.append('div').attr('class','xf-head')
+    .html('Filter by outcome: brush a range &nbsp;<span>— drag across a chart; click it to clear</span>');
+  const histWrap=root.append('div').attr('class','xf-hist');
+  root.append('div').attr('class','xf-head')
+    .html('Filter by setting: click a level &nbsp;<span>— counts update against every other filter</span>');
+  // Primary facets always; detail facets inside a collapsed block. Groups with no surviving
+  // dimension are skipped, so a search that swept no engine knobs shows no "Engine" block (and
+  // no disclosure at all).
+  const GRP_ORDER=['Load','Topology','Routing','Engine'];
+  const groupsOf=tier=>GRP_ORDER
+    .map(g=>({name:g, dims:DIMS.filter(d=>d.grp===g && d.tier===tier)}))
+    .filter(g=>g.dims.length);
+  const PRIMARY=groupsOf('primary'), DETAIL=groupsOf('detail');
+  const nDetail=DETAIL.reduce((n,g)=>n+g.dims.length,0);
+
   const bar=root.append('div').attr('class','xf-bar');
-  const panels=bar.selectAll('div.xf-dim').data(DIMS).join('div').attr('class','xf-dim');
-  panels.append('h5').text(d=>d.label);
-  const optWrap=panels.append('div');
+  const renderGroups=(host,grps)=>{
+    const els=host.selectAll('div.xf-grp').data(grps).join('div').attr('class','xf-grp');
+    els.append('h4').text(d=>d.name);
+    const p=els.append('div').attr('class','xf-grid-dims')
+      .selectAll('div.xf-dim').data(d=>d.dims).join('div')
+      // A facet with many short levels wraps horizontally instead of one option per row.
+      .attr('class',d=>'xf-dim'
+        + (new Set(RECORDS.map(r=>r[d.key])).size > 6 ? ' xf-flow' : '')
+        // phrase-valued facets get extra width (see .xf-wide)
+        + (['series','variant','scorers','route'].includes(d.key) ? ' xf-wide' : ''));
+    p.append('h5').text(d=>d.label);
+    // Each panel's own option holder, bound to its dim — redraw() walks optHolders, so a panel
+    // in a collapsed tier is still updated and its filter still counts.
+    p.each(function(d){ optHolders.push({dim:d, sel:d3.select(this).append('div')}); });
+    return p;
+  };
+  // Every facet panel registers its option holder here, so redraw() iterates ONE list regardless
+  // of which tier a panel lives in (a detail filter stays applied while collapsed).
+  const optHolders=[];
+  const primaryPanels=renderGroups(bar.append('div'),PRIMARY);
+  let detailPanels=null;
+  if (nDetail) {
+    // The disclosure says WHAT is behind it and how many, so it is not a mystery control.
+    const more=bar.append('div').attr('class','xf-more');
+    const names=DETAIL.map(g=>g.name.toLowerCase()).join(' + ');
+    const btn=more.append('button').attr('type','button');
+    const wrap=bar.append('div').attr('class','xf-detail');
+    detailPanels=renderGroups(wrap,DETAIL);
+    let open=false;
+    const sync=()=>{ wrap.classed('show',open);
+      btn.html(`${open?'▾':'▸'} ${open?'hide':'show'} ${nDetail} more filters `
+        +`<span>${names} knobs</span>`); };
+    btn.on('click',()=>{ open=!open; sync(); redraw(); });
+    sync();
+  }
 
   const sum=root.append('div').attr('class','xf-sum');
   const sumCount=sum.append('span');
   sum.append('button').attr('class','xf-clear').text('clear all filters')
-    .on('click',()=>{ DIMS.forEach(d=>{ sel[d.key].clear(); dims[d.key].filterAll(); }); redraw(); });
+    .on('click',()=>{ DIMS.forEach(d=>{ sel[d.key].clear(); dims[d.key].filterAll(); });
+      HISTS.forEach(h=>{ hrange[h.key]=null; hdims[h.key].filterAll();
+        if(brushes[h.key]) brushes[h.key].move(null); });
+      redraw(); });
+
+  // --- the brushable histograms ("filter by outcome") -------------------------------------
+  // Built once (bins and scales are fixed to the FULL record set, so a bar's position never
+  // moves as filters change -- only its highlight does). d3.brushX writes the range; the
+  // crossfilter dimension applies it. Guarded on d3.brushX so a stripped vendor bundle keeps
+  // the click facets working instead of throwing.
+  // buildHists() is DEFERRED to the bottom of the IIFE, after every holder redraw() touches is
+  // declared: attaching a brush can fire its handler immediately, and redraw() reads `none` /
+  // `tableWrap`, which are const (TDZ) -- building here threw "Cannot access 'none' before
+  // initialization" the moment a brush fired during setup.
+  const HW=176, HH=58, HM={t:4,r:6,b:12,l:6};
+  const brushes={}, hscale={}, hbins={}, hbarSel={}, hLabel={};
+  function buildHists(){
+    if (typeof d3.brushX !== 'function' || typeof d3.bin !== 'function') return;
+    const hcells=histWrap.selectAll('div.xf-h').data(HISTS).join('div').attr('class','xf-h');
+    hcells.each(function(h){
+      const cell=d3.select(this);
+      const vals=nums(h.key);
+      const lo=d3.min(vals), hi=d3.max(vals);
+      const head=cell.append('h6');
+      head.append('span').text(`${h.label}${h.unit?' ('+h.unit+')':''}`);
+      hLabel[h.key]=head.append('b').attr('class','off').text('all');
+      // A log axis cannot start at or below zero; fall back to linear when any value would be
+      // clipped, rather than silently dropping those runs off the chart.
+      const useLog = h.log && lo>0;
+      const x=(useLog?d3.scaleLog():d3.scaleLinear()).domain([lo,hi]).range([HM.l,HW-HM.r]).nice();
+      hscale[h.key]=x;
+      const thresholds = useLog
+        ? d3.range(12).map(i=>x.invert(HM.l+(HW-HM.l-HM.r)*i/11))
+        : x.ticks(11);
+      const bins=d3.bin().domain(x.domain()).thresholds(thresholds)(vals);
+      hbins[h.key]=bins;
+      const ymax=d3.max(bins,b=>b.length)||1;
+      const y=d3.scaleLinear().domain([0,ymax]).range([HH-HM.b,HM.t]);
+      const svg=cell.append('svg').attr('viewBox',`0 0 ${HW} ${HH}`)
+        .attr('preserveAspectRatio','none');
+      hbarSel[h.key]=svg.append('g').selectAll('rect').data(bins).join('rect')
+        .attr('class','bar')
+        .attr('x',b=>x(b.x0)).attr('y',b=>y(b.length))
+        .attr('width',b=>Math.max(1,x(b.x1)-x(b.x0)-0.6))
+        .attr('height',b=>Math.max(0,(HH-HM.b)-y(b.length)));
+      const fmt=v=>(Math.abs(v)>=1000?d3.format(',.0f')(v):d3.format(v<10?'.1f':'.0f')(v));
+      svg.append('text').attr('class','axlab').attr('x',HM.l).attr('y',HH-2).text(fmt(lo));
+      svg.append('text').attr('class','axlab').attr('x',HW-HM.r).attr('y',HH-2)
+        .attr('text-anchor','end').text(fmt(hi));
+      const brush=d3.brushX().extent([[HM.l,HM.t],[HW-HM.r,HH-HM.b]])
+        .on('brush end',(ev)=>{
+          if(!ev.selection){ hrange[h.key]=null; hdims[h.key].filterAll(); }
+          else {
+            const [a,b]=ev.selection.map(x.invert);
+            hrange[h.key]=[a,b];
+            // typeof guard: a null metric must not pass a numeric range (and must not throw).
+            hdims[h.key].filterFunction(v=>typeof v==='number'&&isFinite(v)&&v>=a&&v<=b);
+          }
+          redraw();
+        });
+      brushes[h.key]=svg.append('g').attr('class','brush').call(brush);
+    });
+  }
+
+  // Only offer a view the run set actually measured — a y-axis of all-nulls is a blank chart.
+  const hasVals = k => RECORDS.some(r=>typeof r[k]==='number' && isFinite(r[k]));
+  const AXES = VIEWS.filter(v=>hasVals(v.key));
+  let view = AXES[0] || VIEWS[0];
+
+  const vbar=root.append('div').attr('class','xf-views');
+  vbar.append('span').attr('class','lb').text('y-axis');
+  const vbtns=vbar.selectAll('div.xf-view').data(AXES).join('div').attr('class','xf-view')
+    .on('click',(ev,v)=>{ view=v; rescaleY(); redraw(); });
+  vbtns.append('span').text(d=>d.short);
+  vbtns.append('span').attr('class','u').text(d=>d.unit);
+  const vnote=root.append('div').attr('class','xf-head').style('margin-top','6px')
+    .style('text-transform','none').style('letter-spacing','0').style('font-weight','400');
 
   const SW=820,SH=300,SM={t:16,r:18,b:44,l:62};
   const svg=root.append('svg').attr('id','xf-scatter')
@@ -224,36 +529,162 @@ const FACTS = /*__FACTS__*/{};
   svg.append('text').attr('x',SM.l+(SW-SM.l-SM.r)/2).attr('y',SH-8)
     .attr('text-anchor','middle').attr('font-size',12).attr('fill','currentColor')
     .text('aggregate output tok/s delivered by the cluster (log scale)');
-  svg.append('text').attr('transform',`rotate(-90 14 ${SM.t+(SH-SM.t-SM.b)/2})`)
+  const ylab=svg.append('text').attr('transform',`rotate(-90 14 ${SM.t+(SH-SM.t-SM.b)/2})`)
     .attr('x',14).attr('y',SM.t+(SH-SM.t-SM.b)/2).attr('text-anchor','middle')
-    .attr('font-size',12).attr('fill','currentColor').text('tok/s per user');
+    .attr('font-size',12).attr('fill','currentColor');
 
   const clVals=RECORDS.map(r=>r.cl).filter(v=>v>0);
   const x=d3.scaleLog().range([SM.l,SW-SM.r])
     .domain([(d3.min(clVals)||1)/1.3,(d3.max(clVals)||10)*1.3]);
-  const y=d3.scaleLinear().range([SH-SM.b,SM.t]).domain([0,(d3.max(RECORDS,r=>r.pu)||1)*1.08]);
+  let y=d3.scaleLinear().range([SH-SM.b,SM.t]).domain([0,1]);
   const conc=[...new Set(RECORDS.map(r=>r.conc))].sort((a,b)=>a-b);
   const col=d3.scaleOrdinal().domain(conc)
     .range(['#08306b','#1a5296','#2e74b5','#5a9bd4','#8fbce0','#bcd7ec','#dceaf6']);
   gx.call(d3.axisBottom(x).ticks(4,',').tickSize(4)).attr('font-size',11);
-  gy.call(d3.axisLeft(y).ticks(5)).attr('font-size',11);
+
+  function rescaleY(){
+    // Scale to the FULL record set, not the filtered one, so points do not jump as you filter.
+    const vals=RECORDS.map(r=>r[view.key]).filter(v=>typeof v==='number'&&isFinite(v)&&v>0);
+    const hi=d3.max(vals)||1, lo=d3.min(vals)||hi/10;
+    // A log axis needs a positive floor; latency spans orders of magnitude, rates do not.
+    y=(view.log&&lo>0?d3.scaleLog():d3.scaleLinear()).range([SH-SM.b,SM.t])
+      .domain(view.log&&lo>0?[lo/1.4,hi*1.4]:[0,hi*1.08]);
+    gy.call(d3.axisLeft(y).ticks(5,view.log?',':undefined)).attr('font-size',11);
+    ylab.text(`${view.label} (${view.unit})`);
+    vbtns.classed('on',d=>d.key===view.key);
+    vnote.text(view.note);
+  }
+  rescaleY();
 
   const none=root.append('div').attr('class','xf-none')
     .html('<b>No runs match this combination.</b> These filters span values the search never '
       +'measured together — the capacity probe visits a different concurrency ladder per topology, '
-      +'so many config×load pairs have no run. Clear a filter to see data again.');
+      +'so many config×load pairs have no run, and a brushed outcome range excludes runs whose '
+      +'metric was never measured. Clear a filter to see data again.');
+  // --- hover card + click-to-inspect panel ------------------------------------------------
+  // The SVG <title> the browser draws is unstyled, slow to appear and untruncatable, so the
+  // hover is our own fixed-position card; clicking pins the run's full deployment below.
+  const tip=d3.select(document.body).append('div').attr('class','xf-tip');
+  const panel=root.append('div').attr('class','xf-panel');
+  let picked=null;
+
+  const f1=v=>v==null?'n/a':(+v).toFixed(1);                 // null-safe 1-decimal
+  const fk=v=>v==null?'n/a':d3.format(',.0f')(v);            // null-safe integer
+  const fms=v=>v==null?'n/a':(v>=1000?d3.format(',.0f')(v)+' ms':(+v).toFixed(1)+' ms');
+
+  function tipHTML(r){
+    // Lead with the metric currently on the y-axis — that is the question being asked.
+    const rows=[[view.label, view.key==='pu'?f1(r[view.key])+' tok/s':fms(r[view.key])],
+                ['Sessions', fk(r.conc)],
+                ['Fleet output', fk(r.cl)+' tok/s'],
+                ['Per GPU', f1(r.tpg)+' tok/s'],
+                ['GPUs', `${fk(r.gpus)}${r.nodes>1?' · '+r.nodes+' nodes':''}`]];
+    if (view.key!=='pu') rows.splice(1,0,['Speed per user', f1(r.pu)+' tok/s']);
+    // Name the knobs that distinguish this run from its same-shape siblings (build_records fills
+    // r.knobs with exactly the knobs that vary across the set). Without this, two points on the
+    // same topology that differ only in routing look identical on hover.
+    const KN={route:'Routing',scorers:'Scorers',mnbt:'Batch tokens',mns:'Max seqs',
+              bs:'Block size',gmu:'GPU mem util',schedp:'Scheduler',admit:'Admission',
+              a2a:'MoE dispatch'};
+    const knobs=Object.entries(r.knobs||{}).filter(([k,v])=>v!=null&&KN[k])
+      .map(([k,v])=>`<dt>${KN[k]}</dt><dd>${v}</dd>`).join('');
+    return `<h6>${r.series}</h6>`
+      + (r.variant?`<p class="var">${r.variant}</p>`:'')
+      + `<dl>`
+      + rows.map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('')
+      + `</dl>`
+      + (knobs?`<dl style="margin-top:5px;padding-top:5px;border-top:1px solid var(--line)">`
+          +`${knobs}</dl>`:'')
+      + `${r.ok?'':`<p class="bad">Not servable: ${(r.viol||[]).join('; ')}</p>`}`
+      + `<p class="cta">click to see the deployment</p>`;
+  }
+  function showTip(ev,r){
+    tip.html(tipHTML(r)).classed('show',true);
+    const b=tip.node().getBoundingClientRect();
+    // Keep the card on screen: flip left/up near the right or bottom edge.
+    const px=ev.clientX+16, py=ev.clientY+14;
+    tip.style('left',(px+b.width>window.innerWidth?ev.clientX-b.width-16:px)+'px')
+       .style('top',(py+b.height>window.innerHeight?ev.clientY-b.height-14:py)+'px');
+  }
+  const hideTip=()=>tip.classed('show',false);
+
+  function showPanel(r){
+    picked=r.id;
+    const dl=rows=>'<dl>'+rows.filter(x=>x[1]!=null&&x[1]!=='')
+      .map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('')+'</dl>';
+    const parallel=dl([
+      ['Tensor parallel', r.tp], ['Data parallel', r.dp],
+      ['Pipeline parallel', r.pp], ['Expert parallel', r.epw?`width ${r.epw}`:'off'],
+      ['Instances', r.ni], ['GPUs total', fk(r.gpus)],
+      ['Nodes', r.nodes], ['Fabric', r.fabric||(r.nodes>1?'ib-400g':'—')],
+    ]);
+    const engine=dl([
+      ['block_size', r.bs], ['max_num_seqs', r.mns],
+      ['max_num_batched_tokens', r.mnbt==null?null:d3.format(',')(r.mnbt)],
+      ['max_model_len', r.mml==null?null:d3.format(',')(r.mml)],
+      ['gpu_memory_utilization', r.gmu], ['cudagraph_mode', r.cg],
+      ['quantization', r.quant||'checkpoint'], ['cache_dtype', r.cdt||'checkpoint'],
+      ['all2all_backend', r.a2a==='n/a'?null:r.a2a],
+    ]);
+    // Cluster-level policy: these are CLI flags, not scenario fields, and they are often what
+    // separates two runs of the same topology (routing swung throughput 2.3x on kimi-k2.5).
+    const policy=dl([
+      ['routing_policy', r.route||'round-robin'],
+      ['routing_scorers', r.scorers||(r.route==='weighted'?'default profile':null)],
+      ['scheduler', r.schedp||'default'],
+      ['admission_policy', r.admit||'always-admit'],
+      ['prefill/decode', r.pd],
+      ['draft tokens (MTP)', r.mtp||'off'],
+    ]);
+    const measured=dl([
+      ['Sessions', fk(r.conc)], ['Speed per user', f1(r.pu)+' tok/s'],
+      ['Fleet output', fk(r.cl)+' tok/s'], ['Per GPU', f1(r.tpg)+' tok/s'],
+      ['ITL / TPOT p99', fms(r.itl)], ['TTFT p99', fms(r.ttft)],
+      ['E2E p99', fms(r.e2e)], ['Queue delay p99', fms(r.sched)],
+      ['Servable', r.ok?'yes':'no'],
+    ]);
+    panel.html(
+      `<div class="ph"><h5>${r.series} &nbsp;·&nbsp; ${fk(r.conc)} sessions`
+      + (r.variant?` &nbsp;<span style="color:var(--accent);font-size:12px;`
+          +`font-family:var(--sans)">${r.variant}</span>`:'')+`</h5>`
+      + `<button class="x" type="button">close</button></div>`
+      + `<div class="xf-grid">`
+      + `<section><h6>Parallelism</h6>${parallel}</section>`
+      + `<section><h6>Engine</h6>${engine}</section>`
+      + `<section><h6>Routing &amp; policy</h6>${policy}</section>`
+      + `<section><h6>Measured</h6>${measured}</section></div>`
+      + (r.ok?'':`<p class="bad" style="color:var(--bad);font-family:var(--sans);font-size:12px">`
+          +`Not servable: ${(r.viol||[]).join('; ')}</p>`)
+      + `<div class="xf-cmd"><h6 style="font-family:var(--sans);font-size:10px;`
+      + `letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);margin:0 0 6px;`
+      + `font-weight:700">Reproduce this run</h6>`
+      + (r.cmd?`<pre>${r.cmd.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</pre>`
+             :`<p class="none">The command was not recorded for this run`
+              +`${r.scen?` (scenario <code>${r.scen}</code>)`:''}.</p>`)
+      + `</div>`)
+      .classed('show',true);
+    panel.select('button.x').on('click',()=>{ picked=null; panel.classed('show',false); redraw(); });
+    redraw();
+  }
+
   const tableWrap=root.append('div').attr('id','xf-table');
   const COLS=[
-    ['conc','sessions',v=>v],['route','routing',v=>v],['tp','TP',v=>v],
+    ['conc','sessions',v=>v],['series','config',v=>v],
+    ['variant','knob delta',v=>v||'—'],['route','routing',v=>v],
+    ['tp','TP',v=>v],['dp','DP',v=>v],['epw','EP',v=>v==null?'off':v],
     ['pd','P/D',v=>v],['mtp','MTP',v=>v],['mnbt','batch',v=>d3.format(',')(v)],
     ['mns','seqs',v=>v],['pu','tok/s user',v=>v.toFixed(1)],
-    ['cl','tok/s fleet',v=>d3.format(',.0f')(v)],['itl','ITL ms',v=>v.toFixed(1)],
+    ['cl','tok/s fleet',v=>d3.format(',.0f')(v)],
+    ['tpg','tok/s GPU',v=>v.toFixed(1)],['itl','ITL ms',v=>v.toFixed(1)],
+    ['ttft','TTFT ms',v=>d3.format(',.0f')(v)],
+    ['sched','queue ms',v=>d3.format(',.0f')(v)],
     ['hit','prefix hit',v=>v==null?'–':v.toFixed(2)],
     ['p95','p95 s',v=>v?d3.format(',.0f')(v/1000):'–'],
     ['to','dropped',v=>d3.format(',.0f')(v)],
   ];
   const table=tableWrap.append('table');
-  const numCols=['conc','tp','mtp','mnbt','mns','pu','cl','itl','hit','p95','to'];
+  const numCols=['conc','tp','dp','epw','mtp','mnbt','mns','pu','cl','tpg','itl','ttft','sched',
+                 'hit','p95','to'];
   table.append('thead').append('tr').selectAll('th').data(COLS).join('th')
     .attr('class',d=>numCols.includes(d[0])?'n':null).text(d=>d[1]);
   const tbody=table.append('tbody');
@@ -262,7 +693,7 @@ const FACTS = /*__FACTS__*/{};
     dims[key].filterFunction(v=>s.size===0||s.has(String(v))); }
 
   function redraw(){
-    optWrap.each(function(d){
+    optHolders.forEach(function({dim:d, sel:holder}){
       // group().all() counts respect every OTHER dimension's filter (not this dim's own), so a
       // zero here means "clicking this option yields no runs under the current selection". We dim
       // and disable those instead of letting a click blank the whole plot. An option already
@@ -270,7 +701,7 @@ const FACTS = /*__FACTS__*/{};
       const vals=groups[d.key].all();
       const sorted=d.order? vals.slice().sort((a,b)=>d.order(+a.key,+b.key))
                           : vals.slice().sort((a,b)=>b.value-a.value);
-      d3.select(this).selectAll('div.xf-opt').data(sorted,g=>g.key)
+      holder.selectAll('div.xf-opt').data(sorted,g=>g.key)
         .join(enter=>enter.append('div').attr('class','xf-opt')
           .on('click',(ev,g)=>{ const k=String(g.key);
             // block clicks on an empty, not-yet-selected option (would match zero runs)
@@ -280,17 +711,25 @@ const FACTS = /*__FACTS__*/{};
           .call(e=>{ e.append('span').attr('class','k'); e.append('span').attr('class','c'); }))
         .classed('on',g=>sel[d.key].has(String(g.key)))
         .classed('empty',g=>g.value===0 && !sel[d.key].has(String(g.key)))
-        .call(n=>{ n.select('.k').text(g=>d.key==='ok'?(g.key===true?'yes':'no')
-            :(d.key==='mnbt'?d3.format(',')(+g.key):g.key));
+        .call(n=>{ n.select('.k').text(g=>levelLabel(d.key, g.key));
           n.select('.c').text(g=>g.value); });
+    });
+    // Mark the bars inside each active brush, and show the range numerically (a brush you can
+    // see but not read is not a filter you can report).
+    HISTS.forEach(h=>{
+      const rg=hrange[h.key];
+      if(hbarSel[h.key]) hbarSel[h.key].classed('sel',b=>!rg||(b.x1>=rg[0]&&b.x0<=rg[1]));
+      if(hLabel[h.key]){
+        const f=v=>(Math.abs(v)>=1000?d3.format(',.0f')(v):d3.format(v<10?'.1f':'.0f')(v));
+        hLabel[h.key].classed('off',!rg).text(rg?`${f(rg[0])}–${f(rg[1])}`:'all');
+      }
     });
     const rows=dims.conc.top(Infinity).slice().sort((a,b)=>(b.pu??-Infinity)-(a.pu??-Infinity));
     const n=rows.length,nok=rows.filter(r=>r.ok).length;
     none.classed('show', n===0);   // selection matched no runs -> explain instead of a blank plot
     // build_records intentionally emits null pu/cl/itl for rejected/MTP/missing-metric runs; EVERY
-    // read below must tolerate null or one such row kills the whole explorer (review F4).
-    const f1=v=>v==null?'n/a':v.toFixed(1);                 // null-safe 1-decimal
-    const fk=v=>v==null?'n/a':d3.format(',.0f')(v);         // null-safe integer
+    // read below must tolerate null or one such row kills the whole explorer (review F4). f1/fk
+    // are defined once above, next to the hover card that also uses them.
     const bestPu=d3.max(rows,r=>r.pu), bestCl=d3.max(rows,r=>r.cl);  // d3.max skips null/undefined
     sumCount.html(`<b>${n}</b> of ${RECORDS.length} runs selected &nbsp;&middot;&nbsp; `
       +`<b>${nok}</b> meet every limit &nbsp;&middot;&nbsp; `
@@ -298,28 +737,33 @@ const FACTS = /*__FACTS__*/{};
         +`<b>${fk(bestCl)}</b> tok/s fleet`:''));
     // Only points with BOTH axes present can be placed on the scatter; the rest still appear in the
     // table (which shows "–" per null cell) but are not plotted.
-    const plot=rows.filter(r=>r.cl!=null && r.pu!=null);
+    // Only points with BOTH axes present can be placed; a run missing the CURRENT y-metric stays
+    // in the table (which shows "–") rather than being drawn at a made-up height.
+    const plot=rows.filter(r=>r.cl!=null && typeof r[view.key]==='number' && isFinite(r[view.key]));
     gpt.selectAll('g.p').data(plot,r=>r.id)
-      .join(enter=>enter.append('g').attr('class','p').call(g=>g.append('title')))
-      .call(g=>{ g.select('title').text(r=>
-          `${r.conc} sessions · ${r.route} · TP=${r.tp} · ${r.pd}${r.mtp?' · MTP=1':''}\n`
-          +`${f1(r.pu)} tok/s per user, ${fk(r.cl)} tok/s fleet, `
-          +`ITL ${f1(r.itl)} ms${r.hit==null?'':', prefix hit '+r.hit.toFixed(2)}`
-          +(r.ok?'':`\nNOT SERVABLE: ${(r.viol||[]).join('; ')}`));
+      .join(enter=>enter.append('g').attr('class','p'))
+      .classed('sel',r=>r.id===picked)
+      .on('mousemove',showTip).on('mouseleave',hideTip)
+      .on('click',(ev,r)=>{ ev.stopPropagation(); hideTip(); showPanel(r); })
+      .call(g=>{
         g.selectAll('circle').data(r=>[r]).join('circle')
-          .attr('cx',r=>x(r.cl)).attr('cy',r=>y(r.pu)).attr('r',5)
+          .attr('cx',r=>x(r.cl)).attr('cy',r=>y(r[view.key])).attr('r',5)
           .attr('fill',r=>r.ok?col(r.conc):'none')
           .attr('stroke',r=>r.ok?'none':'#b2182b').attr('stroke-width',1.7)
           .attr('stroke-dasharray',r=>r.ok?null:'2.5 2')
           .attr('opacity',r=>r.ok?0.9:0.85); });
     tbody.selectAll('tr').data(rows.slice(0,250),r=>r.id).join('tr')
       .attr('class',r=>r.ok?null:'bad')
+      .style('cursor','pointer')
+      .on('mousemove',showTip).on('mouseleave',hideTip)
+      .on('click',(ev,r)=>{ hideTip(); showPanel(r); })
       .each(function(r){ d3.select(this).selectAll('td')
         .data(COLS.map(c=>[c,r[c[0]]]),d=>d[0][0]).join('td')
         .attr('class',d=>numCols.includes(d[0][0])?'n':null)
         .text(d=>d[1]===null||d[1]===undefined?'–'
           :(typeof d[1]==='boolean'?(d[1]?'yes':'no'):d[0][2](d[1]))); });
   }
+  buildHists();   // safe now: every holder redraw() reads is initialized (see buildHists' note)
   redraw();
 })();
 </script>

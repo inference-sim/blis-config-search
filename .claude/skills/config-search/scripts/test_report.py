@@ -75,6 +75,224 @@ class Records(unittest.TestCase):
                 if (run.get("metrics") or {}).get("itl_p99_ms", 0) > 20]
         self.assertTrue(over and all(not r["ok"] for r in over))
 
+    def test_tpg_is_a_first_class_field(self):
+        # Output per GPU is the headline efficiency axis AND a brush axis in the explorer. It was
+        # only derivable (cl / gpus), so the explorer could not filter on it. Derived from the
+        # UNROUNDED throughput, not from the display-rounded cl, so it does not compound rounding.
+        for r, run in zip(self.recs, self.runs):
+            self.assertIn("tpg", r)
+            raw = (run.get("metrics") or {}).get("tokens_per_sec")
+            if raw is not None and r["gpus"]:
+                self.assertAlmostEqual(r["tpg"], round(raw / r["gpus"], 2), places=2)
+            else:
+                self.assertIsNone(r["tpg"], "tpg must be null, never 0, when throughput is unknown")
+
+    def test_latency_views_share_one_percentile_basis(self):
+        # The explorer lets you switch the latency axis between ITL / TTFT / E2E / scheduling
+        # delay. Those must all be the SAME statistic or the switch silently changes basis under
+        # the reader: `itl` used to carry the MEAN while ttft/p95 carried p99/p95, so flipping the
+        # axis compared a mean against a tail. p99 is the basis the interactivity floor uses.
+        for r, run in zip(self.recs, self.runs):
+            m = run.get("metrics") or {}
+            if m.get("itl_p99_ms"):
+                self.assertAlmostEqual(r["itl"], round(m["itl_p99_ms"], 3), places=3,
+                                       msg="itl must be p99, matching the floor and pu")
+            if m.get("scheduling_delay_p99_ms") is not None:
+                self.assertAlmostEqual(r["sched"], m["scheduling_delay_p99_ms"], places=3)
+            # pu is derived from the same p99 ITL, so the two can never disagree
+            if r["itl"] and r["pu"] and not r["pu_is_step_estimate"]:
+                self.assertAlmostEqual(r["pu"], round(1000.0 / r["itl"], 2), places=1)
+
+    def test_itl_mean_kept_separately(self):
+        # The mean is still useful (it is what BLIS reports most precisely), just not on the same
+        # axis as the tails. Keep it under its own key rather than dropping the data.
+        for r, run in zip(self.recs, self.runs):
+            m = run.get("metrics") or {}
+            if m.get("itl_mean_ms"):
+                self.assertAlmostEqual(r["itl_mean"], round(m["itl_mean_ms"], 3), places=3)
+
+    def test_series_label_is_pure_topology(self):
+        # The series label is the thing you scan: GPUs x TP x EP x instances — what matters most
+        # in LLM inference. Engine knobs do NOT belong in it. Cramming them in produced
+        # "64x TP4xDP2 + EP · ll · b8k · seq256 · mem0.9" and invented abbreviations ("b2k") that
+        # explain nothing. Knobs are filters and panel fields instead.
+        def mk(tp, **cfg):
+            return {"concurrency": 8, "config": {"tp": tp, **cfg},
+                    "deployment": {"gpus": 64, "num_instances": 8,
+                                   "parallel": {"tp": tp, "dp": 1, "pp": 1,
+                                                "enable_expert_parallel": True},
+                                   "engine": {"max_num_seqs": cfg.get("max_num_seqs", 256),
+                                              "max_num_batched_tokens":
+                                                  cfg.get("max_num_batched_tokens", 8192)}},
+                    "metrics": {"tokens_per_sec": 1.0, "itl_p99_ms": 5.0,
+                                "injected_requests": 1, "completed_requests": 1}}
+        runs = [mk(8), mk(8, routing_policy="weighted"), mk(8, max_num_batched_tokens=2048)]
+        recs = report.build_records(runs, self.sc)
+        for r in recs:
+            self.assertEqual(r["series"], "8x TP8 + EP",
+                             f"series must be topology only, got {r['series']!r}")
+            for junk in ("·", "b2k", "seq", "mem", "ll"):
+                self.assertNotIn(junk, r["series"])
+
+    def test_variant_names_the_knob_delta_readably(self):
+        # Distinguishing two same-topology runs is the VARIANT's job, and it must spell the knob
+        # out: "batch tokens 2,048", never "b2k".
+        def mk(**cfg):
+            return {"concurrency": 8, "config": {"tp": 8, **cfg},
+                    "deployment": {"gpus": 64, "num_instances": 8,
+                                   "parallel": {"tp": 8, "dp": 1, "pp": 1},
+                                   "engine": {"max_num_seqs": cfg.get("max_num_seqs", 256),
+                                              "max_num_batched_tokens":
+                                                  cfg.get("max_num_batched_tokens", 8192)}},
+                    "metrics": {"tokens_per_sec": 1.0, "itl_p99_ms": 5.0,
+                                "injected_requests": 1, "completed_requests": 1}}
+        recs = report.build_records(
+            [mk(), mk(routing_policy="least-loaded"), mk(max_num_batched_tokens=2048),
+             mk(max_num_seqs=64)], self.sc)
+        variants = [r["variant"] for r in recs]
+        self.assertEqual(variants[0], "", "the all-defaults run has no variant")
+        self.assertEqual(variants[1], "least-loaded routing")
+        self.assertEqual(variants[2], "batch tokens 2,048")
+        self.assertEqual(variants[3], "max seqs 64")
+        for v in variants:
+            self.assertNotRegex(v, r"\bb\d+k\b|seq\d|mem0|^ll$", f"no abbreviations in {v!r}")
+
+    def test_facets_are_tiered_primary_then_detail(self):
+        # Progressive disclosure: the topology facets that matter most show first; the engine and
+        # routing detail sits behind a disclosure so the panel does not open as a wall of knobs.
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        html = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
+        self.assertIn("tier:'primary'", html)
+        self.assertIn("tier:'detail'", html)
+        self.assertIn("xf-more", html)          # the disclosure control
+        # the headline knobs are primary; the engine limits are detail
+        self.assertRegex(html, r"key:'tp',[^}]*tier:'primary'")
+        self.assertRegex(html, r"key:'epw',[^}]*tier:'primary'")
+        self.assertRegex(html, r"key:'mnbt',[^}]*tier:'detail'")
+        self.assertRegex(html, r"key:'gmu',[^}]*tier:'detail'")
+
+    def test_records_carry_routing_and_engine_knobs(self):
+        # The knobs must reach the records or no facet, label or hover can show them.
+        runs = [{"concurrency": 8, "config": {"tp": 8, "routing_policy": "weighted",
+                                              "routing_scorers": "queue-depth:2"},
+                 "deployment": {"gpus": 8, "num_instances": 1,
+                                "parallel": {"tp": 8, "dp": 1, "pp": 1},
+                                "engine": {"max_num_seqs": 64, "block_size": 16}},
+                 "metrics": {"tokens_per_sec": 1.0, "itl_p99_ms": 5.0,
+                             "injected_requests": 1, "completed_requests": 1}}]
+        r = report.build_records(runs, self.sc)[0]
+        self.assertEqual(r["route"], "weighted")
+        self.assertEqual(r["scorers"], "queue-depth:2")
+        self.assertEqual(r["mns"], 64)
+
+    def test_figure_series_group_per_config_not_per_topology(self):
+        # The operating-curve figure draws one line per configuration walking the load up. Keying
+        # only on `series` (topology) put every knob variant on ONE line: a refined shape has a
+        # run per variant at EVERY load, so the curve zigzagged between unrelated configs.
+        base = {"tp": 4, "dp": 2, "ni": 32, "gpus": 256, "series": "32x TP4xDP2 + EP",
+                "ok": True, "pu": 80.0, "cl": 1000.0}
+        recs = [dict(base, conc=128, variant="", id="a"),
+                dict(base, conc=128, variant="least-loaded routing", id="b"),
+                dict(base, conc=256, variant="", id="c"),
+                dict(base, conc=256, variant="least-loaded routing", id="d")]
+        groups = figures._by_config(recs)
+        self.assertEqual(len(groups), 2, f"one group per config, got {[g[0] for g in groups]}")
+        for label, pts in groups:
+            concs = [p["conc"] for p in pts]
+            self.assertEqual(len(concs), len(set(concs)),
+                             f"{label} repeats a load — that is the zigzag")
+        # and the label must say which variant, or the legend shows the same name twice
+        labels = [label for label, _ in groups]
+        self.assertEqual(len(set(labels)), 2, f"group labels are distinct: {labels}")
+
+    def test_operating_table_states_the_whole_deployment(self):
+        # "What to run" is the table a reader copies flags from, so an omission is a WRONG
+        # deployment, not just a terse one. It showed only --tensor-parallel-size and
+        # --num-instances: no EP, no DP, no routing — the very knobs that distinguish two rows
+        # whose topology matches.
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        recs = report.build_records(runs, sc)
+        html = report._operating_table({}, recs)
+        self.assertIn("--enable-expert-parallel", html)      # the fixture's EP runs
+        self.assertIn("--max-num-seqs", html)
+        # the flag list must cover every knob the search can vary
+        keys = {k for k, _ in report._FLAG_LABELS}
+        for k in ("tp", "dp", "epw", "ni", "mnbt", "mns", "gmu", "bs", "route"):
+            self.assertIn(k, keys, f"operating table omits {k}")
+        # a knob at its default is omitted (the fixture is dp=1 throughout): printing
+        # "--data-parallel-size 1" on every row would bury the settings that matter
+        self.assertNotIn("--data-parallel-size", html)
+        rows = [{"conc": 1, "flags": {"tp": 4, "dp": 2, "epw": 8, "ni": 4}, "pu": 1.0,
+                 "cl": 1.0, "itl": 1.0, "hit": None}]
+        multi = report._operating_table({"operating_points": rows}, recs)
+        self.assertIn("--data-parallel-size", multi)         # ... but shown when it is not 1
+        self.assertIn("--enable-expert-parallel", multi)
+
+    def test_config_facet_exists_so_variants_are_filterable(self):
+        # With knobs out of the label, several runs legitimately share a series name. There must be
+        # a way to pick between them: a `variant` facet listing the knob deltas.
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        html = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
+        self.assertRegex(html, r"key:'variant'")
+        self.assertRegex(html, r"key:'series'")
+
+    def test_records_carry_deployment_detail_for_the_panel(self):
+        # The click-to-inspect panel reads the run's OWN recorded deployment, never a
+        # reconstruction, so it cannot drift from what BLIS consumed.
+        for r in self.recs:
+            for k in ("pp", "nodes", "bs", "mml", "gmu", "cg", "scen", "cmd"):
+                self.assertIn(k, r)
+            self.assertEqual(r["nodes"], max(1, -(-(r["gpus"] or 0) // 8)) if r["gpus"] else 1)
+            # a multi-node pool must name the fabric it prices collectives over
+            if r["nodes"] > 1:
+                self.assertTrue(r["fabric"], "multi-node run must report a fabric")
+            else:
+                self.assertIsNone(r["fabric"])
+
+    def test_cmd_absent_in_older_runs_is_none_not_a_guess(self):
+        # The committed fixture predates the `cmd` field. The panel must show "not recorded"
+        # rather than invent a command that was never run.
+        self.assertTrue(all(r["cmd"] is None for r in self.recs))
+
+    def test_cmd_is_shell_quoted_from_the_recorded_argv(self):
+        runs = [{"concurrency": 1, "cmd": ["/p/blis", "run", "--scenario", "a b.yaml"],
+                 "deployment": {"gpus": 8, "num_instances": 1,
+                                "parallel": {"tp": 8, "dp": 1, "pp": 1}, "engine": {}},
+                 "metrics": {"tokens_per_sec": 1.0, "itl_p99_ms": 5.0,
+                             "injected_requests": 1, "completed_requests": 1}}]
+        r = report.build_records(runs, self.sc)[0]
+        self.assertIn("'a b.yaml'", r["cmd"])      # a path with a space stays one argument
+
+    def test_series_label_distinguishes_dp(self):
+        # A label must identify its shape: "32x TP1" and "32x TP1xDP8" are different deployments
+        # on different GPU counts, and a label that hides dp makes two rows of the explorer's
+        # series facet indistinguishable. dp=1 keeps the short form (no gratuitous "xDP1").
+        self.assertEqual(report._series_label(4, 4, {"tp": 4, "dp": 1,
+                                                     "enable_expert_parallel": True}),
+                         "4x TP4 + EP")
+        self.assertEqual(report._series_label(1, 32, {"tp": 1, "dp": 8,
+                                                      "enable_expert_parallel": True}),
+                         "32x TP1xDP8 + EP")
+        self.assertEqual(report._series_label(2, 32, {"tp": 2, "dp": 4,
+                                                      "enable_expert_parallel": False}),
+                         "32x TP2xDP4")
+        # distinct shapes on the same instance count must not collide
+        a = report._series_label(4, 32, {"tp": 4, "dp": 1, "enable_expert_parallel": False})
+        b = report._series_label(4, 32, {"tp": 4, "dp": 2, "enable_expert_parallel": False})
+        self.assertNotEqual(a, b)
+
+    def test_moe_knobs_are_recorded(self):
+        # dp and the derived expert-parallel width must survive into the records: without them the
+        # explorer cannot show the axis the MoE search now explores.
+        for r, run in zip(self.recs, self.runs):
+            par = ((run.get("deployment") or {}).get("parallel") or {})
+            self.assertEqual(r["dp"], par.get("dp", 1))
+            if par.get("enable_expert_parallel"):
+                # width is tp*pcp*dp (pcp unset = 1), mirroring blis-schemas
+                self.assertEqual(r["epw"], par.get("tp", 1) * par.get("dp", 1))
+            else:
+                self.assertIsNone(r["epw"])
+
 
 class Facts(unittest.TestCase):
     def setUp(self):
@@ -166,6 +384,81 @@ class Narrative(unittest.TestCase):
         pairs = {(r["conc"], r["tp"]) for r in recs}
         self.assertLess(len(pairs), len(concs) * len(tps),
                         "fixture should have empty conc x tp cells to exercise the guard")
+
+    def test_explorer_has_brushable_metric_histograms(self):
+        # The reference report's explorer is TWO-part: "filter by outcome" (brush a range on the
+        # continuous metrics) alongside "filter by setting" (click a knob level). We shipped only
+        # the click facets, so an outcome-first question ("show me everything over 60 tok/s/user")
+        # had no entry point.
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        html = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
+        self.assertIn("Filter by outcome", html)
+        self.assertIn("Filter by setting", html)
+        self.assertIn("brushX", html)                      # d3 brush, not a bespoke drag
+        self.assertIn("xf-hist", html)                      # the histogram row
+        # every brush axis the reference uses, on our own field names
+        for key in ("pu", "tpg", "ttft", "itl"):
+            self.assertRegex(html, rf"key:\s*'{key}'", f"no histogram declared for {key}")
+
+    def test_null_facet_levels_are_labelled(self):
+        # epw is null for every EP-off run, which crossfilter groups as its own level. Rendering
+        # the key verbatim gave a BLANK clickable row ("" with a count of 45) -- a filter you
+        # cannot read. Null levels must carry an explicit label.
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        html = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
+        self.assertIn("LEVEL_LABELS", html, "no null-level label table in the explorer")
+        self.assertRegex(html, r"epw:\s*\{", "epw declares no level labels")
+
+    def test_explorer_exposes_routing_and_engine_facets(self):
+        # Routing swung throughput 2.3x on kimi-k2.5, and the batch/KV limits bind downward
+        # (max_num_seqs 64 cost 29%). Every one of them must be filterable, and must auto-hide
+        # when the search did not sweep it.
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        html = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
+        for key in ("route", "scorers", "bs", "gmu", "schedp", "admit"):
+            self.assertRegex(html, rf"key:\s*'{key}'", f"no facet declared for {key}")
+        # the facets are grouped so deployment knobs read as a block, not mixed into topology
+        self.assertIn("xf-grp", html)
+
+    def test_hover_card_names_the_distinguishing_knobs(self):
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        html = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
+        self.assertIn("r.knobs", html)      # the hover reads the per-row knob map
+
+    def test_explorer_exposes_moe_knob_facets(self):
+        # EP width / dp / all-to-all must be declarable facets. They auto-hide when a run set does
+        # not vary them (the existing varies() guard), which is why the assertion is on the dim
+        # declarations rather than on rendered options.
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        html = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
+        for key in ("epw", "dp", "a2a"):
+            self.assertRegex(html, rf"key:\s*'{key}'", f"no facet declared for {key}")
+
+    def test_explorer_has_a_latency_view_switcher(self):
+        # The scatter's y-axis should answer more than one latency question. ITL, TTFT, E2E and
+        # scheduling delay are four DISTINCT metrics (TPOT is a synonym for ITL, so it is labelled
+        # on the ITL view rather than offered as a fifth).
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        html = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
+        self.assertIn("VIEWS", html)
+        for key in ("pu", "itl", "ttft", "e2e", "sched"):
+            self.assertRegex(html, rf"key:\s*'{key}'", f"no latency view for {key}")
+        self.assertIn("xf-views", html)                 # the switcher UI
+        self.assertIn("TPOT", html)                     # named as the synonym it is
+
+    def test_explorer_has_a_hover_card_and_click_panel(self):
+        # Hover = a readable card (not a bare SVG <title> dump); click = the exact deployment.
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        html = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
+        self.assertIn("xf-tip", html)                   # styled hover card
+        self.assertIn("click to see the deployment", html)   # the hover invites the click
+        self.assertIn("xf-panel", html)                 # click-to-inspect panel
+        self.assertIn("Reproduce this run", html)       # the panel shows the recorded command
+        self.assertIn("Expert parallel", html)          # ... and the parallelism block
+        self.assertIn("showPanel", html)                # wired to a click handler
+        # the panel must read the recorded cmd, and say so plainly when a run has none
+        self.assertIn("r.cmd", html)
+        self.assertIn("was not recorded", html)
 
     def test_partial_report_json_no_crash(self):
         sc, pa, runs, _, _ = report.load_run_dir(FIXTURE)

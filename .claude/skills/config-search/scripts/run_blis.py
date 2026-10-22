@@ -30,11 +30,19 @@ CLI_FLAGS = {"num_instances": "--num-instances", "concurrency": "--concurrency",
              "preemption_policy": "--preemption-policy"}
 PARALLEL_DEFAULTS = {"tp": 1, "pp": 1, "dp": 1, "enable_expert_parallel": False}
 GPUS_PER_NODE = 8   # single-node H100; a per-instance footprint beyond this spans nodes (needs a fabric)
+# Cross-node cost resolves from the fabric (a catalog networks/ entry), required once nodes > 1.
+DEFAULT_FABRIC = "ib-400g"   # InfiniBand NDR 400 Gb/s; the standard H100 multi-node interconnect
 # NON-PRECISION engine defaults only. quantization/cache_dtype are intentionally NOT defaulted: an
 # empty precision lets the checkpoint format govern (e.g. qwen3-14b stays BF16), so forcing FP8 here
-# would silently mis-price every non-FP8 model.
-ENGINE_DEFAULTS = {"block_size": 16, "max_num_batched_tokens": 8192, "max_num_seqs": 256,
+# would silently mis-price every non-FP8 model. `block_size` is also absent here because its right
+# value depends on the MODEL -- see default_block_size(), which fills it in per run.
+ENGINE_DEFAULTS = {"max_num_batched_tokens": 8192, "max_num_seqs": 256,
                    "max_model_len": 32768, "cudagraph_mode": "PIECEWISE", "gpu_memory_utilization": 0.9}
+# A DSA sparse-MLA model's indexer runs on 64-token kernel blocks, so a stated block_size must be a
+# multiple of 64 or the engine refuses the layout at startup (blis-latency-kernel sparse_mla.go,
+# `dsaBlockSize`). vLLM v0.31.0 picks 64 for these models for the same reason.
+DSA_BLOCK_SIZE = 64
+DEFAULT_BLOCK_SIZE = 16     # vLLM's own default for everything else
 # Deliberately unsupported in this runner -> fail loudly with the reason (do not silently drop).
 UNSUPPORTED = {
     "prefill_instances": "PD disaggregation is not supported yet (single colocated pool only)",
@@ -70,16 +78,59 @@ def classify_config(config):
     if parallel["pp"] != 1:
         raise ConfigError("pp>1: the pinned kernel does not price pipeline parallelism")
     fp = footprint_gpus(parallel)
-    if fp > GPUS_PER_NODE:
+    # A multi-node single instance IS supported: the generated scenario names a fabric once the
+    # pool spans nodes (see scenario_yaml), and BLIS prices the cross-node collectives from it.
+    # This matters because the largest MoE models cannot fit in one node at all -- kimi-k3 needs
+    # 332.3 GiB per rank at tp=8 on a 141 GiB device and only fits from tp=32 (4 nodes) up.
+    # What is still refused is a footprint that STRADDLES a node boundary: pools are allocated in
+    # whole nodes, so the remainder would sit idle and the cross-node term would be mispriced.
+    if fp > GPUS_PER_NODE and fp % GPUS_PER_NODE:
         raise ConfigError(
-            f"per-instance footprint tp*pp*dp={fp} > {GPUS_PER_NODE} (one node): a multi-node single "
-            f"instance needs a cluster fabric, not supported yet -- use num_instances to scale out instead")
+            f"per-instance footprint tp*pp*dp={fp} spans {fp / GPUS_PER_NODE:.2g} nodes: a "
+            f"multi-node instance must fill whole {GPUS_PER_NODE}-GPU nodes (use a footprint that "
+            f"is a multiple of {GPUS_PER_NODE}, or scale out with num_instances instead)")
     return parallel, engine, cli
 
 
 def footprint_gpus(parallel):
     """GPUs one instance occupies = tp x pp x dp (EP is within the TP ranks, not an extra factor)."""
     return parallel["tp"] * parallel["pp"] * parallel["dp"]
+
+
+_DSA_CACHE = {}
+
+
+def is_dsa_model(catalog, model):
+    """True when the model's catalog graph has a DSA sparse-MLA attention node.
+
+    DSA is a property of the GRAPH, not of the model's name -- glm-5.3 and deepseek-v4-pro are DSA
+    while qwen3-14b is not, and nothing in the names says so. Read it from the authoritative
+    graph.yaml (NS-6: the catalog is the source of truth) with a plain substring scan so the runner
+    keeps its no-external-yaml-dep property. An unreadable or absent graph answers False: the
+    non-DSA default is the safe one, and BLIS reports the real error for a missing model anyway.
+    """
+    if not catalog or not model:
+        return False
+    key = (catalog, model)
+    if key not in _DSA_CACHE:
+        path = os.path.join(catalog, "models", model, "graph.yaml")
+        try:
+            with open(path, encoding="utf-8") as f:
+                _DSA_CACHE[key] = "sparse_mla" in f.read()
+        except OSError:
+            _DSA_CACHE[key] = False
+    return _DSA_CACHE[key]
+
+
+def default_block_size(catalog, model):
+    """The block_size to state when a candidate does not pin one.
+
+    It cannot be a single constant in either direction: the kernel adapter REQUIRES a positive
+    block_size on the deployment ("kernelmodel: deployment states no block_size"), so omitting it
+    fails every model; but a flat 16 is refused by every DSA sparse-MLA model, which is what made
+    glm-5 / glm-5.2 / glm-5.2-fp8 / glm-5.3 unrunnable in this runner.
+    """
+    return DSA_BLOCK_SIZE if is_dsa_model(catalog, model) else DEFAULT_BLOCK_SIZE
 
 
 def _iter_json_objects(text):
@@ -142,20 +193,37 @@ def _completion_issue(m):
     return None
 
 
-def scenario_yaml(model, hardware, engine_version, parallel, engine, name):
+def pool_nodes(parallel, num_instances=1):
+    """Nodes the colocated pool must hold for `num_instances` copies of this instance shape.
+
+    BLIS v0.10.0 validates `--num-instances` against the pool's rank capacity: a pool of
+    `nodes` x 8 GPUs holds floor(nodes*8 / footprint) instances, and asking for more is refused
+    ("N instance(s) requested, but ...'s colocated pool holds M rank(s) at its layout"). Sizing
+    the pool from ONE instance's footprint therefore capped every search at a single node's
+    worth of instances; size it for the whole fleet instead."""
+    total = footprint_gpus(parallel) * max(1, num_instances)
+    return max(1, -(-total // GPUS_PER_NODE))           # ceil(total / 8)
+
+
+def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances=1,
+                  fabric=DEFAULT_FABRIC):
     """Render a two-doc Scenario+Deployment YAML (no external yaml dep). Omitted engine keys (e.g.
     quantization when unset) let the checkpoint/engine govern."""
     def block(d, indent):
         pad = " " * indent
         return "\n".join(f"{pad}{k}: {json.dumps(v)}" for k, v in d.items())
-    nodes = max(1, -(-footprint_gpus(parallel) // 8))   # ceil(footprint/8); single-node H100 = 8 GPUs
+    nodes = pool_nodes(parallel, num_instances)
+    # A multi-node cluster MUST name a fabric: BLIS resolves cross-node cost from the fabric,
+    # not the chip, and refuses the scenario otherwise ("scenario.cluster.fabric: required for
+    # a N-node cluster"). Single-node clusters omit it (no cross-node traffic to price).
+    fabric_line = f"\n  fabric: {fabric}" if nodes > 1 else ""
     return f"""kind: Scenario
 name: {name}
 engine_version: "{engine_version}"
 model: {model}
 coefficients: [{", ".join(COEFFICIENTS)}]
 cluster:
-  hardware: {hardware}
+  hardware: {hardware}{fabric_line}
   nodes: {nodes}
   gpus_per_node: 8
 ---
@@ -171,15 +239,21 @@ pools:
 """
 
 
-def write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine):
+def write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine, num_instances=1,
+                   fabric=DEFAULT_FABRIC):
     """Write a scenario ATOMICALLY (temp + os.replace) so concurrent pool workers never read a
-    half-written file for the same hashed deployment; return its file name."""
-    key = json.dumps([model, hardware, engine_version, parallel, engine], sort_keys=True)
+    half-written file for the same hashed deployment; return its file name.
+
+    `num_instances` participates in the hash because it sets the pool's node count — two runs
+    that differ only in instance count need DIFFERENT scenario files, or the second reuses a
+    pool too small for it and BLIS refuses the run."""
+    key = json.dumps([model, hardware, engine_version, parallel, engine, num_instances, fabric], sort_keys=True)
     name = f"{model}-{hardware}-{hashlib.sha1(key.encode()).hexdigest()[:10]}"
     os.makedirs(scenarios_dir, exist_ok=True)
     path = os.path.join(scenarios_dir, name + ".yaml")
     if not os.path.exists(path):
-        body = scenario_yaml(model, hardware, engine_version, parallel, engine, name)
+        body = scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances,
+                             fabric)
         fd, tmp = tempfile.mkstemp(dir=scenarios_dir, prefix=".tmp-", suffix=".yaml")
         try:
             with os.fdopen(fd, "w") as f:
@@ -200,7 +274,11 @@ def resolve_defaults(blis, defaults):
 
 def build_cmd(blis, catalog, registry, scenarios_dir, scenario_name, workload, num_requests, seed,
               horizon, defaults, cli):
-    cmd = [blis, "run", "--latency-model", "blis-latency-kernel",
+    # BLIS v0.10.0 (the pinned release) selects the kernel cost-model backend from the
+    # scenario's `coefficients:` list (written into the generated scenario), not a CLI flag.
+    # The old `--latency-model blis-latency-kernel` flag was removed in the release and is
+    # rejected ("unknown flag"), so it must not be passed.
+    cmd = [blis, "run",
            "--scenario", scenario_name, "--scenarios", scenarios_dir, "--registry", registry]
     if catalog:
         cmd += ["--catalog", catalog]
@@ -241,7 +319,11 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
         return rec
     num_instances = cli.get("num_instances", 1)
     fp = footprint_gpus(parallel)
-    scenario_name = write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine)
+    # Fill block_size per MODEL when the candidate did not pin one (see default_block_size): the
+    # adapter requires a value, and DSA models require it to be a multiple of 64.
+    engine.setdefault("block_size", default_block_size(catalog, model))
+    scenario_name = write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine,
+                                   num_instances)
     cmd = build_cmd(blis, catalog, registry, scenarios_dir, scenario_name, workload,
                     num_requests, seed, horizon, defaults, cli)
     t0 = time.time()

@@ -1,0 +1,10 @@
+model: kimi-k2.5
+hardware: h200
+gpu_budget: 512
+workload:
+  preset: multidoc
+objective: dual-pareto
+interactivity_floor:
+  tok_per_s_per_user: 50.0
+headroom: 0.8
+seed: 0

@@ -1,0 +1,115 @@
+name: generate-report
+
+# The report-generation backend. A contributor opens a PR adding a Scenario under
+# submissions/<name>.yaml; a maintainer reviews it and, if it is sound, approves the gated
+# job below, which builds the pinned BLIS stack, runs config-search for that Scenario, writes
+# the resulting run directory into reports/, and commits it back to the PR branch. The normal
+# review + merge -> pages.yml publish path then applies, so nothing reaches the live site
+# without a human merge.
+#
+# Why this is safe against untrusted PRs:
+#   * The job runs ONLY after a maintainer approves it via the protected `report-generation`
+#     environment (configure it in repo Settings with required reviewers). An untrusted PR can
+#     queue the job but it does not execute until a maintainer approves — the submitted prose
+#     never reaches the search/LLM step on its own.
+#   * It never publishes. It commits to the PR branch; publishing is still gated on merge.
+#   * The search brain (LLM) is the only non-hermetic part and is exactly what the approval
+#     gates. BLIS itself is deterministic and LLM-free.
+
+on:
+  # Manual / labelled trigger keeps an untrusted PR from auto-running the search. A maintainer
+  # dispatches it (or adds the trigger label) once they have read the submitted scenario.
+  workflow_dispatch:
+    inputs:
+      submission:
+        description: "submissions/<name>.yaml to run (path relative to repo root)"
+        required: true
+      pr_branch:
+        description: "branch to commit the generated report back to"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: generate-report-${{ github.event.inputs.pr_branch }}
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    # Protected environment: a maintainer must approve before this job runs. The LLM/search
+    # step lives behind this gate.
+    environment: report-generation
+    permissions:
+      contents: write          # commit the generated report back to the PR branch
+    steps:
+      - name: Check out the PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.pr_branch }}
+
+      - name: Validate the submission path and target branch
+        run: |
+          sub="${{ github.event.inputs.submission }}"
+          case "$sub" in
+            submissions/*.yaml) ;;
+            *) echo "submission must be submissions/<name>.yaml" >&2; exit 1 ;;
+          esac
+          test -f "$sub" || { echo "no such submission: $sub" >&2; exit 1; }
+          # reject path traversal / absolute paths
+          case "$sub" in *..*|/*) echo "unsafe path" >&2; exit 1 ;; esac
+          # NEVER commit generated reports straight to a protected branch — they must land on
+          # a PR branch so the normal review + merge -> publish gate applies. Refuse main.
+          branch="${{ github.event.inputs.pr_branch }}"
+          case "$branch" in
+            main|master|HEAD|"") echo "pr_branch must be a PR feature branch, not '$branch'" >&2; exit 1 ;;
+          esac
+          case "$branch" in *..*|/*) echo "unsafe branch name" >&2; exit 1 ;; esac
+          echo "submission=$sub" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24" }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyyaml
+
+      - name: Build the pinned BLIS stack
+        run: |
+          set -euo pipefail
+          # Pins from the config-search SETUP.md. Keep in sync with pins.env.
+          git clone --branch v0.10.0 --depth 1 https://github.com/inference-sim/inference-sim.git upstream
+          ( cd upstream && go build -o blis main.go )
+          git clone --branch 0.2.1 --depth 1 https://github.com/inference-sim/blis-catalog.git
+          git clone --branch v0.1.1 --depth 1 https://github.com/inference-sim/blis-registry.git
+          echo "BLIS_CATALOG=$PWD/blis-catalog"   >> "$GITHUB_ENV"
+          echo "BLIS_REGISTRY=$PWD/blis-registry" >> "$GITHUB_ENV"
+          echo "BLIS_BIN=$PWD/upstream/blis"      >> "$GITHUB_ENV"
+
+      - name: Run config-search for the submitted Scenario
+        env:
+          # The LLM endpoint/key for the search brain is provided as a repo secret, available
+          # only inside this maintainer-approved environment — never to an untrusted PR.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          # scripts/run_submission.py drives the config-search skill for one scenario and
+          # writes reports/<run_id>/. It is the automation entrypoint (added alongside this
+          # workflow); if the agentic search cannot run headless, it fails loudly rather than
+          # publishing a partial/placeholder report.
+          python3 -I scripts/run_submission.py \
+            --submission "$submission" \
+            --blis "$BLIS_BIN" --catalog "$BLIS_CATALOG" --registry "$BLIS_REGISTRY" \
+            --out reports/
+
+      - name: Build the site to validate the new report
+        run: python3 -I scripts/build_gallery.py --no-mock --out /tmp/site-check
+
+      - name: Commit the generated report back to the PR branch
+        run: |
+          set -euo pipefail
+          git config user.name  "blis-config-search-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add reports/
+          git commit -m "ci: generate report for ${submission}" || { echo "nothing to commit"; exit 0; }
+          git push origin HEAD:${{ github.event.inputs.pr_branch }}

@@ -251,6 +251,32 @@ def _per_user_rate(run, mtp):
     return round(1000.0 / itl_p99, 2), False
 
 
+GPUS_PER_NODE = 8
+
+
+def _pool_nodes(dep):
+    """Nodes the run's pool spans = ceil(total GPUs / 8); 1 when unknown.
+
+    Mirrors run_blis.pool_nodes. Reported because a multi-node pool prices its collectives over a
+    fabric, which is a different deployment from the same tp on one node.
+    """
+    total = dep.get("gpus") or 0
+    return max(1, -(-int(total) // GPUS_PER_NODE)) if total else 1
+
+
+def _blis_cmd(run):
+    """The `blis run` invocation for this row, shell-quoted, or None.
+
+    Taken from the recorded `cmd` (what actually ran) rather than rebuilt, so the panel cannot
+    drift from the run. Long absolute paths are left intact: the point is reproducibility.
+    """
+    cmd = run.get("cmd")
+    if not cmd:
+        return None
+    import shlex
+    return " ".join(shlex.quote(str(a)) for a in cmd)
+
+
 def build_records(runs, scenario):
     """Map our per-run rows onto the reference's flat record shape (short keys the explorer uses)."""
     floor = scenario.get("interactivity_floor") or {}
@@ -278,19 +304,50 @@ def build_records(runs, scenario):
             "ni": ni,
             "gpus": gpus,
             "series": _series_label(tp, ni, par),
-            "route": cfg.get("routing_policy", "default"),
+            "route": cfg.get("routing_policy", "round-robin"),
+            "scorers": cfg.get("routing_scorers"),
+            # NB: `sched` is the scheduling-DELAY metric; the scheduler policy is `schedp`.
+            "schedp": cfg.get("scheduler"),
+            "admit": cfg.get("admission_policy"),
             "pd": "colocated" if not (cfg.get("prefill_instances") or cfg.get("decode_instances")) else "disagg",
             "mtp": mtp,
             "mnbt": eng.get("max_num_batched_tokens"),
             "mns": eng.get("max_num_seqs"),
-            "a2a": "n/a" if not par.get("enable_expert_parallel") else "ep",
-            "epw": par.get("tp") if par.get("enable_expert_parallel") else None,
+            # all-to-all backend: the engine field when the search swept it, else the EP state.
+            "a2a": eng.get("all2all_backend") or ("ep" if par.get("enable_expert_parallel") else "n/a"),
+            # Expert-parallel width is DERIVED as tp x pcp x dp (pcp unset = 1), mirroring
+            # blis-schemas Parallelism.ExpertParallelWidth(). A width of 1 shards no experts --
+            # and is exactly what makes a big MoE model refuse to fit ("expert-parallel width 1").
+            "epw": (par.get("tp", 1) * par.get("dp", 1)) if par.get("enable_expert_parallel") else None,
             # metrics (reference short keys)
             "pu": pu,                              # per-user tok/s (see _per_user_rate)
             "pu_is_step_estimate": pu_is_step_estimate,   # True = 1000/itl fallback under MTP (undercount)
             "cl": round(m["tokens_per_sec"], 1) if m.get("tokens_per_sec") is not None else None,
-            "itl": round(itl_mean, 3) if itl_mean else None,
+            # Deployment detail for the click-to-inspect panel: what BLIS actually consumed.
+            "pp": par.get("pp", 1),
+            "nodes": _pool_nodes(dep),
+            "fabric": "ib-400g" if _pool_nodes(dep) > 1 else None,
+            "bs": eng.get("block_size"),
+            "mml": eng.get("max_model_len"),
+            "gmu": eng.get("gpu_memory_utilization"),
+            "cg": eng.get("cudagraph_mode"),
+            "quant": eng.get("quantization"),
+            "cdt": eng.get("cache_dtype"),
+            "scen": dep.get("scenario"),
+            "cmd": _blis_cmd(r),
+            # Output per GPU: the dual objective's efficiency half, and a brush axis in the
+            # explorer. Null (never 0) when throughput is unknown, so a failed run is not plotted
+            # as a perfectly efficient one.
+            "tpg": (round(m["tokens_per_sec"] / gpus, 2)
+                    if m.get("tokens_per_sec") is not None and gpus else None),
+            # Every latency view must share ONE statistic, or switching the explorer's axis
+            # silently swaps a mean for a tail: itl/ttft/e2e/sched are all p99 (the basis the
+            # interactivity floor and `pu` use). The mean is kept separately under itl_mean.
+            "itl": round(m["itl_p99_ms"], 3) if m.get("itl_p99_ms") else None,
+            "itl_mean": round(itl_mean, 3) if itl_mean else None,
             "ttft": m.get("ttft_p99_ms"),
+            "sched": m.get("scheduling_delay_p99_ms"),
+            "e2e": m.get("e2e_p99_ms"),
             "hit": m.get("prefix_hit_rate", m.get("hit_rate")),
             "to": float(m.get("timed_out_requests", 0) or 0),
             "drop": float(m.get("dropped_unservable", 0) or 0),
@@ -299,12 +356,79 @@ def build_records(runs, scenario):
             "status": "complete" if ok else (r.get("phase") or "infeasible"),
             "viol": viol,
         })
+    _disambiguate_series(out)
     return out
 
 
+# Engine/routing knobs that can distinguish two runs of the SAME topology. Order fixes the order
+# of a variant description so it is deterministic. Keys are RECORDS fields (see build_records).
+DISAMBIGUATING_KNOBS = ("route", "scorers", "mnbt", "mns", "bs", "gmu", "schedp", "admit", "a2a")
+
+# Readable names for each knob, used in the `variant` description. These are spelled out on
+# purpose: an invented shorthand ("b2k" for max_num_batched_tokens=2048) tells a reader nothing.
+KNOB_NAMES = {"route": "routing", "scorers": "scorers", "mnbt": "batch tokens",
+              "mns": "max seqs", "bs": "block size", "gmu": "gpu mem util",
+              "schedp": "scheduler", "admit": "admission", "a2a": "MoE dispatch"}
+
+
+def _disambiguate_series(records):
+    """Fill each record's `variant` — the knob delta from its topology group's baseline.
+
+    The `series` label stays PURE TOPOLOGY (`64x TP4xDP2 + EP`): GPUs x TP x EP x instances is
+    what matters most in LLM inference and what a reader scans. Engine and routing knobs are not
+    squeezed into it — doing that produced `64x TP4xDP2 + EP · ll · b8k · seq256 · mem0.9` with
+    invented abbreviations, which is unreadable. They live in `variant` (a spelled-out phrase, for
+    the hover card and table), in `knobs` (for the facets), and in the click panel in full.
+
+    Scoped to the topology group: a row is described only by the knobs that differ among the runs
+    sharing its own topology, measured against that group's most common value (the unrefined
+    runs), so the baseline row has an EMPTY variant and a shape the search never refined keeps a
+    clean name.
+    """
+    for r in records:
+        r.setdefault("variant", "")
+        r.setdefault("knobs", {})
+    if not records:
+        return
+    import collections
+    groups = collections.defaultdict(list)
+    for r in records:
+        groups[(r.get("tp"), r.get("dp"), r.get("epw"), r.get("ni"))].append(r)
+    for rows in groups.values():
+        # knobs that actually differ WITHIN this topology group
+        varying = [k for k in DISAMBIGUATING_KNOBS
+                   if len({json.dumps(r.get(k), sort_keys=True) for r in rows}) > 1]
+        for r in rows:
+            r["knobs"] = {k: r.get(k) for k in varying}
+        if not varying:
+            continue
+        # the group's baseline value per knob = its most common one (the unrefined runs)
+        base = {k: collections.Counter(json.dumps(r.get(k), sort_keys=True)
+                                       for r in rows).most_common(1)[0][0] for k in varying}
+        for r in rows:
+            bits = [_knob_phrase(k, r.get(k)) for k in varying
+                    if r.get(k) is not None
+                    and json.dumps(r.get(k), sort_keys=True) != base[k]]
+            r["variant"] = ", ".join(b for b in bits if b)
+
+
+def _knob_phrase(key, value):
+    """Spelled-out description of one knob setting, e.g. "batch tokens 2,048"."""
+    name = KNOB_NAMES.get(key, key)
+    if key == "route":
+        return f"{value} routing"           # "least-loaded routing"
+    if key in ("mnbt", "mns", "bs"):
+        return f"{name} {value:,}"          # thousands separator: 2,048 not b2k
+    return f"{name} {value}"
+
+
 def _series_label(tp, ni, par):
+    """e.g. "32x TP4xDP2 + EP". dp is shown only when > 1: a label that hid it made TP1 and
+    TP1xDP8 — different deployments on different GPU counts — read as the same series."""
     ep = " + EP" if par.get("enable_expert_parallel") else ""
-    return f"{ni}x TP{tp}{ep}" if tp and ni else (f"TP{tp}" if tp else "config")
+    dp = par.get("dp", 1) or 1
+    shape = f"TP{tp}" + (f"xDP{dp}" if dp > 1 else "")
+    return f"{ni}x {shape}{ep}" if tp and ni else (f"{shape}{ep}" if tp else "config")
 
 
 # --- FACTS: precomputed stats the brain's prose references ------------------
@@ -415,9 +539,20 @@ def _sections(report, records, scenario):
     return "".join(out)
 
 
-_FLAG_LABELS = [("tp", "--tensor-parallel-size"), ("ni", "--num-instances"),
-                ("mnbt", "--max-num-batched-tokens"), ("mns", "--max-num-seqs"),
+# Flags the "What to run" table prints. This is the list a reader COPIES, so an omission is a
+# wrong deployment: it previously showed only tp + num-instances, leaving out expert parallelism,
+# data parallelism and routing — exactly the knobs that distinguish two rows whose topology
+# matches. `epw`/`dp` render as the flags vLLM actually takes.
+_FLAG_LABELS = [("tp", "--tensor-parallel-size"), ("dp", "--data-parallel-size"),
+                ("epw", "--enable-expert-parallel"), ("ni", "--num-instances"),
+                ("bs", "--block-size"), ("mnbt", "--max-num-batched-tokens"),
+                ("mns", "--max-num-seqs"), ("gmu", "--gpu-memory-utilization"),
                 ("mtp", "--num-speculative-tokens"), ("route", "routing"), ("pd", "prefill/decode")]
+# Values that add nothing when printed: a flag at its default, or an "off" state. Keeping them
+# would bury the two or three settings that actually matter for this row.
+_FLAG_SKIP = {"dp": (1, None), "epw": (None,), "mtp": (0, None), "pd": ("colocated", None),
+              "route": ("round-robin", "default", None), "ni": (None,), "bs": (None,),
+              "gmu": (None,), "mnbt": (None,), "mns": (None,), "tp": (None,)}
 
 
 def _operating_table(report, records):
@@ -435,16 +570,20 @@ def _operating_table(report, records):
         pts = []
         for c in sorted(by_conc):
             r = by_conc[c]
-            pts.append({"conc": c, "flags": {"tp": r["tp"], "ni": r["ni"], "mnbt": r["mnbt"],
-                        "mns": r["mns"], "mtp": r["mtp"], "route": r["route"], "pd": r["pd"]},
+            pts.append({"conc": c,
+                        "flags": {k: r.get(k) for k, _ in _FLAG_LABELS},
                         "pu": r["pu"], "cl": r["cl"], "itl": r["itl"], "hit": r["hit"]})
     if not pts:
         return ""
     rows = []
     for p in pts:
         flags = p.get("flags", {})
-        fl = "".join(f'<span class="fl"><i>{esc(lbl)}</i> {esc(flags[k])}</span>'
-                     for k, lbl in _FLAG_LABELS if flags.get(k) is not None)
+        fl = "".join(
+            # a boolean flag prints bare (--enable-expert-parallel, not "... 8")
+            f'<span class="fl"><i>{esc(lbl)}</i>'
+            + ("" if k == "epw" else f' {esc(flags[k])}') + "</span>"
+            for k, lbl in _FLAG_LABELS
+            if flags.get(k) is not None and flags.get(k) not in _FLAG_SKIP.get(k, (None,)))
         rows.append(
             f'<tr><td class="n hero">{esc(p.get("conc"))}</td><td>{fl}</td>'
             f'<td class="n">{_num(p.get("pu"))}</td><td class="n">{_num(p.get("cl"))}</td>'

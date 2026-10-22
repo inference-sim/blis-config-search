@@ -92,8 +92,15 @@ def _axis_titles(xt, yt):
 # --- series grouping -------------------------------------------------------
 
 def _config_key(r):
-    """A stable label for the configuration a record belongs to (everything but load)."""
-    return r.get("series") or f"TP{r.get('tp')} x{r.get('dp') or 1}"
+    """A stable label for the configuration a record belongs to (everything but load).
+
+    MUST include the knob delta. `series` is topology-only, so a refined shape has one run per
+    variant at EVERY load; keying on series alone drew six different configs as a single
+    zigzagging curve that doubled back on itself at each concurrency.
+    """
+    base = r.get("series") or f"TP{r.get('tp')} x{r.get('dp') or 1}"
+    variant = r.get("variant") or ""
+    return f"{base} ({variant})" if variant else base
 
 
 def _by_config(records):

@@ -1,0 +1,8 @@
+{
+  "generated": "2026-10-18",
+  "isl_osl": "ShareGPT",
+  "n_runs": 27,
+  "n_servable": 17,
+  "reason": "Most output tok/s on the budget while holding \u226550 tok/s/user on every instance.",
+  "synthetic": false
+}

@@ -1,0 +1,382 @@
+#!/usr/bin/env python3
+"""Deterministic mini config-search for ONE scenario -> reports/<run_id>/.
+
+    python3 -I scripts/run_search.py --submission submissions/foo.yaml \
+        --blis .build/blis --catalog ../blis-catalog --registry ../blis-registry
+
+This is the automation path behind the local Submit button (serve_local.py calls it). It is a
+SIMPLIFIED, non-LLM sweep: it enumerates a small fixed set of feasible topologies for the
+scenario's GPU budget, probes each over a short concurrency ramp with REAL BLIS runs (via the
+skill's run_blis.run_one), classifies servability against the interactivity floor, picks the
+Pareto winner on usable capacity, and writes a run directory report.py can render.
+
+It is NOT the full agentic search (no diagnostic knob steering); it exists so the Submit UI
+produces a real, honest report from real BLIS numbers. The run dir it writes is the same shape
+the skill writes, so build_gallery.py ingests it unchanged.
+"""
+import argparse
+import collections
+import json
+import os
+import sys
+
+try:
+    import yaml
+except ImportError:
+    raise SystemExit("PyYAML required")
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+SKILL = os.path.join(ROOT, ".claude", "skills", "config-search", "scripts")
+sys.path.insert(0, SKILL)
+sys.path.insert(0, os.path.join(ROOT, "scripts"))
+import run_blis  # noqa: E402
+import topologies  # noqa: E402
+import build_catalog  # noqa: E402
+
+MAX_CANDIDATES = 12
+# How many of the best topologies get a knob refinement pass. Each costs len(knob_variants) x the
+# ramp, so this directly sets the run budget: 3 shapes x 5 variants x ~12 loads ~= 180 extra runs.
+REFINE_TOP = 3
+
+
+def model_entry(model, catalog_root):
+    """The catalog row for `model`, or None. Supplies `arch`, which decides whether the search
+    explores MoE-only axes (dp / expert parallelism). A catalog miss falls back to the dense grid
+    rather than guessing from the name."""
+    try:
+        cat = build_catalog.build(os.path.join(catalog_root, os.pardir))
+    except Exception:
+        return None
+    return next((m for m in cat.get("models", []) if m.get("name") == model), None)
+
+
+def concurrency_ramp(gpu_budget):
+    """Probe ladder for a budget, in stable order.
+
+    The old ladder was the fixed [1..32] whatever the budget. On 256 GPUs that never reached the
+    interactivity limit, so the search ranked shapes on an arbitrary mid-curve point. It also
+    saturated: with --num-requests 80, c=128 and c=256 returned byte-identical throughput because
+    the request pool ran dry (measured). The ladder now grows with the budget, and `requests_for`
+    keeps every point supplied."""
+    ramp = [1, 2, 4, 8, 16, 24, 32]
+    c = 64
+    top = max(32, gpu_budget * 2)      # ~2 sessions per GPU is past any interactivity floor
+    while c <= top:
+        ramp.append(c)
+        c *= 2
+    return ramp
+
+
+# Two configs within this relative distance on the ranking metric are a TIE, and the simpler one
+# wins. qwen3-14b produced "32x TP8 · seq64" beating plain "32x TP8" by 0.3 tok/s out of 39,801
+# (0.0008%): noise, but it promoted a knob-tweaked config to the headline and implied that
+# max_num_seqs=64 was the reason. 0.5% is well inside the simulator's own modelling error.
+TIE_TOLERANCE = 0.005
+
+
+def rank_finalists(finalists):
+    """Best first: most tok/s/GPU, then most tok/s — but a near-tie prefers the SIMPLER config.
+
+    Simpler = fewer engine/routing knobs set away from their defaults. A recommendation should
+    only carry a knob when that knob earned its place.
+    """
+    knobs = [k for k, _ in topologies.KNOB_TIERS]
+    nknobs = lambda f: sum(1 for k in knobs if f["config"].get(k) is not None)
+    best = max((f["at_c_use"]["tokens_per_sec_per_gpu"] or 0) for f in finalists) if finalists else 0
+
+    def key(f):
+        pg = f["at_c_use"]["tokens_per_sec_per_gpu"] or 0
+        # Bucket by relative distance from the best, so everything inside the tolerance compares
+        # equal on efficiency and the knob count decides.
+        bucket = 0 if best <= 0 else int((best - pg) / (best * TIE_TOLERANCE))
+        return (bucket, nknobs(f), -(f["at_c_use"]["tokens_per_sec"] or 0))
+
+    return sorted(finalists, key=key)
+
+
+def winner_name(f):
+    """Identifying name for a finalist: topology, plus its knob delta when it has one.
+
+    `pareto.json` names the winner by string, and several finalists legitimately share a topology
+    once the search refines knobs — so the bare label would not say WHICH `64x TP4xDP2 + EP` won.
+    The knob delta is parenthesised rather than glued on with a separator, so the topology still
+    reads as one unit."""
+    v = f.get("variant")
+    return f"{f['label']} ({v})" if v else f["label"]
+
+
+def winner_reason(f, floor_rate, headroom):
+    """One sentence saying what won and why, naming the knobs that made the difference."""
+    a = f["at_c_use"]
+    v = f.get("variant")
+    how = (f"with {v}" if v else "at default engine and routing settings")
+    return (f"{f['label']} {how} gives the most tok/s/GPU "
+            f"({a['tokens_per_sec_per_gpu']:g} tok/s/GPU, {a['tokens_per_sec']:g} tok/s fleet) "
+            f"while holding the {floor_rate:g} tok/s/user floor; "
+            f"usable load c={f['c_use']} (C*={f['c_star']}, headroom {headroom:g}).")
+
+
+def footprint_tiers(gpu_budget):
+    """Per-instance footprint caps to try, narrowest first.
+
+    One node is where a model that fits belongs — a multi-node instance pays a fabric term on
+    every collective. But the largest MoE models do not fit in one node at ANY tp, so when a tier
+    yields nothing servable the search widens by a node-doubling rather than declaring the model
+    unrunnable. Bounded by the budget: a footprint cannot exceed the GPUs available."""
+    tiers, cap = [], topologies.GPUS_PER_NODE
+    while cap <= gpu_budget:
+        tiers.append(cap)
+        cap *= 2
+    return tiers or [topologies.GPUS_PER_NODE]
+
+
+def requests_for(concurrency, base=80):
+    """Requests to offer at one probe point.
+
+    A point measures the SHAPE only while requests outnumber sessions; otherwise it measures the
+    pool draining. Keep a healthy multiple of the session count."""
+    return max(base, concurrency * 4)
+
+
+def per_user(metrics):
+    """Per-user tok/s on the floor's p99 basis: 1000 / ITL p99 (report.py's fallback; the
+    engine does not emit tok_per_s_per_user directly)."""
+    itl = metrics.get("itl_p99_ms")
+    return round(1000.0 / itl, 1) if itl else None
+
+
+def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, seed=0,
+           model_entry=None):
+    """Probe every candidate topology over a concurrency ramp; return runs, finalists, dropped.
+
+    `model_entry` is the catalog row (for `arch`); when omitted the search is dense-only, which is
+    the safe grid. Candidate shapes come from scripts/topologies.py — the same enumeration the
+    agentic path uses, so this automated sweep explores the MoE expert-parallel axis the skill
+    advertises instead of silently varying tp alone."""
+    model = scenario["model"]
+    hardware = scenario["hardware"]
+    budget = int(scenario["gpu_budget"])
+    wl = scenario.get("workload") or {}
+    workload = wl.get("preset") if isinstance(wl, dict) else wl
+    floor = scenario.get("interactivity_floor") or {}
+    floor_itl = float(floor.get("itl_p99_ms_max", 20.0))
+    floor_rate = float(floor.get("tok_per_s_per_user", 50.0))
+    headroom = float(scenario.get("headroom", 0.8))
+    engine_version = scenario.get("engine_version", "0.29.0")
+
+    ramp = concurrency_ramp(budget)
+    runs, finalists, dropped = [], [], []
+
+    def probe(topo):
+        """Probe one candidate up the ramp; append its runs and either a finalist or a dropped row.
+
+        `label` is provisional — the final labels are assigned once, after every candidate is in,
+        so a suffix only appears on knobs that actually VARY across the set (see relabel())."""
+        label = topologies.label(topo)
+        gpus = topo["tp"] * topo.get("dp", 1) * topo["num_instances"]
+        curve, c_star, first_error = [], None, None
+        for c in ramp:
+            cfg = {**topo, "concurrency": c}
+            rec = run_blis.run_one(blis, catalog, registry, scenarios_dir, model, hardware,
+                                   engine_version, workload, requests_for(c, num_requests), seed,
+                                   None, cfg, phase="probe")
+            runs.append(rec)
+            m = rec.get("metrics") or {}
+            # rec["error"] is set on rc=0 runs too: run_blis._completion_issue flags a run that is
+            # incomplete / overloaded / still queued. Such a run has a tokens_per_sec but is NOT a
+            # usable capacity point — report.py:_feasible already rejects it — so excluding only
+            # on returncode/missing-tps let an overloaded run set c_star and the winner's numbers
+            # while the report marked that same run infeasible. Treat any error as a failed probe.
+            if rec.get("returncode") != 0 or not m.get("tokens_per_sec") or rec.get("error"):
+                if first_error is None:
+                    first_error = rec.get("error") or f"rc={rec.get('returncode')}"
+                # A shape BLIS refuses outright (bad layout / memory) fails at EVERY load, so stop
+                # re-probing it; a run that merely missed the floor or overloaded keeps climbing.
+                if rec.get("returncode") not in (0, None):
+                    break
+                continue
+            pu = per_user(m)
+            servable = pu is not None and pu >= floor_rate and (m.get("itl_p99_ms", 1e9) <= floor_itl)
+            pt = {"concurrency": c, "tokens_per_sec": round(m["tokens_per_sec"], 1),
+                  "itl_p99_ms": m.get("itl_p99_ms"), "tok_per_s_per_user": pu,
+                  "preemption_count": m.get("preemption_count", 0)}
+            curve.append(pt)
+            if servable:
+                c_star = c
+        if c_star is None:
+            # Record WHY, so pareto.json shows the shapes that were tried and failed rather than
+            # leaving a single survivor looking like the whole search space.
+            dropped.append({"label": label, "config": topo, "gpus": gpus,
+                            "reason": (first_error or "no probe met the interactivity floor")})
+            return
+        c_use = max(1, int(round(headroom * c_star)))
+        at = min((p for p in curve if p["concurrency"] <= c_use), key=lambda p: abs(p["concurrency"] - c_use), default=None)
+        if at is None:
+            dropped.append({"label": label, "config": topo, "gpus": gpus,
+                            "reason": f"no probe at or below the usable load c={c_use}"})
+            return
+        tps = at["tokens_per_sec"]
+        finalists.append({
+            "label": label,
+            "config": topo, "gpus": gpus, "c_star": c_star, "c_use": c_use,
+            "at_c_use": {"tokens_per_sec": tps, "tokens_per_sec_per_gpu": round(tps / gpus, 1),
+                         "tok_per_s_per_user": at["tok_per_s_per_user"], "itl_p99_ms": at["itl_p99_ms"],
+                         "ttft_p99_ms": 0.0, "preemption_count": at.get("preemption_count", 0)},
+            "curve": curve,
+        })
+
+    # Single-node footprints first — what a model that fits should use, with no fabric term to pay.
+    # If NOTHING there is servable, the model may simply not fit in one node (kimi-k3 needs 332.3
+    # GiB per rank at tp=8 on a 141 GiB H200 and only fits from tp=32 up), so widen the per-instance
+    # footprint a node at a time rather than reporting "no servable configuration" for a model BLIS
+    # can actually run. Escalation only ever ADDS shapes, so a model that fits is unaffected.
+    for cap in footprint_tiers(budget):
+        seen = {tuple(sorted(c.items())) for c in (f["config"] for f in finalists)} | \
+               {tuple(sorted(c.items())) for c in (d["config"] for d in dropped)}
+        for topo in topologies.candidate_topologies(budget, model_entry, MAX_CANDIDATES, cap):
+            if tuple(sorted(topo.items())) not in seen:
+                probe(topo)
+        if finalists:
+            break
+
+    # Knob refinement, coordinate-wise on the BEST topologies only. Routing and the batch/KV
+    # limits are real levers — on kimi-k2.5 routing swung throughput 2.3x and max_num_seqs=64 cost
+    # 29% — but crossing them with every shape and load would be thousands of near-identical runs.
+    # Refining the top few shapes finds the same binding knob for ~1/9th of the budget.
+    for base in rank_finalists(finalists)[:REFINE_TOP]:
+        for variant in topologies.knob_variants(base["config"]):
+            probe(variant)
+
+    relabel(finalists, dropped)
+    return runs, finalists, (floor_rate, floor_itl, headroom, dropped)
+
+
+def relabel(finalists, dropped):
+    """Keep `label` pure topology and describe knob deltas in a separate `variant` field.
+
+    The label is what a reader scans — GPUs x TP x EP x instances, the things that dominate an
+    LLM serving decision. Engine and routing knobs do NOT belong in it: jamming them in produced
+    `64x TP4xDP2 + EP · ll · b8k · seq256 · mem0.9`, with invented abbreviations that explain
+    nothing. They go in `variant` (a spelled-out phrase) and `knobs` (the raw values), and the
+    report surfaces them as filters and panel fields.
+
+    `variant` is scoped to the topology group and measured against that group's baseline (its most
+    common value per knob), so an unrefined shape and the all-defaults row both get "". Mutates in
+    place."""
+    entries = list(finalists) + list(dropped)
+    if not entries:
+        return ()
+    knobs = [k for k, _ in topologies.KNOB_TIERS]
+    groups = collections.defaultdict(list)
+    for e in entries:
+        c = e["config"]
+        groups[(c.get("tp"), c.get("dp", 1), bool(c.get("enable_expert_parallel")),
+                c.get("num_instances"))].append(e)
+    seen = set()
+    for rows in groups.values():
+        varying = tuple(k for k in knobs
+                        if len({json.dumps(r["config"].get(k)) for r in rows}) > 1)
+        seen.update(varying)
+        base = {k: collections.Counter(json.dumps(r["config"].get(k))
+                                       for r in rows).most_common(1)[0][0] for k in varying}
+        for e in rows:
+            e["label"] = topologies.label(e["config"])          # topology only
+            e["knobs"] = {k: e["config"].get(k) for k in varying}
+            e["variant"] = ", ".join(
+                topologies.knob_phrase(k, e["config"][k]) for k in varying
+                if e["config"].get(k) is not None
+                and json.dumps(e["config"].get(k)) != base[k])
+    return tuple(k for k in knobs if k in seen)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Deterministic mini config-search -> reports/<run_id>/")
+    ap.add_argument("--submission", required=True)
+    ap.add_argument("--blis", default=os.path.join(ROOT, ".build", "blis"))
+    ap.add_argument("--catalog", default=os.path.join(ROOT, os.pardir, "blis-catalog"))
+    ap.add_argument("--registry", default=os.path.join(ROOT, os.pardir, "blis-registry"))
+    ap.add_argument("--out", default=os.path.join(ROOT, "reports"))
+    ap.add_argument("--num-requests", type=int, default=80)
+    args = ap.parse_args(argv)
+
+    sub = os.path.abspath(args.submission)
+    if not os.path.isfile(sub):
+        raise SystemExit(f"no such submission: {args.submission}")
+    scenario = yaml.safe_load(open(sub)) or {}
+    blis = os.path.abspath(args.blis)
+    if not os.path.isfile(blis):
+        raise SystemExit(f"blis binary not found at {blis} — build it first (see SETUP.md)")
+
+    name = os.path.splitext(os.path.basename(sub))[0]
+    run_id = name if name[:1].isalnum() else "submission"
+    run_dir = os.path.join(args.out, run_id)
+    os.makedirs(run_dir, exist_ok=True)
+    # Generated kernel scenarios are build scratch, not run-dir data — keep them in a temp dir
+    # so the committed/ingested run directory holds only scenario/pareto/runs/gallery/report.
+    import tempfile
+    scen_dir = tempfile.mkdtemp(prefix="cs-scenarios-")
+
+    entry = model_entry(scenario["model"], os.path.abspath(args.catalog))
+    arch = (entry or {}).get("arch", "unknown")
+    print(f"searching {scenario.get('model')} ({arch}) on {scenario.get('gpu_budget')}x "
+          f"{scenario.get('hardware')} ({(scenario.get('workload') or {}).get('preset')})…", flush=True)
+    runs, finalists, (floor_rate, floor_itl, headroom, dropped) = search(
+        scenario, blis, args.catalog, args.registry, scen_dir, num_requests=args.num_requests,
+        model_entry=entry)
+    if not finalists:
+        detail = "; ".join(f"{d['label']}: {d['reason'][:120]}" for d in dropped[:4])
+        raise SystemExit("no servable configuration found for this scenario (nothing met the "
+                         f"floor). Tried {len(dropped)} shape(s): {detail}")
+
+    # winner: dual-pareto proxy — most tok/s/GPU, tie-break total tok/s
+    finalists[:] = rank_finalists(finalists)
+    winner = finalists[0]
+    n_servable = sum(1 for r in runs if (r.get("metrics") or {}).get("itl_p99_ms", 1e9) <= floor_itl and r.get("returncode") == 0)
+
+    scenario_out = {"run_id": run_id, "model": scenario["model"], "hardware": scenario["hardware"],
+                    "gpu_budget": scenario["gpu_budget"], "workload": scenario.get("workload"),
+                    "objective": "dual-pareto",
+                    "interactivity_floor": {"tok_per_s_per_user": floor_rate, "itl_p99_ms_max": floor_itl},
+                    "headroom": headroom, "seed": 0}
+    # The move trail must say what was actually explored: the previous wording ("single-node
+    # topologies") described a tp-only sweep and gave no hint that EP was never tried.
+    ep_runs = sum(1 for r in runs if ((r.get("deployment") or {}).get("parallel") or {})
+                  .get("enable_expert_parallel"))
+    trail = [f"enumerated {len(finalists) + len(dropped)} topologies within budget"
+             + (f" ({arch}: tp x dp footprints x expert-parallel arms)" if arch == "MoE"
+                else f" ({arch}: tp tiers)"),
+             "probed a concurrency ramp per topology with real BLIS runs"
+             f" (ladder to c={max(concurrency_ramp(int(scenario['gpu_budget'])))})",
+             f"ranked finalists on usable capacity (headroom {headroom})"]
+    if arch == "MoE":
+        trail.insert(1, f"compared expert-parallel against its non-EP control ({ep_runs} EP runs)")
+    if dropped:
+        trail.append(f"dropped {len(dropped)} shape(s) BLIS refused or that missed the floor")
+    pareto = {"objective": "dual-pareto",
+              "interactivity_floor": {"tok_per_s_per_user": floor_rate, "itl_p99_ms_max": floor_itl},
+              "headroom": headroom, "finalists": finalists, "dropped": dropped,
+              "winner": {"chosen": winner_name(winner), "budget_max": winner_name(winner),
+                         "efficiency_per_gpu": winner_name(winner),
+                         "label": winner["label"], "variant": winner.get("variant", ""),
+                         "reason": winner_reason(winner, floor_rate, headroom),
+                         "move_trail": trail}}
+    gallery = {"synthetic": False, "isl_osl": "", "generated": __import__("datetime").date.today().isoformat(),
+               "n_runs": len(runs), "n_servable": n_servable,
+               "reason": pareto["winner"]["reason"]}
+
+    with open(os.path.join(run_dir, "scenario.json"), "w") as f:
+        json.dump(scenario_out, f, indent=2, sort_keys=True)
+    with open(os.path.join(run_dir, "pareto.json"), "w") as f:
+        json.dump(pareto, f, indent=2, sort_keys=True)
+    with open(os.path.join(run_dir, "gallery.json"), "w") as f:
+        json.dump(gallery, f, indent=2, sort_keys=True)
+    with open(os.path.join(run_dir, "runs.jsonl"), "w") as f:
+        for r in runs:
+            f.write(json.dumps(r, sort_keys=True) + "\n")
+    print(f"wrote {os.path.relpath(run_dir, ROOT)}/ — winner {winner['label']}, "
+          f"{len(finalists)} finalists, {len(runs)} runs ({n_servable} servable)")
+    return run_id
+
+
+if __name__ == "__main__":
+    main()

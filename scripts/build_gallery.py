@@ -130,7 +130,18 @@ def validate_and_project(run_dir):
                 winner_row = row
         elif chosen in (row["name"], label):
             winner_row = row
-    winner = winner_row or finalists[-1]  # fall back to the last finalist if chosen is unset
+    # Resolve the winner. If pareto.json named one (by label/variant or legacy `chosen`) it MUST
+    # match a finalist — silently falling back to finalists[-1] showed the worst-ranked config as
+    # the recommendation. Only when no winner is named at all (older reports) do we fall back.
+    named = chosen_label is not None or chosen is not None
+    if winner_row is not None:
+        winner = winner_row
+    elif named:
+        want = chosen_label if chosen_label is not None else chosen
+        raise Invalid(f"{name}: winner {want!r} does not match any finalist "
+                      f"({[r['name'] for r in finalists]})")
+    else:
+        winner = finalists[-1]
 
     floor = scenario.get("interactivity_floor") or {}
     floor_str = ""
@@ -160,8 +171,11 @@ def validate_and_project(run_dir):
 # A fixed banner/back-link injected into each rendered report. report.py stays a pure,
 # gallery-agnostic transform (and lives in the read-only skill); these are gallery concerns,
 # so the build adds them after the fact, right inside the report's .wrap container.
+# The report is served by the SPA at data/reports/<run_id>/index.html, so the gallery shell
+# (the SPA's own index.html) is THREE levels up — through <run_id>, reports/, and data/. The
+# old ../index.html resolved to data/reports/index.html and 404'd on Pages.
 _BACK_LINK = ('<div style="font:600 13px/1.4 system-ui,sans-serif;margin:16px 0 0">'
-              '<a href="../index.html#/reports" style="color:#1f6e5c;text-decoration:none">← back to the gallery</a></div>')
+              '<a href="../../../index.html#/reports" style="color:#1f6e5c;text-decoration:none">← back to the gallery</a></div>')
 _MOCK_BANNER = ('<div role="note" style="font:600 13px/1.5 system-ui,sans-serif;margin:14px 0 0;'
                 'padding:10px 14px;border:1px solid #d8b984;background:#f6e8ca;color:#6b4508;border-radius:6px">'
                 'MOCK scenario — illustrative placeholder data for the gallery demo, not a BLIS measurement. '

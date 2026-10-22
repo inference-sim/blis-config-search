@@ -261,6 +261,34 @@ def test_winner_prefers_the_simpler_config_on_a_tie():
           "an 84% improvement wins even though it sets a knob")
 
 
+class OverloadedAtHighLoad(FakeRunner):
+    """Every probe returns rc=0 WITH a tokens_per_sec, but past a load it also sets rec["error"]
+    the way run_blis._completion_issue does for an overloaded/incomplete run. Such a run must not
+    count as a capacity point: report.py:_feasible rejects it, so if the search accepted it the
+    report would contradict its own recommendation."""
+
+    def __call__(self, *a, **kw):
+        rec = super().__call__(*a, **kw)
+        if rec.get("returncode") == 0 and rec["config"].get("concurrency", 0) > 64:
+            rec["error"] = "overloaded: dropped_unservable=12"
+        return rec
+
+
+def test_overloaded_runs_do_not_set_capacity():
+    print("a tokens-bearing but errored run is not a capacity point")
+    r = OverloadedAtHighLoad()
+    runs, finalists, _ = run(scenario(), r)
+    # the errored (overloaded) runs must never become the operating point of any finalist
+    for f in finalists:
+        check(f["c_star"] <= 64,
+              f"c_star stays at a load with no completion error (got {f['c_star']})")
+        for pt in f.get("curve", []):
+            # the kept curve points are the clean ones; errored loads are excluded, so no
+            # curve point sits above the overload threshold
+            check(pt["concurrency"] <= 64,
+                  f"curve excludes overloaded loads (saw c={pt['concurrency']})")
+
+
 def test_dense_model_is_unchanged():
     print("dense models keep the narrow grid")
     r = FakeRunner(fail_small_footprint=False)
@@ -288,6 +316,7 @@ if __name__ == "__main__":
     test_labels_are_topology_and_variant_is_separate()
     test_winner_reason_names_the_knobs_that_won()
     test_winner_prefers_the_simpler_config_on_a_tie()
+    test_overloaded_runs_do_not_set_capacity()
     test_dense_model_is_unchanged()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

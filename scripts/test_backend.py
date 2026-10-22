@@ -105,6 +105,18 @@ def test_run_submission():
                            "workload": {"preset": "agentic"}, "gpu_budget": 99999999})
     check(len(errs2) >= 3, "invalid submission reports multiple errors")
 
+    # a bare-number interactivity_floor (what the old Submit form emitted) must be rejected here
+    # with a clear message, not crash the pipeline with AttributeError downstream.
+    errs3, _ = m.validate({"model": "qwen3-14b", "hardware": "h100",
+                           "workload": {"preset": "chatbot"}, "gpu_budget": 8,
+                           "interactivity_floor": 50})
+    check(any("mapping" in e for e in errs3), "bare-number interactivity_floor is rejected")
+    # the nested shape still validates cleanly
+    errs4, _ = m.validate({"model": "qwen3-14b", "hardware": "h100",
+                           "workload": {"preset": "chatbot"}, "gpu_budget": 8,
+                           "interactivity_floor": {"tok_per_s_per_user": 50}})
+    check(errs4 == [], "nested interactivity_floor validates")
+
     # end-to-end CLI behavior: no runner -> loud non-zero exit, no fabricated report
     tmp = tempfile.mkdtemp()
     sub = os.path.join(ROOT, "submissions", "_test_backend_tmp.yaml")

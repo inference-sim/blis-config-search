@@ -527,6 +527,19 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
     onToggle: (s) => setSticky((cur) => toggleHighlight(resolveHighlight(cur, null, shownSeries), s)),
   }
   const regime = useMemo(() => (recs.some((r) => !r.ok && (r.viol ?? []).some((v) => /kv|preempt|memory/i.test(v))) ? 'KV-bound' : 'compute-bound'), [recs])
+  // Hovering a chart line emphasises a whole series; the panel previews THAT series' operating
+  // point — its most efficient servable run (max tok/s/GPU, the objective the search and the
+  // "What to run" table rank on). Resolve within the series: operatingPoints(shown) keeps only
+  // the single best series per load, so a series that never wins a load would resolve to nothing
+  // and the box would stay blank for most lines. Declared BEFORE the early return below so the
+  // hook order is stable when navigating from a scenario with runs to one without (React throws
+  // "rendered fewer hooks than expected" otherwise).
+  const hoverRec = useMemo(() => {
+    if (active === null) return null
+    const mine = shown.filter((r) => r.series === active && r.ok && finite(r.tpg))
+    if (mine.length === 0) return null
+    return mine.reduce((a, b) => ((b.tpg as number) > (a.tpg as number) ? b : a))
+  }, [active, shown])
 
   if (recs.length === 0) {
     return (
@@ -549,17 +562,6 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
   // Resolve against the FILTERED set: if a filter or brush removes the inspected run, the panel
   // closes with it rather than describing a point no longer on the chart.
   const pickedRec = picked === null ? null : shown.find((r) => r.id === picked) ?? null
-  // Hovering a chart line emphasises a whole series; the panel previews THAT series' operating
-  // point — its most efficient servable run (max tok/s/GPU, the objective the search and the
-  // "What to run" table rank on). Resolve within the series: operatingPoints(shown) keeps only
-  // the single best series per load, so a series that never wins a load would resolve to nothing
-  // and the box would stay blank for most lines.
-  const hoverRec = useMemo(() => {
-    if (active === null) return null
-    const mine = shown.filter((r) => r.series === active && r.ok && finite(r.tpg))
-    if (mine.length === 0) return null
-    return mine.reduce((a, b) => ((b.tpg as number) > (a.tpg as number) ? b : a))
-  }, [active, shown])
   // Hover wins while the cursor is on a DIFFERENT series than the pinned run — that is the whole
   // point of the preview: the box tracks the line under the cursor. A click still pins one exact
   // run, so hovering that same series (e.g. resting on the clicked point) keeps showing it rather

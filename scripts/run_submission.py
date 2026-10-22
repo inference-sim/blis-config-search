@@ -64,6 +64,12 @@ def validate(scenario):
         errs.append(f"unknown workload {workload!r}")
     if not budget or not (1 <= budget <= 100000):
         errs.append("gpu_budget out of range")
+    # interactivity_floor must be a mapping (run_search/report.py call .get on it). A bare number —
+    # what the old Submit form emitted — would crash the pipeline with AttributeError downstream,
+    # so reject it here with a clear message instead.
+    floor = scenario.get("interactivity_floor")
+    if floor is not None and not isinstance(floor, dict):
+        errs.append("interactivity_floor must be a mapping, e.g. {tok_per_s_per_user: 50}")
     return errs, (model, hardware, workload, budget)
 
 

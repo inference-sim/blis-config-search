@@ -202,6 +202,17 @@ describe('click a point for its deployment', () => {
     expect(panel.textContent).toContain('64x TP8 + EP')
   })
 
+  it('does not crash navigating from a scenario with runs to one without', () => {
+    // The hoverRec useMemo must sit ABOVE the early return for the empty-records case, or React
+    // throws "rendered fewer hooks than expected" when the same component instance re-renders
+    // from a populated scenario to an empty one (back/forward, or editing the URL).
+    const withRuns = mk('a', 'kimi-k2.5', 'H200', 'multidoc', 512, false, [rec()])
+    const noRuns = mk('a', 'kimi-k2.5', 'H200', 'multidoc', 512, false, [])
+    const { rerender } = render(<ScenarioDetail runId="a" scenarios={[withRuns]} />)
+    expect(() => rerender(<ScenarioDetail runId="a" scenarios={[noRuns]} />)).not.toThrow()
+    expect(screen.getByText(/no per-run records are available/i)).toBeTruthy()
+  })
+
   it('after clicking a point, hovering a different line still updates the box', () => {
     const recs = [
       rec({ id: 'X', series: '64x TP8 + EP', variant: '', tpg: 23 }),
@@ -391,7 +402,9 @@ describe('Submit numeric inputs', () => {
     fireEvent.change(floor, { target: { value: '8' } })
     fireEvent.change(floor, { target: { value: '80' } })
     expect(floor.value).toBe('80')
-    expect(screen.getByLabelText('Generated scenario.yaml').textContent).toContain('interactivity_floor: 80')
+    // interactivity_floor is a mapping (the pipeline calls .get on it), so the value lands on the
+    // nested tok_per_s_per_user key, not a bare `interactivity_floor: 80`.
+    expect(screen.getByLabelText('Generated scenario.yaml').textContent).toContain('tok_per_s_per_user: 80')
   })
 
   it('keeps the YAML on the last valid value while the field is empty', () => {

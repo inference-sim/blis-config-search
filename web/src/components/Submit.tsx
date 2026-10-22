@@ -22,13 +22,18 @@ export function buildYaml(d: Draft): string {
     `workload:`,
     `  preset: ${d.workload}`,
     `objective: dual-pareto`,
-    `interactivity_floor: ${d.floor}   # min tok/s/user`,
+    // interactivity_floor is a mapping everywhere it is read (run_search, report.py, serve_local
+    // all call .get on it). A bare `interactivity_floor: 50` crashes the pipeline with
+    // AttributeError, so emit the nested shape.
+    `interactivity_floor:`,
+    `  tok_per_s_per_user: ${d.floor}   # min tok/s/user`,
     `headroom: ${HEADROOM}`,
     '',
   ].join('\n')
 }
 export function prLink(d: Draft, yaml: string): string {
-  const q = new URLSearchParams({ filename: `scenarios/${d.model}-${d.hardware}-${d.workload}.yaml`, value: yaml })
+  // CI (generate-report.yml) only accepts submissions/*.yaml; a scenarios/ path is rejected.
+  const q = new URLSearchParams({ filename: `submissions/${d.model}-${d.hardware}-${d.workload}.yaml`, value: yaml })
   return `${REPO}/new/main?${q.toString()}`
 }
 
@@ -95,7 +100,16 @@ export function Submit({ catalog, mode }: { catalog: Catalog; mode: Mode }) {
     setRunning(true)
     setLog('')
     try {
-      const res = await fetch('/api/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) })
+      // serve_local.validate_scenario reads interactivity_floor.tok_per_s_per_user (nested) but
+      // workload as a flat string. The flat Draft sent `floor`, which the server never read, so
+      // every local run fell back to the default floor (posting 120 came back as 50). Send the
+      // nested floor; keep workload flat to match the server's reader.
+      const body = {
+        model: d.model, hardware: d.hardware, gpu_budget: d.gpu_budget,
+        workload: d.workload,
+        interactivity_floor: { tok_per_s_per_user: d.floor },
+      }
+      const res = await fetch('/api/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       if (!res.ok || !res.body) {
         setLog(`Request failed: HTTP ${res.status}. Is the local server running (serve_local)?`)
       } else {

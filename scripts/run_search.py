@@ -182,11 +182,16 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
                                    None, cfg, phase="probe")
             runs.append(rec)
             m = rec.get("metrics") or {}
-            if rec.get("returncode") != 0 or not m.get("tokens_per_sec"):
+            # rec["error"] is set on rc=0 runs too: run_blis._completion_issue flags a run that is
+            # incomplete / overloaded / still queued. Such a run has a tokens_per_sec but is NOT a
+            # usable capacity point — report.py:_feasible already rejects it — so excluding only
+            # on returncode/missing-tps let an overloaded run set c_star and the winner's numbers
+            # while the report marked that same run infeasible. Treat any error as a failed probe.
+            if rec.get("returncode") != 0 or not m.get("tokens_per_sec") or rec.get("error"):
                 if first_error is None:
                     first_error = rec.get("error") or f"rc={rec.get('returncode')}"
                 # A shape BLIS refuses outright (bad layout / memory) fails at EVERY load, so stop
-                # re-probing it; a run that merely missed the floor keeps climbing the ramp.
+                # re-probing it; a run that merely missed the floor or overloaded keeps climbing.
                 if rec.get("returncode") not in (0, None):
                     break
                 continue

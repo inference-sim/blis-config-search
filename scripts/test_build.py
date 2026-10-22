@@ -83,6 +83,48 @@ def test_winner_with_a_knob_variant():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_winner_mismatch_raises_not_falls_back():
+    print("test_winner_mismatch_raises_not_falls_back")
+    # When pareto.json names a winner that matches NO finalist, the old code silently showed the
+    # worst-ranked finalist (finalists[-1]) as the recommendation. A named-but-unmatched winner
+    # means the report is inconsistent and must raise, not pick the last row.
+    tmp = tempfile.mkdtemp()
+    try:
+        rd = os.path.join(tmp, "qwen3-14b-h100-chatbot-0003")
+        _mk_run_dir(rd, "qwen3-14b-h100-chatbot-0003")
+        pareto = {"finalists": [{"label": "4x TP2", "config": {"tp": 2, "num_instances": 4},
+                  "gpus": 8, "c_use": 24, "at_c_use": {"tokens_per_sec": 1842.0,
+                  "tokens_per_sec_per_gpu": 230.3, "tok_per_s_per_user": 68.0, "itl_p99_ms": 14.7}}],
+                  "winner": {"chosen": "8x TP1 (does not exist)", "reason": "test"}}
+        json.dump(pareto, open(os.path.join(rd, "pareto.json"), "w"))
+        try:
+            bg.validate_and_project(rd)
+            check(False, "a named winner matching no finalist should raise")
+        except bg.Invalid:
+            check(True, "winner that matches no finalist raises Invalid")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_report_back_link_resolves_on_pages():
+    print("test_report_back_link_resolves_on_pages")
+    # The report is served at data/reports/<run_id>/index.html; the gallery shell is the SPA root.
+    # The back-link must climb three levels (../../../) or it 404s on Pages.
+    tmp = tempfile.mkdtemp()
+    try:
+        rd = os.path.join(tmp, "qwen3-14b-h100-chatbot-0004")
+        _mk_run_dir(rd, "qwen3-14b-h100-chatbot-0004", synthetic=False)
+        out = os.path.join(tmp, "site")
+        bg.build(os.path.dirname(rd), out, include_mock=True)
+        html = open(os.path.join(out, "qwen3-14b-h100-chatbot-0004", "index.html")).read()
+        check("../../../index.html#/reports" in html,
+              "back-link climbs data/reports/<id> to the SPA root")
+        check("\"../index.html#/reports\"" not in html,
+              "the old one-level back-link is gone")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_validation():
     print("test_validation")
     tmp = tempfile.mkdtemp()
@@ -170,6 +212,8 @@ def test_catalog():
 
 if __name__ == "__main__":
     test_winner_with_a_knob_variant()
+    test_winner_mismatch_raises_not_falls_back()
+    test_report_back_link_resolves_on_pages()
     test_validation()
     test_build_determinism_and_nomock()
     test_catalog()

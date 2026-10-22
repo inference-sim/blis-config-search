@@ -509,15 +509,14 @@ describe('ScenarioDetail', () => {
     ]
   }
 
-  it('#8 renders a series legend under every chart, not just the scatter', () => {
+  it('#8 renders ONE shared series legend for all the charts (not one per chart)', () => {
     render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, twoSeries())]} />)
-    // three charts (scatter + 2 line charts) => three legends, each listing both series
+    // a single legend under the chart grid, not duplicated in each figure
     const legends = document.querySelectorAll('.legend')
-    expect(legends.length).toBe(3)
-    for (const lg of legends) {
-      expect([...lg.querySelectorAll('.lg')].map((b) => b.textContent)).toEqual(
-        expect.arrayContaining([expect.stringContaining('A'), expect.stringContaining('B')]))
-    }
+    expect(legends.length).toBe(1)
+    expect(document.querySelector('.charts-legend .legend')).toBeTruthy()
+    expect([...legends[0].querySelectorAll('.lg')].map((b) => b.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining('A'), expect.stringContaining('B')]))
   })
 
   it('#3 shows the interactivity floor as a spec-chip in the header', () => {

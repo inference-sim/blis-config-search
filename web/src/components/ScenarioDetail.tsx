@@ -793,14 +793,6 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
             ones break it. A faint line connects a configuration's runs in load order, so you can trace where adding
             sessions takes it.</p>
           {explainScatter(shown) && <p className="vc-x">{explainScatter(shown)}</p>}
-          <SeriesLegend series={series} colors={colors} hl={hl} setHover={setHover} sticky={sticky}
-            winner={winner} winnerName={winnerName} showState />
-          {active !== null && (
-            <div className="hl-bar" role="status">
-              <span>Highlighting <b className="mono">{active}</b>{sticky === null && ' (hover)'} — emphasis only, filters unchanged.</span>
-              {sticky !== null && <button type="button" className="hl-clear" onClick={hl.onClear}>clear highlight</button>}
-            </div>
-          )}
           {hidden > 0 && <p className="pts-note">{hidden} run{hidden === 1 ? ' has' : 's have'} no throughput values and {hidden === 1 ? 'is' : 'are'} not plotted.</p>}
           {pts.length === 1 && <p className="pts-note">Only one point matches; a trade-off frontier needs two or more.</p>}
         </figure>
@@ -813,7 +805,6 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
             adding sessions has not yet slowed anyone down. The violet line marks that configuration's knee, the first load
             that breaks the floor.</p>
           {explainPerUser(shown, series) && <p className="vc-x">{explainPerUser(shown, series)}</p>}
-          <SeriesLegend series={series} colors={colors} hl={hl} setHover={setHover} sticky={sticky} />
         </figure>
         <figure className="vc">
           <div className="vc-h"><h4 className="vc-t">Inter-token latency vs load</h4><span className="vc-r">latency</span></div>
@@ -824,8 +815,21 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
             the cliff above. Lower is better, and the floor is a ceiling on this number, so a line crossing its knee is what
             makes the per-user rate fall.</p>
           {explainItl(shown) && <p className="vc-x">{explainItl(shown)}</p>}
-          <SeriesLegend series={series} colors={colors} hl={hl} setHover={setHover} sticky={sticky} />
         </figure>
+      </div>
+
+      {/* One legend for all three charts — the colour key is shared, so it lives once under the
+          grid rather than being duplicated in each figure. The highlight-status bar sits with it,
+          since highlighting is global across the charts too. */}
+      <div className="charts-legend">
+        <SeriesLegend series={series} colors={colors} hl={hl} setHover={setHover} sticky={sticky}
+          winner={winner} winnerName={winnerName} showState />
+        {active !== null && (
+          <div className="hl-bar" role="status">
+            <span>Highlighting <b className="mono">{active}</b>{sticky === null && ' (hover)'} — emphasis only, filters unchanged.</span>
+            {sticky !== null && <button type="button" className="hl-clear" onClick={hl.onClear}>clear highlight</button>}
+          </div>
+        )}
       </div>
 
       {/* The deployment box sits BELOW the chart grid, not inside the scatter's figure: nested in

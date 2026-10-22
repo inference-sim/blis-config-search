@@ -75,12 +75,89 @@ Load axis is **concurrency** (closed-loop virtual users, `--concurrency`), not o
 
 ## The search (what Claude does) -- adaptive diagnostic, v1
 
-1. **Enumerate feasible topologies within budget.** Valid `tp` (divides attention/KV heads and, for
-   MoE, expert count), instance counts with `tp x instances <= gpu_budget`, optional PD and EP shapes.
-   Each per-instance topology (tp/pp/dp/ep + engine knobs) becomes a **generated scenario**; instance
-   count stays a CLI knob. Cheap arithmetic feasibility only; **BLIS stays the arbiter** -- a shape
-   BLIS refuses is dropped with its error recorded. (A vendored capacity pre-filter is a later
-   upgrade; see disc #3.)
+1. **Enumerate feasible topologies within budget.** Use **`scripts/topologies.py`**
+   (`candidate_topologies(gpu_budget, model_entry)`) -- the same enumeration the automated
+   `run_search.py` path uses, so the two cannot drift. Valid `tp` (divides attention/KV heads and,
+   for MoE, expert count), instance counts with `tp x dp x instances <= gpu_budget`, optional PD and
+   EP shapes. Each per-instance topology (tp/pp/dp/ep + engine knobs) becomes a **generated
+   scenario**; instance count stays a CLI knob. Cheap arithmetic feasibility only; **BLIS stays the
+   arbiter** -- a shape BLIS refuses is dropped with its error recorded in `pareto.json`'s
+   `dropped[]` (never silently absent -- a lone survivor must not look like the whole space). (A
+   vendored capacity pre-filter is a later upgrade; see disc #3.)
+
+   **MoE knob tier (required for any `arch: MoE` model).** Dense models take `tp` alone; an MoE
+   model must also cross **`dp`** and **`enable_expert_parallel`**, because:
+
+   - The **expert-parallel width is derived, not declared**: `tp x pcp x dp` (blis-schemas
+     `Parallelism.ExpertParallelWidth`). With `pcp` unset that is `tp x dp`, so EP over a width of
+     **1 shards nothing** -- skip those candidates instead of burning a run on a no-op.
+   - A width of 1 is also **why big MoE models refuse to load**: deepseek-v4-pro at `tp=4` fails with
+     *"191.2 GiB of per-rank fixed occupancy on a 141.0 GiB device (tp=4, expert-parallel width 1)"*,
+     while `tp=4,dp=2` runs. If narrow-`tp` shapes are dying on memory, the missing axis is the
+     **footprint** (`tp x dp`), not `tp`.
+   - **Always run the non-EP control** beside each EP arm. On deepseek-v4-pro / 256x H200 every EP
+     arm beat its control (`32x TP4xDP2`: 7994.8 vs 6349.2 tok/s at `C_use`), but the comparison is
+     the finding -- do not assume the direction, measure it.
+   - **Dense models reject both**: `dp=2` on qwen3-14b errors *"states dp 2 for a dense model; DP
+     placement is modelled for MoE models"*, so read `arch` from the catalog (never guess from the
+     name) and keep the dense grid narrow.
+   - `all2all_backend` (`allgather_reducescatter` / `deepep_high_throughput` / `deepep_low_latency`)
+     is a real engine field the kernel prices, but it moved throughput ~2% here against EP's ~24% --
+     it is **not** in the default grid. Sweep it only when asked; the report carries it as a facet.
+
+   **Engine/routing knob tier (coordinate refinement, `topologies.knob_variants`).** After the
+   topology sweep, refine the **top `REFINE_TOP` shapes one knob at a time** -- a full cross
+   product (4 routing x 3 batch x 3 seqs x 12 shapes x 12 loads = 5184 runs) buys nothing a
+   coordinate sweep does not. Measured on kimi-k2.5 / 512x H200 / multidoc:
+
+   | knob | finding |
+   |---|---|
+   | `routing_policy` | **the biggest lever.** `least-loaded` lifted `64x TP4xDP2 + EP` from 36.4 to **67.0 tok/s/GPU (+84%)** by raising `C*` from 512 to 1024. `always-busiest` is pathological (-58% tput, ITL 103 ms, TTFT 4.6 s) -- never recommend it, and do not spend runs on it. Valid: `round-robin` (default), `least-loaded`, `weighted`, `always-busiest`. |
+   | `max_num_seqs` | binds **downward**: 256 -> 64 cost 29%, -> 16 cost 64%. Raising it above the default changed nothing. |
+   | `max_num_batched_tokens` | 8192 -> 2048 raised ITL p99 47%; 32768 changed nothing. |
+   | `gpu_memory_utilization` | 0.9 -> 0.7/0.5 starves KV (1270 preemptions at 0.5, -27% tput). |
+
+   The lesson: these knobs **constrain** rather than improve. Probe the constrained side (where a
+   real deployment is often forced to sit), not headroom that does not exist.
+
+   **Ranking is tie-tolerant (`rank_finalists`, `TIE_TOLERANCE` 0.5%).** Two configs within half a
+   percent on tok/s/GPU are a tie, and the one with **fewer knobs set** wins. Without this,
+   qwen3-14b reported `32x TP8 · seq64` beating plain `32x TP8` by 0.3 tok/s out of 39,801
+   (0.0008% -- noise), implying `max_num_seqs=64` was the reason. A recommendation should only
+   carry a knob that earned its place.
+
+   **The label is topology; knob deltas are a separate field.** `topologies.label()` returns
+   instances x TP x DP x EP only -- what dominates an LLM serving decision and what a reader scans
+   down a column. Knobs go in **`variant`** (`topologies.knob_phrase` /
+   `report._disambiguate_series`), spelled out in words: *"batch tokens 2,048"*, never an invented
+   `b2k`. Squeezing them into the label produced
+   `64x TP4xDP2 + EP · ll · b8k · seq256 · mem0.9 · a2a=ep`, which is why they are separated.
+   `variant` is scoped to the topology group and measured against that group's baseline, so an
+   unrefined shape and the all-defaults row both get `""`.
+
+   The report then surfaces knobs where they belong: **tiered facets** (`tier:'primary'` --
+   sessions / configuration / knob delta / GPUs / TP / DP / EP width / instances -- always
+   visible; `tier:'detail'` -- routing, scheduler, admission, batch tokens, max seqs, block size,
+   gpu-mem-util -- behind a "show N more filters" disclosure, with any filter set there staying
+   applied while collapsed), the hover card's knob block, and the click panel's **Routing &
+   policy** section.
+
+   **Everywhere a config is NAMED, it is named `label (variant)`.** A bare label does not identify
+   a config once knobs are swept -- five finalists read `64x TP2xDP4 + EP` with nothing to tell
+   them apart. So: `pareto.json`'s `winner.chosen` (plus explicit `label`/`variant` fields),
+   `winner.reason` (which states the knobs or says "at default engine and routing settings"), the
+   gallery's `winner.name`/`finalists[].name`, and the web page's recommendation and
+   alternative cards. Two consumers matched on the bare label and broke when `chosen` gained its
+   variant -- `build_gallery` silently showed the LAST finalist as winner, and the detail page
+   dropped every same-topology variant from its runners-up -- so both now match on the
+   **(label, variant) pair**.
+
+   **The operating table ("What to run") must state the whole deployment.** It is the table a
+   reader copies flags from, so an omission is a wrong deployment: it printed only
+   `--tensor-parallel-size` and `--num-instances`, leaving out `--enable-expert-parallel`,
+   `--data-parallel-size` and routing. `report._FLAG_LABELS` now covers every knob the search can
+   vary, and `_FLAG_SKIP` drops the ones sitting at their default so the two or three that matter
+   stay visible.
 2. **Capacity probe to C\*.** For each candidate, probe `--concurrency` upward then **bisect** to
    `C*` = the largest concurrency whose p99s still meet the interactivity floor (and any SLOs).
    ~5-8 runs per candidate. With no floor/SLO, `C*` = the throughput knee.
@@ -104,11 +181,28 @@ Load axis is **concurrency** (closed-loop virtual users, `--concurrency`), not o
 
    The runner **rejects any other candidate key loudly** (recorded as an error row, never silently
    dropped). Not supported yet in v1: PD prefill/decode split (`prefill_tp`/`decode_tp`/
-   `prefill_instances`/`decode_instances`), pipeline parallel (`pp`>1), speculative decoding, chunked-
-   prefill `long_prefill_token_threshold`, and a multi-node *single* instance (`tp*dp` > 8 on H100 --
-   scale out with `num_instances` instead). **Precision is never defaulted**: set `quantization`/
-   `cache_dtype` explicitly (GLM-5.3-Flash is fp8); unset lets the checkpoint govern (e.g. qwen3-14b
-   stays bf16).
+   `prefill_instances`/`decode_instances`), pipeline parallel (`pp`>1), speculative decoding, and
+   chunked-prefill `long_prefill_token_threshold`. **Precision is never defaulted**: set
+   `quantization`/`cache_dtype` explicitly (GLM-5.3-Flash is fp8); unset lets the checkpoint govern
+   (e.g. qwen3-14b stays bf16).
+
+   **Multi-node instances ARE supported**, and necessary: the biggest MoE models do not fit in one
+   node at any `tp`. `tp*dp` may exceed 8 as long as it fills **whole nodes** (a straddling
+   footprint like 12 leaves half a node idle and misprices the cross-node term), and the generated
+   scenario names a `fabric` automatically once the pool spans nodes. The automated search starts
+   at one node and widens a node-doubling at a time **only when nothing single-node is servable**,
+   so a model that fits never pays the fabric term. Measured footprint floors on H200:
+   glm-5.2 and inkling need 2 nodes, kimi-k3 needs 4 (332.3 GiB/rank at tp=8 on a 141 GiB device),
+   nemotron-3-ultra-550b needs 8.
+
+   **`block_size` is model-dependent -- never hardcode it.** The kernel adapter requires a positive
+   value ("deployment states no block_size"), but a DSA sparse-MLA model (glm-5, glm-5.2, glm-5.3,
+   glm-5.3-flash, deepseek-v4-pro) runs a 64-token indexer and refuses a stated 16. `run_blis.py`
+   fills it per model (`default_block_size`, reading `sparse_mla` out of the catalog graph): 64 for
+   DSA, 16 otherwise. A stated value always wins, so it stays a searchable knob.
+
+   A model whose catalog entry has **no `graph.yaml`** cannot run at all (granite-5.0-230b-base,
+   sarvam-105b) -- that is an upstream blis-catalog gap, fixed by its `derive_graph.py`, not here.
 
 4. **Rank + finalists.** Compute the dual Pareto over **usable capacity** `C_use = h x C*`
    (budget-max output tok/s, and output tok/s per GPU `= tps/G`). Dense-sweep the top finalists'
@@ -193,6 +287,20 @@ narrative, pre-rendered inline-SVG figures, a client-side **crossfilter explorer
 a glossary. It **never runs BLIS** at generation time -- it is a pure `run-dir -> index.html`
 transform, so a report is regenerable from the committed data alone.
 
+The explorer is **two-part cross-filtering**, both halves driving one shared selection:
+
+- **"Filter by outcome: brush a range"** -- a row of brushable histograms over the continuous
+  metrics (`pu` speed per user, `tpg` output per GPU, `ttft`, `itl`). Bins and scales are fixed to
+  the full record set so a bar never moves as filters change; only its highlight does.
+- **"Filter by setting: click a level"** -- the categorical knob facets (`conc`, `tp`, `dp`, `epw`,
+  `a2a`, `mnbt`, `mns`, `route`, `pd`, `ok`, ...) with live counts that respect every *other*
+  filter. A knob the search never varied **auto-hides** (the `varies()` guard), so a dense run set
+  shows no EP facets rather than a dead single-value column.
+
+A brushed range excludes runs whose metric was never measured (a null never satisfies a range),
+which is correct -- you cannot select on an outcome that was not measured -- and the empty-state
+banner says so.
+
 ```
 python3 -I scripts/report.py runs/<run-id>              # -> runs/<run-id>/index.html (next to the data)
 python3 -I scripts/report.py runs/<run-id> --out p.html # custom output path
@@ -202,7 +310,9 @@ python3 -I scripts/report.py runs/                      # a parent of several ru
 Inputs (all optional-tolerant -- three of four are brain-authored):
 
 - **`scenario.json` / `pareto.json` / `runs.jsonl`** -- the search outputs. `report.py` maps each
-  run into a flat **`RECORDS`** row (short keys: `conc,tp,ni,series,pu,cl,itl,ttft,p95,ok,viol…`) and
+  run into a flat **`RECORDS`** row (short keys: `conc,tp,dp,epw,ni,gpus,series,pu,cl,tpg,itl,ttft,
+  p95,a2a,ok,viol…`; `tpg` = output per GPU from the *unrounded* throughput, `epw` = the derived
+  expert-parallel width or null when EP is off) and
   classifies each run servable/not against the interactivity floor + SLOs (a declared SLO whose
   metric is absent from both the cluster aggregate and every instance counts as a *violation*, not a
   silent pass). `pu` (per-user tok/s) prefers the engine's authoritative `tok_per_s_per_user` field;

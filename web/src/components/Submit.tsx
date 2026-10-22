@@ -32,9 +32,41 @@ export function prLink(d: Draft, yaml: string): string {
   return `${REPO}/new/main?${q.toString()}`
 }
 
-const num = (v: string, fallback: number) => {
-  const n = Number(v)
-  return Number.isFinite(n) && n > 0 ? n : fallback
+/**
+ * A number field you can actually edit: the text being typed lives in local state, so clearing
+ * the box (or passing through "" / "1." on the way to another value) leaves it cleared instead of
+ * snapping back to a fallback. `onCommit` fires only for values that parse to a positive number,
+ * so the draft — and the YAML below — hold the last good value while the box is mid-edit. On blur
+ * an empty or invalid box is restored to that last good value.
+ */
+function NumField({ value, integer, onCommit, ariaLabel }: { value: number; integer?: boolean; onCommit: (n: number) => void; ariaLabel: string }) {
+  const [text, setText] = useState(String(value))
+  // Track the committed value so an outside change (not our own typing) refreshes the box.
+  const [seen, setSeen] = useState(value)
+  if (seen !== value) {
+    setSeen(value)
+    setText(String(value))
+  }
+  return (
+    <input
+      className="numin"
+      type="number"
+      min={1}
+      step={1}
+      aria-label={ariaLabel}
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value)
+        const n = Number(e.target.value)
+        if (e.target.value.trim() !== '' && Number.isFinite(n) && n > 0) {
+          const v = integer ? Math.round(n) : n
+          setSeen(v)
+          onCommit(v)
+        }
+      }}
+      onBlur={() => setText(String(value))}
+    />
+  )
 }
 
 export function Submit({ catalog, mode }: { catalog: Catalog; mode: Mode }) {
@@ -101,10 +133,10 @@ export function Submit({ catalog, mode }: { catalog: Catalog; mode: Mode }) {
           <Dropdown ariaLabel="Workload" value={d.workload} options={opts(catalog.workloads)} onChange={(v) => setD({ ...d, workload: v })} />
         </label>
         <label className="field"><span>gpu_budget</span>
-          <input className="numin" type="number" min={1} step={1} value={d.gpu_budget} onChange={(e) => setD({ ...d, gpu_budget: Math.round(num(e.target.value, 1)) })} />
+          <NumField ariaLabel="GPU budget" value={d.gpu_budget} integer onCommit={(n) => setD({ ...d, gpu_budget: n })} />
         </label>
         <label className="field"><span>floor (tok/s/user)</span>
-          <input className="numin" type="number" min={1} step={1} value={d.floor} onChange={(e) => setD({ ...d, floor: num(e.target.value, 1) })} />
+          <NumField ariaLabel="Interactivity floor" value={d.floor} onCommit={(n) => setD({ ...d, floor: n })} />
         </label>
       </div>
 

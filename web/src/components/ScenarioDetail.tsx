@@ -1,7 +1,7 @@
 import { useMemo, useState, type KeyboardEvent } from 'react'
 import type { RunRecord, Scenario } from '../types'
 import { reportHref } from '../load'
-import { EMPTY_SEL, dash, emphasis, finite, fnum, resolveHighlight, selectRecords, toggleHighlight, type Selection } from '../lib'
+import { EMPTY_SEL, dash, emphasis, finite, fnum, operatingPoints, resolveHighlight, runFlags, selectRecords, toggleHighlight, type Selection } from '../lib'
 import { Crossfilter } from './Crossfilter'
 import { MockBadge } from './Reports'
 
@@ -38,6 +38,8 @@ interface Pt {
   ok: boolean
   color: string
   title: string
+  /** RunRecord.id — lets a click resolve back to the run whose deployment to show. */
+  id?: string
 }
 const W = 560
 const H = 300
@@ -78,7 +80,170 @@ function Empty({ msg }: { msg: string }) {
   return <div className="chartempty">{msg}</div>
 }
 
-export function Scatter({ pts, xl, yl, label, hl = NO_HL }: { pts: Pt[]; xl: string; yl: string; label: string; hl?: HL }) {
+/** One labelled row in the detail panel. Rows whose value is absent are dropped by `defList`, so
+ *  a run that predates a field shows a shorter panel rather than "null" or a blank cell. */
+type Row = [string, string | number | null | undefined]
+
+function defList(rows: Row[]) {
+  const shown = rows.filter(([, v]) => v !== null && v !== undefined && v !== '')
+  if (shown.length === 0) return null
+  return (
+    <dl className="dd-list2">
+      {shown.map(([k, v]) => (
+        <div key={k}>
+          <dt>{k}</dt>
+          <dd>{String(v)}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+const ms = (v: number | null | undefined) =>
+  !finite(v) ? null : (v as number) >= 1000 ? `${fnum(v, 0)} ms` : `${fnum(v, 1)} ms`
+
+/**
+ * The clicked run's full deployment: what BLIS actually consumed, read from the run's own record
+ * rather than reconstructed, so it cannot drift from the simulation. Sits inline under the chart
+ * (the standalone report's panel does the same, so the two surfaces behave alike).
+ */
+export function PointDetail({ r, onClose }: { r: RunRecord; onClose: () => void }) {
+  const name = r.variant ? `${r.series} (${r.variant})` : r.series
+  return (
+    <div className="ptd" data-testid="pt-detail" role="region" aria-label={`Deployment for ${name}`}>
+      <div className="ptd-h">
+        <div>
+          <div className="ptd-t">{r.series}</div>
+          {r.variant ? <div className="ptd-v">{r.variant}</div> : <div className="ptd-v dim">all knobs at defaults</div>}
+        </div>
+        <button type="button" className="ptd-x" onClick={onClose}>close</button>
+      </div>
+      {!r.ok && r.viol.length > 0 && (
+        <p className="ptd-bad">Not servable: {r.viol.join('; ')}</p>
+      )}
+      <div className="ptd-g">
+        <section>
+          <h5>Parallelism</h5>
+          {defList([
+            ['Tensor parallel', r.tp], ['Data parallel', r.dp], ['Pipeline parallel', r.pp],
+            ['Expert parallel', r.epw ? `width ${r.epw}` : 'off'],
+            ['Instances', r.ni], ['GPUs total', finite(r.gpus) ? fnum(r.gpus, 0) : null],
+            ['Nodes', r.nodes], ['Fabric', r.fabric],
+          ])}
+        </section>
+        <section>
+          <h5>Engine</h5>
+          {defList([
+            ['block_size', r.bs], ['max_num_seqs', r.mns],
+            ['max_num_batched_tokens', finite(r.mnbt) ? fnum(r.mnbt, 0) : null],
+            ['max_model_len', finite(r.mml) ? fnum(r.mml, 0) : null],
+            ['gpu_memory_utilization', r.gmu], ['cudagraph_mode', r.cg],
+            ['quantization', r.quant ?? 'checkpoint'], ['cache_dtype', r.cdt ?? 'checkpoint'],
+            ['all2all_backend', r.a2a === 'n/a' ? null : r.a2a],
+          ])}
+        </section>
+        <section>
+          <h5>Routing &amp; policy</h5>
+          {defList([
+            ['routing_policy', r.route || 'round-robin'],
+            ['routing_scorers', r.scorers],
+            ['scheduler', r.schedp ?? 'default'],
+            ['admission_policy', r.admit ?? 'always-admit'],
+            ['prefill/decode', r.pd],
+            ['draft tokens (MTP)', r.mtp || 'off'],
+          ])}
+        </section>
+        <section>
+          <h5>Measured at {finite(r.conc) ? `${fnum(r.conc, 0)} sessions` : 'this load'}</h5>
+          {defList([
+            ['Speed per user', finite(r.pu) ? `${fnum(r.pu, 1)} tok/s` : null],
+            ['Fleet output', finite(r.cl) ? `${fnum(r.cl, 0)} tok/s` : null],
+            ['Per GPU', finite(r.tpg) ? `${fnum(r.tpg, 1)} tok/s` : null],
+            ['ITL / TPOT p99', ms(r.itl)], ['TTFT p99', ms(r.ttft)],
+            ['E2E p99', ms(r.e2e)], ['Queue delay p99', ms(r.sched)],
+            ['Servable', r.ok ? 'yes' : 'no'],
+          ])}
+        </section>
+      </div>
+      <div className="ptd-cmd">
+        <h5>Reproduce this run</h5>
+        {r.cmd
+          ? <pre>{r.cmd}</pre>
+          : <p className="ptd-none">
+              The command was not recorded for this run{r.scen ? ` (scenario ${r.scen})` : ''}.
+            </p>}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * "What to run": one row per load, pairing the configuration you would deploy with the
+ * performance it gave there — the standalone report's section 9, which reads as "pick an
+ * operating point and read the flags off it". The run table below stays the full per-run log,
+ * including the runs that broke the floor.
+ */
+export function OperatingTable({ recs, onPick, picked = null }: {
+  recs: RunRecord[]
+  onPick?: (id: string) => void
+  picked?: string | null
+}) {
+  const rows = operatingPoints(recs)
+  if (rows.length === 0) {
+    return (
+      <p className="op-none">
+        No run held the interactivity floor, so there is no operating point to recommend. The run
+        log below lists every run and why each one missed.
+      </p>
+    )
+  }
+  return (
+    <div className="tscroll hscroll">
+      <table className="readout op-table" data-testid="operating-table">
+        <thead>
+          <tr className="col">
+            <th>sessions</th><th>configuration</th>
+            <th className="num">tok/s per user</th><th className="num">tok/s fleet</th>
+            <th className="num">tok/s GPU</th><th className="num">ITL ms</th><th className="num">TTFT ms</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id} className={`op-row${r.id === picked ? ' hl' : ''}`}
+              onClick={onPick ? () => onPick(r.id) : undefined}
+              title={onPick ? 'Show the full deployment for this run' : undefined}>
+              <td className="num hero"><span className="num">{fnum(r.conc, 0)}</span></td>
+              <td>
+                <div className="op-name mono">{r.series}</div>
+                {r.variant ? <div className="op-var">{r.variant}</div> : null}
+                <div className="op-flags">
+                  {runFlags(r).map((f) => (
+                    <span className="op-fl" key={f.flag}>
+                      <i>{f.flag}</i>{f.value ? ` ${f.value}` : ''}
+                    </span>
+                  ))}
+                </div>
+              </td>
+              <td className="num"><span className="num">{fnum(r.pu)}</span></td>
+              <td className="num"><span className="num">{fnum(r.cl, 0)}</span></td>
+              <td className="num"><span className="num">{fnum(r.tpg)}</span></td>
+              <td className="num"><span className="num">{fnum(r.itl, 2)}</span></td>
+              <td className="num"><span className="num">{fnum(r.ttft, 0)}</span></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+export function Scatter({ pts, xl, yl, label, hl = NO_HL, onPick, picked = null }: {
+  pts: Pt[]; xl: string; yl: string; label: string; hl?: HL
+  /** Called with a point's record id when it is clicked — opens its deployment panel. */
+  onPick?: (id: string) => void
+  /** The currently inspected record id, ringed so you can see which point the panel describes. */
+  picked?: string | null
+}) {
   if (pts.length === 0) return <Empty msg="No points to plot for the current filters." />
   const xmax = Math.max(...pts.map((p) => p.x), 1) * 1.05
   const ymax = Math.max(...pts.map((p) => p.y), 1) * 1.05
@@ -96,9 +261,17 @@ export function Scatter({ pts, xl, yl, label, hl = NO_HL }: { pts: Pt[]; xl: str
         const em = emphasis(hl.active, p.series)
         const col = em === 'off' ? GREY : p.color
         return (
-          <g key={i} {...seriesProps(hl, p.series)} data-series={p.series} data-em={em}>
+          // A click on the POINT inspects that run; a click on empty chart space still clears the
+          // highlight (the <svg> handler), and the legend keeps series highlighting. So the new
+          // behaviour does not take over a gesture that already meant something else.
+          // keyed by record id for the same reason as the line points above
+          <g key={p.id ?? `i${i}`} {...seriesProps(hl, p.series)} data-series={p.series} data-em={em}>
             <circle cx={px(p.x)} cy={py(p.y)} r={em === 'on' ? 5.5 : 4} fill={p.ok ? col : 'var(--panel)'} stroke={col}
-              strokeWidth={em === 'on' ? 2 : 1.5} opacity={em === 'off' ? 0.25 : 1} className="pt">
+              strokeWidth={em === 'on' ? 2 : 1.5} opacity={em === 'off' ? 0.25 : 1}
+              className={`pt${p.id && p.id === picked ? ' picked' : ''}`}
+              onClick={p.id && onPick
+                ? (e) => { e.stopPropagation(); onPick(p.id as string) }
+                : undefined}>
               <title>{p.title}</title>
             </circle>
           </g>
@@ -110,25 +283,45 @@ export function Scatter({ pts, xl, yl, label, hl = NO_HL }: { pts: Pt[]; xl: str
 
 // The "knee": the first concurrency at which a series stops being servable — the interactivity
 // cliff the deck marks with a violet vertical line. Computed per series from the run records.
-function kneeConc(recs: RunRecord[], series: string): number | null {
-  const rows = recs.filter((r) => r.series === series && finite(r.conc))
+/** First load at which this CONFIG breaks the floor. Keyed by series + variant, because knob
+ *  variants of one topology break at different loads (on kimi-k2.5, least-loaded routing holds to
+ *  1024 while the default breaks at 512) — a per-topology knee would draw one marker for all. */
+function kneeConc(recs: RunRecord[], series: string, variant = ''): number | null {
+  const rows = recs.filter((r) => r.series === series && (r.variant ?? '') === variant && finite(r.conc))
     .sort((a, b) => (a.conc as number) - (b.conc as number))
   const firstBad = rows.find((r) => !r.ok)
   return firstBad ? (firstBad.conc as number) : null
 }
 
-export function Lines({ recs, shownRecs, get, xl, yl, label, colors, showKnee = false, hl = NO_HL }: {
+export function Lines({ recs, shownRecs, get, xl, yl, label, colors, showKnee = false, hl = NO_HL,
+  onPick, picked = null }: {
   recs: RunRecord[]; shownRecs: RunRecord[]; get: (r: RunRecord) => number | null
   xl: string; yl: string; label: string; colors: Map<string, string>; showKnee?: boolean; hl?: HL
+  /** Called with a point's record id when clicked — same contract as Scatter's. */
+  onPick?: (id: string) => void
+  /** The inspected record id, ringed here too so you can see the run across all three charts. */
+  picked?: string | null
 }) {
-  const bySeries = new Map<string, { x: number; y: number; ok: boolean }[]>()
+  // Group by CONFIG identity (series + variant), not by series alone. A line is meant to walk one
+  // configuration up the load: grouping by topology put every knob variant on one polyline, so a
+  // refined shape drew six different configs as a single zigzag — on kimi-k2.5 one "line" spanned
+  // 27.9 to 68.0 tok/s at the SAME concurrency. The id rides along so a point can open its
+  // deployment, as in the scatter.
+  const byConfig = new Map<string, { name: string; variant: string; pts: { x: number; y: number; ok: boolean; id?: string }[] }>()
   for (const r of shownRecs) {
     const y = get(r)
     if (!finite(r.conc) || !finite(y)) continue
-    const a = bySeries.get(r.series) ?? []
-    a.push({ x: r.conc, y: y as number, ok: r.ok })
-    bySeries.set(r.series, a)
+    const variant = r.variant ?? ''
+    const key = `${r.series}\u0000${variant}`
+    const g = byConfig.get(key) ?? { name: r.series, variant, pts: [] }
+    g.pts.push({ x: r.conc, y: y as number, ok: r.ok, id: r.id })
+    byConfig.set(key, g)
   }
+  // Colour and highlight still key off the SERIES — the legend lists topologies, and a variant
+  // should read as a sibling of its shape rather than an unrelated colour.
+  const bySeries = new Map([...byConfig.entries()].map(([k, g]) => [k, g.pts]))
+  const nameOf = (key: string) => byConfig.get(key)!.name
+  const variantOf = (key: string) => byConfig.get(key)!.variant
   const all = [...bySeries.values()].flat()
   if (all.length === 0) return <Empty msg="No concurrency data to plot for the current filters." />
   const xmax = Math.max(...all.map((p) => p.x), 1) * 1.05
@@ -141,32 +334,44 @@ export function Lines({ recs, shownRecs, get, xl, yl, label, colors, showKnee = 
       data-highlight={hl.active ?? ''} onClick={hl.onClear}>
       <Axes xmax={xmax} ymax={ymax} xl={xl} yl={yl} />
       {/* violet knee markers: where each series first breaks the floor (deck convention) */}
-      {showKnee && [...bySeries.keys()].map((name) => {
-        const k = kneeConc(recs, name)
+      {showKnee && [...bySeries.keys()].map((key) => {
+        const name = nameOf(key)
+        const k = kneeConc(recs, name, variantOf(key))
         if (k == null || k > xmax) return null
         const x = px(k)
         return (
-          <g key={`knee-${name}`} className="knee" opacity={emphasis(hl.active, name) === 'off' ? 0.25 : 1}>
+          <g key={`knee-${key}`} className="knee" opacity={emphasis(hl.active, name) === 'off' ? 0.25 : 1}>
             <line x1={x} x2={x} y1={M.t} y2={H - M.b} />
             <text x={x} y={M.t - 2} textAnchor="middle" className="kneelab">knee</text>
           </g>
         )
       })}
-      {[...bySeries.entries()].sort(([a], [b]) => Number(emphasis(hl.active, a) === 'on') - Number(emphasis(hl.active, b) === 'on')).map(([name, pts]) => {
+      {[...bySeries.entries()].sort(([a], [b]) => Number(emphasis(hl.active, nameOf(a)) === 'on') - Number(emphasis(hl.active, nameOf(b)) === 'on')).map(([key, pts]) => {
+        const name = nameOf(key)
+        const variant = variantOf(key)
         const sorted = [...pts].sort((a, b) => a.x - b.x)
         const em = emphasis(hl.active, name)
         const c = em === 'off' ? GREY : (colors.get(name) ?? PALETTE[0])
         const op = em === 'off' ? 0.25 : 1
         return (
-          <g key={name} {...seriesProps(hl, name)} data-series={name} data-em={em}>
+          <g key={key} {...seriesProps(hl, name)} data-series={name} data-variant={variant} data-em={em}>
             {sorted.length > 1 && (
               <polyline fill="none" stroke={c} strokeWidth={em === 'on' ? 3 : 2} strokeLinejoin="round" strokeLinecap="round"
                 opacity={op} className="ln" points={sorted.map((p) => `${px(p.x)},${py(p.y)}`).join(' ')} />
             )}
+            {/* Key by the record id, not the index: the groups are re-sorted by highlight state
+                every render, so index keys let React reuse a circle across DIFFERENT configs and
+                its click handler then opened the wrong run's deployment. */}
             {sorted.map((p, i) => (
-              <circle key={i} cx={px(p.x)} cy={py(p.y)} r={em === 'on' ? 4.2 : 2.8} fill={p.ok ? c : 'var(--panel)'} stroke={c}
-                strokeWidth={em === 'on' ? 1.8 : 1.3} opacity={op} className="pt">
-                <title>{`${name} · conc ${fnum(p.x, 0)} · ${fnum(p.y)}${p.ok ? '' : ' · not servable'}`}</title>
+              <circle key={p.id ?? `i${i}`} cx={px(p.x)} cy={py(p.y)} r={em === 'on' ? 4.2 : 2.8} fill={p.ok ? c : 'var(--panel)'} stroke={c}
+                strokeWidth={em === 'on' ? 1.8 : 1.3} opacity={op}
+                className={`pt${p.id && p.id === picked ? ' picked' : ''}`}
+                onClick={p.id && onPick
+                  ? (e) => { e.stopPropagation(); onPick(p.id as string) }
+                  : undefined}>
+                <title>{`${name}${variant ? ` (${variant})` : ''} · conc ${fnum(p.x, 0)} · ${fnum(p.y)}`
+                  + `${p.ok ? '' : ' · not servable'}`
+                  + (p.id && onPick ? ' — click for the deployment' : '')}</title>
               </circle>
             ))}
           </g>
@@ -257,10 +462,19 @@ function explainItl(recs: RunRecord[]): string | null {
   return s
 }
 
-export function Explorer({ recs, runId, winner = null }: { recs: RunRecord[]; runId: string; winner?: string | null }) {
+export function Explorer({ recs, runId, winner = null, winnerName = null }: {
+  recs: RunRecord[]; runId: string
+  /** The winning TOPOLOGY (matches RunRecord.series, which is topology-only). */
+  winner?: string | null
+  /** The winning config in full, incl. its knob delta — the legend groups by topology, so the
+   *  badge marks a whole series and must say which variant of it was recommended. */
+  winnerName?: string | null
+}) {
   const [sel, setSel] = useState<Selection>(EMPTY_SEL)
   const [sticky, setSticky] = useState<string | null>(null)
   const [hover, setHover] = useState<string | null>(null)
+  // The run whose deployment the inline panel is showing, by RunRecord.id.
+  const [picked, setPicked] = useState<string | null>(null)
   const series = useMemo(() => [...new Set(recs.map((r) => r.series))].sort(), [recs])
   const colors = useMemo(() => new Map(series.map((s, i) => [s, PALETTE[i % PALETTE.length]])), [series])
   const shown = useMemo(() => selectRecords(recs, sel), [recs, sel])
@@ -289,9 +503,13 @@ export function Explorer({ recs, runId, winner = null }: { recs: RunRecord[]; ru
     ok: r.ok,
     color: colors.get(r.series) ?? PALETTE[0],
     series: r.series,
-    title: `${r.series} · conc ${r.conc ?? dash} · ${fnum(r.cl)} tok/s · ${fnum(r.pu)} tok/s/user · ${r.ok ? 'servable' : r.status}`,
+    id: r.id,
+    title: `${r.series}${r.variant ? ` (${r.variant})` : ''} · conc ${r.conc ?? dash} · ${fnum(r.cl)} tok/s · ${fnum(r.pu)} tok/s/user · ${r.ok ? 'servable' : r.status} — click for the deployment`,
   }))
   const hidden = shown.length - pts.length
+  // Resolve against the FILTERED set: if a filter or brush removes the inspected run, the panel
+  // closes with it rather than describing a point no longer on the chart.
+  const pickedRec = picked === null ? null : shown.find((r) => r.id === picked) ?? null
 
   return (
     <div>
@@ -302,7 +520,8 @@ export function Explorer({ recs, runId, winner = null }: { recs: RunRecord[]; ru
         <figure className="vc">
           <div className="vc-h"><h4 className="vc-t">Throughput ↔ interactivity</h4><span className="vc-r">{regime}</span></div>
           <p className="vc-s">cluster tok/s vs per-user tok/s · one point per run</p>
-          <Scatter pts={pts} xl="cluster tok/s" yl="tok/s per user" label="Scatter of cluster throughput against per-user throughput" hl={hl} />
+          <Scatter pts={pts} xl="cluster tok/s" yl="tok/s per user" label="Scatter of cluster throughput against per-user throughput" hl={hl}
+            onPick={setPicked} picked={picked} />
           <p className="vc-k"><b>How to read it.</b> Each point is one run: x is what the whole fleet delivers, y is what one
             caller feels. Up and to the right is better for everyone; filled points hold the interactivity floor, hollow
             ones break it.</p>
@@ -313,7 +532,9 @@ export function Explorer({ recs, runId, winner = null }: { recs: RunRecord[]; ru
               <button type="button" key={s} className={`lg${active === s ? ' on' : ''}`} aria-pressed={sticky === s}
                 onClick={() => hl.onToggle(s)} onPointerEnter={() => setHover(s)} onPointerLeave={() => setHover(null)}>
                 <i className="sw2" style={{ background: colors.get(s) }} />{s}
-                {s === winner && <em className="recmark" title="Recommended configuration">recommended</em>}
+                {s === winner && (
+                  <em className="recmark" title={`Recommended: ${winnerName ?? s}`}>recommended</em>
+                )}
               </button>
             ))}
           </div>
@@ -329,7 +550,8 @@ export function Explorer({ recs, runId, winner = null }: { recs: RunRecord[]; ru
         <figure className="vc">
           <div className="vc-h"><h4 className="vc-t">Per-user rate vs load</h4><span className="vc-r">interactivity</span></div>
           <p className="vc-s">tok/s per user as concurrency climbs</p>
-          <Lines recs={recs} shownRecs={shown} get={(r) => r.pu} xl="concurrency" yl="tok/s per user" label="Per-user throughput by concurrency" colors={colors} showKnee hl={hl} />
+          <Lines recs={recs} shownRecs={shown} get={(r) => r.pu} xl="concurrency" yl="tok/s per user" label="Per-user throughput by concurrency" colors={colors} showKnee hl={hl}
+            onPick={setPicked} picked={picked} />
           <p className="vc-k"><b>How to read it.</b> One line per configuration, walking the load up. Flat is good — it means
             adding sessions has not yet slowed anyone down. The violet line marks that configuration's knee, the first load
             that breaks the floor.</p>
@@ -338,12 +560,28 @@ export function Explorer({ recs, runId, winner = null }: { recs: RunRecord[]; ru
         <figure className="vc">
           <div className="vc-h"><h4 className="vc-t">Inter-token latency vs load</h4><span className="vc-r">latency</span></div>
           <p className="vc-s">ITL (ms) as concurrency climbs</p>
-          <Lines recs={recs} shownRecs={shown} get={(r) => r.itl} xl="concurrency" yl="ITL (ms)" label="Inter-token latency by concurrency" colors={colors} showKnee hl={hl} />
+          <Lines recs={recs} shownRecs={shown} get={(r) => r.itl} xl="concurrency" yl="ITL (ms)" label="Inter-token latency by concurrency" colors={colors} showKnee hl={hl}
+            onPick={setPicked} picked={picked} />
           <p className="vc-k"><b>How to read it.</b> Inter-token latency is the gap between output tokens — the mechanism behind
             the cliff above. Lower is better, and the floor is a ceiling on this number, so a line crossing its knee is what
             makes the per-user rate fall.</p>
           {explainItl(shown) && <p className="vc-x">{explainItl(shown)}</p>}
         </figure>
+      </div>
+
+      {/* The clicked run's deployment sits BELOW the chart grid, not inside the scatter's figure:
+          nested in one column of a 3-up grid it was ~970px tall with the command wrapping every
+          few words. Full width keeps the four sections side by side. */}
+      {pickedRec && <PointDetail r={pickedRec} onClose={() => setPicked(null)} />}
+
+      <div className="op-sec">
+        <h4 className="op-h">What to run</h4>
+        <p className="op-s">
+          One row per load: the most efficient configuration that still held the floor there, and
+          the flags to deploy it with. Pick the load you expect, then read the flags off it —
+          click a row for the full deployment.
+        </p>
+        <OperatingTable recs={shown} onPick={setPicked} picked={picked} />
       </div>
 
       <div className="tscroll hscroll runtable">
@@ -392,8 +630,14 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
   const w = s.winner
   // The two best alternatives to the recommended config, ranked by efficiency (tok/s/GPU
   // then total tok/s), shown side-by-side under the recommendation.
+  //
+  // A config is identified by label + variant, not label alone: once the search refines engine
+  // and routing knobs, several finalists share a topology, and filtering on label dropped every
+  // one of them from the runners-up (often the most interesting comparison — the same shape with
+  // and without a knob change).
+  const key = (f: { label: string; variant?: string }) => `${f.label}\u0000${f.variant ?? ''}`
   const runnersUp = s.finalists
-    .filter((f) => f.label !== w.label)
+    .filter((f) => key(f) !== key(w))
     .sort((a, b) => b.tps_per_gpu - a.tps_per_gpu || b.tps - a.tps)
     .slice(0, 2)
   return (
@@ -414,7 +658,7 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
         <div className="reccard">
           <div className="recrank">RECOMMENDED</div>
           <div className="rechead">
-            <div className="reclabel">{w.label}</div>
+            <div className="reclabel">{w.name ?? w.label}</div>
             <div className="recnote">{s.reason}</div>
           </div>
           <div className="recstats">
@@ -428,9 +672,9 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
         {runnersUp.length > 0 && (
           <div className="runnerups">
             {runnersUp.map((f, i) => (
-              <div className="runcard" key={f.label}>
+              <div className="runcard" key={key(f)}>
                 <div className="runrank">#{i + 2} alternative</div>
-                <div className="runlabel">{f.label}</div>
+                <div className="runlabel">{f.name ?? f.label}</div>
                 <div className="runstats">
                   <div><dt>tok/s</dt><dd className="num">{fnum(f.tps)}</dd></div>
                   <div><dt>tok/s/GPU</dt><dd className="num">{fnum(f.tps_per_gpu)}</dd></div>
@@ -449,7 +693,7 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
 
       <section aria-label="Pareto explorer">
         <div className="seclabel2">Pareto explorer</div>
-        <Explorer recs={recs} runId={s.run_id} winner={w.label} />
+        <Explorer recs={recs} runId={s.run_id} winner={w.label} winnerName={w.name ?? w.label} />
       </section>
     </div>
   )

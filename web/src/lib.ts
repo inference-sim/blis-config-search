@@ -261,3 +261,57 @@ export function emphasis(active: string | null, series: string): 'on' | 'off' | 
   if (active === null) return 'neutral'
   return active === series ? 'on' : 'off'
 }
+
+/* ---------------- operating points: "pick a load, read the flags off it" ----------------
+   Mirrors the standalone report's "What to run" table (report.py `_operating_table`): one row per
+   load, pairing the configuration you would deploy with the performance it gave at that load. The
+   run table below it stays the full per-run log, including the runs that broke the floor. */
+
+/** The flags a reader would actually pass, in a stable order. Mirrors report.py `_FLAG_LABELS`. */
+const FLAGS: { key: keyof RunRecord; flag: string; bool?: true }[] = [
+  { key: 'tp', flag: '--tensor-parallel-size' },
+  { key: 'dp', flag: '--data-parallel-size' },
+  { key: 'epw', flag: '--enable-expert-parallel', bool: true },
+  { key: 'ni', flag: '--num-instances' },
+  { key: 'bs', flag: '--block-size' },
+  { key: 'mnbt', flag: '--max-num-batched-tokens' },
+  { key: 'mns', flag: '--max-num-seqs' },
+  { key: 'gmu', flag: '--gpu-memory-utilization' },
+  { key: 'mtp', flag: '--num-speculative-tokens' },
+  { key: 'route', flag: 'routing' },
+  { key: 'pd', flag: 'prefill/decode' },
+]
+/** Values worth no ink: a knob at its default, or an "off" state. Mirrors report.py `_FLAG_SKIP`.
+ *  Printing them would bury the two or three settings that actually distinguish this run. */
+const FLAG_SKIP: Partial<Record<keyof RunRecord, (string | number | null)[]>> = {
+  dp: [1], epw: [], mtp: [0], pd: ['colocated'], route: ['round-robin', 'default'],
+}
+
+/** The non-default flags for one run, each as {flag, value} — value is '' for a boolean flag. */
+export function runFlags(r: RunRecord): { flag: string; value: string }[] {
+  const out: { flag: string; value: string }[] = []
+  for (const f of FLAGS) {
+    const v = r[f.key] as string | number | null | undefined
+    if (v === null || v === undefined || v === '') continue
+    if ((FLAG_SKIP[f.key] ?? []).includes(v as string | number)) continue
+    out.push({ flag: f.flag, value: f.bool ? '' : String(v) })
+  }
+  return out
+}
+
+/**
+ * One operating point per load: the best SERVABLE run at that concurrency, ranked by tok/s per
+ * GPU. Per-GPU is deliberate — it is the dual-Pareto objective the search optimises and picks its
+ * winner on. Ranking by per-user rate (as the report does) made the table recommend the
+ * fastest-per-user shape while the card above recommended the most efficient one: on kimi-k2.5
+ * that is TP8+EP at 23 tok/s/GPU versus the winner's TP4xDP2+EP at 67.
+ */
+export function operatingPoints(recs: RunRecord[]): RunRecord[] {
+  const best = new Map<number, RunRecord>()
+  for (const r of recs) {
+    if (!r.ok || !finite(r.conc) || !finite(r.tpg)) continue
+    const cur = best.get(r.conc)
+    if (cur === undefined || (r.tpg as number) > (cur.tpg as number)) best.set(r.conc, r)
+  }
+  return [...best.values()].sort((a, b) => (a.conc as number) - (b.conc as number))
+}

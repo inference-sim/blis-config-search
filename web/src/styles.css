@@ -288,6 +288,55 @@ svg.hist-svg{width:100%;height:auto;display:block;touch-action:pan-y;cursor:cros
 svg.chart .hl-target{cursor:pointer;outline:none}
 svg.chart .hl-target:focus-visible .pt{stroke:var(--accent);stroke-width:2.5}
 svg.chart .pt,svg.chart .ln,svg.chart .knee{transition:opacity .15s,stroke .15s}
+/* the point whose deployment the panel below is describing */
+svg.chart .pt.picked{stroke:var(--ink);stroke-width:2.6}
+
+/* ---- "What to run": operating points, one row per load ---- */
+.op-sec{margin-top:18px}
+.op-h{margin:0 0 3px;font-size:13.5px;font-weight:600}
+.op-s{margin:0 0 9px;font-size:11.5px;color:var(--muted);line-height:1.5;max-width:70ch}
+.op-none{margin:0;font-size:12px;color:var(--muted);background:var(--paper);
+border:1px dashed var(--line-strong);border-radius:6px;padding:11px 13px;line-height:1.5}
+.op-table td{vertical-align:top}
+.op-row{cursor:pointer}
+.op-row:hover{background:var(--accent-soft)}
+.op-row.hl{background:var(--accent-soft);box-shadow:inset 2px 0 0 var(--accent)}
+.op-name{font-size:12px;font-weight:600;color:var(--ink)}
+.op-var{font-size:10.5px;color:var(--accent);margin-top:1px}
+/* the flags a reader copies: wrap as chips so a long list stays scannable */
+.op-flags{display:flex;flex-wrap:wrap;gap:2px 8px;margin-top:4px;max-width:62ch}
+.op-fl{font-family:var(--font-mono);font-size:10.5px;color:var(--ink);white-space:nowrap}
+.op-fl i{color:var(--muted);font-style:normal}
+.op-table td.hero .num{font-size:13px;font-weight:600}
+
+/* ---- clicked-point deployment panel (inline, under the chart) ---- */
+.ptd{margin-top:10px;border:1px solid var(--line-strong);border-radius:6px;
+background:var(--bg);padding:11px 13px 12px}
+.ptd-h{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;
+border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:10px}
+.ptd-t{font-family:var(--font-mono);font-size:13px;font-weight:600;color:var(--ink)}
+.ptd-v{font-size:11px;color:var(--accent);margin-top:2px}
+.ptd-v.dim{color:var(--muted)}
+.ptd-x{font-size:11px;color:var(--accent);background:none;border:1px solid var(--accent);
+border-radius:3px;padding:2px 8px;cursor:pointer;flex:none}
+/* this palette has no dedicated "bad" hue — problems use the warn tokens, as elsewhere */
+.ptd-bad{margin:0 0 10px;font-size:11.5px;color:var(--warn-ink);background:var(--warn-bg);
+border:1px solid var(--warn-line);border-radius:4px;padding:6px 9px}
+.ptd-g{display:grid;grid-template-columns:repeat(auto-fit,minmax(176px,1fr));gap:12px 18px}
+.ptd-g h5{margin:0 0 5px;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;
+color:var(--muted);font-weight:700}
+.dd-list2{margin:0;font-size:11.5px}
+.dd-list2 > div{display:flex;justify-content:space-between;gap:10px;padding:1px 0}
+.dd-list2 dt{color:var(--muted);white-space:nowrap}
+.dd-list2 dd{margin:0;font-family:var(--font-mono);font-size:11px;color:var(--ink);
+text-align:right;font-variant-numeric:tabular-nums}
+.ptd-cmd{margin-top:12px}
+.ptd-cmd h5{margin:0 0 5px;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;
+color:var(--muted);font-weight:700}
+.ptd-cmd pre{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:4px;
+padding:9px 11px;overflow-x:auto;font-family:var(--font-mono);font-size:10.5px;line-height:1.6;
+white-space:pre-wrap;word-break:break-all;color:var(--ink)}
+.ptd-none{margin:0;font-size:11.5px;color:var(--muted);font-style:italic}
 .legend .lg{font:inherit;color:inherit;background:none;border:1px solid transparent;border-radius:3px;padding:1px 5px;cursor:pointer;display:inline-flex;align-items:center}
 .legend .lg:hover{border-color:var(--line)}
 .legend .lg.on{border-color:var(--accent);color:var(--ink)}

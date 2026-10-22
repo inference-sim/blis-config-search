@@ -96,12 +96,23 @@ def validate_and_project(run_dir):
         raise Invalid(f"{name}: pareto.json has no finalists")
     chosen = (pareto.get("winner") or {}).get("chosen")
 
+    # The winner is named with its knob delta ("4x TP2 (least-loaded routing)") because several
+    # finalists share a topology once the search refines engine/routing knobs. Match on the
+    # (label, variant) PAIR — matching the bare label silently fell through to the last finalist
+    # and showed the wrong winner on the site.
+    chosen_label = (pareto.get("winner") or {}).get("label")
+    chosen_variant = (pareto.get("winner") or {}).get("variant")
+
     finalists, winner_row = [], None
     for f in finalists_in:
         label = str(_req(f, "label", f"{name} finalist"))
+        variant = str(f.get("variant") or "")
         at = f.get("at_c_use") or {}
         row = {
             "label": label,
+            "variant": variant,
+            # what the site shows: topology, plus the knob delta when there is one
+            "name": f"{label} ({variant})" if variant else label,
             "tp": int(f.get("config", {}).get("tp", 0) or 0),
             "ni": int(f.get("config", {}).get("num_instances", 0) or 0),
             "gpus": int(_num(f.get("gpus", 0), f"{name}:{label} gpus", 0, 100000)),
@@ -112,7 +123,12 @@ def validate_and_project(run_dir):
             "itl_p99": _num(at.get("itl_p99_ms", 0), f"{name}:{label} itl", 0, 1e6),
         }
         finalists.append(row)
-        if label == chosen:
+        # prefer the explicit (label, variant) pair; fall back to the legacy `chosen` string so a
+        # report written before the variant field still resolves its winner
+        if chosen_label is not None:
+            if label == chosen_label and variant == (chosen_variant or ""):
+                winner_row = row
+        elif chosen in (row["name"], label):
             winner_row = row
     winner = winner_row or finalists[-1]  # fall back to the last finalist if chosen is unset
 

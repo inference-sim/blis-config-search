@@ -3,7 +3,12 @@
 // into web/public/data/. Keep in sync with those producers.
 
 export interface Winner {
+  /** Topology only, e.g. "64x TP4xDP2 + EP" — several configs can share this. */
   label: string
+  /** Knob delta from this topology's defaults, e.g. "least-loaded routing"; "" at defaults. */
+  variant?: string
+  /** label + variant — what to DISPLAY, since label alone does not identify a config. */
+  name?: string
   tp: number | null
   ni: number | null
   ep?: boolean
@@ -18,7 +23,10 @@ export interface Winner {
 }
 
 export interface Finalist {
+  /** Topology only; see Winner.label — a finalist is identified by label + variant. */
   label: string
+  variant?: string
+  name?: string
   tp: number | null
   ni: number | null
   gpus: number | null
@@ -76,6 +84,36 @@ export interface RunRecord {
   ok: boolean
   status: string
   viol: string[]
+  // --- deployment detail, for the click-to-inspect panel. build_gallery stages all of these;
+  // the web app simply had no type for them. Optional because an older run directory may lack
+  // any given field, and the panel must render what it has rather than assume.
+  /** Knob delta from this topology's defaults, e.g. "least-loaded routing"; "" at defaults. */
+  variant?: string
+  /** Which knobs varied in this run's topology group, raw values (drives the panel's knob list). */
+  knobs?: Record<string, string | number | boolean | null>
+  pp?: number | null
+  nodes?: number | null
+  fabric?: string | null
+  bs?: number | null
+  mml?: number | null
+  gmu?: number | null
+  cg?: string | null
+  quant?: string | null
+  cdt?: string | null
+  scorers?: string | null
+  /** The scheduler POLICY. Not to be confused with `sched`, the scheduling-delay metric. */
+  schedp?: string | null
+  admit?: string | null
+  /** Output per GPU, from the unrounded throughput. */
+  tpg?: number | null
+  e2e?: number | null
+  /** Scheduling delay p99 in ms (a metric — see `schedp` for the policy). */
+  sched?: number | null
+  itl_mean?: number | null
+  /** The generated scenario file BLIS consumed. */
+  scen?: string | null
+  /** The exact `blis run` invocation, shell-quoted; null for runs recorded before this existed. */
+  cmd?: string | null
 }
 
 export interface ModelEntry {

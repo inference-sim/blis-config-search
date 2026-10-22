@@ -63,6 +63,43 @@ class ClassifyConfig(unittest.TestCase):
         self.assertNotIn("quantization", eng)       # empty precision lets the checkpoint govern
         self.assertNotIn("cache_dtype", eng)
 
+    def test_block_size_default_is_model_aware(self):
+        # block_size cannot be a single constant. The kernel adapter REQUIRES a positive
+        # block_size on the deployment ("deployment states no block_size"), so it must be stated;
+        # but a DSA sparse-MLA model runs a 64-token indexer and refuses a stated 16 ("a stated
+        # size must be a multiple of 64, and the engine refuses this layout at startup"). Our flat
+        # default of 16 therefore made the whole GLM-5.x family unrunnable.
+        self.assertEqual(run_blis.default_block_size(None, "qwen3-14b"), 16)
+        self.assertEqual(run_blis.DSA_BLOCK_SIZE, 64)
+        # a stated value always wins — it stays a searchable knob
+        _, eng, _ = run_blis.classify_config({"tp": 8, "block_size": 64})
+        self.assertEqual(eng["block_size"], 64)
+
+    def test_dsa_detection_from_catalog_graph(self):
+        # DSA is a property of the model GRAPH (a sparse_mla attention node), not of its name.
+        import tempfile
+        d = tempfile.mkdtemp()
+        for name, body in (("dsa-model", "nodes:\n  - op: Attention\n    kind: sparse_mla\n"),
+                           ("plain-model", "nodes:\n  - op: Attention\n    kind: gqa\n")):
+            md = os.path.join(d, "models", name)
+            os.makedirs(md)
+            with open(os.path.join(md, "graph.yaml"), "w") as f:
+                f.write(body)
+        self.assertTrue(run_blis.is_dsa_model(d, "dsa-model"))
+        self.assertFalse(run_blis.is_dsa_model(d, "plain-model"))
+        self.assertEqual(run_blis.default_block_size(d, "dsa-model"), 64)
+        self.assertEqual(run_blis.default_block_size(d, "plain-model"), 16)
+        # an absent graph must not raise -- it falls back to the non-DSA default
+        self.assertFalse(run_blis.is_dsa_model(d, "no-such-model"))
+        self.assertEqual(run_blis.default_block_size(d, "no-such-model"), 16)
+
+    def test_scenario_always_states_a_block_size(self):
+        # the adapter refuses a deployment with no block_size, so the generated YAML must carry one
+        par = {"tp": 8, "pp": 1, "dp": 1, "enable_expert_parallel": True}
+        eng = dict(run_blis.ENGINE_DEFAULTS, block_size=64)
+        self.assertIn("block_size: 64", run_blis.scenario_yaml("glm-5.3", "h200", "0.29.0", par,
+                                                               eng, "n", 1))
+
     def test_precision_passes_through_when_set(self):
         _, eng, _ = run_blis.classify_config({"tp": 8, "quantization": "fp8", "cache_dtype": "fp8"})
         self.assertEqual(eng["quantization"], "fp8")
@@ -96,9 +133,31 @@ class Footprint(unittest.TestCase):
     def test_within_node_dp_allowed(self):
         _, _, _ = run_blis.classify_config({"tp": 4, "dp": 2})          # footprint 8 == one node, OK
 
-    def test_multinode_single_instance_rejected(self):
+    def test_multinode_single_instance_allowed_on_whole_nodes(self):
+        # A multi-node single instance is REAL in BLIS: kimi-k3 needs a 32-GPU footprint to fit its
+        # weights (332.3 GiB/rank at tp=8 on a 141 GiB device) and runs at tp=32 across 4 nodes
+        # once the scenario names a fabric. The runner used to refuse it, which made the largest
+        # models unreachable rather than slow.
+        par, _, _ = run_blis.classify_config({"tp": 32, "enable_expert_parallel": True})
+        self.assertEqual(run_blis.footprint_gpus(par), 32)
+        par2, _, _ = run_blis.classify_config({"tp": 8, "dp": 2})
+        self.assertEqual(run_blis.footprint_gpus(par2), 16)
+
+    def test_multinode_footprint_must_fill_whole_nodes(self):
+        # A footprint that straddles a node boundary (e.g. 12 GPUs = 1.5 nodes) describes no real
+        # placement: the pool is allocated in whole nodes, so the remainder would sit idle and the
+        # cross-node cost would be mispriced. Refuse it rather than silently round the pool up.
         with self.assertRaises(run_blis.ConfigError):
-            run_blis.classify_config({"tp": 8, "dp": 2})                # footprint 16 > one node
+            run_blis.classify_config({"tp": 2, "dp": 6})                # 12 GPUs: 1.5 nodes
+
+    def test_multinode_scenario_names_a_fabric(self):
+        # Cross-node cost resolves from the fabric, not the chip; BLIS refuses a multi-node
+        # cluster that does not name one.
+        par, eng, _ = run_blis.classify_config({"tp": 32, "enable_expert_parallel": True})
+        eng.setdefault("block_size", 64)
+        y = run_blis.scenario_yaml("kimi-k3", "h200", "0.29.0", par, eng, "s", 1)
+        self.assertIn("fabric:", y)
+        self.assertIn("nodes: 4", y)                                    # 32 GPUs / 8 per node
 
 
 class ScenarioYaml(unittest.TestCase):

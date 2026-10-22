@@ -101,7 +101,7 @@ export function Reports({ scenarios, params }: { scenarios: Scenario[]; params: 
                 </div>
                 <div className="winwrap">
                   <div className="winlbl">Recommended config</div>
-                  <div className="win">{s.winner.label}</div>
+                  <div className="win">{s.winner.name ?? s.winner.label}</div>
                   <Metrics s={s} />
                   <div className="foot">
                     <span className="mono"><span className="num">{s.n_servable}</span>/<span className="num">{s.n_runs}</span> servable</span>

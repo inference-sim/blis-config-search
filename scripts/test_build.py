@@ -49,6 +49,40 @@ def _mk_run_dir(d, run_id, synthetic=True, workload="chatbot", hardware="h100"):
         open(os.path.join(d, "MOCK"), "w").close()
 
 
+def test_winner_with_a_knob_variant():
+    print("test_winner_with_a_knob_variant")
+    # pareto.json names the winner with its knob delta ("64x TP4xDP2 + EP (least-loaded
+    # routing)") because several finalists share a topology once the search refines knobs. The
+    # gallery matched `label == chosen` and, finding no match, silently fell back to the LAST
+    # finalist — showing the wrong winner on the site.
+    tmp = tempfile.mkdtemp()
+    try:
+        rd = os.path.join(tmp, "qwen3-14b-h100-chatbot-0002")
+        _mk_run_dir(rd, "qwen3-14b-h100-chatbot-0002")
+        at = {"tokens_per_sec": 2500.0, "tokens_per_sec_per_gpu": 312.5,
+              "tok_per_s_per_user": 80.0, "itl_p99_ms": 12.0}
+        pareto = {"finalists": [
+            {"label": "4x TP2", "variant": "least-loaded routing",
+             "config": {"tp": 2, "num_instances": 4}, "gpus": 8, "c_use": 32, "at_c_use": at},
+            {"label": "4x TP2", "variant": "", "config": {"tp": 2, "num_instances": 4},
+             "gpus": 8, "c_use": 24, "at_c_use": {"tokens_per_sec": 1842.0,
+             "tokens_per_sec_per_gpu": 230.3, "tok_per_s_per_user": 68.0, "itl_p99_ms": 14.7}}],
+            "winner": {"chosen": "4x TP2 (least-loaded routing)", "label": "4x TP2",
+                       "variant": "least-loaded routing", "reason": "test"}}
+        json.dump(pareto, open(os.path.join(rd, "pareto.json"), "w"))
+        _, row = bg.validate_and_project(rd)
+        check(row["winner"]["tps"] == 2500.0,
+              f"the knob-variant winner is matched, not the last finalist "
+              f"(got tps={row['winner']['tps']})")
+        check(row["winner"].get("variant") == "least-loaded routing",
+              f"the winner row carries its knob delta (got {row['winner'].get('variant')!r})")
+        # every finalist row must carry its variant, or the site cannot tell them apart either
+        check(all("variant" in f for f in row["finalists"]),
+              "every finalist row carries a variant field")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_validation():
     print("test_validation")
     tmp = tempfile.mkdtemp()
@@ -135,6 +169,7 @@ def test_catalog():
 
 
 if __name__ == "__main__":
+    test_winner_with_a_knob_variant()
     test_validation()
     test_build_determinism_and_nomock()
     test_catalog()

@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import type { Catalog, RunRecord, Scenario } from './types'
 import { facetCounts, filterScenarios, topConfigs, NO_FILTERS, parseRoute, filterRecords, countReports } from './lib'
 import { ScenarioDetail } from './components/ScenarioDetail'
+import { Reports } from './components/Reports'
 import { Submit } from './components/Submit'
 
 const w = { label: '1x TP8', tp: 8, ni: 1, gpus: 8, c_use: 1, tps: 1, tps_per_gpu: 1, per_user: 1, itl_p99: 1 }
@@ -496,6 +497,24 @@ describe('Submit numeric inputs', () => {
   })
 })
 
+describe('scenario cards', () => {
+  it('lays out cluster and workload on their own labelled rows', () => {
+    render(<Reports scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false)]} params={{}} />)
+    const card = document.querySelector('.card') as Element
+    const rows = [...card.querySelectorAll('.specrows > div')].map((d) => d.textContent ?? '')
+    expect(rows.some((t) => t.startsWith('Cluster'))).toBe(true)
+    expect(rows.some((t) => t.startsWith('Workload'))).toBe(true)
+    // the model is the card heading, a line of its own
+    expect(card.querySelector('.cardhead h3')?.textContent).toBe('m1')
+  })
+
+  it('does not show the sweep-size "N/M servable" line on the card', () => {
+    render(<Reports scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false)]} params={{}} />)
+    const card = document.querySelector('.card') as Element
+    expect(card.textContent).not.toMatch(/servable/i)
+  })
+})
+
 describe('ScenarioDetail', () => {
   it('handles empty records without crashing', () => {
     render(<ScenarioDetail runId="a" scenarios={S} />)
@@ -503,7 +522,7 @@ describe('ScenarioDetail', () => {
     expect(document.body.textContent).not.toContain('NaN')
   })
   it('renders a single-point scatter without NaN', () => {
-    const rec: RunRecord = { id: '1', src: '', conc: 1, tp: 1, dp: 1, ni: 1, gpus: 1, series: 's', route: '', pd: '', mtp: 0, mnbt: null, mns: null, pu: 10, cl: 20, itl: null, ttft: null, hit: null, p95: null, ok: true, status: 'complete', viol: [] }
+    const rec: RunRecord = { id: '1', src: '', conc: 1, tp: 1, dp: 1, ni: 1, gpus: 1, series: 's', route: '', pd: '', mtp: 0, mnbt: null, mns: null, pu: 10, cl: 20, tpg: 20, itl: null, ttft: null, hit: null, p95: null, ok: true, status: 'complete', viol: [] }
     const S1 = [mk('a', 'm1', 'H100', 'chatbot', 16, false, [rec]), ...S.slice(1)]
     render(<ScenarioDetail runId="a" scenarios={S1} />)
     expect(screen.getByText(/Only one point/)).toBeTruthy()
@@ -530,6 +549,15 @@ describe('ScenarioDetail', () => {
     expect(document.querySelector('.charts-legend .legend')).toBeTruthy()
     expect([...legends[0].querySelectorAll('.lg')].map((b) => b.textContent)).toEqual(
       expect.arrayContaining([expect.stringContaining('A'), expect.stringContaining('B')]))
+  })
+
+  it('plots the scatter as tok/s/GPU (y) against tok/s/user (x)', () => {
+    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, twoSeries())]} />)
+    const scatter = [...document.querySelectorAll('svg.chart')]
+      .find((s) => s.querySelectorAll('circle.pt').length > 0) as Element
+    const axes = [...scatter.querySelectorAll('.axlabel')].map((e) => e.textContent)
+    expect(axes).toContain('output tok/s/GPU')   // y: compare GPU utilisation across configs
+    expect(axes).toContain('output tok/s/user')  // x: interactivity
   })
 
   it('lets the user switch the latency chart between TPOT / TTFT / E2E', () => {

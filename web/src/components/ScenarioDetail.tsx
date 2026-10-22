@@ -598,21 +598,21 @@ function axesSearched(recs: RunRecord[]): string[] {
   return out
 }
 
-/** Scatter: the throughput/interactivity trade-off — name the best fleet point that still holds
- *  the floor, and what pushing past it costs. */
+/** Scatter: the efficiency/interactivity trade-off — name the most GPU-efficient point that still
+ *  holds the floor, and what pushing past it costs. */
 function explainScatter(recs: RunRecord[]): string | null {
-  const ok = recs.filter((r) => r.ok && finite(r.cl) && finite(r.pu))
-  const bad = recs.filter((r) => !r.ok && finite(r.cl) && finite(r.pu))
+  const ok = recs.filter((r) => r.ok && finite(r.tpg) && finite(r.pu))
+  const bad = recs.filter((r) => !r.ok && finite(r.tpg) && finite(r.pu))
   if (ok.length === 0) return bad.length ? 'No run in view holds the interactivity floor — every point here breaks it.' : null
-  const best = ok.reduce((a, b) => ((b.cl as number) > (a.cl as number) ? b : a))
-  let s = `The furthest-right filled point is ${best.series} at ${fnum(best.conc, 0)} concurrent `
-    + `sessions: ${fnum(best.cl)} tok/s across the fleet while each user still sees ${fnum(best.pu)} tok/s.`
+  const best = ok.reduce((a, b) => ((b.tpg as number) > (a.tpg as number) ? b : a))
+  let s = `The highest filled point is ${best.series} at ${fnum(best.conc, 0)} concurrent `
+    + `sessions: ${fnum(best.tpg)} tok/s per GPU while each user still sees ${fnum(best.pu)} tok/s.`
   if (bad.length) {
-    const over = bad.reduce((a, b) => ((b.cl as number) > (a.cl as number) ? b : a))
+    const over = bad.reduce((a, b) => ((b.tpg as number) > (a.tpg as number) ? b : a))
     const drop = finite(best.pu) && finite(over.pu) ? Math.round((1 - (over.pu as number) / (best.pu as number)) * 100) : null
-    s += ` Hollow points push further on fleet throughput — up to ${fnum(over.cl)} tok/s — but`
+    s += ` Hollow points push per-GPU throughput higher — up to ${fnum(over.tpg)} tok/s/GPU — but`
       + (drop !== null && drop > 0 ? ` per-user speed falls ${drop}% to ${fnum(over.pu)} tok/s,` : ' per-user speed collapses,')
-      + ' which is why peak throughput alone is the wrong thing to rank on.'
+      + ' which is why peak efficiency alone is the wrong thing to rank on.'
   } else {
     s += ' No run in view breaks the floor, so the frontier is still rising — the limit is past the loads swept here.'
   }
@@ -749,9 +749,12 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
       </div>
     )
   }
-  const pts: Pt[] = shown.filter((r) => finite(r.cl) && finite(r.pu)).map((r) => ({
-    x: r.cl as number,
-    y: r.pu as number,
+  // Scatter axes: x = per-user rate (interactivity), y = tok/s/GPU (how efficiently each GPU is
+  // used). Plotting per-GPU throughput lets you compare GPU utilisation directly across configs,
+  // independent of how many GPUs each one uses.
+  const pts: Pt[] = shown.filter((r) => finite(r.tpg) && finite(r.pu)).map((r) => ({
+    x: r.pu as number,
+    y: r.tpg as number,
     ok: r.ok,
     color: colors.get(r.series) ?? PALETTE[0],
     series: r.series,
@@ -760,7 +763,7 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
     // (same config identity the Lines charts group by: series + variant).
     order: finite(r.conc) ? (r.conc as number) : undefined,
     cfg: `${r.series}\u0000${r.variant ?? ''}`,
-    title: `${r.series}${r.variant ? ` (${r.variant})` : ''} · conc ${r.conc ?? dash} · ${fnum(r.cl)} tok/s · ${fnum(r.pu)} tok/s/user · ${r.ok ? 'servable' : r.status} — click for the deployment`,
+    title: `${r.series}${r.variant ? ` (${r.variant})` : ''} · conc ${r.conc ?? dash} · ${fnum(r.tpg)} tok/s/GPU · ${fnum(r.pu)} tok/s/user · ${r.ok ? 'servable' : r.status} — click for the deployment`,
   }))
   const hidden = shown.length - pts.length
   // Whether ANY run in the scenario recorded a command — drives whether the Reproduce panel shows
@@ -802,14 +805,14 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
 
       <div className="charts">
         <figure className="vc">
-          <div className="vc-h"><h4 className="vc-t">Throughput ↔ interactivity</h4><span className="vc-r">{regime}</span></div>
-          <p className="vc-s">cluster tok/s vs per-user tok/s · one point per run</p>
-          <Scatter pts={pts} xl="cluster tok/s" yl="tok/s per user" label="Scatter of cluster throughput against per-user throughput" hl={hl}
+          <div className="vc-h"><h4 className="vc-t">Efficiency ↔ interactivity</h4><span className="vc-r">{regime}</span></div>
+          <p className="vc-s">tok/s/GPU vs per-user tok/s · one point per run</p>
+          <Scatter pts={pts} xl="output tok/s/user" yl="output tok/s/GPU" label="Scatter of per-GPU throughput against per-user throughput" hl={hl}
             onPick={pickRun} picked={picked} />
-          <p className="vc-k"><b>How to read it.</b> Each point is one run: x is what the whole fleet delivers, y is what one
-            caller feels. Up and to the right is better for everyone; filled points hold the interactivity floor, hollow
-            ones break it. A faint line connects a configuration's runs in load order, so you can trace where adding
-            sessions takes it.</p>
+          <p className="vc-k"><b>How to read it.</b> Each point is one run: x is what one caller feels, y is how much each GPU
+            delivers (so configs are comparable regardless of how many GPUs they use). Up and to the right is better for
+            everyone; filled points hold the interactivity floor, hollow ones break it. A faint line connects a
+            configuration's runs in load order, so you can trace where adding sessions takes it.</p>
           {explainScatter(shown) && <p className="vc-x">{explainScatter(shown)}</p>}
           {hidden > 0 && <p className="pts-note">{hidden} run{hidden === 1 ? ' has' : 's have'} no throughput values and {hidden === 1 ? 'is' : 'are'} not plotted.</p>}
           {pts.length === 1 && <p className="pts-note">Only one point matches; a trade-off frontier needs two or more.</p>}

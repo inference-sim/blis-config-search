@@ -93,18 +93,17 @@ export function Reports({ scenarios, params }: { scenarios: Scenario[]; params: 
             filtered.map((s) => (
               <a className={`card${s.synthetic ? ' is-mock' : ''}`} key={s.run_id} href={scenarioHash(s.run_id)}>
                 <div className="cardhead"><h3>{s.model}</h3>{s.synthetic && <MockBadge />}</div>
-                <div className="spec">
-                  <span className="chip">{s.hardware}</span>
-                  <span className="chip">{s.gpu_budget}× GPU</span>
-                  <span className="chip">{s.workload}</span>
-                  <span className="chip">{s.isl_osl}</span>
-                </div>
+                {/* model / cluster / workload on their own lines — one dimension per row reads
+                    more clearly than a single run-on chip row. */}
+                <dl className="specrows">
+                  <div><dt>Cluster</dt><dd><span className="chip">{s.hardware}</span><span className="chip">{s.gpu_budget}× GPU</span></dd></div>
+                  <div><dt>Workload</dt><dd><span className="chip">{s.workload}</span><span className="chip">{s.isl_osl}</span></dd></div>
+                </dl>
                 <div className="winwrap">
                   <div className="winlbl">Recommended config</div>
                   <div className="win">{s.winner.name ?? s.winner.label}</div>
                   <Metrics s={s} />
                   <div className="foot">
-                    <span className="mono"><span className="num">{s.n_servable}</span>/<span className="num">{s.n_runs}</span> servable</span>
                     <span className="open">details</span>
                   </div>
                 </div>

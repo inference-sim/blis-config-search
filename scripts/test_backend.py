@@ -47,10 +47,21 @@ def test_serve_local():
     check(s["workload"]["preset"] == "chatbot", "workload nested as preset")
     check(s["objective"] == "dual-pareto", "objective defaulted")
 
-    # every invalid field caught
+    # every invalid field caught. The MODEL check is conditional by design: validate_scenario
+    # only rejects an unknown model when a staged catalog exists (`if models and ...` in
+    # serve_local), so it degrades gracefully where web/dist/data/catalog.json was never built —
+    # which is exactly CI, and why asserting a flat 4 errors failed there while passing locally.
     s2, e2 = m.validate_scenario({"model": "nope", "hardware": "x",
                                   "workload": "agentic", "gpu_budget": 0})
-    check(len(e2) == 4, f"all 4 invalid fields reported (got {len(e2)})")
+    has_catalog = bool(m._catalog_models())
+    want = 4 if has_catalog else 3
+    check(len(e2) == want,
+          f"all {want} invalid fields reported (got {len(e2)}; "
+          f"catalog {'staged' if has_catalog else 'absent'}): {e2}")
+    for field in ("hardware", "workload", "gpu_budget"):
+        check(any(field in err for err in e2), f"{field} error reported")
+    if has_catalog:
+        check(any("unknown model" in err for err in e2), "unknown model reported")
 
     # yaml shaping round-trips to the same scenario
     import yaml as _yaml

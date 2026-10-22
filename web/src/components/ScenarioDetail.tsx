@@ -40,6 +40,10 @@ interface Pt {
   title: string
   /** RunRecord.id — lets a click resolve back to the run whose deployment to show. */
   id?: string
+  /** Concurrency, used only to order a series' points into a trajectory polyline in the scatter. */
+  order?: number
+  /** Config identity (series + variant): one trajectory per config, as the Lines charts group. */
+  cfg?: string
 }
 const W = 560
 const H = 300
@@ -107,7 +111,13 @@ const ms = (v: number | null | undefined) =>
  * rather than reconstructed, so it cannot drift from the simulation. Sits inline under the chart
  * (the standalone report's panel does the same, so the two surfaces behave alike).
  */
-export function PointDetail({ r, onClose, pinned = true }: { r: RunRecord; onClose: () => void; pinned?: boolean }) {
+export function PointDetail({ r, onClose, pinned = true, scenarioHasCmd = true }: {
+  r: RunRecord; onClose: () => void; pinned?: boolean
+  /** Whether ANY run in this scenario recorded a command. When false the whole fixture lacks
+   *  `cmd` (a data gap, not a per-run one), so we drop the Reproduce panel rather than show the
+   *  "not recorded" message on every point of the report. */
+  scenarioHasCmd?: boolean
+}) {
   const name = r.variant ? `${r.series} (${r.variant})` : r.series
   const box = useRef<HTMLDivElement>(null)
   // The panel renders below the chart grid, so on a laptop viewport it opens BELOW the fold —
@@ -177,14 +187,19 @@ export function PointDetail({ r, onClose, pinned = true }: { r: RunRecord; onClo
           ])}
         </section>
       </div>
-      <div className="ptd-cmd">
-        <h5>Reproduce this run</h5>
-        {r.cmd
-          ? <pre>{r.cmd}</pre>
-          : <p className="ptd-none">
-              The command was not recorded for this run{r.scen ? ` (scenario ${r.scen})` : ''}.
-            </p>}
-      </div>
+      {/* Only show the Reproduce panel when the scenario records commands at all. If NO run in the
+          fixture has one, the message would fire on every point — a data gap, so hide it entirely;
+          if only this run lacks one (others have it), keep the honest per-run note. */}
+      {scenarioHasCmd && (
+        <div className="ptd-cmd">
+          <h5>Reproduce this run</h5>
+          {r.cmd
+            ? <pre>{r.cmd}</pre>
+            : <p className="ptd-none">
+                The command was not recorded for this run{r.scen ? ` (scenario ${r.scen})` : ''}.
+              </p>}
+        </div>
+      )}
     </div>
   )
 }
@@ -193,24 +208,30 @@ export function PointDetail({ r, onClose, pinned = true }: { r: RunRecord; onClo
  *  tooltips (same affordance as the mock badge). Keyed by the exact header text. */
 const COL_HELP: Record<string, string> = {
   sessions: 'Concurrent sessions — simultaneous users/requests — at this operating point.',
+  configuration: 'The serving topology and the engine/routing flags to deploy it with.',
   'tok/s per user': 'Output tokens per second a single session sees — the interactivity each caller feels.',
   'tok/s fleet': 'Total output tokens per second across every instance and GPU in the deployment — the whole config’s serving capacity.',
   'tok/s GPU': 'Fleet throughput divided by total GPUs — how efficiently each GPU is used.',
   'ITL ms': 'Inter-token latency (p99): the gap between output tokens. Lower feels snappier.',
   'TTFT ms': 'Time to first token (p99): how long a caller waits before the reply starts streaming.',
   // full per-run table below uses slightly different labels for the same quantities
+  series: 'The serving topology — GPUs × tensor-parallel × expert-parallel × instances.',
   conc: 'Concurrent sessions — simultaneous users/requests — this run was swept at.',
   GPUs: 'Total GPUs the deployment consumes (tensor × pipeline parallel × instances).',
   'cluster tok/s': 'Total output tokens per second across the whole deployment — its serving capacity.',
   'tok/s/user': 'Output tokens per second a single session sees — the interactivity each caller feels.',
   status: 'Whether the run held the interactivity floor, or which constraint it broke.',
 }
-/** A header term followed by a small "?" help icon carrying its glossary tooltip. */
+/** A header term with its glossary tooltip. The whole label (term + the "?" icon) is the hover
+ *  target and carries the native `title`, not just the 12px icon — a tooltip on the icon alone was
+ *  an unreliably small target. */
 function Hcol({ term }: { term: string }) {
   const help = COL_HELP[term]
   if (!help) return <>{term}</>
   return (
-    <>{term}<span className="hicon" title={help} role="img" aria-label={`${term}: ${help}`}>?</span></>
+    <span className="hcol" title={help} aria-label={`${term}: ${help}`}>
+      {term}<span className="hicon" aria-hidden="true">?</span>
+    </span>
   )
 }
 
@@ -241,7 +262,7 @@ export function OperatingTable({ recs, onPick, picked = null, active = null }: {
       <table className="readout op-table" data-testid="operating-table">
         <thead>
           <tr className="col">
-            <th><Hcol term="sessions" /></th><th>configuration</th>
+            <th><Hcol term="sessions" /></th><th><Hcol term="configuration" /></th>
             <th className="num"><Hcol term="tok/s per user" /></th><th className="num"><Hcol term="tok/s fleet" /></th>
             <th className="num"><Hcol term="tok/s GPU" /></th><th className="num"><Hcol term="ITL ms" /></th><th className="num"><Hcol term="TTFT ms" /></th>
           </tr>
@@ -292,6 +313,29 @@ export function Scatter({ pts, xl, yl, label, hl = NO_HL, onPick, picked = null 
     <svg viewBox={`0 0 ${W} ${H}`} className={`chart${hl.active ? ' hl-on' : ''}`} role="group" aria-label={label}
       data-highlight={hl.active ?? ''} onClick={hl.onClear}>
       <Axes xmax={xmax} ymax={ymax} xl={xl} yl={yl} />
+      {/* Per-config trajectory: connect a configuration's points in load order so the frontier and
+          each config's path read as a line, matching the two Lines charts rather than a point
+          cloud. Drawn BEFORE the markers so points sit on top. Needs order (concurrency) + cfg;
+          a dataset without them simply draws no connectors. */}
+      {(() => {
+        const byCfg = new Map<string, Pt[]>()
+        for (const p of pts) {
+          if (p.cfg === undefined || p.order === undefined) continue
+          const g = byCfg.get(p.cfg) ?? []
+          g.push(p); byCfg.set(p.cfg, g)
+        }
+        return [...byCfg.entries()].map(([cfg, ps]) => {
+          if (ps.length < 2) return null
+          const sorted = [...ps].sort((a, b) => (a.order as number) - (b.order as number))
+          const em = emphasis(hl.active, sorted[0].series)
+          const col = em === 'off' ? GREY : sorted[0].color
+          return (
+            <polyline key={`traj-${cfg}`} fill="none" stroke={col} strokeWidth={em === 'on' ? 2 : 1.3}
+              strokeLinejoin="round" strokeLinecap="round" opacity={em === 'off' ? 0.18 : 0.5}
+              className="traj" points={sorted.map((p) => `${px(p.x)},${py(p.y)}`).join(' ')} />
+          )
+        })
+      })()}
       {/* deck marker: series-filled when servable, panel-filled (hollow) when not, always
           stroked in the series colour — the instrument-panel look from the BLIS deck.
           Highlighted series stay coloured and draw last; the rest fade to grey context. */}
@@ -317,6 +361,31 @@ export function Scatter({ pts, xl, yl, label, hl = NO_HL, onPick, picked = null 
         )
       })}
     </svg>
+  )
+}
+
+/** Series legend shared by all three charts: colour swatch → configuration, clickable to toggle
+ *  the highlight, hoverable to emphasise. Hoisted out of the scatter so the two Lines charts get
+ *  the same key (they previously relied on colour alone, with no mapping to a config). `showState`
+ *  adds the servable/not swatches and the recommended marker — on for the scatter, off for the
+ *  line charts to keep them compact. */
+function SeriesLegend({ series, colors, hl, setHover, sticky, winner, winnerName, showState = false }: {
+  series: string[]; colors: Map<string, string>; hl: HL; setHover: (s: string | null) => void
+  sticky: string | null; winner?: string | null; winnerName?: string | null; showState?: boolean
+}) {
+  return (
+    <div className="legend">
+      {showState && <><span><i className="dot filled" /> servable</span><span><i className="dot hollow" /> not servable</span></>}
+      {series.map((s) => (
+        <button type="button" key={s} className={`lg${hl.active === s ? ' on' : ''}`} aria-pressed={sticky === s}
+          onClick={() => hl.onToggle(s)} onPointerEnter={() => setHover(s)} onPointerLeave={() => setHover(null)}>
+          <i className="sw2" style={{ background: colors.get(s) }} />{s}
+          {showState && s === winner && (
+            <em className="recmark" title={`Recommended: ${winnerName ?? s}`}>recommended</em>
+          )}
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -428,6 +497,35 @@ export function Lines({ recs, shownRecs, get, xl, yl, label, colors, showKnee = 
 function fmtList(items: string[]): string {
   if (items.length <= 1) return items[0] ?? ''
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+}
+
+/** Which config axes the search actually VARIED, derived from the runs: a dimension is "searched"
+ *  when it took more than one distinct value across the scenario's records. This removes the
+ *  ambiguity the review flagged — a reader can tell whether a knob was tried-and-lost or never
+ *  explored. Returns [] for a scenario where nothing varied (e.g. one run). */
+function axesSearched(recs: RunRecord[]): string[] {
+  const dims: { key: keyof RunRecord; label: string }[] = [
+    { key: 'tp', label: 'tensor-parallel' },
+    { key: 'dp', label: 'data-parallel' },
+    { key: 'epw', label: 'expert-parallel' },
+    { key: 'ni', label: 'instances' },
+    { key: 'mns', label: 'max-num-seqs' },
+    { key: 'mnbt', label: 'max-num-batched-tokens' },
+    { key: 'bs', label: 'block-size' },
+    { key: 'gmu', label: 'gpu-memory-utilization' },
+    { key: 'route', label: 'routing policy' },
+    { key: 'pd', label: 'prefill/decode' },
+    { key: 'mtp', label: 'speculative tokens' },
+  ]
+  const out: string[] = []
+  for (const d of dims) {
+    const vals = new Set(recs.map((r) => {
+      const v = r[d.key]
+      return v === null || v === undefined || v === '' ? null : String(v)
+    }).filter((v) => v !== null))
+    if (vals.size > 1) out.push(d.label)
+  }
+  return out
 }
 
 /** Scatter: the throughput/interactivity trade-off — name the best fleet point that still holds
@@ -556,9 +654,17 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
     color: colors.get(r.series) ?? PALETTE[0],
     series: r.series,
     id: r.id,
+    // order + cfg let the scatter connect a configuration's points into a load-ordered trajectory
+    // (same config identity the Lines charts group by: series + variant).
+    order: finite(r.conc) ? (r.conc as number) : undefined,
+    cfg: `${r.series}\u0000${r.variant ?? ''}`,
     title: `${r.series}${r.variant ? ` (${r.variant})` : ''} · conc ${r.conc ?? dash} · ${fnum(r.cl)} tok/s · ${fnum(r.pu)} tok/s/user · ${r.ok ? 'servable' : r.status} — click for the deployment`,
   }))
   const hidden = shown.length - pts.length
+  // Whether ANY run in the scenario recorded a command — drives whether the Reproduce panel shows
+  // at all (see PointDetail). Checked over the full recs, not the filtered view, so a filter that
+  // happens to hide the command-bearing runs does not make the panel vanish.
+  const scenarioHasCmd = recs.some((r) => !!r.cmd)
   // Resolve against the FILTERED set: if a filter or brush removes the inspected run, the panel
   // closes with it rather than describing a point no longer on the chart.
   const pickedRec = picked === null ? null : shown.find((r) => r.id === picked) ?? null
@@ -583,20 +689,11 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
             onPick={setPicked} picked={picked} />
           <p className="vc-k"><b>How to read it.</b> Each point is one run: x is what the whole fleet delivers, y is what one
             caller feels. Up and to the right is better for everyone; filled points hold the interactivity floor, hollow
-            ones break it.</p>
+            ones break it. A faint line connects a configuration's runs in load order, so you can trace where adding
+            sessions takes it.</p>
           {explainScatter(shown) && <p className="vc-x">{explainScatter(shown)}</p>}
-          <div className="legend">
-            <span><i className="dot filled" /> servable</span><span><i className="dot hollow" /> not servable</span>
-            {series.map((s) => (
-              <button type="button" key={s} className={`lg${active === s ? ' on' : ''}`} aria-pressed={sticky === s}
-                onClick={() => hl.onToggle(s)} onPointerEnter={() => setHover(s)} onPointerLeave={() => setHover(null)}>
-                <i className="sw2" style={{ background: colors.get(s) }} />{s}
-                {s === winner && (
-                  <em className="recmark" title={`Recommended: ${winnerName ?? s}`}>recommended</em>
-                )}
-              </button>
-            ))}
-          </div>
+          <SeriesLegend series={series} colors={colors} hl={hl} setHover={setHover} sticky={sticky}
+            winner={winner} winnerName={winnerName} showState />
           {active !== null && (
             <div className="hl-bar" role="status">
               <span>Highlighting <b className="mono">{active}</b>{sticky === null && ' (hover)'} — emphasis only, filters unchanged.</span>
@@ -615,6 +712,7 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
             adding sessions has not yet slowed anyone down. The violet line marks that configuration's knee, the first load
             that breaks the floor.</p>
           {explainPerUser(shown, series) && <p className="vc-x">{explainPerUser(shown, series)}</p>}
+          <SeriesLegend series={series} colors={colors} hl={hl} setHover={setHover} sticky={sticky} />
         </figure>
         <figure className="vc">
           <div className="vc-h"><h4 className="vc-t">Inter-token latency vs load</h4><span className="vc-r">latency</span></div>
@@ -625,6 +723,7 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
             the cliff above. Lower is better, and the floor is a ceiling on this number, so a line crossing its knee is what
             makes the per-user rate fall.</p>
           {explainItl(shown) && <p className="vc-x">{explainItl(shown)}</p>}
+          <SeriesLegend series={series} colors={colors} hl={hl} setHover={setHover} sticky={sticky} />
         </figure>
       </div>
 
@@ -632,7 +731,8 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
           one column of a 3-up grid it was ~970px tall with the command wrapping every few words.
           Full width keeps the four sections side by side. It shows the clicked (pinned) run, or
           failing that previews the operating point of whatever series the cursor is on. */}
-      {panelRec && <PointDetail r={panelRec} pinned={panelRec === pickedRec} onClose={() => setPicked(null)} />}
+      {panelRec && <PointDetail r={panelRec} pinned={panelRec === pickedRec}
+        scenarioHasCmd={scenarioHasCmd} onClose={() => setPicked(null)} />}
 
       <div className="op-sec">
         <h4 className="op-h">What to run</h4>
@@ -707,6 +807,9 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
       <div className="specchips">
         <span className="spec">{s.hardware}</span><span className="spec">{s.gpu_budget} GPUs</span>
         <span className="spec">{s.workload}</span><span className="spec">{s.isl_osl}</span>
+        {/* The interactivity floor is the premise of every servable/not call below, so state it
+            here with the other constraints rather than only in the dek far down the briefing. */}
+        {s.floor && <span className="spec floor" title="Interactivity floor: a run is servable only if it holds this.">floor: {s.floor}</span>}
         <a className="fullreport" href={reportHref(s.run_id)} target="_blank" rel="noreferrer">Open full report ↗</a>
       </div>
       {s.synthetic && <div className="warnnote">Mock scenario: synthetic placeholder data, not a real simulation run.</div>}
@@ -749,10 +852,25 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
         <p className="dek"><b>Floor held:</b> <span className="mono">{s.floor}</span>{s.headroom != null && <> (headroom <span className="num">{fnum(s.headroom, 2)}</span>)</>}.{' '}
           <span className="num">{s.n_servable}</span> of <span className="num">{s.n_runs}</span> simulated runs are servable.
           {s.finalists.length > runnersUp.length + 1 && <> All <span className="num">{s.finalists.length}</span> finalists are in the run table below.</>}</p>
+        {/* State the method so the ranking is legible: a reader should know WHY these are the
+            finalists and how the order was chosen. */}
+        <p className="dek method"><b>How these were chosen:</b> every candidate topology that held
+          the floor at some load becomes a finalist, recorded at its usable operating point
+          (headroom × the highest servable load). Finalists — and the runners-up above — are ranked
+          by tok/s per GPU, the search objective; the recommendation is the top of that ranking.</p>
       </section>
 
       <section aria-label="Pareto explorer">
         <div className="seclabel2">Pareto explorer</div>
+        {/* Axes searched: which config dimensions actually varied across the runs. Removes the
+            ambiguity of whether a knob was tried-and-lost vs never explored (review #4). */}
+        {(() => {
+          const axes = axesSearched(recs)
+          return axes.length > 0 ? (
+            <p className="axes-searched"><b>Axes searched:</b> {fmtList(axes)} (over a concurrency ramp).
+              Any knob not listed was held at its default, not explored.</p>
+          ) : null
+        })()}
         <Explorer recs={recs} runId={s.run_id} winner={w.label} winnerName={w.name ?? w.label} />
       </section>
     </div>

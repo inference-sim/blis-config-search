@@ -68,6 +68,9 @@ h2.viewhead{margin:0 0 6px;font-size:22px;font-weight:600;letter-spacing:-0.01em
 .ver{display:inline-block;font-size:9.5px;font-family:var(--font-mono);padding:1px 5px;border-radius:3px;background:var(--accent-soft);color:var(--accent-ink);border:1px solid var(--accent);margin-left:6px}
 .specchips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 10px}
 .spec{font-family:var(--font-mono);font-size:11px;padding:1px 7px;border:1px solid var(--line-strong);border-radius:3px;color:var(--muted);background:var(--panel)}
+/* the floor chip is a constraint, not a spec — tint it with the accent so it reads as the
+   premise for every servable/not call on the page */
+.spec.floor{color:var(--accent-ink,var(--accent));border-color:var(--accent);background:var(--accent-soft)}
 .fullreport{font-size:12.5px;margin-left:6px}
 
 /* ---- controls ---- */
@@ -172,6 +175,11 @@ dl.metrics dd,.stats dd{margin:0;font-family:var(--font-mono);font-variant-numer
 
 /* ---- scenario detail ---- */
 .briefing{margin-top:14px}
+/* the "how these were chosen" method line: secondary to the floor-held dek above it */
+.dek.method{font-size:12.5px;margin-top:-10px;line-height:1.5}
+/* "axes searched" line under the Pareto-explorer heading */
+.axes-searched{font-size:12.5px;color:var(--muted);margin:0 0 12px;max-width:80ch;line-height:1.5}
+.axes-searched b{color:var(--ink)}
 /* Row 1: the recommended config, prominent, teal-accented */
 .reccard{background:var(--panel);border:1px solid var(--accent);border-top:3px solid var(--accent);border-radius:8px;padding:14px 20px 16px}
 .recrank{font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent-ink)}
@@ -287,7 +295,9 @@ svg.hist-svg{width:100%;height:auto;display:block;touch-action:pan-y;cursor:cros
 /* ---- series highlight ---- */
 svg.chart .hl-target{cursor:pointer;outline:none}
 svg.chart .hl-target:focus-visible .pt{stroke:var(--accent);stroke-width:2.5}
-svg.chart .pt,svg.chart .ln,svg.chart .knee{transition:opacity .15s,stroke .15s}
+svg.chart .pt,svg.chart .ln,svg.chart .knee,svg.chart .traj{transition:opacity .15s,stroke .15s}
+/* per-config trajectory in the scatter: faint connector, non-interactive (points own the hits) */
+svg.chart .traj{pointer-events:none}
 /* the point whose deployment the panel below is describing */
 svg.chart .pt.picked{stroke:var(--ink);stroke-width:2.6}
 
@@ -309,11 +319,13 @@ border:1px dashed var(--line-strong);border-radius:6px;padding:11px 13px;line-he
 .op-fl i{color:var(--muted);font-style:normal}
 .op-table td.hero .num{font-size:13px;font-weight:600}
 
-/* small "?" help icon after a header term: carries the glossary tooltip on hover/focus */
-th .hicon{display:inline-flex;align-items:center;justify-content:center;cursor:help;
+/* header term + "?" icon: the whole label is the hover target and carries the title tooltip,
+   so the affordance is the full column name rather than a 12px dot */
+th .hcol{cursor:help;display:inline-flex;align-items:center;gap:0}
+th .hicon{display:inline-flex;align-items:center;justify-content:center;
 margin-left:4px;width:12px;height:12px;border-radius:50%;border:1px solid var(--muted);
-color:var(--muted);font-size:8.5px;font-weight:700;line-height:1;vertical-align:middle}
-th .hicon:hover{border-color:var(--accent);color:var(--accent)}
+color:var(--muted);font-size:8.5px;font-weight:700;line-height:1}
+th .hcol:hover .hicon{border-color:var(--accent);color:var(--accent)}
 
 /* ---- clicked-point deployment panel (inline, under the chart) ---- */
 .ptd{margin-top:10px;border:1px solid var(--line-strong);border-radius:6px;

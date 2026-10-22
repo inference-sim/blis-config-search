@@ -250,10 +250,30 @@ describe('click a point for its deployment', () => {
     expect(screen.queryByTestId('pt-detail')).toBeNull()
   })
 
-  it('says so plainly when the command was not recorded', () => {
+  it('shows the Reproduce note on a cmd-less run when others in the scenario have one', () => {
+    // a per-run gap: some runs recorded cmd, this one did not. The panel shows (scenario HAS cmds)
+    // and the clicked cmd-less run carries the honest note.
+    render(<ScenarioDetail runId="a" scenarios={[scen([
+      rec({ id: 'has', conc: 128, cmd: '/p/blis run --concurrency 128' }),
+      rec({ id: 'missing', conc: 512, cmd: null }),
+    ])]} />)
+    // click the cmd-less run via its operating-table row (deterministic, unlike point order)
+    const row = [...screen.getByTestId('operating-table').querySelectorAll('tbody tr')]
+      .find((tr) => tr.textContent?.includes('512')) as Element
+    fireEvent.click(row)
+    const panel = screen.getByTestId('pt-detail')
+    expect(panel.textContent).toMatch(/reproduce this run/i)
+    expect(panel.textContent).toMatch(/not recorded/i)
+  })
+
+  it('hides the Reproduce panel entirely when NO run in the scenario has a command', () => {
+    // a scenario-wide data gap (the committed glm fixture): showing "not recorded" on every point
+    // would undermine the report, so the panel is suppressed rather than shown empty.
     render(<ScenarioDetail runId="a" scenarios={[scen([rec({ cmd: null })])]} />)
     clickFirstPoint()
-    expect(screen.getByTestId('pt-detail').textContent).toMatch(/not recorded/i)
+    const panel = screen.getByTestId('pt-detail')
+    expect(panel.textContent).not.toMatch(/reproduce this run/i)
+    expect(panel.textContent).not.toMatch(/not recorded/i)
   })
 
   it('opens the panel from a point on a line chart too', () => {
@@ -433,5 +453,61 @@ describe('ScenarioDetail', () => {
     render(<ScenarioDetail runId="a" scenarios={S1} />)
     expect(screen.getByText(/Only one point/)).toBeTruthy()
     expect(document.body.innerHTML).not.toContain('NaN')
+  })
+
+  const twoSeries = (): RunRecord[] => {
+    const base = (over: Partial<RunRecord>): RunRecord => ({
+      id: '', src: '', conc: 128, tp: 4, dp: 2, ni: 64, gpus: 512, series: 'A', variant: '',
+      route: '', pd: '', mtp: 0, mnbt: null, mns: null, pu: 80, cl: 1000, itl: 10, ttft: 100,
+      hit: null, p95: null, ok: true, status: 'complete', viol: [], tpg: 50, ...over,
+    })
+    return [
+      base({ id: 'a1', series: 'A', conc: 128 }), base({ id: 'a2', series: 'A', conc: 256, pu: 60 }),
+      base({ id: 'b1', series: 'B', conc: 128, pu: 70 }), base({ id: 'b2', series: 'B', conc: 256, pu: 55 }),
+    ]
+  }
+
+  it('#8 renders a series legend under every chart, not just the scatter', () => {
+    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, twoSeries())]} />)
+    // three charts (scatter + 2 line charts) => three legends, each listing both series
+    const legends = document.querySelectorAll('.legend')
+    expect(legends.length).toBe(3)
+    for (const lg of legends) {
+      expect([...lg.querySelectorAll('.lg')].map((b) => b.textContent)).toEqual(
+        expect.arrayContaining([expect.stringContaining('A'), expect.stringContaining('B')]))
+    }
+  })
+
+  it('#3 shows the interactivity floor as a spec-chip in the header', () => {
+    const s = { ...mk('a', 'm1', 'H100', 'chatbot', 16, false, twoSeries()), floor: '50 tok/s/user' }
+    render(<ScenarioDetail runId="a" scenarios={[s]} />)
+    const chip = document.querySelector('.specchips .spec.floor')
+    expect(chip?.textContent).toContain('50 tok/s/user')
+  })
+
+  it('#5 states how finalists were chosen in the briefing', () => {
+    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, twoSeries())]} />)
+    expect(screen.getByText(/how these were chosen/i)).toBeTruthy()
+    expect(document.querySelector('.dek.method')?.textContent).toMatch(/tok\/s per GPU/i)
+  })
+
+  it('#9 gives header terms (incl. series/configuration) a help tooltip', () => {
+    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, twoSeries())]} />)
+    const labels = [...document.querySelectorAll('th .hcol')].map((e) => e.getAttribute('aria-label') ?? '')
+    expect(labels.some((l) => l.startsWith('series:'))).toBe(true)
+    expect(labels.some((l) => l.startsWith('configuration:'))).toBe(true)
+    // every hcol carries a native title tooltip too
+    expect([...document.querySelectorAll('th .hcol')].every((e) => (e.getAttribute('title') ?? '').length > 0)).toBe(true)
+  })
+
+  it('#4 lists only the axes that actually varied across runs', () => {
+    // tp is constant (4) across both series; series A vs B differ by dp (2 vs 4) and the ramp
+    // varies conc. So "data-parallel" is a searched axis; "tensor-parallel" is not.
+    const recs = twoSeries().map((r) => r.series === 'B' ? { ...r, dp: 4 } : r)
+    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, recs)]} />)
+    const line = document.querySelector('.axes-searched')?.textContent ?? ''
+    expect(line).toMatch(/axes searched/i)
+    expect(line).toContain('data-parallel')
+    expect(line).not.toContain('tensor-parallel')
   })
 })

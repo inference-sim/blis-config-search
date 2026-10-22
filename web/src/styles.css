@@ -325,13 +325,20 @@ border:1px dashed var(--line-strong);border-radius:6px;padding:11px 13px;line-he
 .op-fl i{color:var(--muted);font-style:normal}
 .op-table td.hero .num{font-size:13px;font-weight:600}
 
-/* header term + "?" icon: the whole label is the hover target and carries the title tooltip,
-   so the affordance is the full column name rather than a 12px dot */
-th .hcol{cursor:help;display:inline-flex;align-items:center;gap:0}
+/* header term + "?" icon: the whole label opens a real hover/focus tooltip (.hcol-pop), so the
+   round "?" is an honest affordance rather than a dead native title. */
+th .hcol{cursor:help;display:inline-flex;align-items:center;gap:0;outline:none}
+th .hcol:focus-visible .hicon{border-color:var(--accent);color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
 th .hicon{display:inline-flex;align-items:center;justify-content:center;
 margin-left:4px;width:12px;height:12px;border-radius:50%;border:1px solid var(--muted);
 color:var(--muted);font-size:8.5px;font-weight:700;line-height:1}
 th .hcol:hover .hicon{border-color:var(--accent);color:var(--accent)}
+/* the tooltip bubble: portaled to <body> and position:fixed so the tables' overflow can't clip
+   it; a normal-weight, readable description rather than a terse hint */
+.hcol-pop{position:fixed;z-index:50;max-width:280px;padding:7px 10px;border-radius:6px;
+background:var(--ink);color:var(--paper);font-family:var(--font-sans);font-size:11.5px;
+font-weight:400;line-height:1.45;letter-spacing:0;text-transform:none;white-space:normal;
+box-shadow:0 4px 14px rgba(0,0,0,.22);pointer-events:none}
 
 /* ---- clicked-point deployment panel (inline, under the chart) ---- */
 .ptd{margin-top:10px;border:1px solid var(--line-strong);border-radius:6px;
@@ -370,11 +377,9 @@ white-space:pre-wrap;word-break:break-all;color:var(--ink)}
 .recmark{font-style:normal;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);border:1px solid var(--accent);border-radius:2px;padding:0 3px;margin-left:5px}
 .hl-bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:11px;color:var(--muted)}
 .hl-clear{font:inherit;font-size:11px;color:var(--accent);background:none;border:1px solid var(--accent);border-radius:3px;padding:1px 7px;cursor:pointer}
-.hl-row{cursor:pointer}
-.hl-row:hover td,.hl-row.hl td{background:rgba(31,110,92,.08)}
-/* a series emphasised on a chart fades the table rows that are NOT that series, in both
-   tables — same convention as the chart marks dropping to grey/low-opacity context */
-.op-row,.hl-row{transition:opacity .15s}
-.op-row.dim,.hl-row.dim{opacity:.32}
-.op-row.dim:hover,.hl-row.dim:hover{opacity:1}
-@media (prefers-reduced-motion:reduce){svg.chart .pt,svg.chart .ln,svg.chart .knee,.op-row,.hl-row{transition:none}}
+/* a series emphasised on a chart fades the table rows that are NOT that series — same convention
+   as the chart marks dropping to grey/low-opacity context. Both bottom tables use .op-row now. */
+.op-row{transition:opacity .15s}
+.op-row.dim{opacity:.32}
+.op-row.dim:hover{opacity:1}
+@media (prefers-reduced-motion:reduce){svg.chart .pt,svg.chart .ln,svg.chart .knee,.op-row{transition:none}}

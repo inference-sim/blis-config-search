@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 import type { RunRecord, Scenario } from '../types'
 import { reportHref } from '../load'
 import { EMPTY_SEL, dash, emphasis, finite, fnum, operatingPoints, resolveHighlight, runFlags, selectRecords, sortRows, toggleHighlight, useSort, type Selection, type SortState } from '../lib'
@@ -222,15 +223,39 @@ const COL_HELP: Record<string, string> = {
   'tok/s/user': 'Output tokens per second a single session sees — the interactivity each caller feels.',
   status: 'Whether the run held the interactivity floor, or which constraint it broke.',
 }
-/** A header term with its glossary tooltip. The whole label (term + the "?" icon) is the hover
- *  target and carries the native `title`, not just the 12px icon — a tooltip on the icon alone was
- *  an unreliably small target. */
+/** A header term with its glossary tooltip. The whole label (term + the "?" icon) opens a real
+ *  hover/focus tooltip that shows the term's description. It is portaled to <body> and fixed-
+ *  positioned so the surrounding tables' `overflow:auto`/`hidden` can't clip it (the reason the
+ *  native `title` felt dead), and it opens on keyboard focus too, not hover alone. */
 function Hcol({ term }: { term: string }) {
   const help = COL_HELP[term]
+  const ref = useRef<HTMLSpanElement>(null)
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  // Position the bubble under the label each time it opens, from the label's viewport rect.
+  useLayoutEffect(() => {
+    if (!open || !ref.current) return
+    const r = ref.current.getBoundingClientRect()
+    setPos({ left: r.left, top: r.bottom + 6 })
+  }, [open])
   if (!help) return <>{term}</>
   return (
-    <span className="hcol" title={help} aria-label={`${term}: ${help}`}>
+    <span
+      ref={ref}
+      className="hcol"
+      tabIndex={0}
+      role="note"
+      aria-label={`${term}: ${help}`}
+      onPointerEnter={() => setOpen(true)}
+      onPointerLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={() => setOpen(false)}
+    >
       {term}<span className="hicon" aria-hidden="true">?</span>
+      {open && pos && createPortal(
+        <span className="hcol-pop" role="tooltip" style={{ left: pos.left, top: pos.top }}>{help}</span>,
+        document.body,
+      )}
     </span>
   )
 }
@@ -250,6 +275,25 @@ function SortTh({ term, sortKey, sort, onToggle, num = false }: {
         <span className="arrow">{on ? (sort!.dir === 1 ? '▲' : '▼') : ''}</span>
       </button>
     </th>
+  )
+}
+
+/** The configuration cell shared by both tables: topology name, its knob delta, and the deploy
+ *  flags as chips. Keeping one renderer means the "What to run" table and the full run log read
+ *  identically (the richer operating-table format the review preferred). */
+function ConfigCell({ r }: { r: RunRecord }) {
+  return (
+    <td>
+      <div className="op-name mono">{r.series}</div>
+      {r.variant ? <div className="op-var">{r.variant}</div> : null}
+      <div className="op-flags">
+        {runFlags(r).map((f) => (
+          <span className="op-fl" key={f.flag}>
+            <i>{f.flag}</i>{f.value ? ` ${f.value}` : ''}
+          </span>
+        ))}
+      </div>
+    </td>
   )
 }
 
@@ -311,17 +355,7 @@ export function OperatingTable({ recs, onPick, picked = null, active = null }: {
               onClick={onPick ? () => onPick(r.id) : undefined}
               title={onPick ? 'Show the full deployment for this run' : undefined}>
               <td className="num hero"><span className="num">{fnum(r.conc, 0)}</span></td>
-              <td>
-                <div className="op-name mono">{r.series}</div>
-                {r.variant ? <div className="op-var">{r.variant}</div> : null}
-                <div className="op-flags">
-                  {runFlags(r).map((f) => (
-                    <span className="op-fl" key={f.flag}>
-                      <i>{f.flag}</i>{f.value ? ` ${f.value}` : ''}
-                    </span>
-                  ))}
-                </div>
-              </td>
+              <ConfigCell r={r} />
               <td className="num"><span className="num">{fnum(r.pu)}</span></td>
               <td className="num"><span className="num">{fnum(r.cl, 0)}</span></td>
               <td className="num"><span className="num">{fnum(r.tpg)}</span></td>
@@ -715,15 +749,16 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
   const panelRec = hoverRec && (!pickedRec || hoverRec.series !== pickedRec.series)
     ? hoverRec
     : pickedRec ?? hoverRec
-  // Column → sortable value for the full per-run log. `status` sorts servable-first then by the
-  // violation text, so like failures group together.
+  // Column → sortable value for the full run log. Same columns as the operating table (shared
+  // format); `status` sorts servable-first ('' ranks before any violation text) so like failures
+  // group together.
   const runLogGet = (r: RunRecord, k: string): string | number | null | undefined => {
     switch (k) {
-      case 'series': return r.series
-      case 'conc': return r.conc
-      case 'GPUs': return r.gpus
-      case 'cluster tok/s': return r.cl
-      case 'tok/s/user': return r.pu
+      case 'sessions': return r.conc
+      case 'configuration': return `${r.series}${r.variant ? ` ${r.variant}` : ''}`
+      case 'tok/s per user': return r.pu
+      case 'tok/s fleet': return r.cl
+      case 'tok/s GPU': return r.tpg
       case 'ITL ms': return r.itl
       case 'TTFT ms': return r.ttft
       case 'status': return r.ok ? '' : r.viol.length ? r.viol.join(', ') : r.status
@@ -799,15 +834,22 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
         <OperatingTable recs={shown} onPick={setPicked} picked={picked} active={active} />
       </div>
 
+      <div className="op-sec">
+        <h4 className="op-h">All runs</h4>
+        <p className="op-s">
+          Every run in the sweep — including the ones that broke the floor, with the reason in the
+          status column. Same format as above; click a row for the full deployment.
+        </p>
+      </div>
       <div className="tscroll hscroll runtable">
-        <table className="readout">
+        <table className="readout op-table" data-testid="run-log">
           <thead>
             <tr className="col">
-              <SortTh term="series" sortKey="series" sort={runSort} onToggle={toggleRunSort} />
-              <SortTh term="conc" sortKey="conc" sort={runSort} onToggle={toggleRunSort} num />
-              <SortTh term="GPUs" sortKey="GPUs" sort={runSort} onToggle={toggleRunSort} num />
-              <SortTh term="cluster tok/s" sortKey="cluster tok/s" sort={runSort} onToggle={toggleRunSort} num />
-              <SortTh term="tok/s/user" sortKey="tok/s/user" sort={runSort} onToggle={toggleRunSort} num />
+              <SortTh term="sessions" sortKey="sessions" sort={runSort} onToggle={toggleRunSort} />
+              <SortTh term="configuration" sortKey="configuration" sort={runSort} onToggle={toggleRunSort} />
+              <SortTh term="tok/s per user" sortKey="tok/s per user" sort={runSort} onToggle={toggleRunSort} num />
+              <SortTh term="tok/s fleet" sortKey="tok/s fleet" sort={runSort} onToggle={toggleRunSort} num />
+              <SortTh term="tok/s GPU" sortKey="tok/s GPU" sort={runSort} onToggle={toggleRunSort} num />
               <SortTh term="ITL ms" sortKey="ITL ms" sort={runSort} onToggle={toggleRunSort} num />
               <SortTh term="TTFT ms" sortKey="TTFT ms" sort={runSort} onToggle={toggleRunSort} num />
               <SortTh term="status" sortKey="status" sort={runSort} onToggle={toggleRunSort} />
@@ -815,13 +857,14 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
           </thead>
           <tbody>
             {sortRows(shown, runSort, runLogGet).map((r) => (
-              <tr key={r.id} className={`hl-row${r.ok ? '' : ' bad'}${active === r.series ? ' hl' : ''}${active !== null && r.series !== active ? ' dim' : ''}`}
-                onPointerEnter={() => setHover(r.series)} onPointerLeave={() => setHover(null)} onClick={() => hl.onToggle(r.series)}>
-                <td className="mono">{r.series}</td>
-                <td className="num"><span className="num">{fnum(r.conc, 0)}</span></td>
-                <td className="num"><span className="num">{fnum(r.gpus, 0)}</span></td>
-                <td className="num"><span className="num">{fnum(r.cl)}</span></td>
+              <tr key={r.id} className={`op-row${r.ok ? '' : ' bad'}${r.id === picked ? ' hl' : ''}${active !== null && r.series !== active ? ' dim' : ''}`}
+                onPointerEnter={() => setHover(r.series)} onPointerLeave={() => setHover(null)}
+                onClick={() => setPicked(r.id)} title="Show the full deployment for this run">
+                <td className="num hero"><span className="num">{fnum(r.conc, 0)}</span></td>
+                <ConfigCell r={r} />
                 <td className="num"><span className="num">{fnum(r.pu)}</span></td>
+                <td className="num"><span className="num">{fnum(r.cl, 0)}</span></td>
+                <td className="num"><span className="num">{fnum(r.tpg)}</span></td>
                 <td className="num"><span className="num">{fnum(r.itl, 2)}</span></td>
                 <td className="num"><span className="num">{fnum(r.ttft, 0)}</span></td>
                 <td>{r.ok ? 'servable' : r.viol.length ? r.viol.join(', ') : r.status}</td>

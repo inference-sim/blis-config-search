@@ -512,31 +512,54 @@ describe('ScenarioDetail', () => {
     expect(document.querySelector('.dek.method')?.textContent).toMatch(/tok\/s per GPU/i)
   })
 
-  it('#9 gives header terms (incl. series/configuration) a help tooltip', () => {
+  it('#9 header terms open a hover/focus tooltip showing the description', () => {
     render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, twoSeries())]} />)
-    const labels = [...document.querySelectorAll('th .hcol')].map((e) => e.getAttribute('aria-label') ?? '')
-    expect(labels.some((l) => l.startsWith('series:'))).toBe(true)
-    expect(labels.some((l) => l.startsWith('configuration:'))).toBe(true)
-    // every hcol carries a native title tooltip too
-    expect([...document.querySelectorAll('th .hcol')].every((e) => (e.getAttribute('title') ?? '').length > 0)).toBe(true)
+    const labels = [...document.querySelectorAll('th .hcol')]
+    // every column with help is reachable (incl. series/configuration via their aria-label)
+    const aria = labels.map((e) => e.getAttribute('aria-label') ?? '')
+    expect(aria.some((l) => l.startsWith('configuration:'))).toBe(true)
+    // no dead native title — the help is a real tooltip, not a hover-only attribute
+    expect(labels.every((e) => e.getAttribute('title') === null)).toBe(true)
+    // hovering a header renders a tooltip bubble carrying that term's description
+    const fleet = labels.find((e) => (e.getAttribute('aria-label') ?? '').startsWith('tok/s fleet:')) as Element
+    expect(document.querySelector('.hcol-pop')).toBeNull()
+    fireEvent.pointerEnter(fleet)
+    const pop = document.querySelector('.hcol-pop')
+    expect(pop?.textContent).toMatch(/serving capacity/i)
+    fireEvent.pointerLeave(fleet)
+    expect(document.querySelector('.hcol-pop')).toBeNull()
   })
 
   it('makes the full run-log table sortable by any column', () => {
     const recs = twoSeries()  // series A (pu 80/60) and B (pu 70/55), conc 128/256
     render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, recs)]} />)
-    // the run log is the .runtable table (not the operating-table)
-    const tbl = document.querySelector('.runtable table') as Element
-    const firstCellEach = () => [...tbl.querySelectorAll('tbody tr')].map((tr) => tr.querySelector('td')?.textContent)
-    // sort by series ascending: all A rows before B rows
-    const seriesBtn = [...tbl.querySelectorAll('thead .sortbtn')].find((b) => b.textContent?.includes('series')) as Element
-    fireEvent.click(seriesBtn)
-    const col = firstCellEach()
-    expect(col).toEqual([...col].sort())  // ascending by series name
-    // tok/s/user descending puts the highest per-user run first (A @ conc128, pu 80)
-    const puBtn = [...tbl.querySelectorAll('thead .sortbtn')].find((b) => b.textContent?.includes('tok/s/user')) as Element
+    const tbl = screen.getByTestId('run-log')
+    // configuration column (2nd cell) sorts by series+variant name
+    const cfgText = () => [...tbl.querySelectorAll('tbody tr')].map((tr) => tr.querySelectorAll('td')[1].textContent ?? '')
+    const cfgBtn = [...tbl.querySelectorAll('thead .sortbtn')].find((b) => b.textContent?.includes('configuration')) as Element
+    fireEvent.click(cfgBtn)
+    const col = cfgText()
+    expect(col).toEqual([...col].sort())  // ascending by configuration name
+    // tok/s per user descending puts the highest per-user run first (A @ conc128, pu 80); per-user
+    // is the 3rd cell in the shared format (sessions, configuration, tok/s per user, ...)
+    const puBtn = [...tbl.querySelectorAll('thead .sortbtn')].find((b) => (b.getAttribute('aria-label') ?? b.textContent ?? '').includes('tok/s per user') || b.textContent?.includes('tok/s per user')) as Element
     fireEvent.click(puBtn); fireEvent.click(puBtn)
-    const puCells = [...tbl.querySelectorAll('tbody tr')].map((tr) => Number(tr.querySelectorAll('td')[4].textContent))
+    const puCells = [...tbl.querySelectorAll('tbody tr')].map((tr) => Number(tr.querySelectorAll('td')[2].textContent))
     expect(puCells[0]).toBe(Math.max(...puCells))
+  })
+
+  it('the run log uses the same rich format as the operating table (config cell + all runs)', () => {
+    const recs = [
+      ...twoSeries(),
+      // a failed run must still appear in the run log, with its violation in the status column
+      { ...twoSeries()[0], id: 'bad', series: 'C', conc: 512, ok: false, status: 'over', viol: ['itl_p99_ms 45 > 20'] },
+    ]
+    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, recs)]} />)
+    const tbl = screen.getByTestId('run-log')
+    // rich format: the config cell renders deploy flags, not a bare series string
+    expect(tbl.querySelector('tbody .op-flags')).toBeTruthy()
+    // the failed run is listed with its reason
+    expect(tbl.textContent).toContain('itl_p99_ms 45 > 20')
   })
 
   it('#4 lists only the axes that actually varied across runs', () => {

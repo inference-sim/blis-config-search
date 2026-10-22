@@ -234,7 +234,7 @@ describe('click a point for its deployment', () => {
     expect(screen.getByText(/no per-run records are available/i)).toBeTruthy()
   })
 
-  it('after clicking a point, hovering a different line still updates the box', () => {
+  it('clicking a point pins + highlights its config; a pinned selection is not hijacked by hover', () => {
     const recs = [
       rec({ id: 'X', series: '64x TP8 + EP', variant: '', tpg: 23 }),
       rec({ id: 'Y', series: '64x TP4xDP2 + EP', variant: 'least-loaded routing', tpg: 67 }),
@@ -244,12 +244,33 @@ describe('click a point for its deployment', () => {
       .find((s) => s.querySelectorAll('circle.pt').length > 0) as Element
     const grp = (series: string) => [...scatter.querySelectorAll('[data-series]')]
       .find((g) => g.getAttribute('data-series') === series) as Element
-    // click a point for series Y -> box pinned to Y
+    // click a point for series Y -> box pinned to Y AND the chart highlights Y (greys the rest)
     fireEvent.click(grp('64x TP4xDP2 + EP').querySelector('circle.pt') as Element)
     expect(screen.getByTestId('pt-detail').textContent).toContain('64x TP4xDP2 + EP')
-    // now hover series X's line -> box should follow the hover to X
+    expect(scatter.getAttribute('data-highlight')).toBe('64x TP4xDP2 + EP')
+    // hovering another line does NOT steal the pinned selection — it stays on Y
     fireEvent.pointerEnter(grp('64x TP8 + EP'))
-    expect(screen.getByTestId('pt-detail').textContent).toContain('64x TP8 + EP')
+    expect(scatter.getAttribute('data-highlight')).toBe('64x TP4xDP2 + EP')
+    expect(screen.getByTestId('pt-detail').textContent).toContain('64x TP4xDP2 + EP')
+  })
+
+  it('clicking the same point again unpins and clears the highlight (shows everything)', () => {
+    const recs = [
+      rec({ id: 'X', series: '64x TP8 + EP', variant: '', tpg: 23 }),
+      rec({ id: 'Y', series: '64x TP4xDP2 + EP', variant: 'least-loaded routing', tpg: 67 }),
+    ]
+    render(<ScenarioDetail runId="a" scenarios={[scen(recs)]} />)
+    const scatter = [...document.querySelectorAll('svg.chart')]
+      .find((s) => s.querySelectorAll('circle.pt').length > 0) as Element
+    const grp = (series: string) => [...scatter.querySelectorAll('[data-series]')]
+      .find((g) => g.getAttribute('data-series') === series) as Element
+    const pt = grp('64x TP4xDP2 + EP').querySelector('circle.pt') as Element
+    fireEvent.click(pt)
+    expect(scatter.getAttribute('data-highlight')).toBe('64x TP4xDP2 + EP')
+    // second click on the same point clears both the pin and the highlight
+    fireEvent.click(pt)
+    expect(scatter.getAttribute('data-highlight')).toBe('')
+    expect(screen.queryByTestId('pt-detail')).toBeNull()
   })
 
   it('opens the deployment panel for the clicked run', () => {

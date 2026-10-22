@@ -698,6 +698,17 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
     active, onHover: setHover, onClear: () => setSticky(null),
     onToggle: (s) => setSticky((cur) => toggleHighlight(resolveHighlight(cur, null, shownSeries), s)),
   }
+  // Clicking a point/row pins its deployment AND highlights that configuration (greying the rest);
+  // clicking the same one again (or closing the panel) unpins and clears the highlight, so the
+  // chart returns to showing everything. Highlight keys off the series (the legend's unit), so a
+  // click selects the whole configuration the point belongs to.
+  const pickRun = (id: string) => {
+    if (id === picked) { setPicked(null); setSticky(null); return }
+    setPicked(id)
+    const s = recs.find((r) => r.id === id)?.series ?? null
+    setSticky(s)
+  }
+  const clearPick = () => { setPicked(null); setSticky(null) }
   const regime = useMemo(() => (recs.some((r) => !r.ok && (r.viol ?? []).some((v) => /kv|preempt|memory/i.test(v))) ? 'KV-bound' : 'compute-bound'), [recs])
   // Hovering a chart line emphasises a whole series; the panel previews THAT series' operating
   // point — its most efficient servable run (max tok/s/GPU, the objective the search and the
@@ -776,7 +787,7 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
           <div className="vc-h"><h4 className="vc-t">Throughput ↔ interactivity</h4><span className="vc-r">{regime}</span></div>
           <p className="vc-s">cluster tok/s vs per-user tok/s · one point per run</p>
           <Scatter pts={pts} xl="cluster tok/s" yl="tok/s per user" label="Scatter of cluster throughput against per-user throughput" hl={hl}
-            onPick={setPicked} picked={picked} />
+            onPick={pickRun} picked={picked} />
           <p className="vc-k"><b>How to read it.</b> Each point is one run: x is what the whole fleet delivers, y is what one
             caller feels. Up and to the right is better for everyone; filled points hold the interactivity floor, hollow
             ones break it. A faint line connects a configuration's runs in load order, so you can trace where adding
@@ -797,7 +808,7 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
           <div className="vc-h"><h4 className="vc-t">Per-user rate vs load</h4><span className="vc-r">interactivity</span></div>
           <p className="vc-s">tok/s per user as concurrency climbs</p>
           <Lines recs={recs} shownRecs={shown} get={(r) => r.pu} xl="concurrency" yl="tok/s per user" label="Per-user throughput by concurrency" colors={colors} showKnee hl={hl}
-            onPick={setPicked} picked={picked} />
+            onPick={pickRun} picked={picked} />
           <p className="vc-k"><b>How to read it.</b> One line per configuration, walking the load up. Flat is good — it means
             adding sessions has not yet slowed anyone down. The violet line marks that configuration's knee, the first load
             that breaks the floor.</p>
@@ -808,7 +819,7 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
           <div className="vc-h"><h4 className="vc-t">Inter-token latency vs load</h4><span className="vc-r">latency</span></div>
           <p className="vc-s">ITL (ms) as concurrency climbs</p>
           <Lines recs={recs} shownRecs={shown} get={(r) => r.itl} xl="concurrency" yl="ITL (ms)" label="Inter-token latency by concurrency" colors={colors} showKnee hl={hl}
-            onPick={setPicked} picked={picked} />
+            onPick={pickRun} picked={picked} />
           <p className="vc-k"><b>How to read it.</b> Inter-token latency is the gap between output tokens — the mechanism behind
             the cliff above. Lower is better, and the floor is a ceiling on this number, so a line crossing its knee is what
             makes the per-user rate fall.</p>
@@ -822,7 +833,7 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
           Full width keeps the four sections side by side. It shows the clicked (pinned) run, or
           failing that previews the operating point of whatever series the cursor is on. */}
       {panelRec && <PointDetail r={panelRec} pinned={panelRec === pickedRec}
-        scenarioHasCmd={scenarioHasCmd} onClose={() => setPicked(null)} />}
+        scenarioHasCmd={scenarioHasCmd} onClose={clearPick} />}
 
       <div className="op-sec">
         <h4 className="op-h">What to run</h4>
@@ -831,7 +842,7 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
           the flags to deploy it with. Pick the load you expect, then read the flags off it —
           click a row for the full deployment.
         </p>
-        <OperatingTable recs={shown} onPick={setPicked} picked={picked} active={active} />
+        <OperatingTable recs={shown} onPick={pickRun} picked={picked} active={active} />
       </div>
 
       <div className="op-sec">
@@ -859,7 +870,7 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
             {sortRows(shown, runSort, runLogGet).map((r) => (
               <tr key={r.id} className={`op-row${r.ok ? '' : ' bad'}${r.id === picked ? ' hl' : ''}${active !== null && r.series !== active ? ' dim' : ''}`}
                 onPointerEnter={() => setHover(r.series)} onPointerLeave={() => setHover(null)}
-                onClick={() => setPicked(r.id)} title="Show the full deployment for this run">
+                onClick={() => pickRun(r.id)} title="Show the full deployment for this run">
                 <td className="num hero"><span className="num">{fnum(r.conc, 0)}</span></td>
                 <ConfigCell r={r} />
                 <td className="num"><span className="num">{fnum(r.pu)}</span></td>

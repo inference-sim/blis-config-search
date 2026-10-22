@@ -185,6 +185,41 @@ describe('click a point for its deployment', () => {
     expect(screen.queryByTestId('pt-detail')).toBeNull()
   })
 
+  it('previews a series operating point while hovering its line', () => {
+    const recs = [
+      rec({ id: 'X', series: '64x TP8 + EP', variant: '', tpg: 23 }),
+      rec({ id: 'Y', series: '64x TP4xDP2 + EP', variant: 'least-loaded routing', tpg: 67 }),
+    ]
+    render(<ScenarioDetail runId="a" scenarios={[scen(recs)]} />)
+    expect(screen.queryByTestId('pt-detail')).toBeNull()
+    // hover the group for series X on the scatter
+    const scatter = [...document.querySelectorAll('svg.chart')]
+      .find((s) => s.querySelectorAll('circle.pt').length > 0) as Element
+    const grpX = [...scatter.querySelectorAll('[data-series]')]
+      .find((g) => g.getAttribute('data-series') === '64x TP8 + EP') as Element
+    fireEvent.pointerEnter(grpX)
+    const panel = screen.getByTestId('pt-detail')
+    expect(panel.textContent).toContain('64x TP8 + EP')
+  })
+
+  it('after clicking a point, hovering a different line still updates the box', () => {
+    const recs = [
+      rec({ id: 'X', series: '64x TP8 + EP', variant: '', tpg: 23 }),
+      rec({ id: 'Y', series: '64x TP4xDP2 + EP', variant: 'least-loaded routing', tpg: 67 }),
+    ]
+    render(<ScenarioDetail runId="a" scenarios={[scen(recs)]} />)
+    const scatter = [...document.querySelectorAll('svg.chart')]
+      .find((s) => s.querySelectorAll('circle.pt').length > 0) as Element
+    const grp = (series: string) => [...scatter.querySelectorAll('[data-series]')]
+      .find((g) => g.getAttribute('data-series') === series) as Element
+    // click a point for series Y -> box pinned to Y
+    fireEvent.click(grp('64x TP4xDP2 + EP').querySelector('circle.pt') as Element)
+    expect(screen.getByTestId('pt-detail').textContent).toContain('64x TP4xDP2 + EP')
+    // now hover series X's line -> box should follow the hover to X
+    fireEvent.pointerEnter(grp('64x TP8 + EP'))
+    expect(screen.getByTestId('pt-detail').textContent).toContain('64x TP8 + EP')
+  })
+
   it('opens the deployment panel for the clicked run', () => {
     render(<ScenarioDetail runId="a" scenarios={[scen([rec()])]} />)
     clickFirstPoint()

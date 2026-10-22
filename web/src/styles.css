@@ -309,12 +309,21 @@ border:1px dashed var(--line-strong);border-radius:6px;padding:11px 13px;line-he
 .op-fl i{color:var(--muted);font-style:normal}
 .op-table td.hero .num{font-size:13px;font-weight:600}
 
+/* small "?" help icon after a header term: carries the glossary tooltip on hover/focus */
+th .hicon{display:inline-flex;align-items:center;justify-content:center;cursor:help;
+margin-left:4px;width:12px;height:12px;border-radius:50%;border:1px solid var(--muted);
+color:var(--muted);font-size:8.5px;font-weight:700;line-height:1;vertical-align:middle}
+th .hicon:hover{border-color:var(--accent);color:var(--accent)}
+
 /* ---- clicked-point deployment panel (inline, under the chart) ---- */
 .ptd{margin-top:10px;border:1px solid var(--line-strong);border-radius:6px;
 background:var(--bg);padding:11px 13px 12px}
 .ptd-h{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;
 border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:10px}
 .ptd-t{font-family:var(--font-mono);font-size:13px;font-weight:600;color:var(--ink)}
+/* hover-preview cue: the box is following the cursor, not pinned by a click */
+.ptd-peek{margin-left:8px;font-family:var(--font-sans);font-size:9.5px;font-weight:600;
+letter-spacing:.04em;text-transform:uppercase;color:var(--muted);vertical-align:middle}
 .ptd-v{font-size:11px;color:var(--accent);margin-top:2px}
 .ptd-v.dim{color:var(--muted)}
 .ptd-x{font-size:11px;color:var(--accent);background:none;border:1px solid var(--accent);
@@ -345,4 +354,9 @@ white-space:pre-wrap;word-break:break-all;color:var(--ink)}
 .hl-clear{font:inherit;font-size:11px;color:var(--accent);background:none;border:1px solid var(--accent);border-radius:3px;padding:1px 7px;cursor:pointer}
 .hl-row{cursor:pointer}
 .hl-row:hover td,.hl-row.hl td{background:rgba(31,110,92,.08)}
-@media (prefers-reduced-motion:reduce){svg.chart .pt,svg.chart .ln,svg.chart .knee{transition:none}}
+/* a series emphasised on a chart fades the table rows that are NOT that series, in both
+   tables — same convention as the chart marks dropping to grey/low-opacity context */
+.op-row,.hl-row{transition:opacity .15s}
+.op-row.dim,.hl-row.dim{opacity:.32}
+.op-row.dim:hover,.hl-row.dim:hover{opacity:1}
+@media (prefers-reduced-motion:reduce){svg.chart .pt,svg.chart .ln,svg.chart .knee,.op-row,.hl-row{transition:none}}

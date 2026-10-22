@@ -107,7 +107,7 @@ const ms = (v: number | null | undefined) =>
  * rather than reconstructed, so it cannot drift from the simulation. Sits inline under the chart
  * (the standalone report's panel does the same, so the two surfaces behave alike).
  */
-export function PointDetail({ r, onClose }: { r: RunRecord; onClose: () => void }) {
+export function PointDetail({ r, onClose, pinned = true }: { r: RunRecord; onClose: () => void; pinned?: boolean }) {
   const name = r.variant ? `${r.series} (${r.variant})` : r.series
   const box = useRef<HTMLDivElement>(null)
   // The panel renders below the chart grid, so on a laptop viewport it opens BELOW the fold —
@@ -115,17 +115,20 @@ export function PointDetail({ r, onClose }: { r: RunRecord; onClose: () => void 
   // whenever it opens or switches to another run. `nearest` scrolls the minimum needed, so a
   // panel already on screen does not jump.
   useEffect(() => {
+    // Only pull the panel into view on a deliberate click. On hover it follows the mouse across
+    // series, and auto-scrolling on each one would make the page lurch under the cursor.
+    if (!pinned) return
     // guarded: jsdom (and older engines) do not implement scrollIntoView
     box.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
-  }, [r.id])
+  }, [r.id, pinned])
   return (
     <div ref={box} className="ptd" data-testid="pt-detail" role="region" aria-label={`Deployment for ${name}`}>
       <div className="ptd-h">
         <div>
-          <div className="ptd-t">{r.series}</div>
+          <div className="ptd-t">{r.series}{!pinned && <span className="ptd-peek">operating point · click to pin</span>}</div>
           {r.variant ? <div className="ptd-v">{r.variant}</div> : <div className="ptd-v dim">all knobs at defaults</div>}
         </div>
-        <button type="button" className="ptd-x" onClick={onClose}>close</button>
+        {pinned && <button type="button" className="ptd-x" onClick={onClose}>close</button>}
       </div>
       {!r.ok && r.viol.length > 0 && (
         <p className="ptd-bad">Not servable: {r.viol.join('; ')}</p>
@@ -186,16 +189,43 @@ export function PointDetail({ r, onClose }: { r: RunRecord; onClose: () => void 
   )
 }
 
+/** One-line glossary for the throughput/latency column heads, surfaced as native `title`
+ *  tooltips (same affordance as the mock badge). Keyed by the exact header text. */
+const COL_HELP: Record<string, string> = {
+  sessions: 'Concurrent sessions — simultaneous users/requests — at this operating point.',
+  'tok/s per user': 'Output tokens per second a single session sees — the interactivity each caller feels.',
+  'tok/s fleet': 'Total output tokens per second across every instance and GPU in the deployment — the whole config’s serving capacity.',
+  'tok/s GPU': 'Fleet throughput divided by total GPUs — how efficiently each GPU is used.',
+  'ITL ms': 'Inter-token latency (p99): the gap between output tokens. Lower feels snappier.',
+  'TTFT ms': 'Time to first token (p99): how long a caller waits before the reply starts streaming.',
+  // full per-run table below uses slightly different labels for the same quantities
+  conc: 'Concurrent sessions — simultaneous users/requests — this run was swept at.',
+  GPUs: 'Total GPUs the deployment consumes (tensor × pipeline parallel × instances).',
+  'cluster tok/s': 'Total output tokens per second across the whole deployment — its serving capacity.',
+  'tok/s/user': 'Output tokens per second a single session sees — the interactivity each caller feels.',
+  status: 'Whether the run held the interactivity floor, or which constraint it broke.',
+}
+/** A header term followed by a small "?" help icon carrying its glossary tooltip. */
+function Hcol({ term }: { term: string }) {
+  const help = COL_HELP[term]
+  if (!help) return <>{term}</>
+  return (
+    <>{term}<span className="hicon" title={help} role="img" aria-label={`${term}: ${help}`}>?</span></>
+  )
+}
+
 /**
  * "What to run": one row per load, pairing the configuration you would deploy with the
  * performance it gave there — the standalone report's section 9, which reads as "pick an
  * operating point and read the flags off it". The run table below stays the full per-run log,
  * including the runs that broke the floor.
  */
-export function OperatingTable({ recs, onPick, picked = null }: {
+export function OperatingTable({ recs, onPick, picked = null, active = null }: {
   recs: RunRecord[]
   onPick?: (id: string) => void
   picked?: string | null
+  /** The emphasised series (from a chart hover/click); non-matching rows dim while it is set. */
+  active?: string | null
 }) {
   const rows = operatingPoints(recs)
   if (rows.length === 0) {
@@ -211,14 +241,14 @@ export function OperatingTable({ recs, onPick, picked = null }: {
       <table className="readout op-table" data-testid="operating-table">
         <thead>
           <tr className="col">
-            <th>sessions</th><th>configuration</th>
-            <th className="num">tok/s per user</th><th className="num">tok/s fleet</th>
-            <th className="num">tok/s GPU</th><th className="num">ITL ms</th><th className="num">TTFT ms</th>
+            <th><Hcol term="sessions" /></th><th>configuration</th>
+            <th className="num"><Hcol term="tok/s per user" /></th><th className="num"><Hcol term="tok/s fleet" /></th>
+            <th className="num"><Hcol term="tok/s GPU" /></th><th className="num"><Hcol term="ITL ms" /></th><th className="num"><Hcol term="TTFT ms" /></th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.id} className={`op-row${r.id === picked ? ' hl' : ''}`}
+            <tr key={r.id} className={`op-row${r.id === picked ? ' hl' : ''}${active !== null && r.series !== active ? ' dim' : ''}`}
               onClick={onPick ? () => onPick(r.id) : undefined}
               title={onPick ? 'Show the full deployment for this run' : undefined}>
               <td className="num hero"><span className="num">{fnum(r.conc, 0)}</span></td>
@@ -519,6 +549,24 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
   // Resolve against the FILTERED set: if a filter or brush removes the inspected run, the panel
   // closes with it rather than describing a point no longer on the chart.
   const pickedRec = picked === null ? null : shown.find((r) => r.id === picked) ?? null
+  // Hovering a chart line emphasises a whole series; the panel previews THAT series' operating
+  // point — its most efficient servable run (max tok/s/GPU, the objective the search and the
+  // "What to run" table rank on). Resolve within the series: operatingPoints(shown) keeps only
+  // the single best series per load, so a series that never wins a load would resolve to nothing
+  // and the box would stay blank for most lines.
+  const hoverRec = useMemo(() => {
+    if (active === null) return null
+    const mine = shown.filter((r) => r.series === active && r.ok && finite(r.tpg))
+    if (mine.length === 0) return null
+    return mine.reduce((a, b) => ((b.tpg as number) > (a.tpg as number) ? b : a))
+  }, [active, shown])
+  // Hover wins while the cursor is on a DIFFERENT series than the pinned run — that is the whole
+  // point of the preview: the box tracks the line under the cursor. A click still pins one exact
+  // run, so hovering that same series (e.g. resting on the clicked point) keeps showing it rather
+  // than swapping it for the series' operating point. With nothing pinned, hover is all there is.
+  const panelRec = hoverRec && (!pickedRec || hoverRec.series !== pickedRec.series)
+    ? hoverRec
+    : pickedRec ?? hoverRec
 
   return (
     <div>
@@ -578,10 +626,11 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
         </figure>
       </div>
 
-      {/* The clicked run's deployment sits BELOW the chart grid, not inside the scatter's figure:
-          nested in one column of a 3-up grid it was ~970px tall with the command wrapping every
-          few words. Full width keeps the four sections side by side. */}
-      {pickedRec && <PointDetail r={pickedRec} onClose={() => setPicked(null)} />}
+      {/* The deployment box sits BELOW the chart grid, not inside the scatter's figure: nested in
+          one column of a 3-up grid it was ~970px tall with the command wrapping every few words.
+          Full width keeps the four sections side by side. It shows the clicked (pinned) run, or
+          failing that previews the operating point of whatever series the cursor is on. */}
+      {panelRec && <PointDetail r={panelRec} pinned={panelRec === pickedRec} onClose={() => setPicked(null)} />}
 
       <div className="op-sec">
         <h4 className="op-h">What to run</h4>
@@ -590,19 +639,19 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
           the flags to deploy it with. Pick the load you expect, then read the flags off it —
           click a row for the full deployment.
         </p>
-        <OperatingTable recs={shown} onPick={setPicked} picked={picked} />
+        <OperatingTable recs={shown} onPick={setPicked} picked={picked} active={active} />
       </div>
 
       <div className="tscroll hscroll runtable">
         <table className="readout">
           <thead>
             <tr className="col">
-              {['series', 'conc', 'GPUs', 'cluster tok/s', 'tok/s/user', 'ITL ms', 'TTFT ms', 'status'].map((h) => <th key={h}>{h}</th>)}
+              {['series', 'conc', 'GPUs', 'cluster tok/s', 'tok/s/user', 'ITL ms', 'TTFT ms', 'status'].map((h) => <th key={h}><Hcol term={h} /></th>)}
             </tr>
           </thead>
           <tbody>
             {shown.map((r) => (
-              <tr key={r.id} className={`hl-row${r.ok ? '' : ' bad'}${active === r.series ? ' hl' : ''}`}
+              <tr key={r.id} className={`hl-row${r.ok ? '' : ' bad'}${active === r.series ? ' hl' : ''}${active !== null && r.series !== active ? ' dim' : ''}`}
                 onPointerEnter={() => setHover(r.series)} onPointerLeave={() => setHover(null)} onClick={() => hl.onToggle(r.series)}>
                 <td className="mono">{r.series}</td>
                 <td className="num"><span className="num">{fnum(r.conc, 0)}</span></td>

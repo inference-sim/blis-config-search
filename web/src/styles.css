@@ -123,6 +123,12 @@ thead tr.col th{padding:8px 10px;font-weight:600;font-size:11px;background:#eef1
 thead tr.col th .arrow{color:var(--accent);font-size:10px;min-width:10px}
 thead tr.col th button.sortbtn{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:4px;font:inherit;font-weight:600;color:inherit}
 thead tr.col th button.sortbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* a sortable header is clickable as a whole, so the glossary label inside it is pointer, not the
+   help-cursor it uses when standing alone; the "?" tooltip still works */
+thead tr.col th button.sortbtn .hcol{cursor:pointer}
+/* numeric sort headers sit over their right-aligned columns */
+thead tr.col th.num{text-align:right}
+thead tr.col th.num button.sortbtn{justify-content:flex-end}
 .pts-empty{padding:18px;color:var(--muted);font-size:12.5px}
 .pts-note{margin:8px 0 0;font-size:11.5px;color:var(--muted);max-width:920px;line-height:1.5}
 .runtable{margin-top:18px;max-height:420px;overflow:auto}

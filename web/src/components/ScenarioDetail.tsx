@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { RunRecord, Scenario } from '../types'
 import { reportHref } from '../load'
-import { EMPTY_SEL, dash, emphasis, finite, fnum, operatingPoints, resolveHighlight, runFlags, selectRecords, toggleHighlight, type Selection } from '../lib'
+import { EMPTY_SEL, dash, emphasis, finite, fnum, operatingPoints, resolveHighlight, runFlags, selectRecords, sortRows, toggleHighlight, useSort, type Selection, type SortState } from '../lib'
 import { Crossfilter } from './Crossfilter'
 import { MockBadge } from './Reports'
 
@@ -235,6 +235,24 @@ function Hcol({ term }: { term: string }) {
   )
 }
 
+/** A sortable column header: the glossary label wrapped in the shared `.sortbtn`, with the
+ *  ascending/descending arrow and `aria-sort` matching CatalogTable's pattern. `sortKey` is the
+ *  field this column sorts on; clicking cycles asc → desc → unsorted. */
+function SortTh({ term, sortKey, sort, onToggle, num = false }: {
+  term: string; sortKey: string; sort: SortState | null; onToggle: (k: string) => void; num?: boolean
+}) {
+  const on = sort?.key === sortKey
+  return (
+    <th className={num ? 'num' : undefined}
+      aria-sort={on ? (sort!.dir === 1 ? 'ascending' : 'descending') : 'none'}>
+      <button type="button" className="sortbtn" onClick={() => onToggle(sortKey)}>
+        <Hcol term={term} />
+        <span className="arrow">{on ? (sort!.dir === 1 ? '▲' : '▼') : ''}</span>
+      </button>
+    </th>
+  )
+}
+
 /**
  * "What to run": one row per load, pairing the configuration you would deploy with the
  * performance it gave there — the standalone report's section 9, which reads as "pick an
@@ -248,8 +266,24 @@ export function OperatingTable({ recs, onPick, picked = null, active = null }: {
   /** The emphasised series (from a chart hover/click); non-matching rows dim while it is set. */
   active?: string | null
 }) {
-  const rows = operatingPoints(recs)
-  if (rows.length === 0) {
+  // Default order is by load (operatingPoints returns it concurrency-ascending); a click on any
+  // header sorts by that column instead. `configuration` sorts on the series+variant name.
+  const { sort, toggle } = useSort()
+  const opGet = (r: RunRecord, k: string): string | number | null | undefined => {
+    switch (k) {
+      case 'sessions': return r.conc
+      case 'configuration': return `${r.series}${r.variant ? ` ${r.variant}` : ''}`
+      case 'tok/s per user': return r.pu
+      case 'tok/s fleet': return r.cl
+      case 'tok/s GPU': return r.tpg
+      case 'ITL ms': return r.itl
+      case 'TTFT ms': return r.ttft
+      default: return undefined
+    }
+  }
+  const base = operatingPoints(recs)
+  const rows = sortRows(base, sort, opGet)
+  if (base.length === 0) {
     return (
       <p className="op-none">
         No run held the interactivity floor, so there is no operating point to recommend. The run
@@ -262,9 +296,13 @@ export function OperatingTable({ recs, onPick, picked = null, active = null }: {
       <table className="readout op-table" data-testid="operating-table">
         <thead>
           <tr className="col">
-            <th><Hcol term="sessions" /></th><th><Hcol term="configuration" /></th>
-            <th className="num"><Hcol term="tok/s per user" /></th><th className="num"><Hcol term="tok/s fleet" /></th>
-            <th className="num"><Hcol term="tok/s GPU" /></th><th className="num"><Hcol term="ITL ms" /></th><th className="num"><Hcol term="TTFT ms" /></th>
+            <SortTh term="sessions" sortKey="sessions" sort={sort} onToggle={toggle} />
+            <SortTh term="configuration" sortKey="configuration" sort={sort} onToggle={toggle} />
+            <SortTh term="tok/s per user" sortKey="tok/s per user" sort={sort} onToggle={toggle} num />
+            <SortTh term="tok/s fleet" sortKey="tok/s fleet" sort={sort} onToggle={toggle} num />
+            <SortTh term="tok/s GPU" sortKey="tok/s GPU" sort={sort} onToggle={toggle} num />
+            <SortTh term="ITL ms" sortKey="ITL ms" sort={sort} onToggle={toggle} num />
+            <SortTh term="TTFT ms" sortKey="TTFT ms" sort={sort} onToggle={toggle} num />
           </tr>
         </thead>
         <tbody>
@@ -612,6 +650,8 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
   const [hover, setHover] = useState<string | null>(null)
   // The run whose deployment the inline panel is showing, by RunRecord.id.
   const [picked, setPicked] = useState<string | null>(null)
+  // Sort for the full per-run log. Unsorted = the order build_gallery emitted (series, then load).
+  const { sort: runSort, toggle: toggleRunSort } = useSort()
   const series = useMemo(() => [...new Set(recs.map((r) => r.series))].sort(), [recs])
   const colors = useMemo(() => new Map(series.map((s, i) => [s, PALETTE[i % PALETTE.length]])), [series])
   const shown = useMemo(() => selectRecords(recs, sel), [recs, sel])
@@ -675,6 +715,21 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
   const panelRec = hoverRec && (!pickedRec || hoverRec.series !== pickedRec.series)
     ? hoverRec
     : pickedRec ?? hoverRec
+  // Column → sortable value for the full per-run log. `status` sorts servable-first then by the
+  // violation text, so like failures group together.
+  const runLogGet = (r: RunRecord, k: string): string | number | null | undefined => {
+    switch (k) {
+      case 'series': return r.series
+      case 'conc': return r.conc
+      case 'GPUs': return r.gpus
+      case 'cluster tok/s': return r.cl
+      case 'tok/s/user': return r.pu
+      case 'ITL ms': return r.itl
+      case 'TTFT ms': return r.ttft
+      case 'status': return r.ok ? '' : r.viol.length ? r.viol.join(', ') : r.status
+      default: return undefined
+    }
+  }
 
   return (
     <div>
@@ -748,11 +803,18 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
         <table className="readout">
           <thead>
             <tr className="col">
-              {['series', 'conc', 'GPUs', 'cluster tok/s', 'tok/s/user', 'ITL ms', 'TTFT ms', 'status'].map((h) => <th key={h}><Hcol term={h} /></th>)}
+              <SortTh term="series" sortKey="series" sort={runSort} onToggle={toggleRunSort} />
+              <SortTh term="conc" sortKey="conc" sort={runSort} onToggle={toggleRunSort} num />
+              <SortTh term="GPUs" sortKey="GPUs" sort={runSort} onToggle={toggleRunSort} num />
+              <SortTh term="cluster tok/s" sortKey="cluster tok/s" sort={runSort} onToggle={toggleRunSort} num />
+              <SortTh term="tok/s/user" sortKey="tok/s/user" sort={runSort} onToggle={toggleRunSort} num />
+              <SortTh term="ITL ms" sortKey="ITL ms" sort={runSort} onToggle={toggleRunSort} num />
+              <SortTh term="TTFT ms" sortKey="TTFT ms" sort={runSort} onToggle={toggleRunSort} num />
+              <SortTh term="status" sortKey="status" sort={runSort} onToggle={toggleRunSort} />
             </tr>
           </thead>
           <tbody>
-            {shown.map((r) => (
+            {sortRows(shown, runSort, runLogGet).map((r) => (
               <tr key={r.id} className={`hl-row${r.ok ? '' : ' bad'}${active === r.series ? ' hl' : ''}${active !== null && r.series !== active ? ' dim' : ''}`}
                 onPointerEnter={() => setHover(r.series)} onPointerLeave={() => setHover(null)} onClick={() => hl.onToggle(r.series)}>
                 <td className="mono">{r.series}</td>

@@ -133,6 +133,27 @@ describe('what to run: operating points', () => {
     expect(tbl.textContent).toContain('least-loaded routing')
   })
 
+  it('sorts by any column when its header is clicked (default: by load)', () => {
+    render(<ScenarioDetail runId="a" scenarios={[scen([
+      rec({ id: 'lo', conc: 128, pu: 90, tpg: 67 }),
+      rec({ id: 'hi', conc: 256, pu: 40, tpg: 55 }),
+    ])]} />)
+    const tbl = screen.getByTestId('operating-table')
+    const sessions = (i: number) => tbl.querySelectorAll('tbody tr')[i].querySelector('td')?.textContent
+    // default order is by load, ascending
+    expect(sessions(0)).toBe('128')
+    // click "tok/s per user" -> ascending by per-user rate, so the conc=256 (pu 40) row leads
+    const puBtn = [...tbl.querySelectorAll('thead .sortbtn')].find((b) => b.textContent?.includes('tok/s per user')) as Element
+    fireEvent.click(puBtn)
+    expect(sessions(0)).toBe('256')
+    // click again -> descending, so the pu=90 (conc 128) row leads
+    fireEvent.click(puBtn)
+    expect(sessions(0)).toBe('128')
+    // aria-sort reflects the state
+    const th = puBtn.closest('th') as Element
+    expect(th.getAttribute('aria-sort')).toBe('descending')
+  })
+
   it('picks the best-per-GPU run at each load, matching the objective', () => {
     render(<ScenarioDetail runId="a" scenarios={[scen([
       rec({ id: 'fast-user', conc: 512, pu: 131, tpg: 23, series: '64x TP8 + EP' }),
@@ -498,6 +519,24 @@ describe('ScenarioDetail', () => {
     expect(labels.some((l) => l.startsWith('configuration:'))).toBe(true)
     // every hcol carries a native title tooltip too
     expect([...document.querySelectorAll('th .hcol')].every((e) => (e.getAttribute('title') ?? '').length > 0)).toBe(true)
+  })
+
+  it('makes the full run-log table sortable by any column', () => {
+    const recs = twoSeries()  // series A (pu 80/60) and B (pu 70/55), conc 128/256
+    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, recs)]} />)
+    // the run log is the .runtable table (not the operating-table)
+    const tbl = document.querySelector('.runtable table') as Element
+    const firstCellEach = () => [...tbl.querySelectorAll('tbody tr')].map((tr) => tr.querySelector('td')?.textContent)
+    // sort by series ascending: all A rows before B rows
+    const seriesBtn = [...tbl.querySelectorAll('thead .sortbtn')].find((b) => b.textContent?.includes('series')) as Element
+    fireEvent.click(seriesBtn)
+    const col = firstCellEach()
+    expect(col).toEqual([...col].sort())  // ascending by series name
+    // tok/s/user descending puts the highest per-user run first (A @ conc128, pu 80)
+    const puBtn = [...tbl.querySelectorAll('thead .sortbtn')].find((b) => b.textContent?.includes('tok/s/user')) as Element
+    fireEvent.click(puBtn); fireEvent.click(puBtn)
+    const puCells = [...tbl.querySelectorAll('tbody tr')].map((tr) => Number(tr.querySelectorAll('td')[4].textContent))
+    expect(puCells[0]).toBe(Math.max(...puCells))
   })
 
   it('#4 lists only the axes that actually varied across runs', () => {

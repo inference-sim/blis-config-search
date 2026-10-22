@@ -226,6 +226,41 @@ describe('click a point for its deployment', () => {
     expect(screen.getByTestId('pt-detail')).toBeTruthy()
   })
 
+  it('scrolls the panel into view when it opens off-screen', () => {
+    // The panel renders below the chart grid, so on a laptop viewport it opened ~70px BELOW the
+    // fold: the click appeared to do nothing. Opening it must bring it into view.
+    const seen: unknown[] = []
+    const orig = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = function (this: Element) { seen.push(this) }
+    try {
+      render(<ScenarioDetail runId="a" scenarios={[scen([rec({ id: 'A' })])]} />)
+      const pt = document.querySelector('svg.chart circle.pt')
+      fireEvent.click(pt as Element)
+      const panel = screen.getByTestId('pt-detail')
+      expect(seen).toContain(panel)
+    } finally {
+      Element.prototype.scrollIntoView = orig
+    }
+  })
+
+  it('every plotted chart opens the panel, not just the first', () => {
+    // "applicable to all charts": assert per-chart, since a test that clicks only one chart
+    // would pass while another stayed inert — which is exactly how the Lines charts were missed.
+    const recs = [rec({ id: 'A', conc: 128, itl: 9 }), rec({ id: 'B', conc: 256, itl: 12 })]
+    const charts = () => [...document.querySelectorAll('svg.chart')]
+      .filter((s) => s.querySelectorAll('circle.pt').length > 0)
+    const { unmount } = render(<ScenarioDetail runId="a" scenarios={[scen(recs)]} />)
+    const n = charts().length
+    expect(n).toBe(3)        // scatter + per-user-vs-load + ITL-vs-load
+    unmount()
+    for (let i = 0; i < n; i++) {
+      const v = render(<ScenarioDetail runId="a" scenarios={[scen(recs)]} />)
+      fireEvent.click(charts()[i].querySelector('circle.pt') as Element)
+      expect(screen.getByTestId('pt-detail'), `chart ${i} did not open the panel`).toBeTruthy()
+      v.unmount()
+    }
+  })
+
   it('rings the inspected point on every chart that plots it', () => {
     render(<ScenarioDetail runId="a" scenarios={[scen([
       rec({ id: 'A', conc: 128, itl: 9 }), rec({ id: 'B', conc: 256, itl: 12 }),

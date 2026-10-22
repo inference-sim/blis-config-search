@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { RunRecord, Scenario } from '../types'
 import { reportHref } from '../load'
 import { EMPTY_SEL, dash, emphasis, finite, fnum, operatingPoints, resolveHighlight, runFlags, selectRecords, toggleHighlight, type Selection } from '../lib'
@@ -109,8 +109,17 @@ const ms = (v: number | null | undefined) =>
  */
 export function PointDetail({ r, onClose }: { r: RunRecord; onClose: () => void }) {
   const name = r.variant ? `${r.series} (${r.variant})` : r.series
+  const box = useRef<HTMLDivElement>(null)
+  // The panel renders below the chart grid, so on a laptop viewport it opens BELOW the fold —
+  // measured ~70px past it, which makes a click look like it did nothing. Bring it into view
+  // whenever it opens or switches to another run. `nearest` scrolls the minimum needed, so a
+  // panel already on screen does not jump.
+  useEffect(() => {
+    // guarded: jsdom (and older engines) do not implement scrollIntoView
+    box.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  }, [r.id])
   return (
-    <div className="ptd" data-testid="pt-detail" role="region" aria-label={`Deployment for ${name}`}>
+    <div ref={box} className="ptd" data-testid="pt-detail" role="region" aria-label={`Deployment for ${name}`}>
       <div className="ptd-h">
         <div>
           <div className="ptd-t">{r.series}</div>

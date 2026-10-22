@@ -15,3 +15,8 @@ reports/*/index.html
 
 # Pinned BLIS binary + extracted source (built locally; not committed)
 /.build/
+
+# Superpowers design specs and the design/mockup record — local working notes from the
+# brainstorm/plan workflow, not part of what the repo ships.
+/docs/superpowers/
+/design/

@@ -12,5 +12,3 @@ Config search wrappers over the BLIS backend.
 - **`gallery/` + `scripts/build_gallery.py`** — the data producer: committed run dirs →
   dataset + per-scenario reports the SPA stages in. See [`gallery/README.md`](gallery/README.md).
 - **`reports/`** — committed run directories, the source of truth the site is built from.
-- **`docs/superpowers/specs/`** — design specs; **`design/mockups/`** — the gallery design
-  exploration (mockups + evaluation).

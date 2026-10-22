@@ -23,7 +23,7 @@ import os
 
 REPORTS = os.path.join(os.path.dirname(__file__), os.pardir, "reports")
 
-# The mock scenarios, mirroring design/mockups/data.js (the 5 synthetic rows). The real
+# The mock scenarios (the 5 synthetic rows from the original gallery mockups). The real
 # glm53flash-h100-chatbot row is NOT here — it is the committed fixture in reports/.
 MOCKS = [
     {

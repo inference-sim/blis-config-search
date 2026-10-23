@@ -45,12 +45,11 @@ SUBMISSIONS = os.path.join(ROOT, "submissions")
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 KNOWN_HARDWARE = {"h100", "h200", "gb200-nvl72", "gb300", "a100-80", "a100-sxm", "b200", "b300", "l40s"}
-KNOWN_WORKLOADS = {"chatbot", "summarization", "contentgen", "multidoc"}
 
 
-def _catalog_models():
-    """Model short-names the site knows about. The Vite build stages the catalog as
-    web/dist/data/catalog.json; the old static build wrote catalog.js. Try both."""
+def _catalog():
+    """The staged catalog. The Vite build stages it as web/dist/data/catalog.json; the old
+    static build wrote catalog.js. Try both."""
     candidates = [
         os.path.join(SITE, "data", "catalog.json"),   # Vite SPA build
         os.path.join(SITE, "catalog.js"),             # legacy static build
@@ -58,11 +57,39 @@ def _catalog_models():
     for path in candidates:
         try:
             txt = open(path, encoding="utf-8").read()
-            obj = json.loads(txt[txt.index("{"):txt.rindex("}") + 1])
-            return {m["name"] for m in obj.get("models", [])}
+            return json.loads(txt[txt.index("{"):txt.rindex("}") + 1])
         except Exception:
             continue
-    return set()
+    return {}
+
+
+def _catalog_models():
+    return {m["name"] for m in _catalog().get("models", [])}
+
+
+# The shape presets the catalog has always carried. Used ONLY as the floor when no catalog
+# is staged (CI, a fresh clone): without it an unstaged build would accept any workload
+# string, which is weaker than this validator was before it read the catalog.
+BASE_WORKLOADS = {"chatbot", "summarization", "contentgen", "multidoc"}
+
+
+def _catalog_shape_workloads():
+    """Workload presets a search can actually run: the catalog's SHAPES only.
+
+    `blis run --workload <name>` resolves the name to <catalog>/workloads/<name>.yaml and
+    loads it with blis-schemas' LoadWorkload, which REFUSES a replay workload ("is a replay
+    workload, not a shape"). So a trace-driven replay (agentx-mvp) is not submittable through
+    this form — accepting one would queue a run that cannot start. Replays need a corpus
+    fetched and digest-checked and a lane count, which this Scenario shape cannot express.
+
+    Shapes are read from the catalog rather than hardcoded so a preset added upstream (the
+    ShareGPT one, say) is submittable without editing a list here."""
+    wls = _catalog().get("workloads") or []
+    if not wls:
+        return set(BASE_WORKLOADS)
+    # `kind` is absent in a catalog.json staged before the two arms were distinguished; such
+    # a build predates replays, so every entry in it is a shape.
+    return {w["name"] for w in wls if w.get("kind", "shape") != "replay"}
 
 
 def validate_scenario(body):
@@ -83,8 +110,18 @@ def validate_scenario(body):
         errors.append("model is required")
     if hardware not in KNOWN_HARDWARE:
         errors.append(f"unknown hardware {hardware!r}")
-    if workload not in KNOWN_WORKLOADS:
-        errors.append(f"unknown workload {workload!r}")
+    shapes = _catalog_shape_workloads()
+    if workload not in shapes:
+        # name the alternatives: the caller cannot know which presets this catalog defines,
+        # and a replay rejected here is rejected for a reason worth stating
+        replays = {w["name"] for w in (_catalog().get("workloads") or []) if w.get("kind") == "replay"}
+        if workload in replays:
+            errors.append(f"workload {workload!r} is a trace-driven replay, which a search "
+                          f"scenario cannot run; choose a shape preset: {', '.join(sorted(shapes))}")
+        else:
+            errors.append(f"unknown workload {workload!r} (catalog defines: {', '.join(sorted(shapes))})")
+    elif not workload:
+        errors.append("workload is required")
     if not gpu_budget or not (1 <= gpu_budget <= 100000):
         errors.append("gpu_budget must be an integer in [1, 100000]")
 

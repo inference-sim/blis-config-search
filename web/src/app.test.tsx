@@ -688,6 +688,53 @@ describe('click a point for its deployment', () => {
   })
 })
 
+describe('Submit workload choices', () => {
+  const wl = (name: string, kind: 'shape' | 'replay'): WorkloadEntry =>
+    ({ name, kind } as WorkloadEntry)
+  const cat = (workloads: WorkloadEntry[]): Catalog => ({
+    models: [{ name: 'm1' } as Catalog['models'][number]],
+    hardware: [{ name: 'h100' } as Catalog['hardware'][number]],
+    workloads, fabrics: [], storage: [], registry: [], versions: {},
+  })
+  // Dropdown is a custom listbox (a native select cannot be themed), so the options only
+  // exist in the DOM once it is opened.
+  const offered = () => {
+    fireEvent.click(screen.getByLabelText('Workload'))
+    return [...document.querySelectorAll('[role="option"]')].map((o) => o.textContent)
+  }
+
+  it('offers shape presets and withholds trace-driven replays', () => {
+    // a replay cannot be run by `blis run --workload` (LoadWorkload refuses it), so offering
+    // it would let someone submit a scenario that cannot start
+    render(<Submit catalog={cat([
+      wl('agentx-mvp', 'replay'), wl('chatbot', 'shape'), wl('sharegpt', 'shape'),
+    ])} mode="pages" />)
+    expect(offered()).toEqual(['chatbot', 'sharegpt'])
+    // and it says why, rather than silently dropping it
+    expect(document.body.textContent).toContain('trace-driven')
+  })
+
+  it('defaults to a shape even when a replay sorts first', () => {
+    // the replay sorts ahead of every shape alphabetically, so a naive workloads[0] default
+    // would emit an unrunnable scenario before the user touches anything
+    render(<Submit catalog={cat([wl('agentx-mvp', 'replay'), wl('chatbot', 'shape')])} mode="pages" />)
+    expect(screen.getByLabelText('Workload').textContent).toContain('chatbot')
+    expect(screen.getByLabelText('Generated scenario.yaml').textContent).toContain('preset: chatbot')
+    expect(screen.getByLabelText('Generated scenario.yaml').textContent).not.toContain('agentx-mvp')
+  })
+
+  it('says nothing about replays when the catalog has none', () => {
+    render(<Submit catalog={cat([wl('chatbot', 'shape')])} mode="pages" />)
+    expect(document.body.textContent).not.toContain('trace-driven')
+  })
+
+  it('treats a catalog staged before kind existed as all shapes', () => {
+    // an older catalog.json has no `kind`; it predates replays, so nothing should be withheld
+    render(<Submit catalog={cat([{ name: 'chatbot' } as WorkloadEntry])} mode="pages" />)
+    expect(offered()).toEqual(['chatbot'])
+  })
+})
+
 describe('Submit numeric inputs', () => {
   const catalog: Catalog = {
     models: [{ name: 'm1' } as Catalog['models'][number]],

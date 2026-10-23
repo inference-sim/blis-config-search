@@ -151,6 +151,19 @@ export interface HardwareEntry {
 
 export interface WorkloadEntry {
   name: string
+  /** Which arm of the catalog's workload namespace this entry is. A `shape` states
+   *  prompt/output token distributions; a `replay` names a load generator's
+   *  trace-replay scenario over a pinned corpus and states no distribution at all. */
+  kind: 'shape' | 'replay'
+  /** Replay only: the scenario, the harness that defines it, and the pinned corpus. */
+  scenario: string | null
+  harness_version: string | null
+  corpus: string | null
+  corpus_revision: string | null
+  /** The acceptance profile selectors, which either arm may state. */
+  category: string | null
+  thinking: string | null
+  /** Shape only; a replay's prefix structure lives in its corpus, not in one scalar. */
   prefix_tokens: number | null
   isl_mean: number | null
   isl_stdev: number | null

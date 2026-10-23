@@ -75,10 +75,19 @@ function NumField({ value, integer, onCommit, ariaLabel }: { value: number; inte
 }
 
 export function Submit({ catalog, mode }: { catalog: Catalog; mode: Mode }) {
+  // Only SHAPE workloads are submittable. `blis run --workload <name>` resolves the name to
+  // <catalog>/workloads/<name>.yaml through blis-schemas' LoadWorkload, which refuses a replay
+  // ("is a replay workload, not a shape"), so offering a trace-driven replay here would let
+  // someone queue a run that cannot start. A replay also needs its corpus fetched and
+  // digest-checked and a lane count, none of which this Scenario expresses.
+  // `kind` is absent in a catalog staged before the two arms were distinguished; such a build
+  // predates replays, so treat its entries as shapes.
+  const shapes = catalog.workloads.filter((w) => (w.kind ?? 'shape') !== 'replay')
+  const replayCount = catalog.workloads.length - shapes.length
   const [d, setD] = useState<Draft>({
     model: catalog.models[0]?.name ?? '',
     hardware: catalog.hardware.find((h) => h.name === 'h100')?.name ?? catalog.hardware[0]?.name ?? '',
-    workload: catalog.workloads[0]?.name ?? '',
+    workload: shapes[0]?.name ?? '',
     gpu_budget: 16,
     floor: 50,
   })
@@ -144,7 +153,7 @@ export function Submit({ catalog, mode }: { catalog: Catalog; mode: Mode }) {
           <Dropdown ariaLabel="Hardware" value={d.hardware} options={opts(catalog.hardware)} onChange={(v) => setD({ ...d, hardware: v })} />
         </label>
         <label className="field"><span>workload</span>
-          <Dropdown ariaLabel="Workload" value={d.workload} options={opts(catalog.workloads)} onChange={(v) => setD({ ...d, workload: v })} />
+          <Dropdown ariaLabel="Workload" value={d.workload} options={opts(shapes)} onChange={(v) => setD({ ...d, workload: v })} />
         </label>
         <label className="field"><span>gpu_budget</span>
           <NumField ariaLabel="GPU budget" value={d.gpu_budget} integer onCommit={(n) => setD({ ...d, gpu_budget: n })} />
@@ -164,6 +173,15 @@ export function Submit({ catalog, mode }: { catalog: Catalog; mode: Mode }) {
         )}
       </div>
       <p className="pts-note">Budget <span className="num">{fnum(d.gpu_budget, 0)}</span> GPUs, floor <span className="num">{fnum(d.floor, 0)}</span> tok/s/user, headroom <span className="num">{HEADROOM}</span>.</p>
+      {replayCount > 0 && (
+        <p className="pts-note">
+          The workload list is the catalog's <a href="#/workloads">shape presets</a>. Its{' '}
+          <span className="num">{replayCount}</span> trace-driven{' '}
+          {replayCount === 1 ? 'replay' : 'replays'} {replayCount === 1 ? 'is' : 'are'} not
+          offered here: a replay needs its corpus fetched and digest-checked and a lane count,
+          which this scenario does not express.
+        </p>
+      )}
 
       {mode === 'local' && log !== '' && <pre className="log" aria-label="Run output">{log}</pre>}
 

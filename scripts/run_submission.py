@@ -43,10 +43,39 @@ except ImportError:
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 KNOWN_HARDWARE = {"h100", "h200", "gb200-nvl72", "gb300", "a100-80", "a100-sxm", "b200", "b300", "l40s"}
-KNOWN_WORKLOADS = {"chatbot", "summarization", "contentgen", "multidoc"}
+# The shape presets the catalog has always carried, used as the floor when no catalog path is
+# supplied. With one, the catalog is authoritative — see _shape_workloads.
+BASE_WORKLOADS = {"chatbot", "summarization", "contentgen", "multidoc"}
 
 
-def validate(scenario):
+def _shape_workloads(catalog):
+    """Workload presets a search can run, read from `catalog` when one is given.
+
+    Only SHAPES qualify. `blis run --workload <name>` resolves the name to
+    <catalog>/workloads/<name>.yaml through blis-schemas' LoadWorkload, which REFUSES a
+    replay workload ("is a replay workload, not a shape"), so accepting a trace-driven
+    replay here would queue a run that cannot start. A replay also needs a corpus fetched
+    and digest-checked plus a lane count, none of which this Scenario can express.
+
+    Reading the catalog means a preset added upstream is submittable with no edit here."""
+    wdir = os.path.join(catalog, "workloads") if catalog else None
+    if not wdir or not os.path.isdir(wdir):
+        return set(BASE_WORKLOADS), set()
+    shapes, replays = set(), set()
+    for fn in sorted(os.listdir(wdir)):
+        if not fn.endswith(".yaml"):
+            continue
+        name = fn[:-5]
+        try:
+            with open(os.path.join(wdir, fn), encoding="utf-8") as f:
+                doc = yaml.safe_load(f) or {}
+        except (OSError, yaml.YAMLError):
+            continue
+        (replays if isinstance(doc.get("replay"), dict) else shapes).add(name)
+    return (shapes or set(BASE_WORKLOADS)), replays
+
+
+def validate(scenario, catalog=None):
     errs = []
     model = str(scenario.get("model", "")).strip()
     hardware = str(scenario.get("hardware", "")).strip().lower()
@@ -60,8 +89,12 @@ def validate(scenario):
         errs.append("model required")
     if hardware not in KNOWN_HARDWARE:
         errs.append(f"unknown hardware {hardware!r}")
-    if workload not in KNOWN_WORKLOADS:
-        errs.append(f"unknown workload {workload!r}")
+    shapes, replays = _shape_workloads(catalog)
+    if workload in replays:
+        errs.append(f"workload {workload!r} is a trace-driven replay, which a search scenario "
+                    f"cannot run; choose a shape preset: {', '.join(sorted(shapes))}")
+    elif workload not in shapes:
+        errs.append(f"unknown workload {workload!r} (catalog defines: {', '.join(sorted(shapes))})")
     if not budget or not (1 <= budget <= 100000):
         errs.append("gpu_budget out of range")
     # interactivity_floor must be a mapping (run_search/report.py call .get on it). A bare number —
@@ -90,7 +123,7 @@ def main(argv=None):
 
     with open(sub, encoding="utf-8") as f:
         scenario = yaml.safe_load(f) or {}
-    errs, (model, hardware, workload, budget) = validate(scenario)
+    errs, (model, hardware, workload, budget) = validate(scenario, args.catalog)
     if errs:
         raise SystemExit("invalid scenario:\n  - " + "\n  - ".join(errs))
     print(f"validated: {model} on {budget}x {hardware}, {workload}")

@@ -7,7 +7,7 @@
 Reads (read-only, never mutated):
   blis-catalog/models/<name>/{model.yaml,config.json,graph.yaml}   -> models
   blis-catalog/hardware/<gpu>.yaml                                 -> hardware
-  blis-catalog/workloads/<name>.yaml                              -> workloads
+  blis-catalog/workloads/<name>.yaml  (a shape, or a replay)       -> workloads
   blis-catalog/networks/*.yaml, devices/storage.yaml              -> fabrics, storage
   blis-registry/coefficients/*.yaml                              -> registry sets
 
@@ -18,6 +18,12 @@ the webpage can show "catalog built without <repo>" instead of failing.
 
 Only whitelisted, display-relevant fields are projected; unknown config keys are dropped,
 never invented. The derived graph.yaml is the authoritative source for attention/MoE wiring.
+
+A workloads/*.yaml is one of two kinds, and the projection keeps them apart under `kind`
+rather than flattening both into one row of distribution columns: a SHAPE states prompt and
+output token distributions, while a REPLAY (top-level `replay:`) names a load generator's
+trace-replay scenario over a pinned corpus and states no distribution at all. See
+_workload_entry.
 """
 import argparse
 import json
@@ -168,12 +174,62 @@ def _hardware_entry(path, gpu):
     }
 
 
+def _str_or_none(v):
+    """A display string for a scalar that YAML may have typed for us.
+
+    `thinking: "on"` is a string, but YAML 1.1 reads an unquoted `on` as the boolean
+    True, and `harness_version: 0.12.0` could arrive as a float. Normalize both to the
+    text a reader expects rather than letting `True` reach the page."""
+    if v is None or v == "":
+        return None
+    if isinstance(v, bool):
+        return "on" if v else "off"
+    return str(v)
+
+
 def _workload_entry(path, name):
+    """Project one blis-catalog workloads/*.yaml.
+
+    The namespace holds two kinds of entry, and they are not interchangeable (the
+    schema's workload.Binding picks exactly one arm). A SHAPE states prompt/output
+    token distributions a cost model draws from. A REPLAY (top-level `replay:`, e.g.
+    agentx-mvp) names a load generator's trace-replay scenario over a pinned corpus:
+    its traffic is real recorded requests, so it has no ISL/OSL mean or stdev to
+    state — the corpus carries per-request lengths and a prefix tree instead.
+
+    `kind` is therefore projected explicitly rather than inferred from null columns.
+    Reading absent distributions as "unknown" would be wrong twice over: it reports a
+    replay as a shape with missing data, and it hides the provenance (scenario,
+    corpus, revision) that is the only thing worth showing about a replay.
+    """
     w = _load_yaml(path, {}) or {}
+    rep = w.get("replay")
+    if isinstance(rep, dict):
+        corpus = rep.get("corpus") or {}
+        source = corpus.get("source") or {}
+        return {
+            "name": name,
+            "kind": "replay",
+            "scenario": rep.get("scenario"),
+            "harness_version": _str_or_none(rep.get("harness_version")),
+            "corpus": source.get("huggingface") or corpus.get("loader"),
+            # a revision pins the corpus; short form, since the table shows it inline
+            "corpus_revision": (source.get("revision") or "")[:8] or None,
+            "category": rep.get("category"),
+            "thinking": _str_or_none(rep.get("thinking")),
+            # a replay's traffic is the corpus, not a distribution — these stay absent
+            "prefix_tokens": None,
+            "isl_mean": None, "isl_stdev": None, "isl_min": None, "isl_max": None,
+            "osl_mean": None, "osl_stdev": None, "osl_min": None, "osl_max": None,
+        }
     pr = w.get("prompt") or {}
     out = w.get("output") or {}
     return {
         "name": name,
+        "kind": "shape",
+        "scenario": None, "harness_version": None, "corpus": None,
+        "corpus_revision": None,
+        "category": w.get("category"), "thinking": _str_or_none(w.get("thinking")),
         # absent prefix_tokens means no shared prefix, i.e. 0 (BLIS default); the multidoc
         # preset omits the field where the others write 0 — normalize so the tab is consistent
         "prefix_tokens": w.get("prefix_tokens", 0),

@@ -56,6 +56,13 @@ h2.viewhead{margin:0 0 6px;font-size:22px;font-weight:600;letter-spacing:-0.01em
 /* a dek over a full-width table: even the line lengths so the last line is not a stub that
    reads as truncated copy. text-wrap:balance is progressive — older engines just wrap normally. */
 .dek.balance{text-wrap:balance}
+/* A section head inside a view that carries more than one table (Workloads: shapes vs
+   trace-driven replays). Sits between viewhead and a table's own caption, so it is smaller
+   than h2.viewhead and separated from the table above it rather than from the dek below. */
+h3.subhead{margin:26px 0 6px;font-size:15px;font-weight:600;letter-spacing:-0.005em}
+h3.subhead:first-of-type{margin-top:18px}
+/* an inline de-emphasised run-on, e.g. a corpus revision after its dataset name */
+.mono .dim{color:var(--muted)}
 .crumb{margin:0 0 8px;font-size:12.5px}
 .loading{color:var(--muted);padding:40px 0;font-size:14px}
 .empty{padding:18px;color:var(--muted);font-size:13px;border:1px dashed var(--line-strong);border-radius:6px;background:var(--panel)}

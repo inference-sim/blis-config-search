@@ -12,13 +12,19 @@ const bestWinner = (r: CoverageRow) => r.best?.winner ?? null
  * of scenarios searched most rows carried an empty `reports` cell and the reader had to
  * reconstruct coverage across three tables. Here each row IS a searched combination, and the
  * spec sheets stay one click away below.
+ *
+ * Alignment convention: every measured column here is centered (`center` + `numeric`) rather
+ * than right-aligned, so the numeric columns read as one set. A new measured column follows
+ * suit — mixing the two makes columns of the same kind sit differently. (The per-entity
+ * spec-sheets keep `num`'s right-alignment: those are dense, many-column readouts where
+ * right-aligned figures scan better down the column.)
  */
 export function Coverage({ scenarios }: { scenarios: Scenario[] }) {
   const rows = coverageRows(scenarios)
   const cols: Col<CoverageRow>[] = [
     { key: 'model', label: 'model', get: (r) => r.model, render: (r) => <span className="mono">{r.model}</span> },
     { key: 'hardware', label: 'GPU', get: (r) => r.hardware, render: (r) => <span className="spec">{r.hardware}</span> },
-    { key: 'budget', label: 'GPU budget', get: (r) => r.gpu_budget, render: (r) => <span className="num">{r.gpu_budget}</span>, num: true },
+    { key: 'budget', label: 'GPU budget', get: (r) => r.gpu_budget, center: true, numeric: true, render: (r) => <span className="num">{r.gpu_budget}</span> },
     { key: 'workload', label: 'workload', get: (r) => r.workload, render: (r) => <span className="spec">{r.workload}</span> },
     {
       key: 'config',

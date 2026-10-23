@@ -115,9 +115,27 @@ describe('#11 coverage view', () => {
     expect(head[i].classList.contains('ctr')).toBe(true)
     // still tabular numerals, so the digits line up column-wise
     expect(cell.querySelector('.num')).toBeTruthy()
-    // the other numeric column keeps the existing right-aligned treatment
-    const j = head.findIndex((t) => (t.textContent ?? '').includes('GPU budget'))
-    expect(tbl.querySelectorAll('tbody tr')[0].querySelectorAll('td')[j].classList.contains('num')).toBe(true)
+  })
+
+  it('aligns every measured column the same way, so they read as a set', () => {
+    // One convention for the table: measured quantities are centered. A mix (GPU budget
+    // right-aligned beside a centered tok/s/GPU) makes two numeric columns of the same kind
+    // sit differently. Asserted over all numeric columns, so a new one cannot quietly diverge.
+    render(<Coverage scenarios={C} />)
+    const tbl = document.querySelector('table.readout') as Element
+    const head = [...tbl.querySelectorAll('thead th')].map((t) => (t.textContent ?? '').replace(/[▲▼]/g, '').trim())
+    const cells = [...tbl.querySelectorAll('tbody tr')[0].querySelectorAll('td')]
+    const measured = ['GPU budget', 'tok/s/GPU']
+    for (const label of measured) {
+      const i = head.indexOf(label)
+      expect(i, `${label} column present`).toBeGreaterThan(-1)
+      expect(cells[i].classList.contains('ctr'), `${label} centered`).toBe(true)
+      expect(cells[i].classList.contains('num'), `${label} not right-aligned`).toBe(false)
+      expect(head[i], `${label} header centered`).toBeTruthy()
+      expect(cells[i].querySelector('.num'), `${label} tabular figures`).toBeTruthy()
+    }
+    // no column in this table is right-aligned any more — the convention is centered
+    expect(cells.some((c) => c.classList.contains('num'))).toBe(false)
   })
 
   it('capitalizes GPU in the headers and drops the × from the budget cell', () => {

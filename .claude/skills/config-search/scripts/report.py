@@ -6,7 +6,7 @@
 #   python3 -I scripts/report.py <parent-of-run-dirs> # -> each child's index.html + a card index
 #
 # It reads the run directory the search engine writes and renders a magazine-style analytical report
-# modeled on the CurveBender "glm53flash" format: a numbered-finding narrative, pre-rendered inline-SVG
+# modeled on the internal "glm53flash" reference report format: a numbered-finding narrative, pre-rendered inline-SVG
 # figures (figures.py), a client-side crossfilter explorer over every run, and a glossary.
 #
 # Inputs (all optional-tolerant -- three of four are brain-authored "convention, loose on purpose"):
@@ -646,7 +646,7 @@ def _footer(scenario, pareto, records, n_malformed=0):
                      f'skipped and are not reflected in the figures or counts.')
     return (f'<div class="foot"><b>These are simulator predictions</b> from the '
             f'blis-latency-kernel backend — spot-check against the real llm-d measurements in '
-            f'curvebender-tools/reports before acting. Run <code>{esc(run_id)}</code>{stack}. '
+            f'the internal calibration reports before acting. Run <code>{esc(run_id)}</code>{stack}. '
             f'Raw per-run ledger, scenario and analysis sit beside this report in the run directory '
             f'({len(records)} runs).{malformed}</div>')
 

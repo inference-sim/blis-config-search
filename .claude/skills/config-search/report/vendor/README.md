@@ -3,7 +3,7 @@
 `report.py` inlines these two minified libraries into every generated `index.html`, so the report's
 §1 crossfilter explorer works **fully offline** — the file is a self-contained artifact with no
 network dependency at view time (per the disc #4 "renders offline with nothing installed" promise and
-the CurveBender model). They are the explorer's only JS dependency; the article and the inline-SVG
+the internal reference reports). They are the explorer's only JS dependency; the article and the inline-SVG
 figures need no JS at all.
 
 | file | library | version | license | source |

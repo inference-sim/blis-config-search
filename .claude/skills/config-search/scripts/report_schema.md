@@ -1,6 +1,6 @@
 # `report.json` — the brain-authored narrative seam
 
-`report.py` renders a magazine-style analytical report (modeled on the CurveBender "glm53flash"
+`report.py` renders a magazine-style analytical report (modeled on the internal "glm53flash" reference
 format) from a run directory. Three of its four inputs already exist: `scenario.json`, `pareto.json`,
 `runs.jsonl`. **`report.json` is the fourth** — the *narrative* Claude (the search brain) writes after
 reading the runs. It carries the prose, the hero panel, the numbered findings, the figures each

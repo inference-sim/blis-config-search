@@ -8,13 +8,31 @@ export function fnum(v: number | null | undefined, digits = 1): string {
 }
 
 // ---------- routing ----------
-export type Tab = 'reports' | 'models' | 'workloads' | 'gpus' | 'submit'
+export type Tab = 'reports' | 'coverage' | 'models' | 'workloads' | 'gpus' | 'submit'
 export interface Route {
   tab: Tab
   runId: string | null
   params: Record<string, string>
 }
-const TABS: Tab[] = ['reports', 'models', 'workloads', 'gpus', 'submit']
+/** Every addressable route. Models/workloads/gpus resolve but are not in the primary nav. */
+const TABS: Tab[] = ['reports', 'coverage', 'models', 'workloads', 'gpus', 'submit']
+/** The primary nav. The three per-entity spec sheets are demoted to links on Coverage: with
+ *  only a handful of scenarios searched, a full spec-sheet per catalog entry is mostly empty
+ *  `reports` cells, and the question a reader arrives with — what has been searched? — was
+ *  split across all three. Coverage answers it in one table. */
+export const TAB_LABELS: [Tab, string][] = [
+  ['reports', 'Reports'],
+  ['coverage', 'Coverage'],
+  ['submit', 'Submit'],
+]
+/** The spec sheets, as the secondary links Coverage discloses them through. */
+export const CATALOG_TABS: [Tab, string][] = [
+  ['models', 'Models'],
+  ['workloads', 'Workloads'],
+  ['gpus', 'GPUs'],
+]
+/** A demoted spec-sheet route — not a primary tab, so the nav marks Coverage active for it. */
+export const isCatalogTab = (t: Tab): boolean => CATALOG_TABS.some(([tab]) => tab === t)
 
 export function parseRoute(hash: string): Route {
   const h = hash.replace(/^#\/?/, '')
@@ -82,6 +100,75 @@ export function topConfigs(filtered: Scenario[]): { items: Scenario[]; mockOnly:
 
 export function countReports(scenarios: Scenario[], key: 'model' | 'hardware' | 'workload', name: string): number {
   return scenarios.filter((s) => lc(s[key]) === lc(name)).length
+}
+
+// ---------- coverage: what has actually been searched ----------
+
+/** One searched combination: the filter tuple plus every report behind it. */
+export interface CoverageRow {
+  model: string
+  hardware: string
+  workload: string
+  gpu_budget: number
+  scenarios: Scenario[]
+  /** Reports that are real BLIS output (the rest are synthetic placeholders). */
+  n_real: number
+  /**
+   * The report whose config this row recommends, resolved once at build time (the table reads
+   * it per cell, per sort). With several reports on one tuple — a re-search, or a narrower
+   * sweep — each named its own winner, so they are ranked on tok/s/GPU: the dual-Pareto
+   * objective the search picks its own winner on, and the one `operatingPoints` ranks by. Real
+   * runs beat synthetic placeholders outright, since a mock's numbers are illustrative.
+   */
+  best: Scenario | null
+}
+
+/** Best of a tuple's reports on tok/s/GPU, preferring real runs. See `CoverageRow.best`. */
+function pickBest(scenarios: Scenario[], n_real: number): Scenario | null {
+  const pool = n_real > 0 ? scenarios.filter((s) => !s.synthetic) : scenarios
+  let best: Scenario | null = null
+  for (const s of pool) {
+    if (best === null || s.winner.tps_per_gpu > best.winner.tps_per_gpu) best = s
+  }
+  return best
+}
+
+/**
+ * The inverse of `countReports`: instead of asking "how many reports mention this catalog
+ * entry?", enumerate the (model, hardware, workload, budget) tuples that HAVE a report and
+ * group by them. Only searched combinations get a row, so there is no empty-cell row to read
+ * past. Order is the scenario list's own — build_gallery already emits it sorted.
+ *
+ * Grouping is case-insensitive, matching `countReports` and `canonFilters`. build_gallery
+ * normalizes hardware (lowercases it, validates against the known set, emits upper) but passes
+ * model and workload straight through from the scenario yaml, so two runs of one combination
+ * can disagree on case; they are still one combination. Display uses the first spelling seen.
+ */
+export function coverageRows(scenarios: Scenario[]): CoverageRow[] {
+  const by = new Map<string, CoverageRow>()
+  for (const s of scenarios) {
+    const key = [lc(s.model), lc(s.hardware), lc(s.workload), s.gpu_budget].join('\u0000')
+    let row = by.get(key)
+    if (row === undefined) {
+      row = { model: s.model, hardware: s.hardware, workload: s.workload, gpu_budget: s.gpu_budget, scenarios: [], n_real: 0, best: null }
+      by.set(key, row)
+    }
+    row.scenarios.push(s)
+    if (!s.synthetic) row.n_real++
+  }
+  const rows = [...by.values()]
+  for (const r of rows) r.best = pickBest(r.scenarios, r.n_real)
+  return rows
+}
+
+/**
+ * Where a coverage row points: its one report, or the scenario list filtered to its tuple.
+ * The multi-report target leans on Reports reading exactly these four filter keys — the same
+ * ones `Filters`/`matches` define, compared case-insensitively there via `canonFilters`.
+ */
+export function coverageHref(r: CoverageRow): string {
+  if (r.scenarios.length === 1) return scenarioHash(r.scenarios[0].run_id)
+  return reportsHash({ model: r.model, hardware: r.hardware, workload: r.workload, gpu: String(r.gpu_budget) })
 }
 
 // ---------- sorting ----------

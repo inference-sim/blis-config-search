@@ -4,20 +4,13 @@ import { loadCatalog, loadMode, loadScenarios } from './load'
 import { useHashRoute } from './route'
 import { Reports } from './components/Reports'
 import { ScenarioDetail } from './components/ScenarioDetail'
+import { Coverage } from './components/Coverage'
 import { Models } from './components/Models'
 import { Workloads } from './components/Workloads'
 import { Gpus } from './components/Gpus'
 import { Submit } from './components/Submit'
 import { Footer } from './components/Footer'
-import type { Tab } from './lib'
-
-const TAB_LABELS: [Tab, string][] = [
-  ['reports', 'Reports'],
-  ['models', 'Models'],
-  ['workloads', 'Workloads'],
-  ['gpus', 'GPUs'],
-  ['submit', 'Submit'],
-]
+import { isCatalogTab, TAB_LABELS, type Tab } from './lib'
 
 interface Data {
   scenarios: Scenario[]
@@ -54,6 +47,9 @@ export function App() {
     body = <ScenarioDetail runId={route.runId} scenarios={data.scenarios} />
   } else {
     switch (route.tab) {
+      case 'coverage':
+        body = <Coverage scenarios={data.scenarios} />
+        break
       case 'models':
         body = <Models catalog={data.catalog} scenarios={data.scenarios} />
         break
@@ -71,8 +67,10 @@ export function App() {
     }
   }
 
-  // The scenario-detail view is addressed by runId; keep the Reports tab marked active under it.
-  const activeTab: Tab = route.runId ? 'reports' : route.tab
+  // Two routes are not themselves primary tabs: the scenario detail (addressed by runId) sits
+  // under Reports, and the three catalog spec-sheets are reached from Coverage. Mark their
+  // parent tab so the nav never shows nothing selected.
+  const activeTab: Tab = route.runId ? 'reports' : isCatalogTab(route.tab) ? 'coverage' : route.tab
 
   return (
     <div className="page">

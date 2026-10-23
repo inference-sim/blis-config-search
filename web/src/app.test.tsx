@@ -1,10 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import type { Catalog, RunRecord, Scenario } from './types'
-import { facetCounts, filterScenarios, topConfigs, NO_FILTERS, parseRoute, filterRecords, countReports } from './lib'
+import { facetCounts, filterScenarios, topConfigs, NO_FILTERS, parseRoute, filterRecords, countReports, coverageRows, TAB_LABELS } from './lib'
 import { ScenarioDetail } from './components/ScenarioDetail'
 import { Reports } from './components/Reports'
 import { Submit } from './components/Submit'
+import { Coverage } from './components/Coverage'
+import { Models } from './components/Models'
+import { Workloads } from './components/Workloads'
+import { Gpus } from './components/Gpus'
 
 const w = { label: '1x TP8', tp: 8, ni: 1, gpus: 8, c_use: 1, tps: 1, tps_per_gpu: 1, per_user: 1, itl_p99: 1 }
 const mk = (id: string, model: string, hw: string, wl: string, gpu: number, synthetic: boolean, records: RunRecord[] = []): Scenario => ({
@@ -21,6 +25,185 @@ describe('filters', () => {
     const gpu = facetCounts(S, NO_FILTERS, 'gpu')
     expect(gpu.map((g) => g.value)).toEqual(['8', '16'])
     expect(countReports(S, 'model', 'M1')).toBe(2)
+  })
+})
+
+describe('#11 coverage view', () => {
+  // Two scenarios share one (model, hardware, workload, budget) tuple; a third differs by budget.
+  const C = [
+    mk('a', 'm1', 'H100', 'chatbot', 16, false),
+    mk('a2', 'm1', 'H100', 'chatbot', 16, false),
+    mk('c', 'm2', 'H200', 'multidoc', 512, false),
+  ]
+
+  it('enumerates one row per searched combination, never an unsearched one', () => {
+    const rows = coverageRows(C)
+    expect(rows).toHaveLength(2)
+    expect(rows.map((r) => [r.model, r.hardware, r.workload, r.gpu_budget])).toEqual([
+      ['m1', 'H100', 'chatbot', 16],
+      ['m2', 'H200', 'multidoc', 512],
+    ])
+    // the row carries its scenarios, so the count is the number of reports behind it
+    expect(rows[0].scenarios.map((s) => s.run_id)).toEqual(['a', 'a2'])
+    expect(rows[1].scenarios).toHaveLength(1)
+    // a combination with no report never appears — there is no row to have an empty count
+    expect(rows.every((r) => r.scenarios.length > 0)).toBe(true)
+  })
+
+  it('groups one combination written in different cases into a single row', () => {
+    // build_gallery normalizes hardware (lower + validate, emit upper) but passes model and
+    // workload through from the scenario yaml, so two runs of one combination can disagree on
+    // case. They are the same searched combination and must not split into two rows.
+    const rows = coverageRows([
+      mk('a', 'glm-5.3-flash', 'H100', 'chatbot', 16, false),
+      mk('b', 'GLM-5.3-Flash', 'h100', 'Chatbot', 16, false),
+    ])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].scenarios.map((s) => s.run_id)).toEqual(['a', 'b'])
+  })
+
+  it('counts real vs synthetic reports per row', () => {
+    const rows = coverageRows([mk('a', 'm1', 'H100', 'chatbot', 16, false), mk('b', 'm1', 'H100', 'chatbot', 16, true)])
+    expect(rows[0].scenarios).toHaveLength(2)
+    expect(rows[0].n_real).toBe(1)
+  })
+
+  it('links a single-report row straight to its scenario, a multi-report row to the filtered list', () => {
+    render(<Coverage scenarios={C} />)
+    const hrefs = [...document.querySelectorAll('.readout tbody a')].map((a) => a.getAttribute('href') ?? '')
+    // the m2/H200/multidoc/512 row has exactly one report -> deep-link to the report itself
+    expect(hrefs).toContain('#/scenario/c')
+    // the m1 row has two -> link to Reports pre-filtered on the whole tuple
+    const multi = hrefs.find((h) => h.startsWith('#/reports?')) ?? ''
+    const q = new URLSearchParams(multi.split('?')[1])
+    expect([q.get('model'), q.get('hardware'), q.get('workload'), q.get('gpu')]).toEqual(['m1', 'H100', 'chatbot', '16'])
+  })
+
+  it('shows the recommended config inline, so the table answers "what should I run?"', () => {
+    render(<Coverage scenarios={C} />)
+    // the winner is the payload a reader came for; every row states one
+    expect(document.querySelector('.readout tbody')?.textContent).toContain('1x TP8')
+    expect(document.querySelectorAll('.readout tbody .covwin')).toHaveLength(2)
+  })
+
+  it('names the best config by tok/s/GPU when a tuple has several reports', () => {
+    // two searches of the same tuple: the row must still answer with ONE config, picked on the
+    // objective the search itself optimises, not print "2 reports" in the config column too.
+    const win = (label: string, tpg: number) => ({ ...w, label, name: label, tps_per_gpu: tpg })
+    const rows = [
+      { ...mk('old', 'm1', 'H100', 'chatbot', 16, false), winner: win('4x TP4', 40) },
+      { ...mk('new', 'm1', 'H100', 'chatbot', 16, false), winner: win('8x TP2 + EP', 71) },
+    ]
+    render(<Coverage scenarios={rows} />)
+    const tr = document.querySelector('.readout tbody tr') as Element
+    expect(tr.querySelector('.covwin')?.textContent).toBe('8x TP2 + EP')
+    expect(tr.textContent).toContain('71')
+    // the count still lives in the report column, where it belongs
+    expect(tr.querySelector('a')?.textContent).toContain('2 reports')
+  })
+
+  it('centers tok/s/GPU without riding on num, which means right-aligned', () => {
+    render(<Coverage scenarios={C} />)
+    const tbl = document.querySelector('table.readout') as Element
+    const head = [...tbl.querySelectorAll('thead th')]
+    const i = head.findIndex((t) => (t.textContent ?? '').includes('tok/s/GPU'))
+    const cell = tbl.querySelectorAll('tbody tr')[0].querySelectorAll('td')[i]
+    // centered, and NOT carrying the right-align class
+    expect(cell.classList.contains('ctr')).toBe(true)
+    expect(cell.classList.contains('num')).toBe(false)
+    // the header follows its column
+    expect(head[i].classList.contains('ctr')).toBe(true)
+    // still tabular numerals, so the digits line up column-wise
+    expect(cell.querySelector('.num')).toBeTruthy()
+  })
+
+  it('aligns every measured column the same way, so they read as a set', () => {
+    // One convention for the table: measured quantities are centered. A mix (GPU budget
+    // right-aligned beside a centered tok/s/GPU) makes two numeric columns of the same kind
+    // sit differently. Asserted over all numeric columns, so a new one cannot quietly diverge.
+    render(<Coverage scenarios={C} />)
+    const tbl = document.querySelector('table.readout') as Element
+    const head = [...tbl.querySelectorAll('thead th')].map((t) => (t.textContent ?? '').replace(/[▲▼]/g, '').trim())
+    const cells = [...tbl.querySelectorAll('tbody tr')[0].querySelectorAll('td')]
+    const measured = ['GPU budget', 'tok/s/GPU']
+    for (const label of measured) {
+      const i = head.indexOf(label)
+      expect(i, `${label} column present`).toBeGreaterThan(-1)
+      expect(cells[i].classList.contains('ctr'), `${label} centered`).toBe(true)
+      expect(cells[i].classList.contains('num'), `${label} not right-aligned`).toBe(false)
+      expect(head[i], `${label} header centered`).toBeTruthy()
+      expect(cells[i].querySelector('.num'), `${label} tabular figures`).toBeTruthy()
+    }
+    // no column in this table is right-aligned any more — the convention is centered
+    expect(cells.some((c) => c.classList.contains('num'))).toBe(false)
+  })
+
+  it('capitalizes GPU in the headers and drops the × from the budget cell', () => {
+    render(<Coverage scenarios={C} />)
+    const labels = [...document.querySelectorAll('table.readout thead th')]
+      .map((t) => (t.textContent ?? '').replace(/[▲▼]/g, '').trim())
+    expect(labels).toContain('GPU')
+    expect(labels).toContain('GPU budget')
+    expect(labels).not.toContain('gpu')
+    expect(labels).not.toContain('gpu budget')
+    // the budget reads as a bare count; the GPU column already names the device
+    const cells = [...document.querySelectorAll('table.readout tbody tr')]
+      .map((tr) => tr.querySelectorAll('td')[2].textContent ?? '')
+    expect(cells).toContain('16')
+    expect(cells.every((c) => !c.includes('×'))).toBe(true)
+  })
+
+  it('reads the intro as one clean sentence flow, with no doubled or missing spaces', () => {
+    render(<Coverage scenarios={C} />)
+    const text = document.querySelector('.dek')?.textContent ?? ''
+    // the exact flow a reader sees: JSX whitespace juggling must not double or drop a space
+    expect(text).toContain('that has been searched — 2 combinations, 3 reports.')
+    expect(text).not.toMatch(/\s{2,}/)
+    expect(text).not.toMatch(/\s+[.,]/)
+  })
+
+  it('balances the intro so it does not wrap to a short orphan line', () => {
+    // `.dek` caps at 1100px while the Coverage table runs the full 1480px width, so the
+    // paragraph broke ~380px short of the table edge and dropped a four-word orphan onto
+    // line 2 — which read as text cut off or oddly indented. Balanced wrapping evens the
+    // lines; jsdom applies no layout, so the class is what we can assert here.
+    render(<Coverage scenarios={C} />)
+    expect(document.querySelector('.dek')?.classList.contains('balance')).toBe(true)
+  })
+
+  it('says so when nothing has been searched yet', () => {
+    render(<Coverage scenarios={[]} />)
+    expect(screen.getByText(/no scenarios have been searched/i)).toBeTruthy()
+    expect(document.querySelector('.readout')).toBeNull()
+  })
+
+  it('keeps the per-entity spec sheets reachable as secondary links, not top-level tabs', () => {
+    // the primary nav is Reports / Coverage / Submit — the three catalog tabs are demoted
+    expect(TAB_LABELS.map(([t]) => t)).toEqual(['reports', 'coverage', 'submit'])
+    // ...but their routes still resolve, so the secondary links and old bookmarks work
+    expect(parseRoute('#/models').tab).toBe('models')
+    expect(parseRoute('#/workloads').tab).toBe('workloads')
+    expect(parseRoute('#/gpus').tab).toBe('gpus')
+    expect(parseRoute('#/coverage').tab).toBe('coverage')
+    // Coverage renders the disclosure to each spec sheet
+    render(<Coverage scenarios={C} />)
+    const hrefs = [...document.querySelectorAll('.catlinks a')].map((a) => a.getAttribute('href'))
+    expect(hrefs).toEqual(expect.arrayContaining(['#/models', '#/workloads', '#/gpus']))
+  })
+
+  it('gives each demoted spec sheet a breadcrumb back to Coverage', () => {
+    // no longer a top-level tab, so the only way back out is in the view itself
+    const cat: Catalog = {
+      models: [{ name: 'm1' } as Catalog['models'][number]],
+      hardware: [{ name: 'h100' } as Catalog['hardware'][number]],
+      workloads: [{ name: 'chatbot' } as Catalog['workloads'][number]],
+      fabrics: [], storage: [], registry: [], versions: {},
+    }
+    for (const view of [<Models catalog={cat} scenarios={C} />, <Workloads catalog={cat} scenarios={C} />, <Gpus catalog={cat} scenarios={C} />]) {
+      const { unmount } = render(view)
+      expect(document.querySelector('.crumb a')?.getAttribute('href')).toBe('#/coverage')
+      unmount()
+    }
   })
 })
 

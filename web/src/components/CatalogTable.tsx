@@ -7,7 +7,13 @@ export interface Col<T> {
   /** sortable/raw value */
   get: (r: T) => string | number | null | undefined
   render?: (r: T) => ReactNode
+  /** Tabular numerals, right-aligned — the default for a measured quantity. */
   num?: boolean
+  /** Center the column instead. `num` conflates "is a number" with "right-align", so a
+   *  centered numeric column asks for this and keeps `num`'s tabular figures via `numeric`. */
+  center?: boolean
+  /** Tabular numerals without `num`'s right-alignment; pairs with `center`. */
+  numeric?: boolean
 }
 
 export function CatalogTable<T>({ rows, cols, rowKey, caption }: { rows: T[]; cols: Col<T>[]; rowKey: (r: T) => string; caption: string }) {
@@ -21,7 +27,7 @@ export function CatalogTable<T>({ rows, cols, rowKey, caption }: { rows: T[]; co
         <thead>
           <tr className="col">
             {cols.map((c) => (
-              <th key={c.key} aria-sort={sort?.key === c.key ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}>
+              <th key={c.key} className={c.center ? 'ctr' : undefined} aria-sort={sort?.key === c.key ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}>
                 <button type="button" className="sortbtn" onClick={() => toggle(c.key)}>
                   {c.label}
                   <span className="arrow">{sort?.key === c.key ? (sort.dir === 1 ? '▲' : '▼') : ''}</span>
@@ -36,7 +42,9 @@ export function CatalogTable<T>({ rows, cols, rowKey, caption }: { rows: T[]; co
               {cols.map((c) => {
                 const v = c.get(r)
                 const content = c.render ? c.render(r) : typeof v === 'number' ? fnum(v, 3) : (v ?? dash)
-                return <td key={c.key} className={c.num ? 'num' : undefined}>{c.num ? <span className="num">{content}</span> : content}</td>
+                const cls = c.num ? 'num' : c.center ? 'ctr' : undefined
+                const mono = c.num || c.numeric
+                return <td key={c.key} className={cls}>{mono ? <span className="num">{content}</span> : content}</td>
               })}
             </tr>
           ))}

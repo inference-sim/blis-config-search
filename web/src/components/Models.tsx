@@ -6,6 +6,12 @@ export function ReportsLink({ n, params }: { n: number; params: Record<string, s
   return n > 0 ? <a href={reportsHash(params)}>{n} report{n === 1 ? '' : 's'}</a> : <span className="na">{dash}</span>
 }
 
+/** The three spec-sheets are reached from Coverage rather than the primary nav, so each one
+ *  carries its own way back — nothing in the masthead points at them. */
+export function CatalogCrumb() {
+  return <p className="crumb"><a href="#/coverage">← coverage</a></p>
+}
+
 export function Models({ catalog, scenarios }: { catalog: Catalog; scenarios: Scenario[] }) {
   const cols: Col<ModelEntry>[] = [
     { key: 'name', label: 'model', get: (m) => m.name, render: (m) => <span className="mono">{m.name}</span> },
@@ -30,6 +36,7 @@ export function Models({ catalog, scenarios }: { catalog: Catalog; scenarios: Sc
   ]
   return (
     <div>
+      <CatalogCrumb />
       <h2 className="viewhead">Models</h2>
       <p className="dek"><b>{catalog.models.length}</b> models in the catalog. Missing values are shown as {dash}.</p>
       <CatalogTable rows={catalog.models} cols={cols} rowKey={(m) => m.name} caption="Model catalog" />

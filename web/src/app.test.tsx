@@ -102,6 +102,57 @@ describe('#11 coverage view', () => {
     expect(tr.querySelector('a')?.textContent).toContain('2 reports')
   })
 
+  it('centers tok/s/GPU without riding on num, which means right-aligned', () => {
+    render(<Coverage scenarios={C} />)
+    const tbl = document.querySelector('table.readout') as Element
+    const head = [...tbl.querySelectorAll('thead th')]
+    const i = head.findIndex((t) => (t.textContent ?? '').includes('tok/s/GPU'))
+    const cell = tbl.querySelectorAll('tbody tr')[0].querySelectorAll('td')[i]
+    // centered, and NOT carrying the right-align class
+    expect(cell.classList.contains('ctr')).toBe(true)
+    expect(cell.classList.contains('num')).toBe(false)
+    // the header follows its column
+    expect(head[i].classList.contains('ctr')).toBe(true)
+    // still tabular numerals, so the digits line up column-wise
+    expect(cell.querySelector('.num')).toBeTruthy()
+    // the other numeric column keeps the existing right-aligned treatment
+    const j = head.findIndex((t) => (t.textContent ?? '').includes('GPU budget'))
+    expect(tbl.querySelectorAll('tbody tr')[0].querySelectorAll('td')[j].classList.contains('num')).toBe(true)
+  })
+
+  it('capitalizes GPU in the headers and drops the × from the budget cell', () => {
+    render(<Coverage scenarios={C} />)
+    const labels = [...document.querySelectorAll('table.readout thead th')]
+      .map((t) => (t.textContent ?? '').replace(/[▲▼]/g, '').trim())
+    expect(labels).toContain('GPU')
+    expect(labels).toContain('GPU budget')
+    expect(labels).not.toContain('gpu')
+    expect(labels).not.toContain('gpu budget')
+    // the budget reads as a bare count; the GPU column already names the device
+    const cells = [...document.querySelectorAll('table.readout tbody tr')]
+      .map((tr) => tr.querySelectorAll('td')[2].textContent ?? '')
+    expect(cells).toContain('16')
+    expect(cells.every((c) => !c.includes('×'))).toBe(true)
+  })
+
+  it('reads the intro as one clean sentence flow, with no doubled or missing spaces', () => {
+    render(<Coverage scenarios={C} />)
+    const text = document.querySelector('.dek')?.textContent ?? ''
+    // the exact flow a reader sees: JSX whitespace juggling must not double or drop a space
+    expect(text).toContain('that has been searched — 2 combinations, 3 reports.')
+    expect(text).not.toMatch(/\s{2,}/)
+    expect(text).not.toMatch(/\s+[.,]/)
+  })
+
+  it('balances the intro so it does not wrap to a short orphan line', () => {
+    // `.dek` caps at 1100px while the Coverage table runs the full 1480px width, so the
+    // paragraph broke ~380px short of the table edge and dropped a four-word orphan onto
+    // line 2 — which read as text cut off or oddly indented. Balanced wrapping evens the
+    // lines; jsdom applies no layout, so the class is what we can assert here.
+    render(<Coverage scenarios={C} />)
+    expect(document.querySelector('.dek')?.classList.contains('balance')).toBe(true)
+  })
+
   it('says so when nothing has been searched yet', () => {
     render(<Coverage scenarios={[]} />)
     expect(screen.getByText(/no scenarios have been searched/i)).toBeTruthy()

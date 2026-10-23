@@ -17,8 +17,8 @@ export function Coverage({ scenarios }: { scenarios: Scenario[] }) {
   const rows = coverageRows(scenarios)
   const cols: Col<CoverageRow>[] = [
     { key: 'model', label: 'model', get: (r) => r.model, render: (r) => <span className="mono">{r.model}</span> },
-    { key: 'hardware', label: 'gpu', get: (r) => r.hardware, render: (r) => <span className="spec">{r.hardware}</span> },
-    { key: 'budget', label: 'gpu budget', get: (r) => r.gpu_budget, render: (r) => <span className="num">{r.gpu_budget}×</span>, num: true },
+    { key: 'hardware', label: 'GPU', get: (r) => r.hardware, render: (r) => <span className="spec">{r.hardware}</span> },
+    { key: 'budget', label: 'GPU budget', get: (r) => r.gpu_budget, render: (r) => <span className="num">{r.gpu_budget}</span>, num: true },
     { key: 'workload', label: 'workload', get: (r) => r.workload, render: (r) => <span className="spec">{r.workload}</span> },
     {
       key: 'config',
@@ -33,7 +33,8 @@ export function Coverage({ scenarios }: { scenarios: Scenario[] }) {
       key: 'tpg',
       label: 'tok/s/GPU',
       get: (r) => bestWinner(r)?.tps_per_gpu,
-      num: true,
+      center: true,
+      numeric: true,
       render: (r) => {
         const w = bestWinner(r)
         return w ? <span className="num">{fnum(w.tps_per_gpu, 0)}</span> : <span className="na">{dash}</span>
@@ -55,11 +56,13 @@ export function Coverage({ scenarios }: { scenarios: Scenario[] }) {
   return (
     <div>
       <h2 className="viewhead">Coverage</h2>
-      <p className="dek">
-        Every model × GPU × workload × budget combination that has been searched —{' '}
-        <b>{rows.length}</b> {rows.length === 1 ? 'combination' : 'combinations'}, <b>{scenarios.length}</b>{' '}
-        {scenarios.length === 1 ? 'report' : 'reports'}. Combinations nobody has searched have no row; to add
-        one, build a scenario on the Submit tab.
+      {/* `.dek` caps at 1100px but this view's table runs the full width, so the unbalanced
+          paragraph left a short orphan line that read as truncated text; `balance` evens it. */}
+      <p className="dek balance">
+        Every model × GPU × workload × budget combination that has been searched — <b>{rows.length}</b>{' '}
+        {rows.length === 1 ? 'combination' : 'combinations'}, <b>{scenarios.length}</b>{' '}
+        {scenarios.length === 1 ? 'report' : 'reports'}. Combinations nobody has searched have no row;
+        to add one, build a scenario on the Submit tab.
       </p>
 
       {rows.length === 0 ? (

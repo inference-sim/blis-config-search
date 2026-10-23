@@ -1,9 +1,10 @@
 import type { Scenario } from '../types'
-import { CATALOG_TABS, coverageHref, coverageRows, coverageWinner, dash, fnum, type CoverageRow } from '../lib'
+import { CATALOG_TABS, coverageHref, coverageRows, dash, fnum, type CoverageRow } from '../lib'
 import { CatalogTable, type Col } from './CatalogTable'
 import { MockBadge } from './Reports'
 
-const bestWinner = (r: CoverageRow) => coverageWinner(r)?.winner ?? null
+/** The winner of the report this row recommends; `coverageRows` already resolved which. */
+const bestWinner = (r: CoverageRow) => r.best?.winner ?? null
 
 /**
  * What has been searched, in one table. Replaces the Models / Workloads / GPUs tabs as the

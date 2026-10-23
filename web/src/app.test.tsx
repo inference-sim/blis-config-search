@@ -50,6 +50,18 @@ describe('#11 coverage view', () => {
     expect(rows.every((r) => r.scenarios.length > 0)).toBe(true)
   })
 
+  it('groups one combination written in different cases into a single row', () => {
+    // build_gallery normalizes hardware (lower + validate, emit upper) but passes model and
+    // workload through from the scenario yaml, so two runs of one combination can disagree on
+    // case. They are the same searched combination and must not split into two rows.
+    const rows = coverageRows([
+      mk('a', 'glm-5.3-flash', 'H100', 'chatbot', 16, false),
+      mk('b', 'GLM-5.3-Flash', 'h100', 'Chatbot', 16, false),
+    ])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].scenarios.map((s) => s.run_id)).toEqual(['a', 'b'])
+  })
+
   it('counts real vs synthetic reports per row', () => {
     const rows = coverageRows([mk('a', 'm1', 'H100', 'chatbot', 16, false), mk('b', 'm1', 'H100', 'chatbot', 16, true)])
     expect(rows[0].scenarios).toHaveLength(2)

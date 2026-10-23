@@ -10,7 +10,7 @@ import { Workloads } from './components/Workloads'
 import { Gpus } from './components/Gpus'
 import { Submit } from './components/Submit'
 import { Footer } from './components/Footer'
-import { TAB_LABELS, type Tab } from './lib'
+import { isCatalogTab, TAB_LABELS, type Tab } from './lib'
 
 interface Data {
   scenarios: Scenario[]
@@ -70,8 +70,7 @@ export function App() {
   // Two routes are not themselves primary tabs: the scenario detail (addressed by runId) sits
   // under Reports, and the three catalog spec-sheets are reached from Coverage. Mark their
   // parent tab so the nav never shows nothing selected.
-  const CATALOG: Tab[] = ['models', 'workloads', 'gpus']
-  const activeTab: Tab = route.runId ? 'reports' : CATALOG.includes(route.tab) ? 'coverage' : route.tab
+  const activeTab: Tab = route.runId ? 'reports' : isCatalogTab(route.tab) ? 'coverage' : route.tab
 
   return (
     <div className="page">

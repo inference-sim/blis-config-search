@@ -31,6 +31,8 @@ export const CATALOG_TABS: [Tab, string][] = [
   ['workloads', 'Workloads'],
   ['gpus', 'GPUs'],
 ]
+/** A demoted spec-sheet route — not a primary tab, so the nav marks Coverage active for it. */
+export const isCatalogTab = (t: Tab): boolean => CATALOG_TABS.some(([tab]) => tab === t)
 
 export function parseRoute(hash: string): Route {
   const h = hash.replace(/^#\/?/, '')
@@ -111,6 +113,24 @@ export interface CoverageRow {
   scenarios: Scenario[]
   /** Reports that are real BLIS output (the rest are synthetic placeholders). */
   n_real: number
+  /**
+   * The report whose config this row recommends, resolved once at build time (the table reads
+   * it per cell, per sort). With several reports on one tuple — a re-search, or a narrower
+   * sweep — each named its own winner, so they are ranked on tok/s/GPU: the dual-Pareto
+   * objective the search picks its own winner on, and the one `operatingPoints` ranks by. Real
+   * runs beat synthetic placeholders outright, since a mock's numbers are illustrative.
+   */
+  best: Scenario | null
+}
+
+/** Best of a tuple's reports on tok/s/GPU, preferring real runs. See `CoverageRow.best`. */
+function pickBest(scenarios: Scenario[], n_real: number): Scenario | null {
+  const pool = n_real > 0 ? scenarios.filter((s) => !s.synthetic) : scenarios
+  let best: Scenario | null = null
+  for (const s of pool) {
+    if (best === null || s.winner.tps_per_gpu > best.winner.tps_per_gpu) best = s
+  }
+  return best
 }
 
 /**
@@ -118,6 +138,11 @@ export interface CoverageRow {
  * entry?", enumerate the (model, hardware, workload, budget) tuples that HAVE a report and
  * group by them. Only searched combinations get a row, so there is no empty-cell row to read
  * past. Order is the scenario list's own — build_gallery already emits it sorted.
+ *
+ * Grouping is case-insensitive, matching `countReports` and `canonFilters`. build_gallery
+ * normalizes hardware (lowercases it, validates against the known set, emits upper) but passes
+ * model and workload straight through from the scenario yaml, so two runs of one combination
+ * can disagree on case; they are still one combination. Display uses the first spelling seen.
  */
 export function coverageRows(scenarios: Scenario[]): CoverageRow[] {
   const by = new Map<string, CoverageRow>()
@@ -125,34 +150,25 @@ export function coverageRows(scenarios: Scenario[]): CoverageRow[] {
     const key = [lc(s.model), lc(s.hardware), lc(s.workload), s.gpu_budget].join('\u0000')
     let row = by.get(key)
     if (row === undefined) {
-      row = { model: s.model, hardware: s.hardware, workload: s.workload, gpu_budget: s.gpu_budget, scenarios: [], n_real: 0 }
+      row = { model: s.model, hardware: s.hardware, workload: s.workload, gpu_budget: s.gpu_budget, scenarios: [], n_real: 0, best: null }
       by.set(key, row)
     }
     row.scenarios.push(s)
     if (!s.synthetic) row.n_real++
   }
-  return [...by.values()]
-}
-
-/** Where a coverage row points: its one report, or the scenario list filtered to its tuple. */
-export function coverageHref(r: CoverageRow): string {
-  if (r.scenarios.length === 1) return scenarioHash(r.scenarios[0].run_id)
-  return reportsHash({ model: r.model, hardware: r.hardware, workload: r.workload, gpu: String(r.gpu_budget) })
+  const rows = [...by.values()]
+  for (const r of rows) r.best = pickBest(r.scenarios, r.n_real)
+  return rows
 }
 
 /**
- * The config a coverage row recommends. With several reports on one tuple (a re-search, or a
- * narrower sweep) they each named a winner, so the row ranks them on tok/s/GPU — the same
- * dual-Pareto objective the search picks its own winner on, and the one `operatingPoints`
- * ranks by. Real runs beat synthetic placeholders outright: a mock's numbers are illustrative.
+ * Where a coverage row points: its one report, or the scenario list filtered to its tuple.
+ * The multi-report target leans on Reports reading exactly these four filter keys — the same
+ * ones `Filters`/`matches` define, compared case-insensitively there via `canonFilters`.
  */
-export function coverageWinner(r: CoverageRow): Scenario | null {
-  const pool = r.n_real > 0 ? r.scenarios.filter((s) => !s.synthetic) : r.scenarios
-  let best: Scenario | null = null
-  for (const s of pool) {
-    if (best === null || s.winner.tps_per_gpu > best.winner.tps_per_gpu) best = s
-  }
-  return best
+export function coverageHref(r: CoverageRow): string {
+  if (r.scenarios.length === 1) return scenarioHash(r.scenarios[0].run_id)
+  return reportsHash({ model: r.model, hardware: r.hardware, workload: r.workload, gpu: String(r.gpu_budget) })
 }
 
 // ---------- sorting ----------

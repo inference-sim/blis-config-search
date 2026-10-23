@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import type { Catalog, RunRecord, Scenario } from './types'
+import type { Catalog, RunRecord, Scenario, WorkloadEntry } from './types'
 import { facetCounts, filterScenarios, topConfigs, NO_FILTERS, parseRoute, filterRecords, countReports, coverageRows, TAB_LABELS } from './lib'
 import { ScenarioDetail } from './components/ScenarioDetail'
 import { Reports } from './components/Reports'
@@ -189,6 +189,58 @@ describe('#11 coverage view', () => {
     render(<Coverage scenarios={C} />)
     const hrefs = [...document.querySelectorAll('.catlinks a')].map((a) => a.getAttribute('href'))
     expect(hrefs).toEqual(expect.arrayContaining(['#/models', '#/workloads', '#/gpus']))
+  })
+
+  it('separates trace-driven replays from shapes and shows a replay its provenance', () => {
+    // A replay states no ISL/OSL distribution — the corpus carries per-request lengths — so
+    // the page must not render it as a shape row of em-dashes, which would read as missing
+    // data. It gets its own table showing scenario + pinned corpus instead.
+    const wl = (over: Partial<WorkloadEntry>): WorkloadEntry => ({
+      name: 'x', kind: 'shape', scenario: null, harness_version: null, corpus: null,
+      corpus_revision: null, category: null, thinking: null, prefix_tokens: 0,
+      isl_mean: 1, isl_stdev: 1, isl_min: 1, isl_max: 1,
+      osl_mean: 1, osl_stdev: 1, osl_min: 1, osl_max: 1, ...over,
+    })
+    const cat: Catalog = {
+      models: [], hardware: [], fabrics: [], storage: [], registry: [], versions: {},
+      workloads: [
+        wl({ name: 'sharegpt', isl_mean: 208, osl_mean: 185 }),
+        wl({
+          name: 'agentx-mvp', kind: 'replay', scenario: 'inferencex-agentx-mvp',
+          harness_version: '0.12.0', corpus: 'semianalysisai/cc-traces-weka-062126-256k',
+          corpus_revision: '8fecd2fc', category: 'coding', thinking: 'on',
+          prefix_tokens: null, isl_mean: null, isl_stdev: null, isl_min: null, isl_max: null,
+          osl_mean: null, osl_stdev: null, osl_min: null, osl_max: null,
+        }),
+      ],
+    }
+    render(<Workloads catalog={cat} scenarios={[]} />)
+    const caps = [...document.querySelectorAll('caption')].map((c) => c.textContent)
+    expect(caps).toEqual(['Workload shapes', 'Trace-driven replay workloads'])
+
+    // the shape lands in the shapes table, the replay in the replay table — not mixed
+    const [shapeTable, replayTable] = [...document.querySelectorAll('table')]
+    expect(shapeTable.textContent).toContain('sharegpt')
+    expect(shapeTable.textContent).not.toContain('agentx-mvp')
+    expect(replayTable.textContent).toContain('agentx-mvp')
+
+    // the replay's provenance is what's shown, and the ISL/OSL heads are absent there
+    expect(replayTable.textContent).toContain('inferencex-agentx-mvp')
+    expect(replayTable.textContent).toContain('semianalysisai/cc-traces-weka-062126-256k')
+    expect(replayTable.textContent).toContain('@8fecd2fc')
+    const replayHeads = [...replayTable.querySelectorAll('thead th')].map((th) => th.textContent)
+    expect(replayHeads.join()).not.toContain('ISL')
+    expect(replayHeads.join()).not.toContain('OSL')
+  })
+
+  it('omits the replay table entirely when the catalog has no replay workload', () => {
+    // an older catalog checkout has only shapes; it must not grow an empty second table
+    const cat: Catalog = {
+      models: [], hardware: [], fabrics: [], storage: [], registry: [], versions: {},
+      workloads: [{ name: 'chatbot', kind: 'shape' } as WorkloadEntry],
+    }
+    render(<Workloads catalog={cat} scenarios={[]} />)
+    expect([...document.querySelectorAll('caption')].map((c) => c.textContent)).toEqual(['Workload shapes'])
   })
 
   it('gives each demoted spec sheet a breadcrumb back to Coverage', () => {

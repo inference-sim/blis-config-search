@@ -73,6 +73,12 @@ h2.viewhead{margin:0 0 6px;font-size:22px;font-weight:600;letter-spacing:-0.01em
 .spec.floor{color:var(--accent-ink,var(--accent));border-color:var(--accent);background:var(--accent-soft)}
 .fullreport{font-size:12.5px;margin-left:6px}
 
+/* ---- Coverage: the searched-combinations table + its link down to the spec-sheets ---- */
+/* the recommended config is the payload of a coverage row — give it the same mono/accent
+   treatment the card's .win gets, so the eye lands on it rather than on the tuple columns */
+.covwin{font-family:var(--font-mono);font-weight:600;color:var(--accent-ink)}
+.catlinks{margin:16px 0 0;font-size:12.5px;color:var(--muted)}
+
 /* ---- controls ---- */
 .chips{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;align-items:center}
 .filterbar{padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--panel);margin:18px 0}

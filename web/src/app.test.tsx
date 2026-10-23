@@ -1,10 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import type { Catalog, RunRecord, Scenario } from './types'
-import { facetCounts, filterScenarios, topConfigs, NO_FILTERS, parseRoute, filterRecords, countReports } from './lib'
+import { facetCounts, filterScenarios, topConfigs, NO_FILTERS, parseRoute, filterRecords, countReports, coverageRows, TAB_LABELS } from './lib'
 import { ScenarioDetail } from './components/ScenarioDetail'
 import { Reports } from './components/Reports'
 import { Submit } from './components/Submit'
+import { Coverage } from './components/Coverage'
+import { Models } from './components/Models'
+import { Workloads } from './components/Workloads'
+import { Gpus } from './components/Gpus'
 
 const w = { label: '1x TP8', tp: 8, ni: 1, gpus: 8, c_use: 1, tps: 1, tps_per_gpu: 1, per_user: 1, itl_p99: 1 }
 const mk = (id: string, model: string, hw: string, wl: string, gpu: number, synthetic: boolean, records: RunRecord[] = []): Scenario => ({
@@ -21,6 +25,104 @@ describe('filters', () => {
     const gpu = facetCounts(S, NO_FILTERS, 'gpu')
     expect(gpu.map((g) => g.value)).toEqual(['8', '16'])
     expect(countReports(S, 'model', 'M1')).toBe(2)
+  })
+})
+
+describe('#11 coverage view', () => {
+  // Two scenarios share one (model, hardware, workload, budget) tuple; a third differs by budget.
+  const C = [
+    mk('a', 'm1', 'H100', 'chatbot', 16, false),
+    mk('a2', 'm1', 'H100', 'chatbot', 16, false),
+    mk('c', 'm2', 'H200', 'multidoc', 512, false),
+  ]
+
+  it('enumerates one row per searched combination, never an unsearched one', () => {
+    const rows = coverageRows(C)
+    expect(rows).toHaveLength(2)
+    expect(rows.map((r) => [r.model, r.hardware, r.workload, r.gpu_budget])).toEqual([
+      ['m1', 'H100', 'chatbot', 16],
+      ['m2', 'H200', 'multidoc', 512],
+    ])
+    // the row carries its scenarios, so the count is the number of reports behind it
+    expect(rows[0].scenarios.map((s) => s.run_id)).toEqual(['a', 'a2'])
+    expect(rows[1].scenarios).toHaveLength(1)
+    // a combination with no report never appears — there is no row to have an empty count
+    expect(rows.every((r) => r.scenarios.length > 0)).toBe(true)
+  })
+
+  it('counts real vs synthetic reports per row', () => {
+    const rows = coverageRows([mk('a', 'm1', 'H100', 'chatbot', 16, false), mk('b', 'm1', 'H100', 'chatbot', 16, true)])
+    expect(rows[0].scenarios).toHaveLength(2)
+    expect(rows[0].n_real).toBe(1)
+  })
+
+  it('links a single-report row straight to its scenario, a multi-report row to the filtered list', () => {
+    render(<Coverage scenarios={C} />)
+    const hrefs = [...document.querySelectorAll('.readout tbody a')].map((a) => a.getAttribute('href') ?? '')
+    // the m2/H200/multidoc/512 row has exactly one report -> deep-link to the report itself
+    expect(hrefs).toContain('#/scenario/c')
+    // the m1 row has two -> link to Reports pre-filtered on the whole tuple
+    const multi = hrefs.find((h) => h.startsWith('#/reports?')) ?? ''
+    const q = new URLSearchParams(multi.split('?')[1])
+    expect([q.get('model'), q.get('hardware'), q.get('workload'), q.get('gpu')]).toEqual(['m1', 'H100', 'chatbot', '16'])
+  })
+
+  it('shows the recommended config inline, so the table answers "what should I run?"', () => {
+    render(<Coverage scenarios={C} />)
+    // the winner is the payload a reader came for; every row states one
+    expect(document.querySelector('.readout tbody')?.textContent).toContain('1x TP8')
+    expect(document.querySelectorAll('.readout tbody .covwin')).toHaveLength(2)
+  })
+
+  it('names the best config by tok/s/GPU when a tuple has several reports', () => {
+    // two searches of the same tuple: the row must still answer with ONE config, picked on the
+    // objective the search itself optimises, not print "2 reports" in the config column too.
+    const win = (label: string, tpg: number) => ({ ...w, label, name: label, tps_per_gpu: tpg })
+    const rows = [
+      { ...mk('old', 'm1', 'H100', 'chatbot', 16, false), winner: win('4x TP4', 40) },
+      { ...mk('new', 'm1', 'H100', 'chatbot', 16, false), winner: win('8x TP2 + EP', 71) },
+    ]
+    render(<Coverage scenarios={rows} />)
+    const tr = document.querySelector('.readout tbody tr') as Element
+    expect(tr.querySelector('.covwin')?.textContent).toBe('8x TP2 + EP')
+    expect(tr.textContent).toContain('71')
+    // the count still lives in the report column, where it belongs
+    expect(tr.querySelector('a')?.textContent).toContain('2 reports')
+  })
+
+  it('says so when nothing has been searched yet', () => {
+    render(<Coverage scenarios={[]} />)
+    expect(screen.getByText(/no scenarios have been searched/i)).toBeTruthy()
+    expect(document.querySelector('.readout')).toBeNull()
+  })
+
+  it('keeps the per-entity spec sheets reachable as secondary links, not top-level tabs', () => {
+    // the primary nav is Reports / Coverage / Submit — the three catalog tabs are demoted
+    expect(TAB_LABELS.map(([t]) => t)).toEqual(['reports', 'coverage', 'submit'])
+    // ...but their routes still resolve, so the secondary links and old bookmarks work
+    expect(parseRoute('#/models').tab).toBe('models')
+    expect(parseRoute('#/workloads').tab).toBe('workloads')
+    expect(parseRoute('#/gpus').tab).toBe('gpus')
+    expect(parseRoute('#/coverage').tab).toBe('coverage')
+    // Coverage renders the disclosure to each spec sheet
+    render(<Coverage scenarios={C} />)
+    const hrefs = [...document.querySelectorAll('.catlinks a')].map((a) => a.getAttribute('href'))
+    expect(hrefs).toEqual(expect.arrayContaining(['#/models', '#/workloads', '#/gpus']))
+  })
+
+  it('gives each demoted spec sheet a breadcrumb back to Coverage', () => {
+    // no longer a top-level tab, so the only way back out is in the view itself
+    const cat: Catalog = {
+      models: [{ name: 'm1' } as Catalog['models'][number]],
+      hardware: [{ name: 'h100' } as Catalog['hardware'][number]],
+      workloads: [{ name: 'chatbot' } as Catalog['workloads'][number]],
+      fabrics: [], storage: [], registry: [], versions: {},
+    }
+    for (const view of [<Models catalog={cat} scenarios={C} />, <Workloads catalog={cat} scenarios={C} />, <Gpus catalog={cat} scenarios={C} />]) {
+      const { unmount } = render(view)
+      expect(document.querySelector('.crumb a')?.getAttribute('href')).toBe('#/coverage')
+      unmount()
+    }
   })
 })
 

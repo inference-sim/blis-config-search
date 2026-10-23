@@ -8,13 +8,29 @@ export function fnum(v: number | null | undefined, digits = 1): string {
 }
 
 // ---------- routing ----------
-export type Tab = 'reports' | 'models' | 'workloads' | 'gpus' | 'submit'
+export type Tab = 'reports' | 'coverage' | 'models' | 'workloads' | 'gpus' | 'submit'
 export interface Route {
   tab: Tab
   runId: string | null
   params: Record<string, string>
 }
-const TABS: Tab[] = ['reports', 'models', 'workloads', 'gpus', 'submit']
+/** Every addressable route. Models/workloads/gpus resolve but are not in the primary nav. */
+const TABS: Tab[] = ['reports', 'coverage', 'models', 'workloads', 'gpus', 'submit']
+/** The primary nav. The three per-entity spec sheets are demoted to links on Coverage: with
+ *  only a handful of scenarios searched, a full spec-sheet per catalog entry is mostly empty
+ *  `reports` cells, and the question a reader arrives with — what has been searched? — was
+ *  split across all three. Coverage answers it in one table. */
+export const TAB_LABELS: [Tab, string][] = [
+  ['reports', 'Reports'],
+  ['coverage', 'Coverage'],
+  ['submit', 'Submit'],
+]
+/** The spec sheets, as the secondary links Coverage discloses them through. */
+export const CATALOG_TABS: [Tab, string][] = [
+  ['models', 'Models'],
+  ['workloads', 'Workloads'],
+  ['gpus', 'GPUs'],
+]
 
 export function parseRoute(hash: string): Route {
   const h = hash.replace(/^#\/?/, '')
@@ -82,6 +98,61 @@ export function topConfigs(filtered: Scenario[]): { items: Scenario[]; mockOnly:
 
 export function countReports(scenarios: Scenario[], key: 'model' | 'hardware' | 'workload', name: string): number {
   return scenarios.filter((s) => lc(s[key]) === lc(name)).length
+}
+
+// ---------- coverage: what has actually been searched ----------
+
+/** One searched combination: the filter tuple plus every report behind it. */
+export interface CoverageRow {
+  model: string
+  hardware: string
+  workload: string
+  gpu_budget: number
+  scenarios: Scenario[]
+  /** Reports that are real BLIS output (the rest are synthetic placeholders). */
+  n_real: number
+}
+
+/**
+ * The inverse of `countReports`: instead of asking "how many reports mention this catalog
+ * entry?", enumerate the (model, hardware, workload, budget) tuples that HAVE a report and
+ * group by them. Only searched combinations get a row, so there is no empty-cell row to read
+ * past. Order is the scenario list's own — build_gallery already emits it sorted.
+ */
+export function coverageRows(scenarios: Scenario[]): CoverageRow[] {
+  const by = new Map<string, CoverageRow>()
+  for (const s of scenarios) {
+    const key = [lc(s.model), lc(s.hardware), lc(s.workload), s.gpu_budget].join('\u0000')
+    let row = by.get(key)
+    if (row === undefined) {
+      row = { model: s.model, hardware: s.hardware, workload: s.workload, gpu_budget: s.gpu_budget, scenarios: [], n_real: 0 }
+      by.set(key, row)
+    }
+    row.scenarios.push(s)
+    if (!s.synthetic) row.n_real++
+  }
+  return [...by.values()]
+}
+
+/** Where a coverage row points: its one report, or the scenario list filtered to its tuple. */
+export function coverageHref(r: CoverageRow): string {
+  if (r.scenarios.length === 1) return scenarioHash(r.scenarios[0].run_id)
+  return reportsHash({ model: r.model, hardware: r.hardware, workload: r.workload, gpu: String(r.gpu_budget) })
+}
+
+/**
+ * The config a coverage row recommends. With several reports on one tuple (a re-search, or a
+ * narrower sweep) they each named a winner, so the row ranks them on tok/s/GPU — the same
+ * dual-Pareto objective the search picks its own winner on, and the one `operatingPoints`
+ * ranks by. Real runs beat synthetic placeholders outright: a mock's numbers are illustrative.
+ */
+export function coverageWinner(r: CoverageRow): Scenario | null {
+  const pool = r.n_real > 0 ? r.scenarios.filter((s) => !s.synthetic) : r.scenarios
+  let best: Scenario | null = null
+  for (const s of pool) {
+    if (best === null || s.winner.tps_per_gpu > best.winner.tps_per_gpu) best = s
+  }
+  return best
 }
 
 // ---------- sorting ----------

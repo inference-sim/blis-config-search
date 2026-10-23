@@ -1,7 +1,7 @@
 import type { Catalog, HardwareEntry, Scenario } from '../types'
 import { countReports, dash } from '../lib'
 import { CatalogTable, type Col } from './CatalogTable'
-import { ReportsLink } from './Models'
+import { CatalogCrumb, ReportsLink } from './Models'
 
 export function Gpus({ catalog, scenarios }: { catalog: Catalog; scenarios: Scenario[] }) {
   const cols: Col<HardwareEntry>[] = [
@@ -25,6 +25,7 @@ export function Gpus({ catalog, scenarios }: { catalog: Catalog; scenarios: Scen
   ]
   return (
     <div>
+      <CatalogCrumb />
       <h2 className="viewhead">GPUs</h2>
       <p className="dek"><b>{catalog.hardware.length}</b> hardware entries. Missing values are shown as {dash}.</p>
       <CatalogTable rows={catalog.hardware} cols={cols} rowKey={(h) => h.name} caption="Hardware catalog" />

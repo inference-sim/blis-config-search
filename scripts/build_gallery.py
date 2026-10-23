@@ -286,7 +286,7 @@ def main(argv=None):
     except Invalid as e:
         raise SystemExit(f"validation error: {e}")
 
-    # catalog.js (models / hardware / workloads tabs) — degrades gracefully if siblings absent
+    # catalog.js (the models / hardware / workloads spec-sheets) — degrades gracefully if siblings absent
     import build_catalog
     cat = build_catalog.build(os.path.abspath(args.siblings))
     with open(os.path.join(args.out, "catalog.js"), "w", encoding="utf-8") as f:

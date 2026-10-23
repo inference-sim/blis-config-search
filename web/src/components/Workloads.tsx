@@ -1,7 +1,7 @@
 import type { Catalog, Scenario, WorkloadEntry } from '../types'
 import { countReports, dash } from '../lib'
 import { CatalogTable, type Col } from './CatalogTable'
-import { ReportsLink } from './Models'
+import { CatalogCrumb, ReportsLink } from './Models'
 
 export function Workloads({ catalog, scenarios }: { catalog: Catalog; scenarios: Scenario[] }) {
   const cols: Col<WorkloadEntry>[] = [
@@ -24,6 +24,7 @@ export function Workloads({ catalog, scenarios }: { catalog: Catalog; scenarios:
   ]
   return (
     <div>
+      <CatalogCrumb />
       <h2 className="viewhead">Workloads</h2>
       <p className="dek"><b>{catalog.workloads.length}</b> workload presets (input / output sequence lengths in tokens). Missing values are shown as {dash}.</p>
       <CatalogTable rows={catalog.workloads} cols={cols} rowKey={(w) => w.name} caption="Workload presets" />

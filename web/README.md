@@ -36,7 +36,7 @@ server locally; Pages is never `file://`.)
 ```
 src/
   main.tsx App.tsx route.ts lib.ts types.ts load.ts vite-env.d.ts styles.css
-  components/ Dropdown.tsx Rail.tsx Reports.tsx ScenarioDetail.tsx
+  components/ Dropdown.tsx Rail.tsx Reports.tsx ScenarioDetail.tsx Coverage.tsx
               Models.tsx Workloads.tsx Gpus.tsx CatalogTable.tsx Submit.tsx
 scripts/stage-data.mjs       site/ -> public/data/
 public/data/                 staged data (gitignored; regenerated)
@@ -44,5 +44,12 @@ dist/                        build output = Pages artifact (gitignored)
 ```
 
 Tabs: **Reports** (exec "configs to try" summary → cross-filter → gallery cards → scenario
-detail with briefing + Pareto explorer), **Models / Workloads / GPUs** (catalog spec-sheets),
-**Submit** (Scenario builder; read-only on Pages, live in local mode).
+detail with briefing + Pareto explorer), **Coverage** (one row per searched model × GPU ×
+workload × budget combination, linking to its report), **Submit** (Scenario builder;
+read-only on Pages, live in local mode).
+
+The per-entity catalog spec-sheets (**Models / Workloads / GPUs**) are not primary tabs: they
+listed every catalog entry, so with a handful of scenarios searched most rows carried an empty
+`reports` cell, and "what has been searched?" was split across three tables. Coverage answers
+that in one table and links down to the spec-sheets, which keep their `#/models`, `#/workloads`
+and `#/gpus` routes (so old bookmarks resolve) and each carry a breadcrumb back to Coverage.

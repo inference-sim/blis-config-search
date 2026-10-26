@@ -8,7 +8,9 @@ naming) and run_submission (validation, unsafe-path refusal, no-runner loud fail
 are the non-build backend pieces; the build/catalog are covered by test_build.py.
 """
 import importlib.util
+import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -62,6 +64,31 @@ def test_serve_local():
         check(any(field in err for err in e2), f"{field} error reported")
     if has_catalog:
         check(any("unknown model" in err for err in e2), "unknown model reported")
+
+    # The local-run server resolves workload names from the STAGED catalog (web/dist/data or
+    # site/catalog.js), so a preset added upstream is runnable with no edit here — and a
+    # trace-driven replay is refused, since `blis run --workload` cannot load one.
+    staged = tempfile.mkdtemp()
+    old_site = m.SITE
+    try:
+        os.makedirs(os.path.join(staged, "data"))
+        with open(os.path.join(staged, "data", "catalog.json"), "w", encoding="utf-8") as f:
+            json.dump({"models": [{"name": "qwen3-14b"}], "workloads": [
+                {"name": "chatbot", "kind": "shape"},
+                {"name": "sharegpt", "kind": "shape"},
+                {"name": "agentx-mvp", "kind": "replay"},
+            ]}, f)
+        m.SITE = staged
+        base = {"model": "qwen3-14b", "hardware": "h100", "gpu_budget": 8}
+        _, e3 = m.validate_scenario({**base, "workload": "sharegpt"})
+        check(e3 == [], "a staged shape preset validates without a code edit")
+        _, e4 = m.validate_scenario({**base, "workload": "agentx-mvp"})
+        check(any("replay" in e for e in e4), "a staged replay is refused for the local run")
+        _, e5 = m.validate_scenario({**base, "workload": "nope"})
+        check(any("sharegpt" in e for e in e5), "an unknown workload names the staged presets")
+    finally:
+        m.SITE = old_site
+        shutil.rmtree(staged, ignore_errors=True)
 
     # yaml shaping round-trips to the same scenario
     import yaml as _yaml
@@ -117,6 +144,43 @@ def test_run_submission():
                            "interactivity_floor": {"tok_per_s_per_user": 50}})
     check(errs4 == [], "nested interactivity_floor validates")
 
+    # Workload names come from the catalog, not a hardcoded list: a preset added upstream must
+    # validate with no edit here, and a trace-driven replay must be REFUSED, because
+    # `blis run --workload` loads the name with LoadWorkload, which rejects a replay file.
+    cat = tempfile.mkdtemp()
+    try:
+        wdir = os.path.join(cat, "workloads")
+        os.makedirs(wdir)
+        for name in ("chatbot", "sharegpt"):
+            with open(os.path.join(wdir, f"{name}.yaml"), "w", encoding="utf-8") as f:
+                f.write("prefix_tokens: 0\nprompt: {tokens: 8}\noutput: {tokens: 8}\n")
+        with open(os.path.join(wdir, "agentx-mvp.yaml"), "w", encoding="utf-8") as f:
+            f.write("replay:\n  scenario: inferencex-agentx-mvp\n  harness_version: 0.12.0\n")
+
+        base = {"model": "qwen3-14b", "hardware": "h100", "gpu_budget": 8}
+        errs5, _ = m.validate({**base, "workload": {"preset": "sharegpt"}}, cat)
+        check(errs5 == [], "a shape preset from the catalog validates without a code edit")
+
+        errs6, _ = m.validate({**base, "workload": {"preset": "agentx-mvp"}}, cat)
+        check(any("replay" in e for e in errs6),
+              "a trace-driven replay is refused, since BLIS cannot run it as a preset")
+
+        errs7, _ = m.validate({**base, "workload": {"preset": "nope"}}, cat)
+        check(any("sharegpt" in e for e in errs7),
+              "an unknown workload names the catalog's actual presets")
+    finally:
+        shutil.rmtree(cat)
+
+    # with no catalog path, the four long-standing presets remain the floor — an unstaged
+    # checkout must not start accepting arbitrary workload names
+    errs8, _ = m.validate({"model": "qwen3-14b", "hardware": "h100",
+                           "workload": {"preset": "multidoc"}, "gpu_budget": 8})
+    check(errs8 == [], "base presets validate with no catalog supplied")
+    errs9, _ = m.validate({"model": "qwen3-14b", "hardware": "h100",
+                           "workload": {"preset": "sharegpt"}, "gpu_budget": 8})
+    check(any("unknown workload" in e for e in errs9),
+          "with no catalog, a name outside the base presets is still rejected")
+
     # end-to-end CLI behavior: no runner -> loud non-zero exit, no fabricated report
     tmp = tempfile.mkdtemp()
     sub = os.path.join(ROOT, "submissions", "_test_backend_tmp.yaml")
@@ -137,7 +201,6 @@ def test_run_submission():
         check(r2.returncode != 0, "unsafe submission path refused")
     finally:
         os.remove(sub)
-        import shutil
         shutil.rmtree(tmp, ignore_errors=True)
 
 

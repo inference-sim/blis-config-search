@@ -185,6 +185,56 @@ def test_build_determinism_and_nomock():
         shutil.rmtree(tmp)
 
 
+def test_catalog_workload_kinds():
+    """The two arms of the catalog's workloads/ namespace, on a fixture.
+
+    test_catalog() below reads the real sibling repos, which are ABSENT in CI, so its
+    workload assertions never run there. These do: a hand-built catalog with one shape
+    and one replay pins the projection contract hermetically.
+    """
+    tmp = tempfile.mkdtemp()
+    try:
+        wdir = os.path.join(tmp, "blis-catalog", "workloads")
+        os.makedirs(wdir)
+        with open(os.path.join(wdir, "sharegpt.yaml"), "w", encoding="utf-8") as f:
+            f.write("prefix_tokens: 0\n"
+                    "prompt: {tokens: 208, tokens_stdev: 231, tokens_min: 4, tokens_max: 1013}\n"
+                    "output: {tokens: 185, tokens_stdev: 190, tokens_min: 4, tokens_max: 979}\n")
+        # the replay arm, shaped as blis-catalog's agentx-mvp.yaml is
+        with open(os.path.join(wdir, "agentx-mvp.yaml"), "w", encoding="utf-8") as f:
+            f.write('_comment: "provenance prose the loader discards"\n'
+                    "replay:\n"
+                    "  scenario: inferencex-agentx-mvp\n"
+                    "  harness_version: 0.12.0\n"
+                    "  corpus:\n"
+                    "    loader: semianalysis_cc_traces_weka_062126_256k\n"
+                    "    source:\n"
+                    "      huggingface: semianalysisai/cc-traces-weka-062126-256k\n"
+                    "      revision: 8fecd2fc56694469f758f0afbbb6335ad3043740\n"
+                    "  category: coding\n"
+                    '  thinking: "on"\n')
+        wl = {w["name"]: w for w in bc.build(tmp)["workloads"]}
+        check(set(wl) == {"sharegpt", "agentx-mvp"}, "both workload arms are projected")
+
+        sg = wl["sharegpt"]
+        check(sg["kind"] == "shape", "a prompt/output file projects as a shape")
+        check((sg["isl_mean"], sg["osl_mean"]) == (208, 185), "shape ISL/OSL means projected")
+        check(sg["scenario"] is None and sg["corpus"] is None, "a shape carries no replay provenance")
+
+        ax = wl["agentx-mvp"]
+        check(ax["kind"] == "replay", "a top-level replay: file projects as a replay")
+        check(ax["scenario"] == "inferencex-agentx-mvp", "replay scenario projected")
+        check(ax["corpus"] == "semianalysisai/cc-traces-weka-062126-256k", "replay corpus projected")
+        check(ax["corpus_revision"] == "8fecd2fc", "corpus revision shortened for display")
+        check(ax["harness_version"] == "0.12.0", "harness version projected as a string")
+        check(ax["thinking"] == "on", "thinking projected as text, never a bool")
+        # the point of the fix: absent distributions must stay absent, not read as 0
+        check(ax["isl_mean"] is None and ax["osl_mean"] is None and ax["prefix_tokens"] is None,
+              "a replay states no ISL/OSL distribution and no scalar prefix")
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_catalog():
     print("test_catalog")
     cat = bc.build(os.path.join(ROOT, os.pardir))
@@ -200,7 +250,29 @@ def test_catalog():
         hw = {h["name"] for h in cat["hardware"]}
         check("h100" in hw and "h200" in hw, "h100/h200 in hardware")
         wl = {w["name"] for w in cat["workloads"]}
-        check(wl == {"chatbot", "summarization", "contentgen", "multidoc"}, "exactly the 4 real workloads")
+        # The four shape presets are the floor, not the ceiling: the catalog's workloads/
+        # namespace also carries trace-driven entries (agentx-mvp, and more over time), so
+        # asserting an exact set made this test fail the moment upstream added one. Assert
+        # the presets are present and every entry is projected, which is the contract.
+        check(wl >= {"chatbot", "summarization", "contentgen", "multidoc"},
+              "the four shape presets are all present")
+        check(all(w["kind"] in ("shape", "replay") for w in cat["workloads"]),
+              "every workload is projected as a shape or a replay")
+        shapes = [w for w in cat["workloads"] if w["kind"] == "shape"]
+        check(all(w["isl_mean"] and w["osl_mean"] for w in shapes),
+              "every shape states prompt and output means")
+        for w in cat["workloads"]:
+            if w["kind"] != "replay":
+                continue
+            # a replay's provenance is the only thing worth showing about it, so it must
+            # project; its distributions must stay absent rather than read as zeros
+            check(w["scenario"] and w["corpus"], f"replay {w['name']} projects scenario + corpus")
+            check(w["isl_mean"] is None and w["prefix_tokens"] is None,
+                  f"replay {w['name']} states no ISL/OSL distribution")
+        sg = next((w for w in cat["workloads"] if w["name"] == "sharegpt"), None)
+        if sg:  # present once blis-catalog#(sharegpt) lands; skipped against an older checkout
+            check(sg["kind"] == "shape" and sg["isl_mean"] == 208 and sg["osl_mean"] == 185,
+                  "sharegpt preset projects its measured ISL/OSL")
     else:
         print("  (sibling repos absent — catalog empty; that is the graceful path)")
 
@@ -216,6 +288,7 @@ if __name__ == "__main__":
     test_report_back_link_resolves_on_pages()
     test_validation()
     test_build_determinism_and_nomock()
+    test_catalog_workload_kinds()
     test_catalog()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

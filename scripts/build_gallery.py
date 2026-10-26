@@ -121,6 +121,13 @@ def validate_and_project(run_dir):
             "tps_per_gpu": _num(at.get("tokens_per_sec_per_gpu", 0), f"{name}:{label} tps/gpu", 0, 1e9),
             "per_user": _num(at.get("tok_per_s_per_user", 0), f"{name}:{label} per_user", 0, 1e6),
             "itl_p99": _num(at.get("itl_p99_ms", 0), f"{name}:{label} itl", 0, 1e6),
+            # The load the numbers above were MEASURED at. It equals c_use for a well-formed
+            # finalist; it differs only when the dedicated c_use run failed and a lower probe
+            # stood in, and the card pairs these figures with c_use, so a silent substitution
+            # would read as the throughput at a load never run. Absent in a run dir written
+            # before the field existed -> fall back to c_use rather than inventing a mismatch.
+            "measured_at": int(_num(at.get("measured_at_concurrency", f.get("c_use", 0)) or 0,
+                                    f"{name}:{label} measured_at", 0, 1e7)),
         }
         finalists.append(row)
         # prefer the explicit (label, variant) pair; fall back to the legacy `chosen` string so a

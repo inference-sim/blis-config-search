@@ -328,7 +328,35 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
                          "reason": (first_error or "no probe met the interactivity floor")})
             return
         c_use = max(1, int(round(headroom * c_star)))
-        at = min((p for p in curve if p["concurrency"] <= c_use), key=lambda p: abs(p["concurrency"] - c_use), default=None)
+        # MEASURE c_use, do not substitute the nearest lower rung. The ramp doubles, so
+        # c_use = 0.8 x c_star almost never lands on a rung: with c*=64 the nearest lower probe is
+        # 32, and reporting that run's throughput as "the throughput at c=51" understated the
+        # winner by 46% (423.5 vs 786.9 tok/s measured here). The same arithmetic understated
+        # every doubling-ramp finalist by ~37%, the committed kimi-k2.5 report included, where
+        # "34,307.6 tok/s at c=819" is really the c=512 measurement. One extra run per finalist
+        # buys a number that is actually the number the report claims.
+        at = next((p for p in curve if p["concurrency"] == c_use), None)
+        if at is None:
+            cfg = {**base_engine, **topo, "concurrency": c_use}
+            nreq = None if replay else requests_for(c_use, num_requests)
+            rec = run_blis.run_one(blis, catalog, registry, scenarios_dir, model, hardware,
+                                   engine_version, workload, nreq, seed, None, cfg,
+                                   phase="c_use", timeout=run_timeout, replay=replay)
+            add_run(rec)
+            m = rec.get("metrics") or {}
+            if rec.get("returncode") == 0 and m.get("tokens_per_sec") and not rec.get("error"):
+                pu = per_user(m)
+                at = {"concurrency": c_use, "tokens_per_sec": round(m["tokens_per_sec"], 1),
+                      "itl_p99_ms": m.get("itl_p99_ms"), "tok_per_s_per_user": pu,
+                      "preemption_count": m.get("preemption_count", 0)}
+                # Keep the curve ordered by load, so the figures draw it correctly.
+                curve.append(at)
+                curve.sort(key=lambda p: p["concurrency"])
+        if at is None:
+            # The dedicated c_use run failed, so fall back to the best probe at or below it and
+            # say so, rather than dropping a shape that IS servable at c_star.
+            at = min((p for p in curve if p["concurrency"] <= c_use),
+                     key=lambda p: abs(p["concurrency"] - c_use), default=None)
         if at is None:
             add_dropped({"label": label, "config": topo, "gpus": gpus,
                          "reason": f"no probe at or below the usable load c={c_use}"})
@@ -339,7 +367,12 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
             "config": topo, "gpus": gpus, "c_star": c_star, "c_use": c_use,
             "at_c_use": {"tokens_per_sec": tps, "tokens_per_sec_per_gpu": round(tps / gpus, 1),
                          "tok_per_s_per_user": at["tok_per_s_per_user"], "itl_p99_ms": at["itl_p99_ms"],
-                         "ttft_p99_ms": 0.0, "preemption_count": at.get("preemption_count", 0)},
+                         "ttft_p99_ms": 0.0, "preemption_count": at.get("preemption_count", 0),
+                         # The load these numbers were actually MEASURED at. Normally c_use; it
+                         # differs only when the dedicated c_use run failed and the nearest lower
+                         # probe stood in, and then the discrepancy must be visible rather than
+                         # presented as the figure at c_use.
+                         "measured_at_concurrency": at["concurrency"]},
             "curve": curve,
         })
 

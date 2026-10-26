@@ -382,6 +382,32 @@ def test_parallel_probing_matches_sequential_exactly():
           f"the same winner is chosen ({run_search.winner_name(w_seq)})")
 
 
+def test_c_use_is_measured_not_substituted():
+    print("c_use is measured, not read off the nearest lower rung")
+    r = FakeRunner()
+    runs, finalists, _ = run(scenario(budget=64), r)
+    probed = {c["concurrency"] for c in r.calls}
+    for f in finalists:
+        # The headline numbers must come from a run AT c_use. The ramp doubles, so c_use
+        # (0.8 x c_star) almost never lands on a rung; substituting the rung below understated
+        # throughput by ~37% on every doubling-ramp finalist.
+        check(f["at_c_use"]["measured_at_concurrency"] == f["c_use"],
+              f"{f['label']}: measured at c={f['at_c_use']['measured_at_concurrency']}, "
+              f"claims c_use={f['c_use']}")
+        check(f["c_use"] in probed, f"{f['label']}: a run exists at c_use={f['c_use']}")
+        # And the curve must carry that point, so the figures draw what the text cites.
+        check(any(p["concurrency"] == f["c_use"] for p in f["curve"]),
+              f"{f['label']}: the curve includes c_use={f['c_use']}")
+
+
+def test_c_use_run_is_labelled_as_its_own_phase():
+    print("the c_use run is a distinct phase in the ledger")
+    r = FakeRunner()
+    runs, finalists, _ = run(scenario(budget=64), r)
+    phases = {x.get("phase") for x in runs}
+    check("c_use" in phases, f"c_use runs are labelled (phases seen: {sorted(p for p in phases if p)})")
+
+
 if __name__ == "__main__":
     test_explores_ep()
     test_ep_wins_when_it_is_better()
@@ -398,5 +424,7 @@ if __name__ == "__main__":
     test_replay_workload_takes_the_replay_path()
     test_shape_workload_passes_no_replay()
     test_parallel_probing_matches_sequential_exactly()
+    test_c_use_is_measured_not_substituted()
+    test_c_use_run_is_labelled_as_its_own_phase()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

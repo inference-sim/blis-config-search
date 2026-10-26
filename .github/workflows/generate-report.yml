@@ -77,11 +77,16 @@ jobs:
       - name: Build the pinned BLIS stack
         run: |
           set -euo pipefail
-          # Pins from the config-search SETUP.md. Keep in sync with pins.env.
-          git clone --branch v0.10.0 --depth 1 https://github.com/inference-sim/inference-sim.git upstream
+          # Pins come from pins.env -- the single source of truth, also read by
+          # scripts/build_catalog.py for the site's version pills. Never hard-code a ref here.
+          set -a; . ./pins.env; set +a
+          git clone --branch "$BLIS_REF" --depth 1 https://github.com/inference-sim/inference-sim.git upstream
+          # The tag is not immutable upstream; refuse to build a moved tag (same check as SETUP.md).
+          test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
+            echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
           ( cd upstream && go build -o blis main.go )
-          git clone --branch 0.2.1 --depth 1 https://github.com/inference-sim/blis-catalog.git
-          git clone --branch v0.1.1 --depth 1 https://github.com/inference-sim/blis-registry.git
+          git clone --branch "$CATALOG_REF" --depth 1 https://github.com/inference-sim/blis-catalog.git
+          git clone --branch "$REGISTRY_REF" --depth 1 https://github.com/inference-sim/blis-registry.git
           echo "BLIS_CATALOG=$PWD/blis-catalog"   >> "$GITHUB_ENV"
           echo "BLIS_REGISTRY=$PWD/blis-registry" >> "$GITHUB_ENV"
           echo "BLIS_BIN=$PWD/upstream/blis"      >> "$GITHUB_ENV"

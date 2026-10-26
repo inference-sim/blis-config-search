@@ -375,6 +375,17 @@ class Narrative(unittest.TestCase):
         self.assertIn('class="short"', html)
         self.assertNotIn("__BODY__", html)
 
+    def test_provenance_strip_is_a_semantic_footer(self):
+        # The provenance strip closes the document, so it is a <footer>, not an anonymous <div>:
+        # the generated report and the React dashboard (<footer class="sitefoot">) agree on the
+        # outline. The .foot class is kept, so report/template.html's styling is untouched.
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        html = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
+        self.assertIn('<footer class="foot">', html)
+        self.assertNotIn('<div class="foot">', html)
+        self.assertIn(".foot{", html)                    # template rule still matches the element
+        self.assertEqual(html.count('<footer'), html.count('</footer>'))
+
     def test_explorer_handles_empty_cross_filter(self):
         # The capacity probe visits a different concurrency ladder per topology, so many
         # conc x tp pairs have no run. The explorer must (a) ship an empty-state banner and

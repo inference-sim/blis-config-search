@@ -65,7 +65,11 @@ def _workload_name(scenario):
     wl = scenario.get("workload") or {}
     if isinstance(wl, str):
         return wl
-    return wl.get("preset") or wl.get("name") or "workload"
+    # A REPLAY workload has no `preset` -- its traffic is a recorded corpus, named by the harness
+    # scenario it replays. Reading only `preset` labelled every replay row the literal word
+    # "workload", which tells a reader nothing and makes two different replays indistinguishable.
+    rep = wl.get("replay") or {}
+    return wl.get("preset") or rep.get("scenario") or wl.get("name") or "workload"
 
 
 def validate_and_project(run_dir):

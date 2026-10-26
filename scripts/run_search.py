@@ -56,6 +56,36 @@ def _replay_of(scenario):
     return wl.get("replay") if isinstance(wl, dict) else None
 
 
+def _pinned_stack():
+    """The pinned stack recorded into scenario.json, from pins.env."""
+    pins = build_catalog.read_pins()
+    return {"blis": pins.get("BLIS_REF", "unpinned"),
+            "kernel": pins.get("KERNEL_REF", "unpinned"),
+            "catalog": pins.get("CATALOG_REF", "unpinned"),
+            "registry": pins.get("REGISTRY_REF", "unpinned")}
+
+
+def _corpus_traffic_note(runs):
+    """A short description of the traffic a replay actually served, measured from the runs.
+
+    A replay cannot advertise a mean ISL/OSL up front, but it CAN report what it served, which is
+    what a reader wants from that slot. Taken from the largest completed run so it describes the
+    corpus rather than a tiny probe.
+    """
+    best = None
+    for r in runs:
+        m = r.get("metrics") or {}
+        c = m.get("completed_requests") or 0
+        if r.get("returncode") == 0 and c and m.get("total_input_tokens"):
+            if best is None or c > (best.get("completed_requests") or 0):
+                best = m
+    if not best:
+        return ""
+    c = best["completed_requests"]
+    return (f"~{round(best['total_input_tokens'] / c):,} in / "
+            f"{round((best.get('total_output_tokens') or 0) / c):,} out per request")
+
+
 def _workload_label(scenario):
     """How to name this scenario's workload in progress output and the gallery.
 
@@ -459,7 +489,11 @@ def main(argv=None):
                     "gpu_budget": scenario["gpu_budget"], "workload": scenario.get("workload"),
                     "objective": "dual-pareto",
                     "interactivity_floor": {"tok_per_s_per_user": floor_rate, "itl_p99_ms_max": floor_itl},
-                    "headroom": headroom, "seed": 0}
+                    "headroom": headroom, "seed": int(scenario.get("seed", 0) or 0),
+                    # Which simulator priced these runs. pins.env is the single source of truth
+                    # (build_catalog.read_pins); without this the report footer printed "?" for
+                    # every component of the stack.
+                    "pinned_stack": _pinned_stack()}
     # The move trail must say what was actually explored: the previous wording ("single-node
     # topologies") described a tp-only sweep and gave no hint that EP was never tried.
     ep_runs = sum(1 for r in runs if ((r.get("deployment") or {}).get("parallel") or {})
@@ -485,7 +519,15 @@ def main(argv=None):
                          "label": winner["label"], "variant": winner.get("variant", ""),
                          "reason": winner_reason(winner, floor_rate, headroom),
                          "move_trail": trail}}
-    gallery = {"synthetic": False, "isl_osl": "", "generated": __import__("datetime").date.today().isoformat(),
+    # A replay has no ISL/OSL by construction -- its per-request lengths live in the corpus -- so
+    # the chip that would carry a shape's "256/256" describes the traffic instead of rendering
+    # blank. A shape workload keeps the empty string the gallery already expects.
+    rep_out = _replay_of(scenario)
+    isl_osl = ""
+    if rep_out:
+        isl_osl = f"replay · {_corpus_traffic_note(runs)}" if _corpus_traffic_note(runs) else "replay"
+    gallery = {"synthetic": False, "isl_osl": isl_osl,
+               "generated": __import__("datetime").date.today().isoformat(),
                "n_runs": len(runs), "n_servable": n_servable,
                "reason": pareto["winner"]["reason"]}
 

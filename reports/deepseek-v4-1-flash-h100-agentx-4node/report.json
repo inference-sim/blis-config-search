@@ -68,12 +68,12 @@
       "title": "The operating curve, and where it stops"
     },
     {
-      "caption_note": "Only expert-parallel layouts appear: the controls never produced a servable run.",
+      "caption_note": "Only expert-parallel layouts appear: no control produced a servable run.",
       "figure": "scale_bars",
       "num": 3,
       "prose": [
-        "The search runs every expert-parallel candidate beside its non-EP control, because the direction is supposed to be measured rather than assumed. On this model and this part the comparison is not close: <b>all 5 non-EP controls failed outright</b>, and 15 of the 15 finalists are expert-parallel.",
-        "The failures are memory, not throughput. The controls report either <i>\u201cNo available memory for the cache blocks\u201d</i> or a per-rank fixed occupancy above the device \u2014 on H100 the kernel reports up to 129.9 GiB per rank against a 79.2 GiB device. Sharding the experts is what makes a 256k-token context fit at all, which is also why the narrow-TP shapes die: the expert-parallel width is derived as tp \u00d7 dp, so a width of 1 shards nothing."
+        "The search runs every expert-parallel candidate beside its non-EP control, because the direction is meant to be measured rather than assumed. Here the comparison is not close: <b>every one of the 5 non-EP controls failed outright</b>, and all 15 finalists are expert-parallel.",
+        "The failures are memory, not throughput \u2014 <i>\u201cNo available memory for the cache blocks\u201d</i>, or a per-rank fixed occupancy above the 79.2 GiB device. Sharding the experts is what makes a 256k-token context fit on this part at all. It is also why the narrow-TP shapes die even with EP on: the expert-parallel width is derived as tp \u00d7 dp, so a width of 1 shards nothing."
       ],
       "title": "Expert parallelism is load-bearing, not an optimisation"
     },

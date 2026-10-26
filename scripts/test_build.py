@@ -235,6 +235,48 @@ def test_catalog_workload_kinds():
         shutil.rmtree(tmp)
 
 
+def test_pins_are_the_single_source_of_the_sim_version():
+    """pins.env is the authority for "which simulator priced these reports".
+
+    Three surfaces have to agree, or the site publishes a version that no run was made with:
+      * pins.env            -- BLIS_REF / BLIS_SHA (read by build_catalog + the workflow)
+      * SETUP.md            -- what a human clones by hand
+      * generate-report.yml -- what CI clones; it must source pins.env, not hard-code a ref
+
+    The regression this guards: `versions["inference-sim"]` used to be a `git describe` of an
+    ambient ../inference-sim checkout. Nothing is ingested from that repo, so the pill published
+    whatever branch a developer left lying around (v0.7.10-40-g220aa1dd, off the pinned tag's
+    ancestry entirely), and read "absent" in CI, which clones the pin to ./upstream instead.
+    """
+    print("test_pins_are_the_single_source_of_the_sim_version")
+    pins = bc.read_pins()
+    ref, sha = pins.get("BLIS_REF"), pins.get("BLIS_SHA")
+    check(bool(ref) and bool(sha), "pins.env must define BLIS_REF and BLIS_SHA")
+    check(len(sha or "") == 40, "BLIS_SHA should be a full 40-char commit sha")
+
+    # the pill is the pin, and never a description of some sibling checkout
+    cat = bc.build("/nonexistent-siblings-xyz")
+    check(cat["versions"]["inference-sim"] == ref,
+          f"version pill should be the pinned {ref}, got {cat['versions']['inference-sim']!r}")
+    check("absent" not in cat["versions"]["inference-sim"],
+          "the sim version must not depend on a sibling checkout being present")
+
+    # SETUP.md documents the same pin a human would clone
+    with open(os.path.join(ROOT, ".claude", "skills", "config-search", "SETUP.md")) as f:
+        setup = f.read()
+    check(f"--branch {ref} " in setup, f"SETUP.md should clone {ref}")
+    check(sha in setup, f"SETUP.md should verify the pinned sha {sha[:7]}")
+
+    # CI must read pins.env rather than carry its own copy of the refs
+    with open(os.path.join(ROOT, ".github", "workflows", "generate-report.yml")) as f:
+        wf = f.read()
+    check(". ./pins.env" in wf, "generate-report.yml should source pins.env")
+    for key in ("BLIS_REF", "CATALOG_REF", "REGISTRY_REF"):
+        check(f'"${key}"' in wf, f"the workflow should take {key} from pins.env")
+    check(f"--branch {ref} " not in wf,
+          "generate-report.yml hard-codes the sim ref; source it from pins.env instead")
+
+
 def test_lexicon_mirror_is_in_sync():
     """The shared report vocabulary (issue #13) lives in the skill at
     .claude/skills/config-search/report/lexicon.json; web/src/lexicon.json is a byte-identical
@@ -314,6 +356,7 @@ if __name__ == "__main__":
     test_validation()
     test_build_determinism_and_nomock()
     test_catalog_workload_kinds()
+    test_pins_are_the_single_source_of_the_sim_version()
     test_lexicon_mirror_is_in_sync()
     test_catalog()
     print(f"\n{PASS} passed, {FAIL} failed")

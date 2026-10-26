@@ -758,11 +758,14 @@ def _footer(scenario, pareto, records, n_malformed=0):
     if n_malformed:
         malformed = (f' <b>Note:</b> {n_malformed} malformed line(s) in <code>runs.jsonl</code> were '
                      f'skipped and are not reflected in the figures or counts.')
-    return (f'<div class="foot"><b>These are simulator predictions</b> from the '
+    # A real <footer> element, not a bare <div>: the provenance strip is the article's footer in
+    # the document outline, same as the React dashboard's <footer class="sitefoot">. The .foot
+    # class (and so every style rule in report/template.html) is unchanged.
+    return (f'<footer class="foot"><b>These are simulator predictions</b> from the '
             f'blis-latency-kernel backend — spot-check against the real llm-d measurements in '
             f'curvebender-tools/reports before acting. Run <code>{esc(run_id)}</code>{stack}. '
             f'Raw per-run ledger, scenario and analysis sit beside this report in the run directory '
-            f'({len(records)} runs).{malformed}</div>')
+            f'({len(records)} runs).{malformed}</footer>')
 
 
 def render_report(scenario, pareto, runs, report, run_path=None, n_malformed=0):

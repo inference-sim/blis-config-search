@@ -16,6 +16,10 @@ Pure + deterministic: entries sorted by name, JSON serialized with sort_keys. Ne
 BLIS. If a sibling repo is absent, its section is empty and `versions` records "absent" so
 the webpage can show "catalog built without <repo>" instead of failing.
 
+`versions["inference-sim"]` is NOT a sibling describe: it is BLIS_REF from pins.env, the ref
+the report workflow clones and builds. Nothing here is ingested from ../inference-sim, so an
+ambient checkout's HEAD is not provenance for the committed runs.
+
 Only whitelisted, display-relevant fields are projected; unknown config keys are dropped,
 never invented. The derived graph.yaml is the authoritative source for attention/MoE wiring.
 
@@ -36,6 +40,27 @@ except ImportError:
     raise SystemExit("PyYAML required: pip install pyyaml")
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+PINS = os.path.join(ROOT, "pins.env")
+
+
+def read_pins(path=PINS):
+    """The pinned stack from pins.env, as a dict of KEY -> value.
+
+    This is the authority for "which simulator priced these runs". Returns {} if the file is
+    missing, so a checkout without it degrades to "unpinned" rather than failing the build.
+    """
+    pins = {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                pins[k.strip()] = v.strip()
+    except OSError:
+        return {}
+    return pins
 
 
 def _load_yaml(path, default=None):
@@ -243,7 +268,6 @@ def _workload_entry(path, name):
 def build(siblings):
     catalog = os.path.join(siblings, "blis-catalog")
     registry = os.path.join(siblings, "blis-registry")
-    sim = os.path.join(siblings, "inference-sim")
 
     models, hardware, workloads, fabrics, storage, reg_sets = [], [], [], [], [], []
 
@@ -289,10 +313,18 @@ def build(siblings):
                 coeffs = c.get("coefficients") or []
                 reg_sets.append({"name": c.get("name") or fn[:-5], "entries": len(coeffs)})
 
+    # `inference-sim` is the version of the simulator that PRICED the committed runs, so it comes
+    # from pins.env -- the ref the report workflow actually clones and builds -- NOT from
+    # _git_describe() of a sibling checkout. Nothing is ingested from ../inference-sim (unlike the
+    # catalog and registry, which are read file-by-file), so an ambient clone's HEAD says nothing
+    # about the reports: whatever branch a developer happened to leave it on would be published as
+    # provenance, and in CI (which clones the pinned ref to ./upstream, not ../inference-sim) the
+    # pill read "absent" even though every run was priced by the pin.
+    pins = read_pins()
     versions = {
         "blis-catalog": _git_describe(catalog),
         "blis-registry": _git_describe(registry),
-        "inference-sim": _git_describe(sim),
+        "inference-sim": pins.get("BLIS_REF") or "unpinned (no BLIS_REF in pins.env)",
     }
     return {"models": models, "hardware": hardware, "workloads": workloads,
             "fabrics": fabrics, "storage": storage, "registry": reg_sets, "versions": versions}
@@ -301,7 +333,8 @@ def build(siblings):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Ingest sibling BLIS repos -> site/catalog.js")
     ap.add_argument("--siblings", default=os.path.join(ROOT, os.pardir),
-                    help="dir containing blis-catalog / blis-registry / inference-sim")
+                    help="dir containing blis-catalog / blis-registry (inference-sim is not "
+                         "read: its version comes from pins.env)")
     ap.add_argument("--out", default=os.path.join(ROOT, "site", "catalog.js"))
     args = ap.parse_args(argv)
     cat = build(os.path.abspath(args.siblings))

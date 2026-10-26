@@ -45,6 +45,9 @@ export interface Scenario {
   gpu_budget: number
   workload: string
   isl_osl: string
+  /** A caveat about the DATA itself (not the recommendation): real BLIS runs whose measurement
+   *  does not match what the scenario claims to measure. Empty for a scenario with none. */
+  caveat?: string
   floor: string
   headroom: number | null
   n_runs: number

@@ -5,7 +5,7 @@ import { reportHref } from '../load'
 import { EMPTY_SEL, dash, emphasis, finite, fnum, operatingPoints, resolveHighlight, runFlags, selectRecords, sortRows, toggleHighlight, useSort, type Selection, type SortState } from '../lib'
 import { OBJECTIVE, OPERATING_COLUMNS, figure as fig, help as lexHelp, label as lexLabel, metric } from '../lexicon'
 import { Crossfilter } from './Crossfilter'
-import { MockBadge } from './Reports'
+import { MockBadge, CaveatBadge } from './Reports'
 
 const PALETTE = ['#1f6e5c', '#34366e', '#b5651d', '#a3301f', '#6b7d1f', '#7a4a8c', '#2a7f9e', '#8a6d00']
 
@@ -931,7 +931,7 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
   return (
     <div>
       <p className="crumb"><a href="#/reports">← all reports</a></p>
-      <h2 className="viewhead">{s.model}{s.synthetic && <MockBadge />}</h2>
+      <h2 className="viewhead">{s.model}{s.synthetic && <MockBadge />}{!s.synthetic && s.caveat && <CaveatBadge caveat={s.caveat} />}</h2>
       <div className="specchips">
         <span className="spec">{s.hardware}</span><span className="spec">{s.gpu_budget} GPUs</span>
         <span className="spec">{s.workload}</span><span className="spec">{s.isl_osl}</span>
@@ -941,6 +941,9 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
         <a className="fullreport" href={reportHref(s.run_id)} target="_blank" rel="noreferrer">Open full report ↗</a>
       </div>
       {s.synthetic && <div className="warnnote">Mock scenario: synthetic placeholder data, not a real simulation run.</div>}
+      {/* The full caveat, not just the badge: a reader about to copy a deployment out of this
+          page has to be able to read what these runs actually measured. */}
+      {!s.synthetic && s.caveat && <div className="warnnote">{s.caveat}</div>}
 
       <section className="briefing" aria-label="Top configs to try">
         <div className="seclabel2">Top configs to try</div>

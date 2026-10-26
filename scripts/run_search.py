@@ -50,14 +50,52 @@ def model_entry(model, catalog_root):
     return next((m for m in cat.get("models", []) if m.get("name") == model), None)
 
 
-def concurrency_ramp(gpu_budget):
+def _replay_of(scenario):
+    """The scenario's replay descriptor, or None for a generated-shape workload."""
+    wl = scenario.get("workload") or {}
+    return wl.get("replay") if isinstance(wl, dict) else None
+
+
+def _workload_label(scenario):
+    """How to name this scenario's workload in progress output and the gallery.
+
+    A shape preset is named by its preset; a replay by its harness scenario. A replay has no
+    `preset` at all, so reading only that printed "None" for the agentic runs.
+    """
+    wl = scenario.get("workload") or {}
+    if not isinstance(wl, dict):
+        return str(wl)
+    rep = wl.get("replay") or {}
+    return wl.get("preset") or rep.get("scenario") or "workload"
+
+
+def concurrency_ramp(gpu_budget, replay=None):
     """Probe ladder for a budget, in stable order.
 
     The old ladder was the fixed [1..32] whatever the budget. On 256 GPUs that never reached the
     interactivity limit, so the search ranked shapes on an arbitrary mid-curve point. It also
     saturated: with --num-requests 80, c=128 and c=256 returned byte-identical throughput because
     the request pool ran dry (measured). The ladder now grows with the budget, and `requests_for`
-    keeps every point supplied."""
+    keeps every point supplied.
+
+    A REPLAY's load axis is session-tree LANES, not in-flight requests: one lane drives a whole
+    agentic trajectory whose sub-requests fan out from it, so a lane is worth many concurrent
+    requests and the ladder has to be far shorter. Measured on deepseek-v4.1-flash / h100 /
+    agentx-mvp at one TP8xDP4 instance: 16 lanes holds ITL p99 at 9.2 ms, 24 lanes is already at
+    453 ms, and throughput PEAKS near 48 lanes and then falls. Per instance the knee sits between
+    16 and 32 lanes, and it scales with the fleet (4 instances hold 64 lanes at 10.5 ms), so the
+    ladder is sized per instance-equivalent rather than per GPU.
+    """
+    if replay:
+        # ~8 GPUs per instance-equivalent; probe around the measured per-instance knee and a
+        # couple of doublings past it, so C* is bracketed rather than merely approached.
+        inst = max(1, int(gpu_budget) // topologies.GPUS_PER_NODE)
+        ramp, c = [], 4
+        top = max(32, 32 * inst)
+        while c <= top:
+            ramp.append(c)
+            c *= 2
+        return ramp
     ramp = [1, 2, 4, 8, 16, 24, 32]
     c = 64
     top = max(32, gpu_budget * 2)      # ~2 sessions per GPU is past any interactivity floor
@@ -146,7 +184,7 @@ def per_user(metrics):
 
 
 def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, seed=0,
-           model_entry=None):
+           model_entry=None, run_timeout=120):
     """Probe every candidate topology over a concurrency ramp; return runs, finalists, dropped.
 
     `model_entry` is the catalog row (for `arch`); when omitted the search is dense-only, which is
@@ -158,13 +196,22 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
     budget = int(scenario["gpu_budget"])
     wl = scenario.get("workload") or {}
     workload = wl.get("preset") if isinstance(wl, dict) else wl
+    # A REPLAY workload is a different BLIS subcommand, not a --workload value: its traffic is a
+    # recorded corpus, so there is no ISL/OSL to generate and no request count to offer. The
+    # submission states it under `workload.replay:` and run_blis switches onto `blis replay`.
+    replay = wl.get("replay") if isinstance(wl, dict) else None
+    # Engine knobs every run of this scenario carries (precision, context window, ...). A replay
+    # NEEDS max_model_len raised: the AgentX corpus caps requests at 256k, and every trace whose
+    # peak prompt+output exceeds the deployment's window is dropped -- at the 32768 default that
+    # is the entire corpus ("no trace fits max_context_length 32768").
+    base_engine = dict(scenario.get("engine") or {})
     floor = scenario.get("interactivity_floor") or {}
     floor_itl = float(floor.get("itl_p99_ms_max", 20.0))
     floor_rate = float(floor.get("tok_per_s_per_user", 50.0))
     headroom = float(scenario.get("headroom", 0.8))
     engine_version = scenario.get("engine_version", "0.29.0")
 
-    ramp = concurrency_ramp(budget)
+    ramp = concurrency_ramp(budget, replay)
     runs, finalists, dropped = [], [], []
 
     def probe(topo):
@@ -176,10 +223,12 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
         gpus = topo["tp"] * topo.get("dp", 1) * topo["num_instances"]
         curve, c_star, first_error = [], None, None
         for c in ramp:
-            cfg = {**topo, "concurrency": c}
+            cfg = {**base_engine, **topo, "concurrency": c}
+            # A replay is bounded by its sending window, not a request count.
+            nreq = None if replay else requests_for(c, num_requests)
             rec = run_blis.run_one(blis, catalog, registry, scenarios_dir, model, hardware,
-                                   engine_version, workload, requests_for(c, num_requests), seed,
-                                   None, cfg, phase="probe")
+                                   engine_version, workload, nreq, seed,
+                                   None, cfg, phase="probe", timeout=run_timeout, replay=replay)
             runs.append(rec)
             m = rec.get("metrics") or {}
             # rec["error"] is set on rc=0 runs too: run_blis._completion_issue flags a run that is
@@ -297,6 +346,15 @@ def main(argv=None):
     ap.add_argument("--registry", default=os.path.join(ROOT, os.pardir, "blis-registry"))
     ap.add_argument("--out", default=os.path.join(ROOT, "reports"))
     ap.add_argument("--num-requests", type=int, default=80)
+    # A replay parses a ~569 MB corpus and simulates a 900 s sending window, so a run takes far
+    # longer than a generated-workload probe. The default 120 s would time out every one.
+    ap.add_argument("--run-timeout", type=int, default=120,
+                    help="per-BLIS-run timeout in seconds (raise it for a replay workload)")
+    # The corpus is machine-specific and ~569 MB, so the submission states its DIGEST (which
+    # pins the bytes) while the path is supplied here. The digest is checked by BLIS, so a
+    # wrong file fails loudly rather than replaying different traffic under the same name.
+    ap.add_argument("--corpus", help="replay corpus file (required by a replay submission)")
+    ap.add_argument("--corpus-cache", help="dir for parsed-corpus snapshots (a large speedup)")
     args = ap.parse_args(argv)
 
     sub = os.path.abspath(args.submission)
@@ -316,13 +374,30 @@ def main(argv=None):
     import tempfile
     scen_dir = tempfile.mkdtemp(prefix="cs-scenarios-")
 
+    # A replay submission needs the corpus path from the command line; fail before any run
+    # rather than once per probe.
+    rep = _replay_of(scenario)
+    if rep is not None:
+        if not args.corpus:
+            raise SystemExit(
+                f"{os.path.basename(sub)} is a replay submission (workload.replay) and needs "
+                f"--corpus: the corpus is not vendored by blis-catalog. Fetch traces.jsonl for "
+                f"{rep.get('scenario')} and pass its path; the submission's corpus_sha256 holds "
+                f"it to the right bytes.")
+        if not os.path.isfile(args.corpus):
+            raise SystemExit(f"--corpus not found at {args.corpus}")
+        rep = dict(rep, corpus=os.path.abspath(args.corpus))
+        if args.corpus_cache:
+            rep["corpus_cache"] = os.path.abspath(args.corpus_cache)
+        scenario = dict(scenario, workload=dict(scenario["workload"], replay=rep))
+
     entry = model_entry(scenario["model"], os.path.abspath(args.catalog))
     arch = (entry or {}).get("arch", "unknown")
     print(f"searching {scenario.get('model')} ({arch}) on {scenario.get('gpu_budget')}x "
-          f"{scenario.get('hardware')} ({(scenario.get('workload') or {}).get('preset')})…", flush=True)
+          f"{scenario.get('hardware')} ({_workload_label(scenario)})…", flush=True)
     runs, finalists, (floor_rate, floor_itl, headroom, dropped) = search(
         scenario, blis, args.catalog, args.registry, scen_dir, num_requests=args.num_requests,
-        model_entry=entry)
+        model_entry=entry, run_timeout=args.run_timeout)
     if not finalists:
         detail = "; ".join(f"{d['label']}: {d['reason'][:120]}" for d in dropped[:4])
         raise SystemExit("no servable configuration found for this scenario (nothing met the "
@@ -345,8 +420,11 @@ def main(argv=None):
     trail = [f"enumerated {len(finalists) + len(dropped)} topologies within budget"
              + (f" ({arch}: tp x dp footprints x expert-parallel arms)" if arch == "MoE"
                 else f" ({arch}: tp tiers)"),
-             "probed a concurrency ramp per topology with real BLIS runs"
-             f" (ladder to c={max(concurrency_ramp(int(scenario['gpu_budget'])))})",
+             (f"probed a session-lane ramp per topology with real BLIS replay runs"
+              f" (ladder to {max(concurrency_ramp(int(scenario['gpu_budget']), _replay_of(scenario)))} lanes)"
+              if _replay_of(scenario) else
+              "probed a concurrency ramp per topology with real BLIS runs"
+              f" (ladder to c={max(concurrency_ramp(int(scenario['gpu_budget'])))})"),
              f"ranked finalists on usable capacity (headroom {headroom})"]
     if arch == "MoE":
         trail.insert(1, f"compared expert-parallel against its non-EP control ({ep_runs} EP runs)")

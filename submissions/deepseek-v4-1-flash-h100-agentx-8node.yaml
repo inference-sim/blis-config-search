@@ -1,0 +1,39 @@
+# DeepSeek-V4.1-Flash on a 8-node h100 cluster (64 GPUs), serving InferenceX's AgentX
+# MVP agentic workload.
+#
+# The workload is a REPLAY, not a generated shape: its traffic is 393 recorded Claude Code
+# trajectories (SemiAnalysis Weka v7 traces), so it has no ISL/OSL. BLIS replays it with
+# `blis replay --agentic-scenario`, and `concurrency` below means session-tree LANES -- live
+# trajectories, each fanning out into many sub-requests -- not in-flight requests.
+#
+# The corpus is NOT vendored by blis-catalog. Fetch traces.jsonl from the Hugging Face dataset
+# semianalysisai/cc-traces-weka-062126-256k and pass --corpus; the sha256 here is mandatory,
+# because aiperf reads the dataset's default branch rather than a pinned revision, so only the
+# file's bytes tie a run to its corpus.
+model: deepseek-v4.1-flash
+hardware: h100
+gpu_budget: 64
+workload:
+  replay:
+    scenario: inferencex-agentx-mvp
+    corpus_sha256: e39cd2ff3eba21d4a3664be51da743ac3d2149a1933898cafc7bfeac8147eeef
+    benchmark_duration: 900s
+    # Every request in flight when the sending window closes is allowed to finish. With the
+    # default 30s grace period most loads report "incomplete: injected != completed" and the
+    # search discards them as capacity points, even though they are honest saturation data.
+    grace_period: inf
+    # The deployment's own resolved window. Traces whose peak prompt+output exceed it are
+    # dropped, and the corpus caps requests at 256k -- at the 32768 engine default that drops
+    # EVERY trace ("no trace fits max_context_length 32768").
+    max_context_length: max_model_len
+engine:
+  # DeepseekV41ForCausalLM refuses an empty cache dtype: "its packed attention serves only fp8
+  # caches, as fp8_ds_mla or nvfp4_ds_mla, and vLLM v0.31.0 refuses any other".
+  cache_dtype: fp8_ds_mla
+  # 256k, to admit the corpus (see max_context_length above).
+  max_model_len: 262144
+objective: dual-pareto
+interactivity_floor:
+  tok_per_s_per_user: 50.0
+headroom: 0.8
+seed: 42

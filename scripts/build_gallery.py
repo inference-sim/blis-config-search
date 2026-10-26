@@ -164,6 +164,10 @@ def validate_and_project(run_dir):
         "generated": str(gallery.get("generated", "")),
         "winner": winner, "finalists": finalists,
         "reason": str(gallery.get("reason") or (pareto.get("winner") or {}).get("reason", "")),
+        # A run-dir-authored caveat about the DATA itself (not the recommendation), shown on the
+        # card and banners the report. Used for the reports whose workload label does not match
+        # the traffic they were priced on -- see _CAVEAT_BANNER.
+        "caveat": str(gallery.get("caveat", "")),
     }
     return run_id, row
 
@@ -182,9 +186,22 @@ _MOCK_BANNER = ('<div role="note" style="font:600 13px/1.5 system-ui,sans-serif;
                 'Do not deploy from these numbers.</div>')
 
 
-def _decorate_report(path, synthetic):
-    """Inject a back-to-gallery link (all reports) and a MOCK banner (synthetic only) just
-    inside the report's .wrap container, without touching report.py."""
+def _caveat_banner(text):
+    """A banner for a data caveat the run dir declares in gallery.json's `caveat`.
+
+    Distinct from the MOCK banner: these ARE real BLIS measurements, but something about what
+    they measured does not match what the report says it measured, and a reader deciding a
+    deployment from them has to know that.
+    """
+    return ('<div role="note" style="font:600 13px/1.5 system-ui,sans-serif;margin:14px 0 0;'
+            'padding:10px 14px;border:1px solid #d8b984;background:#f6e8ca;color:#6b4508;'
+            'border-radius:6px">' + report_py.esc(text) + '</div>')
+
+
+def _decorate_report(path, synthetic, caveat=""):
+    """Inject a back-to-gallery link (all reports), a MOCK banner (synthetic only) and a data
+    caveat banner (when the run dir declares one) just inside the report's .wrap container,
+    without touching report.py."""
     try:
         with open(path, encoding="utf-8") as f:
             html = f.read()
@@ -194,7 +211,7 @@ def _decorate_report(path, synthetic):
     i = html.find(anchor)
     if i == -1:
         return
-    inject = _BACK_LINK + (_MOCK_BANNER if synthetic else "")
+    inject = _BACK_LINK + (_MOCK_BANNER if synthetic else "") + (_caveat_banner(caveat) if caveat else "")
     at = i + len(anchor)
     html = html[:at] + inject + html[at:]
     with open(path, "w", encoding="utf-8") as f:
@@ -226,7 +243,7 @@ def build(reports_dir, out_dir, include_mock=True):
         os.makedirs(dest, exist_ok=True)
         scenario, pareto, runs, report, _ = report_py.load_run_dir(rd)
         report_py.write_one(rd, out=os.path.join(dest, "index.html"))
-        _decorate_report(os.path.join(dest, "index.html"), row["synthetic"])
+        _decorate_report(os.path.join(dest, "index.html"), row["synthetic"], row.get("caveat", ""))
         for fn in REPORT_DATA_FILES:
             src = os.path.join(rd, fn)
             if os.path.exists(src):

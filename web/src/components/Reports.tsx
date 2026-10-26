@@ -29,6 +29,13 @@ export function MockBadge() {
   return <span className="mock" title="Synthetic placeholder scenario, not a real simulation run">mock</span>
 }
 
+/** Flags a scenario whose runs are real BLIS output but do not measure what the scenario says
+ *  they measure (e.g. a workload label the runs were not actually priced on). Distinct from
+ *  `mock`, which marks data that is not a simulation at all. */
+export function CaveatBadge({ caveat }: { caveat: string }) {
+  return <span className="caveat" title={caveat}>caveat</span>
+}
+
 // mock-A facet rail: each facet value is a clickable option with a live count (how many
 // scenarios it yields under the OTHER active facets); zero-count options dim and disable.
 function FacetRail({ scenarios, f, onToggle, onReset }: {
@@ -92,7 +99,7 @@ export function Reports({ scenarios, params }: { scenarios: Scenario[]; params: 
           ) : (
             filtered.map((s) => (
               <a className={`card${s.synthetic ? ' is-mock' : ''}`} key={s.run_id} href={scenarioHash(s.run_id)}>
-                <div className="cardhead"><h3>{s.model}</h3>{s.synthetic && <MockBadge />}</div>
+                <div className="cardhead"><h3>{s.model}</h3>{s.synthetic && <MockBadge />}{!s.synthetic && s.caveat && <CaveatBadge caveat={s.caveat} />}</div>
                 {/* model / cluster / workload on their own lines — one dimension per row reads
                     more clearly than a single run-on chip row. */}
                 <dl className="specrows">
@@ -115,6 +122,9 @@ export function Reports({ scenarios, params }: { scenarios: Scenario[]; params: 
 
       {filtered.some((s) => s.synthetic) && (
         <p className="listnote">Cards marked <MockBadge /> are illustrative placeholder scenarios, not BLIS output. Open a scenario for its recommended configs and interactive Pareto charts.</p>
+      )}
+      {filtered.some((s) => !s.synthetic && s.caveat) && (
+        <p className="listnote">Cards marked <span className="caveat">caveat</span> hold real BLIS runs that do not measure quite what the scenario claims. Open the scenario to read the caveat before deploying from its numbers.</p>
       )}
     </div>
   )

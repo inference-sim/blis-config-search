@@ -1,4 +1,5 @@
 {
+  "caveat": "Workload label caveat: these runs were priced on BLIS's default 512/512-token request distribution, not on the multidoc shape this report names. `blis run --workload` is silently ignored when --concurrency is set, so every run here generated ~519/513 tokens per request instead of the preset's 10240/1536. The topology comparison and the per-GPU ranking are still real BLIS measurements, but they describe that default traffic -- treat the absolute throughput as being for a 10240-token workload with caution. Fixed in the runner; this report predates the fix and has not been re-run.",
   "generated": "2026-10-21",
   "isl_osl": "",
   "n_runs": 280,

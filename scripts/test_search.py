@@ -13,6 +13,7 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import run_search  # noqa: E402
+from run_search import _workload_label  # noqa: E402
 
 PASS = 0
 FAIL = 0
@@ -46,8 +47,11 @@ class FakeRunner:
         self.fail_small_footprint = fail_small_footprint
 
     def __call__(self, blis, catalog, registry, scenarios_dir, model, hardware, engine_version,
-                 workload, num_requests, seed, horizon, config, phase="probe"):
+                 workload, num_requests, seed, horizon, config, phase="probe", timeout=120,
+                 defaults=None, replay=None):
         self.calls.append(dict(config, num_requests=num_requests))
+        self.replays = getattr(self, "replays", [])
+        self.replays.append(replay)
         tp, dp = config.get("tp", 1), config.get("dp", 1)
         ni, conc = config.get("num_instances", 1), config.get("concurrency", 1)
         ep = bool(config.get("enable_expert_parallel"))
@@ -306,6 +310,42 @@ def test_dense_model_is_unchanged():
     check(all(not c.get("enable_expert_parallel") for c in r.calls), "dense: never expert-parallel")
 
 
+def test_replay_workload_takes_the_replay_path():
+    print("replay workload drives blis replay, on a lane ramp")
+    sc = scenario(budget=32, model="deepseek-v4.1-flash", hardware="h100")
+    rep = {"scenario": "inferencex-agentx-mvp", "corpus": "/tmp/traces.jsonl",
+           "corpus_sha256": "deadbeef", "max_context_length": "max_model_len"}
+    sc["workload"] = {"replay": rep}
+    sc["engine"] = {"cache_dtype": "fp8_ds_mla", "max_model_len": 262144}
+    r = FakeRunner()
+    runs, finalists, _ = run(sc, r)
+    # Every run must carry the replay descriptor, or it silently ran a generated workload.
+    check(all(x is not None for x in r.replays),
+          "every run was handed the replay descriptor")
+    # A replay has no request count: it is bounded by its sending window.
+    check(all(c.get("num_requests") is None for c in r.calls),
+          "no --num-requests is offered for a replay")
+    # The scenario's engine knobs must reach every run: at the 32768 default the corpus filter
+    # drops EVERY trace, so an unraised max_model_len would make the whole search vacuous.
+    check(all(c.get("max_model_len") == 262144 for c in r.calls),
+          "the scenario's engine knobs reach every run")
+    check(all(c.get("cache_dtype") == "fp8_ds_mla" for c in r.calls),
+          "the required cache dtype reaches every run")
+    # Lanes, not requests: the ladder is far shorter than the per-GPU one.
+    lanes = sorted({c["concurrency"] for c in r.calls})
+    check(max(lanes) <= 128, f"the lane ladder stays small (got {lanes})")
+    check(_workload_label(sc) == "inferencex-agentx-mvp",
+          "a replay is named by its scenario, not a missing preset")
+
+
+def test_shape_workload_passes_no_replay():
+    print("a shape workload still takes the generated path")
+    r = FakeRunner()
+    run(scenario(budget=32), r)
+    check(all(x is None for x in r.replays), "no replay descriptor on a shape workload")
+    check(all(c.get("num_requests") for c in r.calls), "requests are offered for a shape")
+
+
 if __name__ == "__main__":
     test_explores_ep()
     test_ep_wins_when_it_is_better()
@@ -319,5 +359,7 @@ if __name__ == "__main__":
     test_winner_prefers_the_simpler_config_on_a_tie()
     test_overloaded_runs_do_not_set_capacity()
     test_dense_model_is_unchanged()
+    test_replay_workload_takes_the_replay_path()
+    test_shape_workload_passes_no_replay()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

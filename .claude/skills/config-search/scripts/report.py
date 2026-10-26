@@ -333,7 +333,11 @@ def build_records(runs, scenario):
             "ni": ni,
             "gpus": gpus,
             "series": _series_label(tp, ni, par),
-            "route": cfg.get("routing_policy", "round-robin"),
+            # Routing: the llm-d EPP arm this run used (v0.12.0+), else the former routing policy
+            # for a run recorded before routing moved into the router. "default" is the router's
+            # own built-in standalone configuration -- NOT the former "round-robin", which llm-d
+            # dropped; naming it round-robin here would assert a policy the router does not have.
+            "route": _routing_arm(cfg),
             "scorers": cfg.get("routing_scorers"),
             # NB: `sched` is the scheduling-DELAY metric; the scheduler policy is `schedp`.
             "schedp": cfg.get("scheduler"),
@@ -449,6 +453,25 @@ def _knob_phrase(key, value):
     if key in ("mnbt", "mns", "bs"):
         return f"{name} {value:,}"          # thousands separator: 2,048 not b2k
     return f"{name} {value}"
+
+
+def _routing_arm(cfg):
+    """The routing arm a run used, as a facet value.
+
+    Since inference-sim v0.12.0 routing is an llm-d EndpointPickerConfig named by the scenario's
+    `router:` block, so the arm is identified by that file's basename
+    ("routing/prefix-affinity.yaml" -> "prefix-affinity"). A run recorded BEFORE routing moved
+    carries the former `routing_policy` instead, and is shown as it was.
+
+    No arm means the router's own built-in standalone configuration, reported as "default" --
+    deliberately not "round-robin", which llm-d dropped: naming it that would assert a policy the
+    router does not have.
+    """
+    rc = cfg.get("router_config")
+    if rc:
+        base = str(rc).rsplit("/", 1)[-1]
+        return base[:-5] if base.endswith(".yaml") else base
+    return cfg.get("routing_policy") or "default"
 
 
 def _series_label(tp, ni, par):

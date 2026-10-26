@@ -180,14 +180,15 @@ def test_refines_knobs_on_the_best_topologies():
     r = FakeRunner()
     runs, finalists, _ = run(scenario(), r)
     swept = {k for c in r.calls for k in c
-             if k in ("routing_policy", "max_num_seqs", "max_num_batched_tokens",
+             if k in ("router_config", "max_num_seqs", "max_num_batched_tokens",
                       "gpu_memory_utilization")}
     check(swept, f"engine/routing knobs were swept at all (got {sorted(swept)})")
-    check("routing_policy" in swept, "routing policy — the biggest measured lever — was swept")
+    # Routing is still swept, now as an llm-d EPP config file (v0.12.0 removed --routing-policy).
+    check("router_config" in swept, "the routing axis was swept (as an EPP config)")
     # refinement must be TARGETED: a full cross product over every shape and load would be
     # thousands of runs. Only the best topologies get refined.
     refined = {(c.get("tp"), c.get("dp", 1)) for c in r.calls
-               if any(k in c for k in ("routing_policy", "max_num_seqs"))}
+               if any(k in c for k in ("router_config", "max_num_seqs"))}
     allshapes = {(c.get("tp"), c.get("dp", 1)) for c in r.calls}
     check(len(refined) < len(allshapes),
           f"refined {len(refined)} of {len(allshapes)} shapes, not all of them")
@@ -253,7 +254,7 @@ def test_winner_prefers_the_simpler_config_on_a_tie():
           "a 0.0008% edge does not beat a simpler config")
     # but a REAL difference still wins, however many knobs it carries
     c = {"label": "32x TP8 · ll", "config": {"tp": 8, "num_instances": 32,
-                                             "routing_policy": "least-loaded"},
+                                             "router_config": "routing/queue-kv.yaml"},
          "at_c_use": {"tokens_per_sec_per_gpu": 67.0, "tokens_per_sec": 34307.6}}
     d = {"label": "32x TP8", "config": {"tp": 8, "num_instances": 32},
          "at_c_use": {"tokens_per_sec_per_gpu": 36.4, "tokens_per_sec": 18657.3}}

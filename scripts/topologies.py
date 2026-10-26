@@ -126,17 +126,29 @@ def candidate_topologies(gpu_budget, model_entry=None, max_candidates=12,
 # The lesson: these knobs bind DOWNWARD. Raising them past the default changed nothing measurable,
 # so the grid probes the constrained side (where a real deployment is often forced to sit) rather
 # than spending runs on headroom that does not exist.
+# ROUTING ARMS MOVED. inference-sim v0.12.0 removed --routing-policy (and every other routing /
+# admission flag): routing is the embedded llm-d router now, configured by an
+# EndpointPickerConfig that the scenario's `router:` block names. So a routing arm is a FILE --
+# see routing/README.md for each arm and the former flag it maps from. Upstream dropped
+# round-robin / least-loaded / always-busiest outright ("the llm-d router has no such policy"),
+# so the +84% `least-loaded` result from the kimi-k2.5 campaign has no exact equivalent here and
+# that comparison cannot be reproduced arm-for-arm.
+#
+# Measured on deepseek-v4.1-flash / 4x TP8xDP4 / h100 / chatbot at 64 sessions: the router's
+# default, `queue`, `load-aware`, `queue-kv` and `prefix-affinity` are all byte-identical
+# (5333.7 tok/s), and `random` differs only slightly (5318.8). Uniform synthetic requests over
+# four equal instances leave no imbalance for a scorer to exploit, so the arms are kept for the
+# agentic replay -- whose trajectories vary hugely in size and re-send a growing shared prefix --
+# rather than being presented as a lever this workload has shown.
+ROUTING_ARMS = ("routing/prefix-affinity.yaml", "routing/queue-kv.yaml")
+
 KNOB_TIERS = (
     # one entry per knob: (key, values to probe besides the default)
-    ("routing_policy", ("least-loaded", "weighted")),   # round-robin IS the default
+    ("router_config", ROUTING_ARMS),                    # the router's own default IS the baseline
     ("max_num_seqs", (64,)),                            # the batch-width constraint that binds
     ("max_num_batched_tokens", (2048,)),                # the prefill-admission constraint
     ("gpu_memory_utilization", (0.7,)),                 # a KV-starved deployment
 )
-# always-busiest is a real BLIS policy but a pathological one (-58% throughput); it is never a
-# recommendation, so it is not spent as a candidate. Valid set: round-robin, least-loaded,
-# weighted, always-busiest.
-EXCLUDED_ROUTING = ("always-busiest",)
 
 
 def knob_variants(topology):
@@ -169,14 +181,27 @@ def label(cand):
 
 # Readable knob names, spelled out on purpose: "b2k" for max_num_batched_tokens=2048 tells a
 # reader nothing. Mirrors report.KNOB_NAMES, keyed by candidate-config key.
-KNOB_NAMES = {"routing_policy": "routing", "routing_scorers": "scorers",
+KNOB_NAMES = {"router_config": "routing", "routing_policy": "routing",
+              "routing_scorers": "scorers",
               "max_num_batched_tokens": "batch tokens", "max_num_seqs": "max seqs",
               "block_size": "block size", "gpu_memory_utilization": "gpu mem util",
               "scheduler": "scheduler", "admission_policy": "admission"}
 
 
+def routing_arm_name(path):
+    """The readable name of a routing arm, from its EPP config path.
+
+    "routing/prefix-affinity.yaml" -> "prefix-affinity". The file basename IS the arm's name (see
+    routing/README.md), so a reader sees "prefix-affinity routing" rather than a path.
+    """
+    base = str(path).rsplit("/", 1)[-1]
+    return base[:-5] if base.endswith(".yaml") else base
+
+
 def knob_phrase(key, value):
     """Spelled-out description of one knob setting, e.g. "batch tokens 2,048"."""
+    if key == "router_config":
+        return f"{routing_arm_name(value)} routing"
     if key == "routing_policy":
         return f"{value} routing"
     name = KNOB_NAMES.get(key, key)

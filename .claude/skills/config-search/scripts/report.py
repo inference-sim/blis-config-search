@@ -23,11 +23,12 @@
 # Determinism (INV-6): a pure function of the run-directory CONTENTS. Identical data renders
 # byte-identical HTML regardless of where the directory lives or what it is named -- the footer
 # identifies the run by the in-data run_id, never the path/basename (and says "unidentified" if none).
-import argparse, json, math, os, re, sys
+import argparse, decimal, json, math, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import figures  # noqa: E402
+import lexicon  # noqa: E402
 
 REPORT_DIR = os.path.normpath(os.path.join(HERE, "..", "report"))
 TEMPLATE = os.path.join(REPORT_DIR, "template.html")
@@ -37,6 +38,10 @@ VENDOR_DIR = os.path.join(REPORT_DIR, "vendor")
 VENDOR_LIBS = ("d3.min.js", "crossfilter.min.js")
 RECORDS_PH = "/*__RECORDS__*/[]"
 FACTS_PH = "/*__FACTS__*/{}"
+# The shared vocabulary, baked into the page so the explorer's facet/metric/axis names come from
+# the same file the React dashboard reads (issue #13). Inlined, not fetched: the report must stay
+# self-contained and offline.
+LEXICON_PH = "/*__LEXICON__*/{}"
 CARDS_PH = "/*__CONFIG_SEARCH_CARDS__*/[]"
 
 
@@ -160,6 +165,30 @@ def _as_num(v):
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+def _fnum(v, digits):
+    """Format a metric the way the dashboard's `fnum` (web/src/lib.ts) does, so one number is not
+    printed `143.9` on one surface and `144` on the other (issue #13 review).
+
+    `fnum` is `toLocaleString('en-US', {maximumFractionDigits: digits, minimumFractionDigits: 0})`:
+      * at most `digits` decimals, with trailing zeros STRIPPED (18.0 -> "18", 6.72 -> "6.72");
+      * thousands separators;
+      * and ties rounded HALF AWAY FROM ZERO. That last part is why this cannot just be an
+        f-string: Python's format() rounds half to EVEN (banker's), so f"{0.5:.0f}" is "0" where
+        JS gives "1" -- a residual mismatch on exactly the .5 cases.
+    `digits` comes from the metric's lexicon entry, which is where the dashboard reads it too.
+    """
+    n = _as_num(v)
+    if n is None:
+        return "–"
+    q = decimal.Decimal(1).scaleb(-digits)        # 1, 0.1, 0.01, ...
+    d = decimal.Decimal(repr(float(n))).quantize(q, rounding=decimal.ROUND_HALF_UP)
+    # strip trailing zeros (minimumFractionDigits: 0) without going to exponent form
+    txt = f"{d:,f}"
+    if "." in txt:
+        txt = txt.rstrip("0").rstrip(".")
+    return txt or "0"
 
 
 # --- RECORDS: one flat row per blis run -------------------------------------
@@ -522,17 +551,36 @@ def _section_measurements(report):
             f'The measurements</h2>{_prose(intro)}<div id="xf"></div></section>')
 
 
+def _caption(section, fignum):
+    """The figcaption for one section's figure: "Figure N." then the figure's SHARED caption.
+
+    The caption comes from report/lexicon.json, which the React dashboard reads too, so one plot
+    cannot be described in two vocabularies across the two surfaces (issue #13, item 7b). A
+    section may still APPEND its own run-specific sentence via `caption_note` -- the shared
+    sentence says what the axes mean, the note says what this run's numbers do. A section whose
+    figure has no lexicon entry falls back to its authored `caption` verbatim.
+    """
+    name = section.get("figure")
+    shared = lexicon.FIGURES.get(name, {}).get("caption")
+    if not shared:
+        return section.get("caption", "")
+    note = section.get("caption_note") or ""
+    lead = f"<b>Figure {fignum}. {esc(shared)}</b>"
+    return f"{lead} {note}".strip()
+
+
 def _sections(report, records, scenario):
     out = []
+    fignum = 0
     for s in report.get("sections", []):
         num = s.get("num", "")
         title = esc(s.get("title", ""))
         fig = ""
         if s.get("figure"):
+            fignum += 1
             svg = render_figure(s["figure"], records, scenario)
-            cap = s.get("caption", "")
             fig = (f'<figure><div class="figwrap">{svg}</div>'
-                   f'<figcaption>{cap}</figcaption></figure>')
+                   f'<figcaption>{_caption(s, fignum)}</figcaption></figure>')
         prose = _prose(s.get("prose", [])) if s.get("prose") else ""
         out.append(f'<section class="finding"><h2><span class="num">{num}</span>{title}</h2>'
                    f'{fig}{prose}</section>')
@@ -543,55 +591,112 @@ def _sections(report, records, scenario):
 # wrong deployment: it previously showed only tp + num-instances, leaving out expert parallelism,
 # data parallelism and routing — exactly the knobs that distinguish two rows whose topology
 # matches. `epw`/`dp` render as the flags vLLM actually takes.
-_FLAG_LABELS = [("tp", "--tensor-parallel-size"), ("dp", "--data-parallel-size"),
-                ("epw", "--enable-expert-parallel"), ("ni", "--num-instances"),
-                ("bs", "--block-size"), ("mnbt", "--max-num-batched-tokens"),
-                ("mns", "--max-num-seqs"), ("gmu", "--gpu-memory-utilization"),
-                ("mtp", "--num-speculative-tokens"), ("route", "routing"), ("pd", "prefill/decode")]
-# Values that add nothing when printed: a flag at its default, or an "off" state. Keeping them
-# would bury the two or three settings that actually matter for this row.
-_FLAG_SKIP = {"dp": (1, None), "epw": (None,), "mtp": (0, None), "pd": ("colocated", None),
-              "route": ("round-robin", "default", None), "ni": (None,), "bs": (None,),
-              "gmu": (None,), "mnbt": (None,), "mns": (None,), "tp": (None,)}
+#
+# The list and the skip table come from report/lexicon.json, which the React dashboard reads too
+# (web/src/lib.ts `FLAGS`/`FLAG_SKIP`), so the two surfaces cannot print different deployments for
+# one run. A key absent from _FLAG_SKIP still skips None -- see lexicon.FLAG_SKIP.
+_FLAG_LABELS = lexicon.FLAG_LABELS
+_FLAG_SKIP = lexicon.FLAG_SKIP
+
+
+def _obj_rank(r):
+    """Sort key ranking one record on the SHARED objective (lexicon.objective): tok/s per GPU,
+    then fleet tok/s, then tok/s per user, then run id. The tiebreaks make the pick deterministic
+    rather than ledger-order dependent -- two runs at one load with equal efficiency would
+    otherwise resolve differently on the two surfaces (and between two renders)."""
+    def num(key):
+        v = _as_num(r.get(key))
+        return v if v is not None else float("-inf")
+    primary = num(lexicon.OBJECTIVE["key"])
+    ties = [num(k) if k != "id" else 0.0 for k in lexicon.OBJECTIVE["tiebreak"]]
+    return (primary, *ties)
+
+
+def operating_points(records):
+    """One operating point per load: the best SERVABLE run at that concurrency on the shared
+    objective (tok/s per GPU -- see lexicon.objective), concurrency-ascending.
+
+    This is the report half of the parity fix for issue #13. It previously ranked by per-user
+    rate while the dashboard's `operatingPoints()` ranked by tok/s per GPU, so at high load the
+    two "What to run" tables recommended DIFFERENT configurations for one scenario -- and the
+    report's own recommendation card, which quotes the search winner, ranks per-GPU too. Both
+    surfaces now rank on the one objective the search itself optimises.
+
+    Rows with conc=None are skipped: a null load is not a meaningful operating point, and mixing
+    None with ints breaks sorted() (jgchn review). build_facts/figures already treat conc=None as
+    not-a-value, so this matches. A run with no `tpg` cannot be ranked on the objective, so it is
+    skipped rather than ranked as infinitely inefficient.
+    """
+    by_conc = {}
+    for r in records:
+        if not r.get("ok") or r.get("conc") is None or _as_num(r.get("tpg")) is None:
+            continue
+        cur = by_conc.get(r["conc"])
+        # strict >: the first record at a load wins a tie, and the id tiebreak below decides
+        # between genuinely equal rows, so the pick does not depend on ledger order
+        if cur is None or _obj_rank(r) > _obj_rank(cur) or (
+                _obj_rank(r) == _obj_rank(cur) and str(r.get("id")) < str(cur.get("id"))):
+            by_conc[r["conc"]] = r
+    return [by_conc[c] for c in sorted(by_conc)]
+
+
+def _operating_row(r):
+    """One derived operating point, in the authored `operating_points` shape (so both paths feed
+    the same renderer). Carries every column lexicon.operating_columns declares."""
+    return {"conc": r.get("conc"), "series": r.get("series"), "variant": r.get("variant"),
+            "flags": {k: r.get(k) for k, _ in _FLAG_LABELS},
+            "pu": r.get("pu"), "cl": r.get("cl"), "tpg": r.get("tpg"),
+            "itl": r.get("itl"), "ttft": r.get("ttft"), "e2e": r.get("e2e")}
+
+
+# The right-aligning class the numeric column heads carry. Kept out of the f-string below so no
+# escaped quote is needed there (see _operating_table).
+NUMERIC_TH = ' class="n"'
 
 
 def _operating_table(report, records):
-    pts = report.get("operating_points")
+    """The "What to run" table. DERIVED from the records whenever there are any, so it cannot
+    disagree with the dashboard's table over the same run set (issue #13): a hand-authored
+    `operating_points` list carried its own metrics and its own choice of rows, which is exactly
+    the drift the issue is about. The authored list is still honoured when the run dir has no
+    usable ledger -- a brain-written table beats no table at all."""
+    derived = operating_points(records)
+    pts = [_operating_row(r) for r in derived] if derived else (report.get("operating_points") or [])
     if not pts:
-        # auto: best servable record per concurrency, by per-user rate. Skip rows with conc=None --
-        # a null load is not a meaningful operating point, and mixing None with ints breaks sorted()
-        # (jgchn review). build_facts/figures already treat conc=None as not-a-value, so this matches.
-        by_conc = {}
-        for r in records:
-            if r.get("ok") and r.get("pu") is not None and r.get("conc") is not None:
-                cur = by_conc.get(r["conc"])
-                if cur is None or r["pu"] > cur["pu"]:
-                    by_conc[r["conc"]] = r
-        pts = []
-        for c in sorted(by_conc):
-            r = by_conc[c]
-            pts.append({"conc": c,
-                        "flags": {k: r.get(k) for k, _ in _FLAG_LABELS},
-                        "pu": r["pu"], "cl": r["cl"], "itl": r["itl"], "hit": r["hit"]})
-    if not pts:
-        return ""
+        # Nothing held the floor. Say so in the lexicon's words -- the dashboard renders the same
+        # sentence here (ScenarioDetail's OperatingTable). Returning "" printed the "one row per
+        # load ... read the flags off it" blurb above empty space, which reads like a broken page
+        # rather than a finding (issue #13 review). With no records at all there is nothing to
+        # report either way, so stay silent.
+        return (f'<p class="op-none">{esc(lexicon.OBJECTIVE["none"])}</p>' if records else "")
+    cols = lexicon.OPERATING_COLUMNS
     rows = []
     for p in pts:
         flags = p.get("flags", {})
         fl = "".join(
             # a boolean flag prints bare (--enable-expert-parallel, not "... 8")
             f'<span class="fl"><i>{esc(lbl)}</i>'
-            + ("" if k == "epw" else f' {esc(flags[k])}') + "</span>"
+            + ("" if k in lexicon.BOOL_FLAGS else f' {esc(flags[k])}') + "</span>"
             for k, lbl in _FLAG_LABELS
             if flags.get(k) is not None and flags.get(k) not in _FLAG_SKIP.get(k, (None,)))
-        rows.append(
-            f'<tr><td class="n hero">{esc(p.get("conc"))}</td><td>{fl}</td>'
-            f'<td class="n">{_num(p.get("pu"))}</td><td class="n">{_num(p.get("cl"))}</td>'
-            f'<td class="n">{_num(p.get("itl"))}</td>'
-            f'<td class="n">{"–" if p.get("hit") is None else f"{p['hit']:.2f}"}</td></tr>')
-    return ('<table class="short"><thead><tr><th>sessions</th><th>configuration</th>'
-            '<th class="n">tok/s per user</th><th class="n">tok/s fleet</th>'
-            '<th class="n">ITL ms</th><th class="n">prefix hit</th></tr></thead>'
+        # The configuration cell names the topology and its knob delta above the flags, matching
+        # the dashboard's ConfigCell -- a flag list alone does not say WHICH config a row is.
+        name = (f'<div class="op-name">{esc(p["series"])}</div>' if p.get("series") else "")
+        var = (f'<div class="op-var">{esc(p["variant"])}</div>' if p.get("variant") else "")
+        cells = [f'<td class="n hero">{esc(p.get("conc"))}</td>', f"<td>{name}{var}{fl}</td>"]
+        # Formatted through the metric's lexicon `digits`, like the dashboard's
+        # `fnum(v, metric(col).digits)` -- NOT _num's own heuristic, which rounded `cl` to 143.9
+        # where the dashboard showed 144 (issue #13 review).
+        cells += [f'<td class="n">{_fnum(p.get(c), lexicon.metric(c, "digits"))}</td>'
+                  for c in cols[2:]]
+        rows.append(f'<tr>{"".join(cells)}</tr>')
+    # The attribute is a plain single-quoted literal rather than an escaped one inside the
+    # f-string: a backslash in an f-string expression is a syntax error before Python 3.12
+    # (PEP 701 lifted it), and nothing here needs a 3.12 floor.
+    heads = "".join(
+        f'<th{NUMERIC_TH if i >= 2 else ""}>{esc(lexicon.label(c))}</th>'
+        for i, c in enumerate(cols))
+    return (f'<table class="short"><thead><tr>{heads}</tr></thead>'
             f'<tbody>{"".join(rows)}</tbody></table>')
 
 
@@ -600,10 +705,19 @@ def _what_to_run(report, records):
     if not prose and not records:
         return ""
     num = report.get("recommendation_num", 9)
-    body = _prose(prose) if prose else _prose(
-        ["Pick an operating point from the table below and read the flags off it."])
+    pts = operating_points(records)
+    table = _operating_table(report, records)
+    # The objective the rows are ranked on is STATED, not implied: the issue asks for the two
+    # surfaces to rank on the same objective *and say which*. The dashboard prints the same
+    # sentence (lexicon.objective.blurb) over its own copy of this table. It is dropped when there
+    # is no table to describe -- "pick a load and read the flags off it" over an empty section is
+    # worse than saying nothing.
+    # ONE prose block: two adjacent .prose divs lost the inter-paragraph spacing, so the shared
+    # blurb ran straight on from the brain's last sentence.
+    paras = list(prose or []) + ([lexicon.OBJECTIVE["blurb"]] if pts else [])
+    body = _prose(paras) if paras else ""
     return (f'<section class="finding"><h2><span class="num">{num}</span>What to run</h2>'
-            f'{body}{_operating_table(report, records)}</section>')
+            f'{body}{table}</section>')
 
 
 def _glossary(report):
@@ -673,6 +787,7 @@ def render_report(scenario, pareto, runs, report, run_path=None, n_malformed=0):
         "__VENDOR_JS__": _vendor_js(),      # inline d3 + crossfilter (self-contained / offline)
         RECORDS_PH: _json_for_script(records),
         FACTS_PH: _json_for_script(facts),
+        LEXICON_PH: _json_for_script(lexicon.LEX),
     }
     for ph in replacements:
         if ph not in html:

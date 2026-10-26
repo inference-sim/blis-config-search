@@ -155,9 +155,18 @@ Load axis is **concurrency** (closed-loop virtual users, `--concurrency`), not o
    **The operating table ("What to run") must state the whole deployment.** It is the table a
    reader copies flags from, so an omission is a wrong deployment: it printed only
    `--tensor-parallel-size` and `--num-instances`, leaving out `--enable-expert-parallel`,
-   `--data-parallel-size` and routing. `report._FLAG_LABELS` now covers every knob the search can
-   vary, and `_FLAG_SKIP` drops the ones sitting at their default so the two or three that matter
-   stay visible.
+   `--data-parallel-size` and routing. The flag list and the skip list come from the shared lexicon
+   (`report/lexicon.json`), which covers every knob the search can vary and drops the ones sitting
+   at their default so the two or three that matter stay visible -- and means the dashboard prints
+   the same deployment for the same run.
+
+   **It ranks on tok/s per GPU, and says so.** One row per load, the most efficient *servable*
+   run there, ties broken on fleet tok/s then per-user rate then run id. Per-GPU is the efficiency
+   half of the dual-Pareto objective the search picks its own winner on, so the table, the
+   recommendation card and the winner all agree. With `runs.jsonl` present the rows are **derived**
+   from the records; a brain-authored `operating_points` list is a fallback for a run dir with no
+   usable ledger (an authored list carried its own rows and its own metrics, which is how the two
+   surfaces drifted apart in the first place).
 2. **Capacity probe to C\*.** For each candidate, probe `--concurrency` upward then **bisect** to
    `C*` = the largest concurrency whose p99s still meet the interactivity floor (and any SLOs).
    ~5-8 runs per candidate. With no floor/SLO, `C*` = the throughput knee.
@@ -324,12 +333,26 @@ Inputs (all optional-tolerant -- three of four are brain-authored):
   `pu_is_step_estimate`) rather than publishing a known-wrong number. It also computes a **`FACTS`**
   stats object the prose cites.
 - **`report.json`** -- the **brain-authored narrative** (standfirst, hero panel, numbered sections +
-  which figure each shows, the operating-point table, the glossary). Documented in
+  which figure each shows, run-specific caption notes, the glossary). Documented in
   `scripts/report_schema.md`. **Absent -> the report still renders** the header, the explorer, and an
-  auto operating table, with no analysis prose.
+  auto operating table, with no analysis prose. Note what it does **not** carry: metric names, axis
+  titles, a figure caption's leading sentence and the "What to run" ranking rule all come from the
+  shared lexicon below, so the narrative cannot re-word them for one surface only.
 
 Pieces:
 
+- **`report/lexicon.json` + `scripts/lexicon.py`** -- the **shared vocabulary of both report
+  surfaces**. config-search renders the same runs twice: this standalone HTML report and the React
+  dashboard in `web/`. They had drifted into two vocabularies for one set of numbers and two
+  ranking objectives for "What to run" -- the report ranked operating points by per-user rate while
+  the dashboard ranked them by tok/s per GPU, so at high load the two tables recommended
+  *different* configurations for one scenario (issue #13). The lexicon fixes the objective (tok/s
+  per GPU, with explicit tiebreaks, plus the blurb that states it), every metric/facet label, unit
+  and definition, the axis titles, each figure's caption, and the deploy-flag list the operating
+  table prints. `report.py` and `figures.py` read it through `lexicon.py`, and `report.py` bakes
+  the whole file into the page so the explorer's JS labels come from it too. **`web/src/lexicon.json`
+  is a byte-identical mirror** (Vite cannot import out of this read-only skill dir); change the copy
+  here, then copy it over the mirror -- `scripts/test_build.py` fails the build on drift.
 - **`scripts/figures.py`** -- deterministic inline-SVG figure builders (`operating_curve`,
   `scale_bars`, `tail_scatter`, …), themed via the stylesheet's `--fig-*` variables. Each is
   registered with the `keys` (RECORDS fields) its story depends on; `report.render_figure` checks

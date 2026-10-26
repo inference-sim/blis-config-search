@@ -69,8 +69,19 @@ padding:0 12px 7px;vertical-align:bottom}
 td{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
 td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 td.hero{font-size:19px;font-weight:700;color:var(--accent)}
-.short .fl{display:block;font-family:var(--mono);font-size:11.5px;
-color:var(--ink);white-space:nowrap;line-height:1.75}
+/* The "What to run" configuration cell. Mirrors the dashboard's .op-name/.op-var/.op-flags
+   (web/src/styles.css) so one row reads the same on both surfaces: the topology, its knob delta,
+   then the flags FLOWING rather than one per line -- stacked, eleven flags made a row tall
+   enough to push the next load off the screen. */
+/* "nothing held the floor" -- the report's twin of the dashboard's .op-none (web/src/styles.css),
+   so the empty case reads as a finding on both surfaces rather than a missing table. */
+.op-none{margin:14px 0 0;font-size:13px;color:var(--ink2);border-left:2px solid var(--rule);
+padding:8px 0 8px 12px}
+.short .op-name{font-size:12.5px;font-weight:700;color:var(--ink)}
+.short .op-var{font-size:11px;color:var(--accent);margin-top:1px}
+.short td>.op-name+.fl,.short td>.op-var+.fl{margin-top:4px}
+.short .fl{display:inline-block;font-family:var(--mono);font-size:11.5px;
+color:var(--ink);white-space:nowrap;line-height:1.7;margin-right:9px}
 .short .fl i{color:var(--ink3);font-style:normal}
 #xf{margin-top:20px}
 /* The explorer is two-part, as in the reference report: brush a RANGE on an outcome metric
@@ -285,6 +296,13 @@ __VENDOR_JS__
 <script>
 const RECORDS = /*__RECORDS__*/[];
 const FACTS = /*__FACTS__*/{};
+// The shared vocabulary (report/lexicon.json), baked in by report.py. The React dashboard reads
+// the same file, so a facet, a metric or an axis is named identically on both surfaces -- the
+// drift issue #13 is about. `lab()` is the one lookup both namespaces go through.
+const LEX = /*__LEXICON__*/{};
+const lab = k => (LEX.metrics && LEX.metrics[k] ? LEX.metrics[k].label
+                  : (LEX.facets && LEX.facets[k] ? LEX.facets[k].label : k));
+const ax = k => (LEX.axes && LEX.axes[k]) || '';
 
 // Cross-filtered explorer over the same records that produced every figure.
 // Crossfilter holds the dimensions; d3 renders. Clicking a value filters every
@@ -302,57 +320,58 @@ const FACTS = /*__FACTS__*/{};
   // are always visible. `detail` is the engine and routing knobs: real levers (routing swung
   // throughput 2.3x) but second-order, and showing all of them at once turned the panel into a
   // wall of knobs. They sit behind "more filters".
+  // Every `label` is lab(key) -- the shared lexicon's name for that facet, which the dashboard's
+  // FACETS list reads from the same file. A facet is never renamed in one place only.
+  const num=(a,b)=>a-b;
   const ALL_DIMS = [
-    {key:'conc', label:'sessions',       order:(a,b)=>a-b,  grp:'Load',       tier:'primary'},
+    {key:'conc', order:num,  grp:'Load',       tier:'primary'},
     // `series` is the topology; `variant` is its knob delta. Both are primary: once the search
     // refines knobs, several runs legitimately share a series name, and the variant facet is how
     // you tell those apart without hunting through the table.
-    {key:'series',label:'configuration', order:null,        grp:'Topology',   tier:'primary'},
-    {key:'variant',label:'knob delta',   order:null,        grp:'Topology',   tier:'primary'},
-    {key:'gpus', label:'GPUs',           order:(a,b)=>a-b,  grp:'Topology',   tier:'primary'},
-    {key:'tp',   label:'TP',             order:(a,b)=>a-b,  grp:'Topology',   tier:'primary'},
-    {key:'dp',   label:'DP',             order:(a,b)=>a-b,  grp:'Topology',   tier:'primary'},
-    {key:'epw',  label:'EP width',       order:(a,b)=>a-b,  grp:'Topology',   tier:'primary'},
-    {key:'ni',   label:'instances',      order:(a,b)=>a-b,  grp:'Topology',   tier:'primary'},
-    {key:'ok',   label:'servable',       order:null,        grp:'Load',       tier:'primary'},
-    {key:'nodes',label:'nodes',          order:(a,b)=>a-b,  grp:'Topology',   tier:'detail'},
-    {key:'pd',   label:'prefill/decode', order:null,        grp:'Topology',   tier:'detail'},
-    {key:'route',label:'routing',        order:null,        grp:'Routing',    tier:'detail'},
-    {key:'scorers',label:'route scorers',order:null,        grp:'Routing',    tier:'detail'},
-    {key:'schedp',label:'scheduler',     order:null,        grp:'Routing',    tier:'detail'},
-    {key:'admit',label:'admission',      order:null,        grp:'Routing',    tier:'detail'},
-    {key:'a2a',  label:'MoE dispatch',   order:null,        grp:'Engine',     tier:'detail'},
-    {key:'mnbt', label:'batch tokens',   order:(a,b)=>a-b,  grp:'Engine',     tier:'detail'},
-    {key:'mns',  label:'max seqs',       order:(a,b)=>a-b,  grp:'Engine',     tier:'detail'},
-    {key:'bs',   label:'block size',     order:(a,b)=>a-b,  grp:'Engine',     tier:'detail'},
-    {key:'gmu',  label:'gpu mem util',   order:(a,b)=>a-b,  grp:'Engine',     tier:'detail'},
-    {key:'mtp',  label:'draft tokens',   order:(a,b)=>a-b,  grp:'Engine',     tier:'detail'},
-  ];
+    {key:'series',order:null, grp:'Topology',   tier:'primary'},
+    {key:'variant',order:null,grp:'Topology',   tier:'primary'},
+    {key:'gpus', order:num,  grp:'Topology',   tier:'primary'},
+    {key:'tp',   order:num,  grp:'Topology',   tier:'primary'},
+    {key:'dp',   order:num,  grp:'Topology',   tier:'primary'},
+    {key:'epw',  order:num,  grp:'Topology',   tier:'primary'},
+    {key:'ni',   order:num,  grp:'Topology',   tier:'primary'},
+    {key:'ok',   order:null, grp:'Load',       tier:'primary'},
+    {key:'nodes',order:num,  grp:'Topology',   tier:'detail'},
+    {key:'pd',   order:null, grp:'Topology',   tier:'detail'},
+    {key:'route',order:null, grp:'Routing',    tier:'detail'},
+    {key:'scorers',order:null,grp:'Routing',   tier:'detail'},
+    {key:'schedp',order:null,grp:'Routing',    tier:'detail'},
+    {key:'admit',order:null, grp:'Routing',    tier:'detail'},
+    {key:'a2a',  order:null, grp:'Engine',     tier:'detail'},
+    {key:'mnbt', order:num,  grp:'Engine',     tier:'detail'},
+    {key:'mns',  order:num,  grp:'Engine',     tier:'detail'},
+    {key:'bs',   order:num,  grp:'Engine',     tier:'detail'},
+    {key:'gmu',  order:num,  grp:'Engine',     tier:'detail'},
+    {key:'mtp',  order:num,  grp:'Engine',     tier:'detail'},
+  ].map(d=>({...d, label:lab(d.key)}));
   // Y-axis views for the scatter. EVERY latency metric here is p99 — the basis the interactivity
   // floor uses — so switching the axis never swaps a mean for a tail under the reader.
   // TPOT is not a fifth view: time-per-output-token IS the inter-token latency, so it is named on
   // the ITL view rather than offered as a separate (identical) axis.
+  // label/unit/note all come from the lexicon entry for the key (the `help` line is the note), so
+  // the y-axis of this scatter reads exactly like the dashboard's column for the same metric.
   const VIEWS = [
-    {key:'pu',   label:'Speed per user', short:'per user', unit:'tok/s', log:false, hi:true,
-     note:'output tokens per second each user sees — 1000 / ITL p99'},
-    {key:'itl',  label:'ITL / TPOT',     short:'ITL',      unit:'ms',    log:false, hi:false,
-     note:'inter-token latency p99, a.k.a. TPOT (time per output token)'},
-    {key:'ttft', label:'TTFT',           short:'TTFT',     unit:'ms',    log:true,  hi:false,
-     note:'time to first token, p99 — how long a user waits before anything appears'},
-    {key:'e2e',  label:'E2E',            short:'E2E',      unit:'ms',    log:true,  hi:false,
-     note:'end-to-end request latency, p99'},
-    {key:'sched',label:'Queue delay',    short:'queue',    unit:'ms',    log:true,  hi:false,
-     note:'scheduling delay p99 — time spent queued before admission'},
-  ];
+    {key:'pu',   short:'per user', log:false, hi:true},
+    {key:'itl',  short:'TPOT',     log:false, hi:false},
+    {key:'ttft', short:'TTFT',     log:true,  hi:false},
+    {key:'e2e',  short:'E2E',      log:true,  hi:false},
+    {key:'sched',short:'queue',    log:true,  hi:false},
+  ].map(v=>({...v, label:lab(v.key), unit:LEX.metrics[v.key].unit,
+             note:LEX.metrics[v.key].help}));
   // Continuous outcome metrics, brushed as a RANGE rather than clicked as a level. These are the
   // reference report's "filter by outcome" row; `log` for the heavy-tailed latency axes.
   const ALL_HISTS = [
-    {key:'pu',   label:'Speed per user', unit:'tok/s', log:false},
-    {key:'tpg',  label:'Output per GPU', unit:'tok/s', log:false},
-    {key:'ttft', label:'TTFT p99',       unit:'ms',    log:true},
-    {key:'itl',  label:'ITL p99',        unit:'ms',    log:false},
-    {key:'sched',label:'Queue delay',    unit:'ms',    log:true},
-  ];
+    {key:'pu',   log:false},
+    {key:'tpg',  log:false},
+    {key:'ttft', log:true},
+    {key:'itl',  log:false},
+    {key:'sched',log:true},
+  ].map(h=>({...h, label:lab(h.key), unit:LEX.metrics[h.key].unit}));
   // Level labels for facet values that do not read as themselves. crossfilter groups null as its
   // own level, so epw (null on every EP-off run) rendered a BLANK clickable row with a count --
   // a filter you could not read. '' is the key for null/undefined after String().
@@ -528,7 +547,7 @@ const FACTS = /*__FACTS__*/{};
   const gpt=svg.append('g');
   svg.append('text').attr('x',SM.l+(SW-SM.l-SM.r)/2).attr('y',SH-8)
     .attr('text-anchor','middle').attr('font-size',12).attr('fill','currentColor')
-    .text('aggregate output tok/s delivered by the cluster (log scale)');
+    .text(ax('cl_log'));
   const ylab=svg.append('text').attr('transform',`rotate(-90 14 ${SM.t+(SH-SM.t-SM.b)/2})`)
     .attr('x',14).attr('y',SM.t+(SH-SM.t-SM.b)/2).attr('text-anchor','middle')
     .attr('font-size',12).attr('fill','currentColor');
@@ -575,11 +594,11 @@ const FACTS = /*__FACTS__*/{};
   function tipHTML(r){
     // Lead with the metric currently on the y-axis — that is the question being asked.
     const rows=[[view.label, view.key==='pu'?f1(r[view.key])+' tok/s':fms(r[view.key])],
-                ['Sessions', fk(r.conc)],
-                ['Fleet output', fk(r.cl)+' tok/s'],
-                ['Per GPU', f1(r.tpg)+' tok/s'],
-                ['GPUs', `${fk(r.gpus)}${r.nodes>1?' · '+r.nodes+' nodes':''}`]];
-    if (view.key!=='pu') rows.splice(1,0,['Speed per user', f1(r.pu)+' tok/s']);
+                [lab('conc'), fk(r.conc)],
+                [lab('cl'), fk(r.cl)+' tok/s'],
+                [lab('tpg'), f1(r.tpg)+' tok/s'],
+                [lab('gpus'), `${fk(r.gpus)}${r.nodes>1?' · '+r.nodes+' nodes':''}`]];
+    if (view.key!=='pu') rows.splice(1,0,[lab('pu'), f1(r.pu)+' tok/s']);
     // Name the knobs that distinguish this run from its same-shape siblings (build_records fills
     // r.knobs with exactly the knobs that vary across the set). Without this, two points on the
     // same topology that differ only in routing look identical on hover.
@@ -637,10 +656,10 @@ const FACTS = /*__FACTS__*/{};
       ['draft tokens (MTP)', r.mtp||'off'],
     ]);
     const measured=dl([
-      ['Sessions', fk(r.conc)], ['Speed per user', f1(r.pu)+' tok/s'],
-      ['Fleet output', fk(r.cl)+' tok/s'], ['Per GPU', f1(r.tpg)+' tok/s'],
-      ['ITL / TPOT p99', fms(r.itl)], ['TTFT p99', fms(r.ttft)],
-      ['E2E p99', fms(r.e2e)], ['Queue delay p99', fms(r.sched)],
+      [lab('conc'), fk(r.conc)], [lab('pu'), f1(r.pu)+' tok/s'],
+      [lab('cl'), fk(r.cl)+' tok/s'], [lab('tpg'), f1(r.tpg)+' tok/s'],
+      [lab('itl'), fms(r.itl)], [lab('ttft'), fms(r.ttft)],
+      [lab('e2e'), fms(r.e2e)], [lab('sched'), fms(r.sched)],
       ['Servable', r.ok?'yes':'no'],
     ]);
     panel.html(
@@ -668,20 +687,21 @@ const FACTS = /*__FACTS__*/{};
   }
 
   const tableWrap=root.append('div').attr('id','xf-table');
+  // Column heads are lab(key): the same names the dashboard's run log uses, from one file.
   const COLS=[
-    ['conc','sessions',v=>v],['series','config',v=>v],
-    ['variant','knob delta',v=>v||'—'],['route','routing',v=>v],
-    ['tp','TP',v=>v],['dp','DP',v=>v],['epw','EP',v=>v==null?'off':v],
-    ['pd','P/D',v=>v],['mtp','MTP',v=>v],['mnbt','batch',v=>d3.format(',')(v)],
-    ['mns','seqs',v=>v],['pu','tok/s user',v=>v.toFixed(1)],
-    ['cl','tok/s fleet',v=>d3.format(',.0f')(v)],
-    ['tpg','tok/s GPU',v=>v.toFixed(1)],['itl','ITL ms',v=>v.toFixed(1)],
-    ['ttft','TTFT ms',v=>d3.format(',.0f')(v)],
-    ['sched','queue ms',v=>d3.format(',.0f')(v)],
-    ['hit','prefix hit',v=>v==null?'–':v.toFixed(2)],
-    ['p95','p95 s',v=>v?d3.format(',.0f')(v/1000):'–'],
-    ['to','dropped',v=>d3.format(',.0f')(v)],
-  ];
+    ['conc',v=>v],['series',v=>v],
+    ['variant',v=>v||'—'],['route',v=>v],
+    ['tp',v=>v],['dp',v=>v],['epw',v=>v==null?'off':v],
+    ['pd',v=>v],['mtp',v=>v],['mnbt',v=>d3.format(',')(v)],
+    ['mns',v=>v],['pu',v=>v.toFixed(1)],
+    ['cl',v=>d3.format(',.0f')(v)],
+    ['tpg',v=>v.toFixed(1)],['itl',v=>v.toFixed(1)],
+    ['ttft',v=>d3.format(',.0f')(v)],
+    ['sched',v=>d3.format(',.0f')(v)],
+    ['hit',v=>v==null?'–':v.toFixed(2)],
+    ['p95',v=>v?d3.format(',.0f')(v/1000):'–'],
+    ['to',v=>d3.format(',.0f')(v)],
+  ].map(([k,fmt])=>[k, k==='to'?'dropped':lab(k), fmt]);
   const table=tableWrap.append('table');
   const numCols=['conc','tp','dp','epw','mtp','mnbt','mns','pu','cl','tpg','itl','ttft','sched',
                  'hit','p95','to'];
@@ -733,8 +753,8 @@ const FACTS = /*__FACTS__*/{};
     const bestPu=d3.max(rows,r=>r.pu), bestCl=d3.max(rows,r=>r.cl);  // d3.max skips null/undefined
     sumCount.html(`<b>${n}</b> of ${RECORDS.length} runs selected &nbsp;&middot;&nbsp; `
       +`<b>${nok}</b> meet every limit &nbsp;&middot;&nbsp; `
-      +(n?`best <b>${f1(bestPu)}</b> tok/s per user, `
-        +`<b>${fk(bestCl)}</b> tok/s fleet`:''));
+      +(n?`best <b>${f1(bestPu)}</b> ${lab('pu')}, `
+        +`<b>${fk(bestCl)}</b> ${lab('cl')}`:''));
     // Only points with BOTH axes present can be placed on the scatter; the rest still appear in the
     // table (which shows "–" per null cell) but are not plotted.
     // Only points with BOTH axes present can be placed; a run missing the CURRENT y-metric stays

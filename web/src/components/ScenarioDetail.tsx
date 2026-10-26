@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { RunRecord, Scenario } from '../types'
 import { reportHref } from '../load'
 import { EMPTY_SEL, dash, emphasis, finite, fnum, operatingPoints, resolveHighlight, runFlags, selectRecords, sortRows, toggleHighlight, useSort, type Selection, type SortState } from '../lib'
+import { OBJECTIVE, OPERATING_COLUMNS, figure as fig, help as lexHelp, label as lexLabel, metric } from '../lexicon'
 import { Crossfilter } from './Crossfilter'
 import { MockBadge } from './Reports'
 
@@ -177,13 +178,15 @@ export function PointDetail({ r, onClose, pinned = true, scenarioHasCmd = true }
           ])}
         </section>
         <section>
-          <h5>Measured at {finite(r.conc) ? `${fnum(r.conc, 0)} sessions` : 'this load'}</h5>
+          {/* Row names are lexicon labels — the standalone report's click panel is this panel's
+              twin and reads the same entries, so one measurement is never named two ways. */}
+          <h5>Measured at {finite(r.conc) ? `${fnum(r.conc, 0)} ${metric('conc').unit}` : 'this load'}</h5>
           {defList([
-            ['Speed per user', finite(r.pu) ? `${fnum(r.pu, 1)} tok/s` : null],
-            ['Fleet output', finite(r.cl) ? `${fnum(r.cl, 0)} tok/s` : null],
-            ['Per GPU', finite(r.tpg) ? `${fnum(r.tpg, 1)} tok/s` : null],
-            ['TPOT p99', ms(r.itl)], ['TTFT p99', ms(r.ttft)],
-            ['E2E p99', ms(r.e2e)], ['Queue delay p99', ms(r.sched)],
+            [lexLabel('pu'), finite(r.pu) ? `${fnum(r.pu, 1)} tok/s` : null],
+            [lexLabel('cl'), finite(r.cl) ? `${fnum(r.cl, 0)} tok/s` : null],
+            [lexLabel('tpg'), finite(r.tpg) ? `${fnum(r.tpg, 1)} tok/s` : null],
+            [lexLabel('itl'), ms(r.itl)], [lexLabel('ttft'), ms(r.ttft)],
+            [lexLabel('e2e'), ms(r.e2e)], [lexLabel('sched'), ms(r.sched)],
             ['Servable', r.ok ? 'yes' : 'no'],
           ])}
         </section>
@@ -205,17 +208,22 @@ export function PointDetail({ r, onClose, pinned = true, scenarioHasCmd = true }
   )
 }
 
-/** One-line glossary for the throughput/latency column heads, surfaced as native `title`
- *  tooltips (same affordance as the mock badge). Keyed by the exact header text. */
+/** The columns both readout tables show, in the shared order (lexicon `operating_columns`), each
+ *  as the record field it reads plus the header text. The run log appends a `status` column.
+ *  Header text and tooltip come from the lexicon, so the standalone HTML report names the same
+ *  numbers the same way (issue #13, item 7b). */
+export const OP_COLS: { key: string; term: string }[] = OPERATING_COLUMNS.map((key) => ({
+  key,
+  term: lexLabel(key),
+}))
+/** Which of those columns are numeric (right-aligned, number-sorted). `series` is the one that
+ *  is not — it renders the whole configuration cell. */
+const isNumCol = (key: string) => key !== 'series'
+
+/** One-line glossary for the column heads, surfaced as a hover/focus tooltip. Keyed by the
+ *  header text, with `status` (a dashboard-only column) defined locally. */
 const COL_HELP: Record<string, string> = {
-  sessions: 'Concurrent sessions — simultaneous users/requests — at this operating point.',
-  configuration: 'The serving topology and the engine/routing flags to deploy it with.',
-  'tok/s per user': 'Output tokens per second a single session sees — the interactivity each caller feels.',
-  'tok/s fleet': 'Total output tokens per second across every instance and GPU in the deployment — the whole config’s serving capacity.',
-  'tok/s GPU': 'Fleet throughput divided by total GPUs — how efficiently each GPU is used.',
-  'TPOT ms': 'Time per output token (p99), a.k.a. inter-token latency: the gap between output tokens. Lower feels snappier.',
-  'TTFT ms': 'Time to first token (p99): how long a caller waits before the reply starts streaming.',
-  'E2E ms': 'End-to-end latency (p99): total time from request to the last output token.',
+  ...Object.fromEntries(OP_COLS.map((c) => [c.term, lexHelp(c.key) ?? ''])),
   status: 'Whether the run held the interactivity floor, or which constraint it broke.',
 }
 /** A header term with its glossary tooltip. The whole label (term + the "?" icon) opens a real
@@ -273,6 +281,29 @@ function SortTh({ term, sortKey, sort, onToggle, num = false }: {
   )
 }
 
+/** Column key -> sortable value, for both readout tables. `series` sorts on the series+variant
+ *  name (what the configuration cell displays); `status` sorts servable-first ('' ranks before
+ *  any violation text) so like failures group together. */
+export function colValue(r: RunRecord, key: string): string | number | null | undefined {
+  if (key === 'series') return `${r.series}${r.variant ? ` ${r.variant}` : ''}`
+  if (key === 'status') return r.ok ? '' : r.viol.length ? r.viol.join(', ') : r.status
+  return r[key as keyof RunRecord] as string | number | null | undefined
+}
+
+/** One readout cell. The configuration column renders the whole deployment; every other column
+ *  is a number formatted to the digits the lexicon declares for that metric, so the two tables
+ *  (and the standalone report) round one metric the same way everywhere. */
+function Cell({ r, col }: { r: RunRecord; col: string }) {
+  if (col === 'series') return <ConfigCell r={r} />
+  if (col === 'status') return <td>{r.ok ? 'servable' : r.viol.length ? r.viol.join(', ') : r.status}</td>
+  const v = r[col as keyof RunRecord] as number | null | undefined
+  return (
+    <td className={col === 'conc' ? 'num hero' : 'num'}>
+      <span className="num">{fnum(v, metric(col).digits)}</span>
+    </td>
+  )
+}
+
 /** The configuration cell shared by both tables: topology name, its knob delta, and the deploy
  *  flags as chips. Keeping one renderer means the "What to run" table and the full run log read
  *  identically (the richer operating-table format the review preferred). */
@@ -306,44 +337,22 @@ export function OperatingTable({ recs, onPick, picked = null, active = null }: {
   active?: string | null
 }) {
   // Default order is by load (operatingPoints returns it concurrency-ascending); a click on any
-  // header sorts by that column instead. `configuration` sorts on the series+variant name.
+  // header sorts by that column instead. The `series` column sorts on the series+variant name.
   const { sort, toggle } = useSort()
-  const opGet = (r: RunRecord, k: string): string | number | null | undefined => {
-    switch (k) {
-      case 'sessions': return r.conc
-      case 'configuration': return `${r.series}${r.variant ? ` ${r.variant}` : ''}`
-      case 'tok/s per user': return r.pu
-      case 'tok/s fleet': return r.cl
-      case 'tok/s GPU': return r.tpg
-      case 'TPOT ms': return r.itl
-      case 'TTFT ms': return r.ttft
-      case 'E2E ms': return r.e2e
-      default: return undefined
-    }
-  }
   const base = operatingPoints(recs)
-  const rows = sortRows(base, sort, opGet)
+  const rows = sortRows(base, sort, colValue)
   if (base.length === 0) {
-    return (
-      <p className="op-none">
-        No run held the interactivity floor, so there is no operating point to recommend. The run
-        log below lists every run and why each one missed.
-      </p>
-    )
+    // The reason comes from the lexicon, so the standalone report says it in the same words.
+    return <p className="op-none">{OBJECTIVE.none}</p>
   }
   return (
     <div className="tscroll hscroll">
       <table className="readout op-table" data-testid="operating-table">
         <thead>
           <tr className="col">
-            <SortTh term="sessions" sortKey="sessions" sort={sort} onToggle={toggle} />
-            <SortTh term="configuration" sortKey="configuration" sort={sort} onToggle={toggle} />
-            <SortTh term="tok/s per user" sortKey="tok/s per user" sort={sort} onToggle={toggle} num />
-            <SortTh term="tok/s fleet" sortKey="tok/s fleet" sort={sort} onToggle={toggle} num />
-            <SortTh term="tok/s GPU" sortKey="tok/s GPU" sort={sort} onToggle={toggle} num />
-            <SortTh term="TPOT ms" sortKey="TPOT ms" sort={sort} onToggle={toggle} num />
-            <SortTh term="TTFT ms" sortKey="TTFT ms" sort={sort} onToggle={toggle} num />
-            <SortTh term="E2E ms" sortKey="E2E ms" sort={sort} onToggle={toggle} num />
+            {OP_COLS.map((c) => (
+              <SortTh key={c.key} term={c.term} sortKey={c.key} sort={sort} onToggle={toggle} num={isNumCol(c.key)} />
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -351,14 +360,7 @@ export function OperatingTable({ recs, onPick, picked = null, active = null }: {
             <tr key={r.id} className={`op-row${r.id === picked ? ' hl' : ''}${active !== null && r.series !== active ? ' dim' : ''}`}
               onClick={onPick ? () => onPick(r.id) : undefined}
               title={onPick ? 'Show the full deployment for this run' : undefined}>
-              <td className="num hero"><span className="num">{fnum(r.conc, 0)}</span></td>
-              <ConfigCell r={r} />
-              <td className="num"><span className="num">{fnum(r.pu)}</span></td>
-              <td className="num"><span className="num">{fnum(r.cl, 0)}</span></td>
-              <td className="num"><span className="num">{fnum(r.tpg)}</span></td>
-              <td className="num"><span className="num">{fnum(r.itl, 2)}</span></td>
-              <td className="num"><span className="num">{fnum(r.ttft, 0)}</span></td>
-              <td className="num"><span className="num">{fnum(r.e2e, 0)}</span></td>
+              {OP_COLS.map((c) => <Cell key={c.key} r={r} col={c.key} />)}
             </tr>
           ))}
         </tbody>
@@ -656,10 +658,14 @@ interface LatMetric {
   get: (r: RunRecord) => number | null
   phrase: string       // used in the derived explainer sentence
 }
+/** `<lexicon label> (<lexicon unit>)`, e.g. "TPOT p99 (ms)" — the label names the statistic, the
+ *  unit belongs on a selector and an axis. Both halves come from the lexicon so the standalone
+ *  report names the same metric identically. */
+const latLabel = (key: string) => `${lexLabel(key)} (${metric(key).unit})`
 const LAT_METRICS: LatMetric[] = [
-  { key: 'tpot', label: 'TPOT p99 (ms)', get: (r) => r.itl, phrase: 'time per output token' },
-  { key: 'ttft', label: 'TTFT p99 (ms)', get: (r) => r.ttft ?? null, phrase: 'time to first token' },
-  { key: 'e2e', label: 'E2E p99 (ms)', get: (r) => r.e2e ?? null, phrase: 'end-to-end latency' },
+  { key: 'tpot', label: latLabel('itl'), get: (r) => r.itl, phrase: 'time per output token' },
+  { key: 'ttft', label: latLabel('ttft'), get: (r) => r.ttft ?? null, phrase: 'time to first token' },
+  { key: 'e2e', label: latLabel('e2e'), get: (r) => r.e2e ?? null, phrase: 'end-to-end latency' },
 ]
 
 /** Latency-vs-load: latency is the mechanism behind the cliff — quantify flat vs post-knee, for
@@ -780,23 +786,8 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
   const panelRec = hoverRec && (!pickedRec || hoverRec.series !== pickedRec.series)
     ? hoverRec
     : pickedRec ?? hoverRec
-  // Column → sortable value for the full run log. Same columns as the operating table (shared
-  // format); `status` sorts servable-first ('' ranks before any violation text) so like failures
-  // group together.
-  const runLogGet = (r: RunRecord, k: string): string | number | null | undefined => {
-    switch (k) {
-      case 'sessions': return r.conc
-      case 'configuration': return `${r.series}${r.variant ? ` ${r.variant}` : ''}`
-      case 'tok/s per user': return r.pu
-      case 'tok/s fleet': return r.cl
-      case 'tok/s GPU': return r.tpg
-      case 'TPOT ms': return r.itl
-      case 'TTFT ms': return r.ttft
-      case 'E2E ms': return r.e2e
-      case 'status': return r.ok ? '' : r.viol.length ? r.viol.join(', ') : r.status
-      default: return undefined
-    }
-  }
+  // The full run log shows the operating table's shared columns plus why a run missed.
+  const logCols = [...OP_COLS, { key: 'status', term: 'status' }]
 
   return (
     <div>
@@ -805,26 +796,26 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
 
       <div className="charts">
         <figure className="vc">
-          <div className="vc-h"><h4 className="vc-t">Efficiency ↔ interactivity</h4><span className="vc-r">{regime}</span></div>
-          <p className="vc-s">tok/s/GPU vs per-user tok/s · one point per run</p>
-          <Scatter pts={pts} xl="output tok/s/user" yl="output tok/s/GPU" label="Scatter of per-GPU throughput against per-user throughput" hl={hl}
+          {/* Title, axis labels and both caption lines come from the shared lexicon, so this plot
+              and its counterpart in the standalone HTML report describe one story in one
+              vocabulary (issue #13, item 7b). */}
+          <div className="vc-h"><h4 className="vc-t">{fig('efficiency_interactivity').title}</h4><span className="vc-r">{regime}</span></div>
+          <p className="vc-s">{fig('efficiency_interactivity').caption}</p>
+          <Scatter pts={pts} xl={fig('efficiency_interactivity').xl} yl={fig('efficiency_interactivity').yl ?? ''}
+            label={fig('efficiency_interactivity').caption} hl={hl}
             onPick={pickRun} picked={picked} />
-          <p className="vc-k"><b>How to read it.</b> Each point is one run: x is what one caller feels, y is how much each GPU
-            delivers (so configs are comparable regardless of how many GPUs they use). Up and to the right is better for
-            everyone; filled points hold the interactivity floor, hollow ones break it. A faint line connects a
-            configuration's runs in load order, so you can trace where adding sessions takes it.</p>
+          <p className="vc-k"><b>How to read it.</b> {fig('efficiency_interactivity').read}</p>
           {explainScatter(shown) && <p className="vc-x">{explainScatter(shown)}</p>}
           {hidden > 0 && <p className="pts-note">{hidden} run{hidden === 1 ? ' has' : 's have'} no throughput values and {hidden === 1 ? 'is' : 'are'} not plotted.</p>}
           {pts.length === 1 && <p className="pts-note">Only one point matches; a trade-off frontier needs two or more.</p>}
         </figure>
         <figure className="vc">
-          <div className="vc-h"><h4 className="vc-t">Per-user rate vs load</h4><span className="vc-r">interactivity</span></div>
-          <p className="vc-s">tok/s per user as concurrency climbs</p>
-          <Lines recs={recs} shownRecs={shown} get={(r) => r.pu} xl="concurrency" yl="tok/s per user" label="Per-user throughput by concurrency" colors={colors} showKnee hl={hl}
-            onPick={pickRun} picked={picked} />
-          <p className="vc-k"><b>How to read it.</b> One line per configuration, walking the load up. Flat is good — it means
-            adding sessions has not yet slowed anyone down. The violet line marks that configuration's knee, the first load
-            that breaks the floor.</p>
+          <div className="vc-h"><h4 className="vc-t">{fig('per_user_vs_load').title}</h4><span className="vc-r">interactivity</span></div>
+          <p className="vc-s">{fig('per_user_vs_load').caption}</p>
+          <Lines recs={recs} shownRecs={shown} get={(r) => r.pu} xl={fig('per_user_vs_load').xl}
+            yl={fig('per_user_vs_load').yl ?? ''} label={fig('per_user_vs_load').caption}
+            colors={colors} showKnee hl={hl} onPick={pickRun} picked={picked} />
+          <p className="vc-k"><b>How to read it.</b> {fig('per_user_vs_load').read}</p>
           {explainPerUser(shown, series) && <p className="vc-x">{explainPerUser(shown, series)}</p>}
         </figure>
         <figure className="vc">
@@ -837,12 +828,12 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
               </select>
             </label>
           </div>
-          <p className="vc-s">{latMetric.label} as concurrency climbs</p>
-          <Lines recs={recs} shownRecs={shown} get={latMetric.get} xl="concurrency" yl={latMetric.label} label={`${latMetric.label} by concurrency`} colors={colors} showKnee hl={hl}
-            onPick={pickRun} picked={picked} />
-          <p className="vc-k"><b>How to read it.</b> {latMetric.label.replace(/ \(ms\)$/, '')} as the load climbs — the latency behind
-            the per-user cliff above. Lower is better, and the floor is a ceiling on this number, so a line crossing its knee is
-            what makes the per-user rate fall.</p>
+          <p className="vc-s">{latMetric.label} — {fig('latency_vs_load').caption}</p>
+          <Lines recs={recs} shownRecs={shown} get={latMetric.get} xl={fig('latency_vs_load').xl}
+            yl={latMetric.label} label={`${latMetric.label} by ${fig('latency_vs_load').xl}`}
+            colors={colors} showKnee hl={hl} onPick={pickRun} picked={picked} />
+          <p className="vc-k"><b>How to read it.</b> {latMetric.label} as the load climbs.{' '}
+            {fig('latency_vs_load').read}</p>
           {explainLatency(shown, latMetric) && <p className="vc-x">{explainLatency(shown, latMetric)}</p>}
         </figure>
       </div>
@@ -870,11 +861,10 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
 
       <div className="op-sec">
         <h4 className="op-h">What to run</h4>
-        <p className="op-s">
-          One row per load: the most efficient configuration that still held the floor there, and
-          the flags to deploy it with. Pick the load you expect, then read the flags off it —
-          click a row for the full deployment.
-        </p>
+        {/* The blurb — including which objective the rows are ranked on — comes from the shared
+            lexicon, so the standalone report's section 9 states the same rule in the same words
+            and its table recommends the same configuration (issue #13). */}
+        <p className="op-s">{OBJECTIVE.blurb} Click a row for the full deployment.</p>
         <OperatingTable recs={shown} onPick={pickRun} picked={picked} active={active} />
       </div>
 
@@ -889,34 +879,21 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
         <table className="readout op-table" data-testid="run-log">
           <thead>
             <tr className="col">
-              <SortTh term="sessions" sortKey="sessions" sort={runSort} onToggle={toggleRunSort} />
-              <SortTh term="configuration" sortKey="configuration" sort={runSort} onToggle={toggleRunSort} />
-              <SortTh term="tok/s per user" sortKey="tok/s per user" sort={runSort} onToggle={toggleRunSort} num />
-              <SortTh term="tok/s fleet" sortKey="tok/s fleet" sort={runSort} onToggle={toggleRunSort} num />
-              <SortTh term="tok/s GPU" sortKey="tok/s GPU" sort={runSort} onToggle={toggleRunSort} num />
-              <SortTh term="TPOT ms" sortKey="TPOT ms" sort={runSort} onToggle={toggleRunSort} num />
-              <SortTh term="TTFT ms" sortKey="TTFT ms" sort={runSort} onToggle={toggleRunSort} num />
-              <SortTh term="E2E ms" sortKey="E2E ms" sort={runSort} onToggle={toggleRunSort} num />
-              <SortTh term="status" sortKey="status" sort={runSort} onToggle={toggleRunSort} />
+              {logCols.map((c) => (
+                <SortTh key={c.key} term={c.term} sortKey={c.key} sort={runSort} onToggle={toggleRunSort}
+                  num={c.key !== 'series' && c.key !== 'status'} />
+              ))}
             </tr>
           </thead>
           <tbody>
-            {sortRows(shown, runSort, runLogGet).map((r) => (
+            {sortRows(shown, runSort, colValue).map((r) => (
               <tr key={r.id} className={`op-row${r.ok ? '' : ' bad'}${r.id === picked ? ' hl' : ''}${active !== null && r.series !== active ? ' dim' : ''}`}
                 onPointerEnter={() => setHover(r.series)} onPointerLeave={() => setHover(null)}
                 onClick={() => pickRun(r.id)} title="Show the full deployment for this run">
-                <td className="num hero"><span className="num">{fnum(r.conc, 0)}</span></td>
-                <ConfigCell r={r} />
-                <td className="num"><span className="num">{fnum(r.pu)}</span></td>
-                <td className="num"><span className="num">{fnum(r.cl, 0)}</span></td>
-                <td className="num"><span className="num">{fnum(r.tpg)}</span></td>
-                <td className="num"><span className="num">{fnum(r.itl, 2)}</span></td>
-                <td className="num"><span className="num">{fnum(r.ttft, 0)}</span></td>
-                <td className="num"><span className="num">{fnum(r.e2e, 0)}</span></td>
-                <td>{r.ok ? 'servable' : r.viol.length ? r.viol.join(', ') : r.status}</td>
+                {logCols.map((c) => <Cell key={c.key} r={r} col={c.key} />)}
               </tr>
             ))}
-            {shown.length === 0 && <tr><td colSpan={9} className="pts-empty">No runs match these filters.</td></tr>}
+            {shown.length === 0 && <tr><td colSpan={logCols.length} className="pts-empty">No runs match these filters.</td></tr>}
           </tbody>
         </table>
       </div>

@@ -1,0 +1,309 @@
+{
+  "_source": "The shared vocabulary of the config-search report surfaces. CANONICAL COPY.",
+  "_mirror": "web/src/lexicon.json is a byte-identical mirror, imported by the React dashboard (which cannot read the skill dir at build time). scripts/test_build.py fails if the two drift.",
+  "_why": "config-search renders the same runs twice -- the standalone HTML report (report.py + figures.py + report/template.html) and the React dashboard (web/src). They had grown two vocabularies for one set of numbers ('Speed per user' / 'Per-user rate' / 'tok/s per user') and, worse, two ranking objectives for 'What to run'. Both now read their labels and their objective from this file, so a reader moving between the two surfaces sees one set of words and one recommendation.",
+  "objective": {
+    "key": "tpg",
+    "label": "tok/s per GPU",
+    "tiebreak": [
+      "cl",
+      "pu",
+      "id"
+    ],
+    "rule": "Among the SERVABLE runs at one load, the operating point is the run with the highest tok/s per GPU; ties break on fleet tok/s, then tok/s per user, then run id (so the pick is deterministic, not iteration-order dependent).",
+    "why": "tok/s per GPU is the efficiency half of the dual-Pareto objective the search optimises and picks its own winner on, so the 'What to run' table, the recommendation card and the search winner all rank on one number. Ranking by per-user rate instead made the table recommend the fastest-per-user shape while the card above recommended the most efficient one: on kimi-k2.5 that is TP8+EP at 23 tok/s/GPU versus the winner's TP4xDP2+EP at 67.",
+    "blurb": "One row per load: the most efficient configuration that still held the floor there, and the flags to deploy it with. Rows are ranked on tok/s per GPU — the objective the search picks its winner on. Pick the load you expect, then read the flags off it.",
+    "none": "No run held the interactivity floor, so there is no operating point to recommend. The full run log lists every run and why each one missed."
+  },
+  "metrics": {
+    "conc": {
+      "label": "sessions",
+      "unit": "sessions",
+      "digits": 0,
+      "help": "Concurrent sessions — simultaneous users/requests — at this operating point."
+    },
+    "pu": {
+      "label": "tok/s per user",
+      "unit": "tok/s",
+      "digits": 1,
+      "help": "Output tokens per second a single session sees — the interactivity each caller feels. On a p99 basis, the same basis as the interactivity floor."
+    },
+    "cl": {
+      "label": "tok/s fleet",
+      "unit": "tok/s",
+      "digits": 0,
+      "help": "Total output tokens per second across every instance and GPU in the deployment — the whole config's serving capacity."
+    },
+    "tpg": {
+      "label": "tok/s per GPU",
+      "unit": "tok/s",
+      "digits": 1,
+      "help": "Fleet throughput divided by total GPUs — how efficiently each GPU is used."
+    },
+    "itl": {
+      "label": "TPOT p99",
+      "unit": "ms",
+      "digits": 2,
+      "help": "Time per output token (p99), a.k.a. inter-token latency (ITL): the gap between output tokens. Lower feels snappier."
+    },
+    "ttft": {
+      "label": "TTFT p99",
+      "unit": "ms",
+      "digits": 0,
+      "help": "Time to first token (p99): how long a caller waits before the reply starts streaming."
+    },
+    "e2e": {
+      "label": "E2E p99",
+      "unit": "ms",
+      "digits": 0,
+      "help": "End-to-end latency (p99): total time from request to the last output token."
+    },
+    "p95": {
+      "label": "E2E p95",
+      "unit": "ms",
+      "digits": 0,
+      "help": "End-to-end latency of the slowest 95% of sessions — the tail check on a fast-looking config."
+    },
+    "sched": {
+      "label": "queue delay p99",
+      "unit": "ms",
+      "digits": 0,
+      "help": "Scheduling delay (p99): time a request spent queued before admission."
+    },
+    "hit": {
+      "label": "prefix hit",
+      "unit": "",
+      "digits": 2,
+      "help": "Fraction of prompt tokens served from the prefix cache."
+    }
+  },
+  "facets": {
+    "series": {
+      "label": "configuration",
+      "help": "The serving topology — GPUs, tensor/data/expert parallelism and instance count."
+    },
+    "variant": {
+      "label": "knob delta",
+      "help": "How this run's engine and routing knobs differ from its topology group's baseline."
+    },
+    "gpus": {
+      "label": "GPUs",
+      "help": "Total GPUs the deployment occupies."
+    },
+    "tp": {
+      "label": "tensor parallel",
+      "help": "How many GPUs each copy of the model is split across."
+    },
+    "dp": {
+      "label": "data parallel",
+      "help": "How many data-parallel replicas each instance runs."
+    },
+    "epw": {
+      "label": "expert-parallel width",
+      "help": "How many ranks the MoE experts are sharded over (derived as tp x dp); off when expert parallelism is disabled."
+    },
+    "ni": {
+      "label": "instances",
+      "help": "How many independent model replicas serve the fleet."
+    },
+    "ok": {
+      "label": "servable",
+      "help": "Whether the run held the interactivity floor and every SLO."
+    },
+    "src": {
+      "label": "run source",
+      "help": "Which search phase produced the run."
+    },
+    "nodes": {
+      "label": "nodes",
+      "help": "How many 8-GPU nodes the pool spans; past one, collectives cross a fabric."
+    },
+    "pd": {
+      "label": "prefill/decode",
+      "help": "Whether prefill and decode share instances (colocated) or run on separate pools (disagg)."
+    },
+    "route": {
+      "label": "routing",
+      "help": "The policy that picks an instance for each request."
+    },
+    "scorers": {
+      "label": "route scorers",
+      "help": "The scorers the routing policy ranks instances with."
+    },
+    "schedp": {
+      "label": "scheduler",
+      "help": "The engine's request-scheduling policy."
+    },
+    "admit": {
+      "label": "admission",
+      "help": "The policy deciding whether a request is admitted or shed."
+    },
+    "a2a": {
+      "label": "MoE dispatch",
+      "help": "The all-to-all backend that moves tokens to their experts."
+    },
+    "mnbt": {
+      "label": "max batched tokens",
+      "help": "Engine cap on the tokens in one batch (--max-num-batched-tokens)."
+    },
+    "mns": {
+      "label": "max seqs",
+      "help": "Engine cap on concurrent sequences (--max-num-seqs)."
+    },
+    "bs": {
+      "label": "block size",
+      "help": "KV-cache block size in tokens (--block-size)."
+    },
+    "gmu": {
+      "label": "gpu mem util",
+      "help": "Fraction of each GPU's memory the engine may use (--gpu-memory-utilization)."
+    },
+    "mtp": {
+      "label": "draft tokens",
+      "help": "Speculative-decoding draft depth (--num-speculative-tokens); 0 is off."
+    }
+  },
+  "axes": {
+    "cl_log": "aggregate output tok/s delivered by the cluster (log)",
+    "pu": "tok/s per user",
+    "tpg": "tok/s per GPU",
+    "conc": "sessions",
+    "p95_log": "slowest 95% of session latencies (log)",
+    "max_conc": "highest concurrency served inside every limit"
+  },
+  "flags": [
+    {
+      "key": "tp",
+      "flag": "--tensor-parallel-size"
+    },
+    {
+      "key": "dp",
+      "flag": "--data-parallel-size"
+    },
+    {
+      "key": "epw",
+      "flag": "--enable-expert-parallel",
+      "bool": true
+    },
+    {
+      "key": "ni",
+      "flag": "--num-instances"
+    },
+    {
+      "key": "bs",
+      "flag": "--block-size"
+    },
+    {
+      "key": "mnbt",
+      "flag": "--max-num-batched-tokens"
+    },
+    {
+      "key": "mns",
+      "flag": "--max-num-seqs"
+    },
+    {
+      "key": "gmu",
+      "flag": "--gpu-memory-utilization"
+    },
+    {
+      "key": "mtp",
+      "flag": "--num-speculative-tokens"
+    },
+    {
+      "key": "route",
+      "flag": "routing"
+    },
+    {
+      "key": "pd",
+      "flag": "prefill/decode"
+    }
+  ],
+  "flag_skip": {
+    "dp": [
+      1
+    ],
+    "epw": [],
+    "mtp": [
+      0
+    ],
+    "pd": [
+      "colocated"
+    ],
+    "route": [
+      "round-robin",
+      "default"
+    ]
+  },
+  "operating_columns": [
+    "conc",
+    "series",
+    "pu",
+    "cl",
+    "tpg",
+    "itl",
+    "ttft",
+    "e2e"
+  ],
+  "figures": {
+    "operating_curve": {
+      "surfaces": [
+        "report"
+      ],
+      "title": "The operating curve, and where it stops",
+      "xl": "@axes.cl_log",
+      "yl": "@axes.pu",
+      "caption": "Each configuration trades tok/s per user for tok/s fleet, until it falls off a cliff. One line per configuration, walking the load up; the number beside each marker is the session count. Filled markers hold the interactivity floor, hollow ones break a limit. The dashed line is the floor itself.",
+      "read": "One line per configuration, walking the load up. Flat is good — it means adding sessions has not yet slowed anyone down. Where a line turns down is its knee: the first load that breaks the floor."
+    },
+    "per_user_vs_load": {
+      "surfaces": [
+        "dashboard"
+      ],
+      "title": "tok/s per user vs load",
+      "xl": "@axes.conc",
+      "yl": "@axes.pu",
+      "caption": "Each configuration trades tok/s per user for tok/s fleet, until it falls off a cliff. One line per configuration, walking the load up. Filled markers hold the interactivity floor, hollow ones break a limit.",
+      "read": "One line per configuration, walking the load up. Flat is good — it means adding sessions has not yet slowed anyone down. The violet line marks that configuration's knee, the first load that breaks the floor."
+    },
+    "efficiency_interactivity": {
+      "surfaces": [
+        "dashboard"
+      ],
+      "title": "Efficiency ↔ interactivity",
+      "xl": "@axes.pu",
+      "yl": "@axes.tpg",
+      "caption": "tok/s per GPU against tok/s per user, one point per run — the two halves of the search objective, plotted against each other.",
+      "read": "Each point is one run: x is what one caller feels, y is how much each GPU delivers (so configurations compare regardless of how many GPUs they use). Up and to the right is better for everyone; filled points hold the interactivity floor, hollow ones break it. A faint line connects a configuration's runs in load order, so you can trace where adding sessions takes it."
+    },
+    "latency_vs_load": {
+      "surfaces": [
+        "dashboard"
+      ],
+      "title": "Latency vs load",
+      "xl": "@axes.conc",
+      "yl": null,
+      "caption": "The latency behind the per-user cliff, as the load climbs.",
+      "read": "Lower is better, and the interactivity floor is a ceiling on this number, so a line crossing its knee is what makes tok/s per user fall."
+    },
+    "tail_scatter": {
+      "surfaces": [
+        "report"
+      ],
+      "title": "Why the fastest-looking configuration can be the wrong one",
+      "xl": "@axes.p95_log",
+      "yl": "@axes.pu",
+      "caption": "tok/s per user against the slowest 95% of session latencies. Every run; crosses break a limit. A configuration pushed past its cliff reports a lower tok/s per user AND a longer tail — the two move together, so the tail is a faithful independent check.",
+      "read": "An independent check that a fast-looking configuration is not fast only because it dropped or queued requests."
+    },
+    "scale_bars": {
+      "surfaces": [
+        "report"
+      ],
+      "title": "How far each configuration scales",
+      "xl": "@axes.max_conc",
+      "yl": "",
+      "caption": "Highest concurrency each configuration serves inside every limit. The cross marks the first load that breaks one. Identical hardware, identical workload.",
+      "read": "One bar per configuration: how many sessions it carries before any limit binds."
+    }
+  }
+}

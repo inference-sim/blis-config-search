@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import type { Catalog, RunRecord, Scenario, WorkloadEntry } from './types'
 import { facetCounts, filterScenarios, topConfigs, NO_FILTERS, parseRoute, filterRecords, countReports, coverageRows, TAB_LABELS } from './lib'
+import { OBJECTIVE, label as lexLabel, metric } from './lexicon'
 import { ScenarioDetail } from './components/ScenarioDetail'
 import { Reports } from './components/Reports'
 import { Submit } from './components/Submit'
@@ -345,6 +346,15 @@ describe('what to run: operating points', () => {
   const scen = (records: RunRecord[]): Scenario =>
     ({ ...mk('a', 'kimi-k2.5', 'H200', 'multidoc', 512, false, records) })
 
+  it('states the shared ranking objective above the table', () => {
+    // 7a's acceptance criterion is "the same, STATED objective". The standalone report prints the
+    // identical sentence over its own copy of this table (test_report.py Parity).
+    render(<ScenarioDetail runId="a" scenarios={[scen([rec()])]} />)
+    const blurb = document.querySelector('.op-sec .op-s')?.textContent ?? ''
+    expect(blurb).toContain(OBJECTIVE.blurb)
+    expect(blurb).toContain(OBJECTIVE.label)   // names tok/s per GPU explicitly
+  })
+
   it('shows one row per load, pairing the flags with what they delivered', () => {
     render(<ScenarioDetail runId="a" scenarios={[scen([
       rec({ id: 'a', conc: 128, tpg: 67 }),
@@ -366,9 +376,10 @@ describe('what to run: operating points', () => {
     ])]} />)
     const heads = [...screen.getByTestId('operating-table').querySelectorAll('thead .hcol')]
       .map((e) => e.getAttribute('aria-label') ?? '')
-    expect(heads.some((h) => h.startsWith('TPOT ms:'))).toBe(true)
-    expect(heads.some((h) => h.startsWith('TTFT ms:'))).toBe(true)
-    expect(heads.some((h) => h.startsWith('E2E ms:'))).toBe(true)
+    // headers are the shared lexicon labels, not literals (see the scatter-axis test)
+    for (const k of ['itl', 'ttft', 'e2e']) {
+      expect(heads.some((h) => h.startsWith(`${lexLabel(k)}:`))).toBe(true)
+    }
     // the E2E value is rendered in the row
     expect(screen.getByTestId('operating-table').textContent).toContain('12,836')
   })
@@ -838,8 +849,11 @@ describe('ScenarioDetail', () => {
     const scatter = [...document.querySelectorAll('svg.chart')]
       .find((s) => s.querySelectorAll('circle.pt').length > 0) as Element
     const axes = [...scatter.querySelectorAll('.axlabel')].map((e) => e.textContent)
-    expect(axes).toContain('output tok/s/GPU')   // y: compare GPU utilisation across configs
-    expect(axes).toContain('output tok/s/user')  // x: interactivity
+    // The axis names are the SHARED ones (issue #13): the standalone report labels the same two
+    // quantities from the same lexicon entries, so asserting the literals here would re-introduce
+    // exactly the drift this file is now the dashboard half of.
+    expect(axes).toContain(lexLabel('tpg'))   // y: compare GPU utilisation across configs
+    expect(axes).toContain(lexLabel('pu'))    // x: interactivity
   })
 
   it('lets the user switch the latency chart between TPOT / TTFT / E2E', () => {
@@ -847,7 +861,8 @@ describe('ScenarioDetail', () => {
     const picker = document.querySelector('.vc-pick select') as HTMLSelectElement
     expect(picker).toBeTruthy()
     // the options are the three latency metrics; default is TPOT
-    expect([...picker.options].map((o) => o.textContent)).toEqual(['TPOT p99 (ms)', 'TTFT p99 (ms)', 'E2E p99 (ms)'])
+    expect([...picker.options].map((o) => o.textContent)).toEqual(
+      ['itl', 'ttft', 'e2e'].map((k) => `${lexLabel(k)} (${metric(k).unit})`))
     expect(picker.value).toBe('tpot')
     // the latency figure's subtitle reflects the selected metric
     const fig = picker.closest('figure') as Element

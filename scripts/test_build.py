@@ -235,6 +235,31 @@ def test_catalog_workload_kinds():
         shutil.rmtree(tmp)
 
 
+def test_lexicon_mirror_is_in_sync():
+    """The shared report vocabulary (issue #13) lives in the skill at
+    .claude/skills/config-search/report/lexicon.json; web/src/lexicon.json is a byte-identical
+    mirror, because Vite cannot import out of the read-only skill dir. A mirror that drifts is
+    worse than no sharing at all -- it looks shared and is not -- so the build fails on it."""
+    print("test_lexicon_mirror_is_in_sync")
+    canon = os.path.join(ROOT, ".claude", "skills", "config-search", "report", "lexicon.json")
+    mirror = os.path.join(ROOT, "web", "src", "lexicon.json")
+    check(os.path.exists(canon), "skill lexicon.json is missing")
+    if not os.path.exists(mirror):
+        check(False, "web/src/lexicon.json is missing (copy the skill's lexicon.json over it)")
+        return
+    with open(canon, "rb") as a, open(mirror, "rb") as b:
+        ca, cb = a.read(), b.read()
+    check(ca == cb, "web/src/lexicon.json has drifted from the skill's report/lexicon.json; "
+                    "copy the canonical file over it")
+    lex = json.loads(ca)
+    # the dashboard and the report both key off these, so a rename here must be deliberate
+    check(lex["objective"]["key"] == "tpg", "the shared objective is no longer tok/s per GPU")
+    for key in lex["operating_columns"]:
+        src = lex["metrics"].get(key) or lex["facets"].get(key, {})
+        check(bool(src.get("label")), f"operating column {key} has no label")
+        check(bool(src.get("help")), f"operating column {key} has no help text")
+
+
 def test_catalog():
     print("test_catalog")
     cat = bc.build(os.path.join(ROOT, os.pardir))
@@ -289,6 +314,7 @@ if __name__ == "__main__":
     test_validation()
     test_build_determinism_and_nomock()
     test_catalog_workload_kinds()
+    test_lexicon_mirror_is_in_sync()
     test_catalog()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

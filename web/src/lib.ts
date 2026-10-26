@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Scenario } from './types'
+import * as lex from './lexicon'
 
 // ---------- formatting ----------
 export const dash = '—'
@@ -232,31 +233,19 @@ export function filterRecords(recs: RunRecord[], f: RecFilters): RunRecord[] {
 export const finite = (v: number | null | undefined): v is number => typeof v === 'number' && Number.isFinite(v)
 
 // ---------- cross-filter selection (brushable histograms + categorical facets) ----------
+/* Every label below comes from the shared lexicon (`./lexicon`), not a literal: the standalone
+   HTML report labels the same fields from the same file, so one metric cannot be "Per-user rate"
+   here and "tok/s per user" there (issue #13, item 7b). */
 export type MetricKey = 'cl' | 'pu' | 'itl' | 'ttft' | 'p95' | 'conc'
-export const METRICS: { key: MetricKey; label: string; unit: string; digits: number }[] = [
-  { key: 'cl', label: 'Fleet throughput', unit: 'tok/s', digits: 0 },
-  { key: 'pu', label: 'Per-user rate', unit: 'tok/s', digits: 1 },
-  { key: 'itl', label: 'Inter-token latency', unit: 'ms', digits: 1 },
-  { key: 'ttft', label: 'TTFT p99', unit: 'ms', digits: 0 },
-  { key: 'p95', label: 'E2E p95', unit: 'ms', digits: 0 },
-  { key: 'conc', label: 'Concurrency', unit: 'sessions', digits: 0 },
-]
+const METRIC_KEYS: MetricKey[] = ['cl', 'pu', 'itl', 'ttft', 'p95', 'conc']
+export const METRICS: { key: MetricKey; label: string; unit: string; digits: number }[] =
+  METRIC_KEYS.map((key) => ({ key, ...lex.metric(key) }))
 export type FacetField = 'series' | 'tp' | 'ni' | 'gpus' | 'epw' | 'ok' | 'src' | 'pd' | 'route' | 'a2a' | 'mtp' | 'mns' | 'mnbt'
-export const FACETS: { key: FacetField; label: string }[] = [
-  { key: 'series', label: 'Configuration' },
-  { key: 'tp', label: 'Tensor parallel' },
-  { key: 'ni', label: 'Instances' },
-  { key: 'gpus', label: 'GPUs' },
-  { key: 'epw', label: 'Expert parallel width' },
-  { key: 'ok', label: 'Servable' },
-  { key: 'src', label: 'Run source' },
-  { key: 'pd', label: 'Prefill/decode' },
-  { key: 'route', label: 'Routing' },
-  { key: 'a2a', label: 'All-to-all' },
-  { key: 'mtp', label: 'MTP depth' },
-  { key: 'mns', label: 'Max seqs' },
-  { key: 'mnbt', label: 'Max batched tokens' },
+const FACET_KEYS: FacetField[] = [
+  'series', 'tp', 'ni', 'gpus', 'epw', 'ok', 'src', 'pd', 'route', 'a2a', 'mtp', 'mns', 'mnbt',
 ]
+export const FACETS: { key: FacetField; label: string }[] =
+  FACET_KEYS.map((key) => ({ key, label: lex.label(key) }))
 export type Range = [number, number]
 export interface Selection {
   facets: Partial<Record<FacetField, string[]>>
@@ -350,29 +339,16 @@ export function emphasis(active: string | null, series: string): 'on' | 'off' | 
 }
 
 /* ---------------- operating points: "pick a load, read the flags off it" ----------------
-   Mirrors the standalone report's "What to run" table (report.py `_operating_table`): one row per
-   load, pairing the configuration you would deploy with the performance it gave at that load. The
-   run table below it stays the full per-run log, including the runs that broke the floor. */
+   The same table as the standalone report's "What to run" (report.py `_operating_table`): one row
+   per load, pairing the configuration you would deploy with the performance it gave at that load,
+   ranked on the one shared objective. The run table below it stays the full per-run log,
+   including the runs that broke the floor. */
 
-/** The flags a reader would actually pass, in a stable order. Mirrors report.py `_FLAG_LABELS`. */
-const FLAGS: { key: keyof RunRecord; flag: string; bool?: true }[] = [
-  { key: 'tp', flag: '--tensor-parallel-size' },
-  { key: 'dp', flag: '--data-parallel-size' },
-  { key: 'epw', flag: '--enable-expert-parallel', bool: true },
-  { key: 'ni', flag: '--num-instances' },
-  { key: 'bs', flag: '--block-size' },
-  { key: 'mnbt', flag: '--max-num-batched-tokens' },
-  { key: 'mns', flag: '--max-num-seqs' },
-  { key: 'gmu', flag: '--gpu-memory-utilization' },
-  { key: 'mtp', flag: '--num-speculative-tokens' },
-  { key: 'route', flag: 'routing' },
-  { key: 'pd', flag: 'prefill/decode' },
-]
-/** Values worth no ink: a knob at its default, or an "off" state. Mirrors report.py `_FLAG_SKIP`.
- *  Printing them would bury the two or three settings that actually distinguish this run. */
-const FLAG_SKIP: Partial<Record<keyof RunRecord, (string | number | null)[]>> = {
-  dp: [1], epw: [], mtp: [0], pd: ['colocated'], route: ['round-robin', 'default'],
-}
+/** The flags a reader would actually pass, in a stable order, and the values worth no ink (a knob
+ *  at its default or an "off" state — printing those buries the settings that actually matter).
+ *  Both come from the shared lexicon, which report.py reads as `_FLAG_LABELS` / `_FLAG_SKIP`, so
+ *  the two surfaces cannot print different deployments for one run. */
+const { FLAGS, FLAG_SKIP } = lex
 
 /** The non-default flags for one run, each as {flag, value} — value is '' for a boolean flag. */
 export function runFlags(r: RunRecord): { flag: string; value: string }[] {
@@ -380,25 +356,46 @@ export function runFlags(r: RunRecord): { flag: string; value: string }[] {
   for (const f of FLAGS) {
     const v = r[f.key] as string | number | null | undefined
     if (v === null || v === undefined || v === '') continue
-    if ((FLAG_SKIP[f.key] ?? []).includes(v as string | number)) continue
+    if ((FLAG_SKIP[f.key as string] ?? []).includes(v as string | number)) continue
     out.push({ flag: f.flag, value: f.bool ? '' : String(v) })
   }
   return out
 }
 
+/** Rank one run on the SHARED objective (lexicon `objective`): tok/s per GPU, then fleet tok/s,
+ *  then tok/s per user. Returned as a tuple compared left to right, so the tiebreaks make the
+ *  pick deterministic rather than record-order dependent. Mirrors report.py `_obj_rank`. */
+function objRank(r: RunRecord): number[] {
+  const num = (k: string): number => {
+    const v = r[k as keyof RunRecord]
+    return typeof v === 'number' && Number.isFinite(v) ? v : -Infinity
+  }
+  return [num(lex.OBJECTIVE.key), ...lex.OBJECTIVE.tiebreak.filter((k) => k !== 'id').map(num)]
+}
+/** Lexicographic compare of two rank tuples: >0 when `a` is the better operating point. */
+function cmpRank(a: number[], b: number[]): number {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] - b[i]
+  return 0
+}
+
 /**
- * One operating point per load: the best SERVABLE run at that concurrency, ranked by tok/s per
- * GPU. Per-GPU is deliberate — it is the dual-Pareto objective the search optimises and picks its
- * winner on. Ranking by per-user rate (as the report does) made the table recommend the
- * fastest-per-user shape while the card above recommended the most efficient one: on kimi-k2.5
- * that is TP8+EP at 23 tok/s/GPU versus the winner's TP4xDP2+EP at 67.
+ * One operating point per load: the best SERVABLE run at that concurrency on the shared objective
+ * — tok/s per GPU, the efficiency half of the dual-Pareto objective the search optimises and
+ * picks its own winner on (lexicon `objective`, which report.py's `operating_points` reads too).
+ *
+ * Ranking by per-user rate instead — which the standalone report used to do — made the table
+ * recommend the fastest-per-user shape while the card above recommended the most efficient one:
+ * on kimi-k2.5 that is TP8+EP at 23 tok/s/GPU versus the winner's TP4xDP2+EP at 67. That was the
+ * cross-surface disagreement issue #13 is about; both tables now rank on this one objective.
  */
 export function operatingPoints(recs: RunRecord[]): RunRecord[] {
   const best = new Map<number, RunRecord>()
   for (const r of recs) {
     if (!r.ok || !finite(r.conc) || !finite(r.tpg)) continue
     const cur = best.get(r.conc)
-    if (cur === undefined || (r.tpg as number) > (cur.tpg as number)) best.set(r.conc, r)
+    if (cur === undefined) { best.set(r.conc, r); continue }
+    const c = cmpRank(objRank(r), objRank(cur))
+    if (c > 0 || (c === 0 && String(r.id) < String(cur.id))) best.set(r.conc, r)
   }
   return [...best.values()].sort((a, b) => (a.conc as number) - (b.conc as number))
 }

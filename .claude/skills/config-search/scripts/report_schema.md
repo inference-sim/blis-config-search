@@ -37,17 +37,22 @@ CSS-only hover tooltip, and `href="#g-ID"` jumps to the matching glossary entry.
       "num": 2,
       "title": "The operating curve, and where it stops",
       "figure": "operating_curve",      // see "Figures" below; omit for a prose-only section
-      "caption": "<b>Figure 1.</b> …",  // figcaption HTML
+      // The caption's first sentence is SHARED, from report/lexicon.json — do not write it here.
+      // `caption_note` appends what is specific to THIS run (inline HTML allowed).
+      "caption_note": "Here that is a four-fold spread in capacity.",
       "prose": ["paragraph one…", "paragraph two…"]
     }
   ],
 
   // "What to run" section (number defaults to 9). Prose + an operating-point table.
+  // The table is DERIVED from runs.jsonl whenever there are runs — see "The shared lexicon".
   "recommendation_num": 9,
   "recommendation_prose": ["…", "…"],
   "operating_points": [
-    // One row per chosen operating point. `flags` keys are read in a fixed order into the
-    // monospace flag list: tp, ni, mnbt, mns, mtp, route, pd (any subset).
+    // FALLBACK ONLY: used when the run dir has no usable ledger. With runs.jsonl present the
+    // table is derived from the records instead, so both report surfaces show the same rows.
+    // `flags` keys are read in the lexicon's fixed order (tp, dp, epw, ni, bs, mnbt, mns, gmu,
+    // mtp, route, pd — any subset).
     {"conc": 20, "flags": {"tp": 4, "ni": 4, "mnbt": 8192, "mns": 256, "mtp": 0},
      "pu": 70.0, "cl": 1471.5, "itl": 14.29, "hit": null}
   ],
@@ -60,6 +65,34 @@ CSS-only hover tooltip, and `href="#g-ID"` jumps to the matching glossary entry.
 }
 ```
 
+## The shared lexicon
+
+config-search renders the same runs on **two** surfaces: this standalone report and the React
+dashboard in `web/`. They had grown two vocabularies for one set of numbers and, worse, two
+ranking objectives for "What to run" — the report ranked operating points by per-user rate while
+the dashboard ranked them by tok/s per GPU, so at high load the two tables recommended *different*
+configurations for the same scenario (issue #13).
+
+Both surfaces now read **`report/lexicon.json`**:
+
+| block | what it fixes |
+|---|---|
+| `objective` | the one ranking rule for "What to run" (tok/s per GPU, with explicit tiebreaks), plus the blurb that *states* it to the reader |
+| `metrics` / `facets` | one label, unit, rounding and one-line definition per RECORDS field |
+| `axes` | the axis titles the figures draw |
+| `figures` | per figure: title, axis refs, the shared caption, and the "how to read it" line |
+| `flags` / `flag_skip` | the deploy flags the operating table prints, and the values worth no ink |
+| `operating_columns` | which columns that table shows, in order |
+
+`scripts/lexicon.py` is the Python reader (`report.py` and `figures.py` import it, and `report.py`
+bakes the whole file into the page so the explorer's JS labels match too). `web/src/lexicon.json`
+is a **byte-identical mirror** — Vite cannot import out of the read-only skill dir — and
+`scripts/test_build.py` fails the build if the two drift. Change the skill's copy, then copy it
+over the mirror.
+
+**So:** do not write a metric name, an axis title, a figure caption's leading sentence, or a
+ranking rule into `report.json`. Add it to the lexicon (both copies) and let both surfaces read it.
+
 ## Figures
 
 `figure` names a builder registered in `scripts/figures.py`'s `FIGURES` map. Each entry is
@@ -68,11 +101,15 @@ first checks that **every** `keys` field actually varies across the runs; if one
 never swept it), it returns a captioned placeholder instead of a misleading flat chart. An unknown
 figure name likewise placeholders.
 
+Each figure's caption, axis titles and "how to read it" line come from the lexicon's `figures`
+block, so the dashboard's charts of the same story are worded identically. A section supplies only
+its `caption_note`.
+
 | name | what it draws | keys (must vary) |
 |---|---|---|
-| `operating_curve` | per-user tok/s vs cluster tok/s, one line per config, concurrency-labelled; filled = servable | `conc` |
+| `operating_curve` | tok/s per user vs cluster tok/s, one line per config, concurrency-labelled; filled = servable | `conc` |
 | `scale_bars` | max servable concurrency per config, with the first-break marker | `series` |
-| `tail_scatter` | per-user tok/s vs p95 latency; crosses = unservable | `conc` |
+| `tail_scatter` | tok/s per user vs p95 latency; crosses = unservable | `conc` |
 
 Builders for knobs the v1 engine does not yet vary (routing, PD split, speculative decoding, dispatch
 collective) are **not shipped**; `figures.py` lists them only as commented-out registry examples.

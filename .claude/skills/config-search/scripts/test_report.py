@@ -23,6 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import report
 import figures
+import lexicon
 
 FIXTURE = os.path.normpath(os.path.join(HERE, "..", "examples", "sample-run"))
 SMOKETEST_JS = os.path.join(HERE, "explorer_smoketest.js")
@@ -222,10 +223,16 @@ class Records(unittest.TestCase):
         # a knob at its default is omitted (the fixture is dp=1 throughout): printing
         # "--data-parallel-size 1" on every row would bury the settings that matter
         self.assertNotIn("--data-parallel-size", html)
-        rows = [{"conc": 1, "flags": {"tp": 4, "dp": 2, "epw": 8, "ni": 4}, "pu": 1.0,
-                 "cl": 1.0, "itl": 1.0, "hit": None}]
-        multi = report._operating_table({"operating_points": rows}, recs)
-        self.assertIn("--data-parallel-size", multi)         # ... but shown when it is not 1
+        # ... but shown when it is not 1. Checked on the DERIVED path, which is what a reader
+        # sees: _operating_table now derives its rows from the records whenever there are any
+        # (see test_operating_table_is_derived_not_authored).
+        dp_runs = [{"concurrency": 1, "config": {"tp": 4, "num_instances": 4},
+                    "deployment": {"gpus": 8, "num_instances": 4,
+                                   "parallel": {"tp": 4, "dp": 2, "enable_expert_parallel": True}},
+                    "metrics": {"tokens_per_sec": 100.0, "itl_p99_ms": 9.0,
+                                "injected_requests": 1, "completed_requests": 1}}]
+        multi = report._operating_table({}, report.build_records(dp_runs, sc))
+        self.assertIn("--data-parallel-size", multi)
         self.assertIn("--enable-expert-parallel", multi)
 
     def test_config_facet_exists_so_variants_are_filterable(self):
@@ -766,6 +773,157 @@ class QaRegressions(unittest.TestCase):
             sc, pa, runs, rep, nmal = report.load_run_dir(d)   # no scenario/pareto/report files
             self.assertEqual((sc, pa, rep), ({}, {}, {}))
             self.assertEqual(len(runs), 1)
+
+
+
+# ---------------------------------------------------------------------------
+# Issue #13 -- cross-surface parity. config-search renders the same runs twice (this standalone
+# report and the React dashboard in web/). The two had drifted into two vocabularies and, worse,
+# two ranking objectives for "What to run", so at high load they recommended DIFFERENT configs
+# for one scenario. These tests pin the seam: one lexicon file, one objective, one set of words.
+class Parity(unittest.TestCase):
+    WEB_MIRROR = os.path.normpath(os.path.join(HERE, "..", "..", "..", "..", "web", "src",
+                                               "lexicon.json"))
+
+    def test_web_mirror_is_byte_identical(self):
+        # The dashboard cannot import out of the read-only skill dir, so web/src/lexicon.json is a
+        # copy. A copy that drifts is worse than no sharing at all -- it looks shared and is not.
+        if not os.path.exists(self.WEB_MIRROR):
+            self.skipTest("web/ not present in this checkout")
+        with open(lexicon.PATH, "rb") as a, open(self.WEB_MIRROR, "rb") as b:
+            self.assertEqual(a.read(), b.read(),
+                             "web/src/lexicon.json has drifted from report/lexicon.json; "
+                             "copy the skill's canonical file over it")
+
+    def test_operating_points_rank_on_the_stated_objective(self):
+        # 7a: the table must rank on tok/s per GPU -- the objective the search itself optimises
+        # and the recommendation card quotes -- not on per-user rate.
+        self.assertEqual(lexicon.OBJECTIVE["key"], "tpg")
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        recs = report.build_records(runs, sc)
+        pts = report.operating_points(recs)
+        self.assertTrue(pts)
+        by_conc = {}
+        for r in recs:
+            if r.get("ok") and r.get("conc") is not None and r.get("tpg") is not None:
+                by_conc.setdefault(r["conc"], []).append(r)
+        for p in pts:
+            best = max(x["tpg"] for x in by_conc[p["conc"]])
+            self.assertEqual(p["tpg"], best,
+                             f"conc {p['conc']}: picked {p['tpg']} tok/s/GPU, best is {best}")
+
+    def test_a_per_user_winner_does_not_win_the_table(self):
+        # The exact shape of the disagreement: at one load, the fastest-per-user run is NOT the
+        # most efficient. The table must take the efficient one (what the dashboard takes).
+        runs = []
+        for tpg_tps, pu, ni in ((2300.0, 131.0, 1), (6700.0, 83.0, 2)):
+            runs.append({"concurrency": 512,
+                         "deployment": {"gpus": 100, "num_instances": ni,
+                                        "parallel": {"tp": 8, "enable_expert_parallel": True}},
+                         "metrics": {"tokens_per_sec": tpg_tps, "itl_p99_ms": 1000.0 / pu,
+                                     "tok_per_s_per_user": pu,
+                                     "injected_requests": 1, "completed_requests": 1}})
+        recs = report.build_records(runs, {"interactivity_floor": {"tok_per_s_per_user": 50}})
+        pts = report.operating_points(recs)
+        self.assertEqual(len(pts), 1)
+        self.assertEqual(pts[0]["pu"], 83.0, "ranked by per-user rate instead of per-GPU")
+        self.assertEqual(pts[0]["tpg"], 67.0)
+
+    def test_the_table_is_derived_not_authored(self):
+        # A hand-authored operating_points list carried its own rows AND its own metrics, which is
+        # exactly the drift the issue is about: the glm fixture authors 3 of its 10 servable loads.
+        # With records present the table is derived, so both surfaces show the same rows.
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        self.assertTrue(rep.get("operating_points"), "fixture should still author a list")
+        recs = report.build_records(runs, sc)
+        html = report._operating_table(rep, recs)
+        body = html[html.index("<tbody>"):]
+        self.assertEqual(body.count("<tr>"), len(report.operating_points(recs)))
+
+    def test_authored_points_still_render_without_a_ledger(self):
+        # ... but a run dir with no usable ledger falls back to the authored table: a brain-written
+        # table beats no table at all.
+        rows = [{"conc": 20, "flags": {"tp": 4, "ni": 4}, "pu": 70.0, "cl": 1471.5, "itl": 14.3}]
+        html = report._operating_table({"operating_points": rows}, [])
+        self.assertIn("--tensor-parallel-size", html)
+        self.assertEqual(html[html.index("<tbody>"):].count("<tr>"), 1)
+
+    def test_objective_is_stated_in_the_what_to_run_section(self):
+        # The acceptance criterion is "the same, STATED objective" -- not merely the same code.
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        recs = report.build_records(runs, sc)
+        html = report._what_to_run(rep, recs)
+        self.assertIn(lexicon.OBJECTIVE["blurb"], html)
+        self.assertIn(lexicon.OBJECTIVE["label"], html)
+
+    def test_operating_pick_is_deterministic_under_ties(self):
+        # Two equally efficient runs at one load must resolve the same way on both surfaces, so the
+        # tiebreak is explicit rather than ledger-order dependent.
+        def rec(rid):
+            return {"id": rid, "ok": True, "conc": 8, "tpg": 50.0, "cl": 400.0, "pu": 80.0}
+        a, b = rec("zzz"), rec("aaa")
+        self.assertEqual(report.operating_points([a, b])[0]["id"], "aaa")
+        self.assertEqual(report.operating_points([b, a])[0]["id"], "aaa")
+
+    def test_figure_captions_come_from_the_lexicon(self):
+        # 7b: the shared figures must carry the shared caption, so a reader moving between the two
+        # surfaces sees one vocabulary.
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        html = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
+        for name in ("operating_curve", "scale_bars", "tail_scatter"):
+            cap = lexicon.figure(name, "caption")
+            self.assertIn(report.esc(cap), html, f"{name}'s shared caption is not in the report")
+
+    def test_figure_axis_titles_come_from_the_lexicon(self):
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        recs = report.build_records(runs, sc)
+        svg = figures.fig_operating_curve(recs)
+        self.assertIn(figures.esc(lexicon.AXES["pu"]), svg)
+        self.assertIn(figures.esc(lexicon.AXES["cl_log"]), svg)
+        tail = figures.fig_tail_scatter(recs)
+        self.assertIn(figures.esc(lexicon.AXES["p95_log"]), tail)
+
+    def test_captions_are_numbered_and_take_a_run_specific_note(self):
+        # The shared sentence says what the axes mean; an optional per-run note says what THIS
+        # run's numbers do. Both appear, and the figure number is assigned by the renderer.
+        section = {"figure": "scale_bars", "caption_note": "Four-fold spread here."}
+        cap = report._caption(section, 2)
+        self.assertIn("Figure 2.", cap)
+        self.assertIn("Four-fold spread here.", cap)
+        self.assertIn(report.esc(lexicon.figure("scale_bars", "caption")), cap)
+        # a figure with no lexicon entry keeps its authored caption verbatim
+        self.assertEqual(report._caption({"figure": "nope", "caption": "<b>Custom.</b>"}, 1),
+                         "<b>Custom.</b>")
+
+    def test_lexicon_is_baked_into_the_page_for_the_explorer(self):
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        html = report.render_report(sc, pa, runs, rep, "/abs/sample-run")
+        self.assertNotIn(report.LEXICON_PH, html, "the lexicon placeholder was not substituted")
+        self.assertIn("const LEX =", html)
+        # the explorer resolves its labels through the shared lookup, not literals
+        self.assertIn("label:lab(d.key)", html)
+
+    def test_explorer_panel_names_metrics_from_the_lexicon(self):
+        # The report's click-to-inspect panel is the twin of the dashboard's PointDetail. Both now
+        # name their measurement rows from the lexicon, so one number is never labelled two ways.
+        tpl = open(os.path.join(report.REPORT_DIR, "template.html"), encoding="utf-8").read()
+        for key in ("conc", "pu", "cl", "tpg", "itl", "ttft", "e2e", "sched"):
+            self.assertIn(f"lab('{key}')", tpl, f"the panel/hover still hardcodes {key}'s label")
+
+    def test_flag_list_is_shared_with_the_dashboard(self):
+        # A flag printed on one surface and not the other is a wrong deployment either way.
+        self.assertEqual(report._FLAG_LABELS, lexicon.FLAG_LABELS)
+        keys = {k for k, _ in report._FLAG_LABELS}
+        for k in ("tp", "dp", "epw", "ni", "bs", "mnbt", "mns", "gmu", "mtp", "route", "pd"):
+            self.assertIn(k, keys)
+
+    def test_every_operating_column_has_a_label_and_a_definition(self):
+        # The dashboard builds its column heads AND their tooltips from these entries, so a
+        # missing one renders an unnamed column there.
+        for key in lexicon.OPERATING_COLUMNS:
+            self.assertTrue(lexicon.label(key), f"{key} has no label")
+            src = lexicon.METRICS.get(key) or lexicon.FACETS[key]
+            self.assertTrue(src.get("help"), f"{key} has no help text")
 
 
 if __name__ == "__main__":

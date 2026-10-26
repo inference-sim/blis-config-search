@@ -8,7 +8,16 @@
 #
 # A figure whose keying knob was not varied in this run (e.g. routing, when the v1 engine only
 # sweeps concurrency + tp) returns a captioned placeholder instead of a misleading empty chart.
+#
+# Axis titles come from lexicon.py (report/lexicon.json), NOT from literals here: the React
+# dashboard draws the same stories from the same file, so one plot cannot be labelled "per-user
+# token rate" on one surface and "tok/s per user" on the other (issue #13).
 import math
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lexicon  # noqa: E402
 
 VIEW_W, VIEW_H = 840, 470
 PAD = {"t": 36, "r": 24, "b": 74, "l": 64}
@@ -119,11 +128,12 @@ _SERIES_COLORS = ["#1b4f8f", "#c2410c", "#1e5c33", "#7b3fb5", "#9a6a00", "#0e749
 # --- Figure 3: the operating curve (pu vs cl, one line per config) ---------
 
 def fig_operating_curve(records, floor_pu=None):
-    """Per-user token rate (y) against aggregate cluster output (x, log), a line per config.
-    Filled markers are servable (ok), hollow ones break a limit; markers labelled with concurrency."""
+    """tok/s per user (y) against aggregate cluster output (x, log), a line per config.
+    Filled markers are servable (ok), hollow ones break a limit; markers labelled with concurrency.
+    Axis titles and the shared caption live in lexicon.json under figures.operating_curve."""
     pts_all = [r for r in records if r.get("cl") and r.get("pu") is not None]
     if not pts_all:
-        return placeholder("no runs with throughput + per-user rate to plot")
+        return placeholder(f"no runs with throughput + {lexicon.label('pu')} to plot")
     x0, y0t, x1, y1b = _plot_box()
     xs = [r["cl"] for r in pts_all]
     xlo, xhi = min(xs) / 1.3, max(xs) * 1.3
@@ -162,7 +172,8 @@ def fig_operating_curve(records, floor_pu=None):
                          f'stroke="var(--fig-muted,#b9c0c8)" stroke-width="1.3" '
                          f'stroke-dasharray="5 3"/>'
                          f'<text x="{x1-2:.1f}" y="{fy-5:.1f}" text-anchor="end" font-size="10.5" '
-                         f'fill="var(--fig-ink3,#8a8a8a)">interactivity floor {_fmt(floor_pu)} tok/s/user</text>')
+                         f'fill="var(--fig-ink3,#8a8a8a)">interactivity floor {_fmt(floor_pu)} '
+                         f'{lexicon.metric("pu", "unit")}/user</text>')
 
     for i, (label, pts) in enumerate(_by_config(records)):
         pp = [r for r in pts if r.get("cl") and r.get("pu") is not None]
@@ -181,8 +192,9 @@ def fig_operating_curve(records, floor_pu=None):
                 f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="4.5" '
                 f'fill="{color if ok else "var(--fig-bg,#fff)"}" stroke="{color}" '
                 f'stroke-width="1.6"{"" if ok else " stroke-dasharray=\"2.5 2\""}>'
-                f'<title>{esc(label)}: {r.get("conc")} sessions, {_fmt(r["pu"])} tok/s/user, '
-                f'{_fmt(r["cl"])} tok/s fleet{"" if ok else " (NOT servable)"}</title></circle>')
+                f'<title>{esc(label)}: {r.get("conc")} sessions, {_fmt(r["pu"])} '
+                f'{lexicon.label("pu")}, {_fmt(r["cl"])} {lexicon.label("cl")}'
+                f'{"" if ok else " (NOT servable)"}</title></circle>')
             inner.append(f'<text x="{cx+7:.1f}" y="{cy-6:.1f}" font-size="9.5" '
                          f'fill="var(--fig-ink3,#8a8a8a)">{r.get("conc")}</text>')
         # label the series at its last point
@@ -192,16 +204,17 @@ def fig_operating_curve(records, floor_pu=None):
         inner.append(f'<text x="{lx+10:.1f}" y="{ly+4:.1f}" font-size="11" font-weight="600" '
                      f'fill="{color}">{esc(label)}</text>')
 
-    inner.append(_axis_titles("aggregate output tok/s delivered by the cluster (log)",
-                              "tok/s per user"))
-    return _svg("".join(inner), "per-user token rate against aggregate cluster output per configuration")
+    inner.append(_axis_titles(lexicon.figure("operating_curve", "xl"),
+                              lexicon.figure("operating_curve", "yl")))
+    return _svg("".join(inner), lexicon.figure("operating_curve", "caption"))
 
 
 # --- Figure 7: the tail-vs-rate scatter (pu vs p95) ------------------------
 
 def fig_tail_scatter(records):
-    """Per-user rate (y) against the slowest-95% latency (x, log). Crosses break a limit --
-    the independent check that a fast-looking config isn't fast only because it dropped requests."""
+    """tok/s per user (y) against the slowest-95% latency (x, log). Crosses break a limit --
+    the independent check that a fast-looking config isn't fast only because it dropped requests.
+    Axis titles and the shared caption live in lexicon.json under figures.tail_scatter."""
     pts = [r for r in records if r.get("p95") and r.get("pu") is not None]
     if not pts:
         return placeholder("no runs with a p95 latency to plot")
@@ -233,7 +246,7 @@ def fig_tail_scatter(records):
         cx = _log(r["p95"], xlo, xhi, x0, x1)
         cy = _lin(r["pu"], 0, ytop, y1b, y0t)
         ok = r.get("ok", True)
-        tip = (f'{r.get("conc")} sessions, {_fmt(r["pu"])} tok/s/user, '
+        tip = (f'{r.get("conc")} sessions, {_fmt(r["pu"])} {lexicon.label("pu")}, '
                f'p95 {_fmt(r["p95"]/1000)}s{"" if ok else " (NOT servable)"}')
         if ok:
             inner.append(f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="4.5" '
@@ -245,8 +258,9 @@ def fig_tail_scatter(records):
                          f'<line x1="{cx-4:.1f}" y1="{cy+4:.1f}" x2="{cx+4:.1f}" y2="{cy-4:.1f}"/>'
                          f'<title>{esc(tip)}</title></g>')
 
-    inner.append(_axis_titles("slowest 95% of session latencies (log)", "tok/s per user"))
-    return _svg("".join(inner), "per-user token rate against tail latency, crosses break a limit")
+    inner.append(_axis_titles(lexicon.figure("tail_scatter", "xl"),
+                              lexicon.figure("tail_scatter", "yl")))
+    return _svg("".join(inner), lexicon.figure("tail_scatter", "caption"))
 
 
 # --- Figure 6: how far each configuration scales (max servable concurrency) --
@@ -300,8 +314,9 @@ def fig_scale_bars(records):
                          f'<line x1="{fx-4:.1f}" y1="{cy-4:.1f}" x2="{fx+4:.1f}" y2="{cy+4:.1f}"/>'
                          f'<line x1="{fx-4:.1f}" y1="{cy+4:.1f}" x2="{fx+4:.1f}" y2="{cy-4:.1f}"/>'
                          f'<title>first break at {fb}: {esc(reason)}</title></g>')
-    inner.append(_axis_titles("highest concurrency served inside every limit", ""))
-    return _svg("".join(inner), "maximum servable concurrency per configuration")
+    inner.append(_axis_titles(lexicon.figure("scale_bars", "xl"),
+                              lexicon.figure("scale_bars", "yl")))
+    return _svg("".join(inner), lexicon.figure("scale_bars", "caption"))
 
 
 # Figure registry. Each entry declares the builder plus `keys`: the RECORDS field(s) the figure's

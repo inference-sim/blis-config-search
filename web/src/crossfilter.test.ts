@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { RunRecord } from './types'
-import { EMPTY_SEL, facetLevels, histogram, operatingPoints, runFlags, selectRecords, varyingMetrics, visibleFacets } from './lib'
+import { EMPTY_SEL, dash, facetLevels, fnum, histogram, operatingPoints, runFlags, selectRecords, varyingMetrics, visibleFacets } from './lib'
 import { FACETS, METRICS } from './lib'
 import { AXES, OBJECTIVE, OPERATING_COLUMNS, figure, help as lexHelp, label as lexLabel } from './lexicon'
 
@@ -228,5 +228,24 @@ describe('report/dashboard parity (issue #13)', () => {
 
   it('states the objective in the "What to run" blurb both surfaces print', () => {
     expect(OBJECTIVE.blurb).toContain(OBJECTIVE.label)
+  })
+
+  it('formats every shared column to the lexicon digits (the report does too)', () => {
+    // report.py `_fnum` reproduces this exact formatter so one number is not printed 143.9 on one
+    // surface and 144 on the other (PR #16 review). These cases are mirrored in
+    // test_report.py `test_fnum_matches_the_dashboard_formatter` -- keep the two lists together.
+    const cases: [number | null, number, string][] = [
+      [143.9, 0, '144'], [18.0, 1, '18'], [6.72, 2, '6.72'], [7476.19, 0, '7,476'],
+      [0.5, 0, '1'], [1.5, 0, '2'], [2.5, 0, '3'], [0.15, 1, '0.2'],
+      [1e6, 0, '1,000,000'], [0.0, 2, '0'], [null, 1, dash],
+    ]
+    for (const [v, digits, want] of cases) expect(fnum(v, digits)).toBe(want)
+  })
+
+  it('names the no-servable-runs case without saying which way the run log sits', () => {
+    // The dashboard's run log is BELOW this table; the report's explorer table is ABOVE it, so a
+    // shared sentence cannot say "below".
+    expect(OBJECTIVE.none).toBeTruthy()
+    expect(OBJECTIVE.none.toLowerCase()).not.toContain('below')
   })
 })

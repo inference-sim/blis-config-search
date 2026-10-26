@@ -20,6 +20,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lexicon  # noqa: E402
 
 VIEW_W, VIEW_H = 840, 470
+# The dash pattern a hollow (not-servable) marker carries. Held in a constant so the f-string that
+# emits it needs no escaped quote: a backslash in an f-string expression is a syntax error before
+# Python 3.12 (PEP 701 lifted it), and these modules need no 3.12 floor.
+HOLLOW_DASH = ' stroke-dasharray="2.5 2"'
 PAD = {"t": 36, "r": 24, "b": 74, "l": 64}
 
 
@@ -191,7 +195,7 @@ def fig_operating_curve(records, floor_pu=None):
             inner.append(
                 f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="4.5" '
                 f'fill="{color if ok else "var(--fig-bg,#fff)"}" stroke="{color}" '
-                f'stroke-width="1.6"{"" if ok else " stroke-dasharray=\"2.5 2\""}>'
+                f'stroke-width="1.6"{HOLLOW_DASH if not ok else ""}>'
                 f'<title>{esc(label)}: {r.get("conc")} sessions, {_fmt(r["pu"])} '
                 f'{lexicon.label("pu")}, {_fmt(r["cl"])} {lexicon.label("cl")}'
                 f'{"" if ok else " (NOT servable)"}</title></circle>')

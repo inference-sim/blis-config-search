@@ -13,7 +13,7 @@
     "rule": "Among the SERVABLE runs at one load, the operating point is the run with the highest tok/s per GPU; ties break on fleet tok/s, then tok/s per user, then run id (so the pick is deterministic, not iteration-order dependent).",
     "why": "tok/s per GPU is the efficiency half of the dual-Pareto objective the search optimises and picks its own winner on, so the 'What to run' table, the recommendation card and the search winner all rank on one number. Ranking by per-user rate instead made the table recommend the fastest-per-user shape while the card above recommended the most efficient one: on kimi-k2.5 that is TP8+EP at 23 tok/s/GPU versus the winner's TP4xDP2+EP at 67.",
     "blurb": "One row per load: the most efficient configuration that still held the floor there, and the flags to deploy it with. Rows are ranked on tok/s per GPU — the objective the search picks its winner on. Pick the load you expect, then read the flags off it.",
-    "none": "No run held the interactivity floor, so there is no operating point to recommend. The run log below lists every run and why each one missed."
+    "none": "No run held the interactivity floor, so there is no operating point to recommend. The full run log lists every run and why each one missed."
   },
   "metrics": {
     "conc": {

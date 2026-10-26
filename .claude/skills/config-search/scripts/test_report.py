@@ -910,6 +910,74 @@ class Parity(unittest.TestCase):
         for key in ("conc", "pu", "cl", "tpg", "itl", "ttft", "e2e", "sched"):
             self.assertIn(f"lab('{key}')", tpl, f"the panel/hover still hardcodes {key}'s label")
 
+    # --- review follow-ups (PR #16) ---------------------------------------------------------
+
+    def test_operating_numbers_use_the_lexicon_digits(self):
+        # The table rendered its numbers through _num's own heuristic (>=1000 -> 0dp, else 1dp)
+        # while the dashboard used the metric's lexicon `digits`, so a reader saw cl as 143.9 here
+        # and 144 there -- the same 7b drift class this change closes, on the values themselves.
+        sc, pa, runs, rep, _ = report.load_run_dir(FIXTURE)
+        recs = report.build_records(runs, sc)
+        html = report._operating_table(rep, recs)
+        first = report.operating_points(recs)[0]
+        for c in lexicon.OPERATING_COLUMNS[2:]:
+            want = report._fnum(first.get(c), lexicon.metric(c, "digits"))
+            self.assertIn(f'<td class="n">{want}</td>', html,
+                          f"{c} is not formatted to its lexicon digits")
+        # and specifically NOT the old heuristic, where the two disagree
+        self.assertIn('<td class="n">144</td>', html)        # cl, digits 0 (was 143.9)
+        self.assertNotIn('<td class="n">143.9</td>', html)
+
+    def test_fnum_matches_the_dashboard_formatter(self):
+        # _fnum must reproduce web/src/lib.ts `fnum`: at most `digits` decimals with trailing zeros
+        # stripped, thousands separators, and ties rounded HALF AWAY FROM ZERO. The last part is
+        # why an f-string will not do -- format() rounds half to EVEN, so f"{0.5:.0f}" is "0"
+        # where JS gives "1".
+        for value, digits, want in [(143.9, 0, "144"), (18.0, 1, "18"), (6.72, 2, "6.72"),
+                                    (7476.19, 0, "7,476"), (0.5, 0, "1"), (1.5, 0, "2"),
+                                    (2.5, 0, "3"), (0.15, 1, "0.2"), (1e6, 0, "1,000,000"),
+                                    (0.0, 2, "0"), (None, 1, "–")]:
+            self.assertEqual(report._fnum(value, digits), want,
+                             f"_fnum({value!r}, {digits}) should be {want!r}")
+
+    def test_no_servable_runs_says_so_on_both_surfaces(self):
+        # The dashboard renders objective.none when nothing holds the floor; the report returned ""
+        # and printed the "one row per load ... read the flags off it" blurb above empty space.
+        runs = [{"concurrency": 8,
+                 "deployment": {"gpus": 8, "num_instances": 1, "parallel": {"tp": 8}},
+                 "metrics": {"tokens_per_sec": 100.0, "itl_p99_ms": 80.0,
+                             "injected_requests": 1, "completed_requests": 1}}]
+        recs = report.build_records(runs, {"interactivity_floor": {"tok_per_s_per_user": 50}})
+        self.assertFalse(any(r["ok"] for r in recs), "fixture should have nothing servable")
+        html = report._what_to_run({"recommendation_prose": ["Pick a config."]}, recs)
+        self.assertIn(lexicon.OBJECTIVE["none"], html)
+        # ... and does NOT promise a table that is not there
+        self.assertNotIn(lexicon.OBJECTIVE["blurb"], html)
+        self.assertIn("Pick a config.", html)          # the brain's own prose still shows
+
+    def test_empty_case_wording_is_direction_neutral(self):
+        # The run log sits BELOW this table on the dashboard and ABOVE it in the report (section 1
+        # is the explorer), so the shared sentence must not say "below".
+        self.assertNotIn("below", lexicon.OBJECTIVE["none"].lower())
+
+    def test_modules_do_not_require_python_312(self):
+        # A backslash inside an f-string expression is a syntax error before 3.12 (PEP 701 lifted
+        # it). CI pins 3.12, so only a compile check catches a floor nobody asked for.
+        import ast
+        for name in ("report.py", "figures.py", "lexicon.py"):
+            path = os.path.join(HERE, name)
+            with open(path, encoding="utf-8") as f:
+                src = f.read()
+            ast.parse(src)                     # sanity: valid on the running interpreter
+            for node in ast.walk(ast.parse(src)):
+                if isinstance(node, ast.JoinedStr):
+                    for part in node.values:
+                        if isinstance(part, ast.FormattedValue):
+                            expr = ast.get_source_segment(src, part.value) or ""
+                            self.assertNotIn("\\", expr,
+                                             f"{name}: backslash in an f-string expression "
+                                             f"({expr[:60]!r}) forces a Python 3.12 floor")
+
     def test_flag_list_is_shared_with_the_dashboard(self):
         # A flag printed on one surface and not the other is a wrong deployment either way.
         self.assertEqual(report._FLAG_LABELS, lexicon.FLAG_LABELS)

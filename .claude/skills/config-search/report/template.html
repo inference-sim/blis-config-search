@@ -73,6 +73,10 @@ td.hero{font-size:19px;font-weight:700;color:var(--accent)}
    (web/src/styles.css) so one row reads the same on both surfaces: the topology, its knob delta,
    then the flags FLOWING rather than one per line -- stacked, eleven flags made a row tall
    enough to push the next load off the screen. */
+/* "nothing held the floor" -- the report's twin of the dashboard's .op-none (web/src/styles.css),
+   so the empty case reads as a finding on both surfaces rather than a missing table. */
+.op-none{margin:14px 0 0;font-size:13px;color:var(--ink2);border-left:2px solid var(--rule);
+padding:8px 0 8px 12px}
 .short .op-name{font-size:12.5px;font-weight:700;color:var(--ink)}
 .short .op-var{font-size:11px;color:var(--accent);margin-top:1px}
 .short td>.op-name+.fl,.short td>.op-var+.fl{margin-top:4px}

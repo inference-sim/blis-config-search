@@ -23,7 +23,7 @@
 # Determinism (INV-6): a pure function of the run-directory CONTENTS. Identical data renders
 # byte-identical HTML regardless of where the directory lives or what it is named -- the footer
 # identifies the run by the in-data run_id, never the path/basename (and says "unidentified" if none).
-import argparse, json, math, os, re, sys
+import argparse, decimal, json, math, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -165,6 +165,30 @@ def _as_num(v):
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+def _fnum(v, digits):
+    """Format a metric the way the dashboard's `fnum` (web/src/lib.ts) does, so one number is not
+    printed `143.9` on one surface and `144` on the other (issue #13 review).
+
+    `fnum` is `toLocaleString('en-US', {maximumFractionDigits: digits, minimumFractionDigits: 0})`:
+      * at most `digits` decimals, with trailing zeros STRIPPED (18.0 -> "18", 6.72 -> "6.72");
+      * thousands separators;
+      * and ties rounded HALF AWAY FROM ZERO. That last part is why this cannot just be an
+        f-string: Python's format() rounds half to EVEN (banker's), so f"{0.5:.0f}" is "0" where
+        JS gives "1" -- a residual mismatch on exactly the .5 cases.
+    `digits` comes from the metric's lexicon entry, which is where the dashboard reads it too.
+    """
+    n = _as_num(v)
+    if n is None:
+        return "–"
+    q = decimal.Decimal(1).scaleb(-digits)        # 1, 0.1, 0.01, ...
+    d = decimal.Decimal(repr(float(n))).quantize(q, rounding=decimal.ROUND_HALF_UP)
+    # strip trailing zeros (minimumFractionDigits: 0) without going to exponent form
+    txt = f"{d:,f}"
+    if "." in txt:
+        txt = txt.rstrip("0").rstrip(".")
+    return txt or "0"
 
 
 # --- RECORDS: one flat row per blis run -------------------------------------
@@ -625,6 +649,11 @@ def _operating_row(r):
             "itl": r.get("itl"), "ttft": r.get("ttft"), "e2e": r.get("e2e")}
 
 
+# The right-aligning class the numeric column heads carry. Kept out of the f-string below so no
+# escaped quote is needed there (see _operating_table).
+NUMERIC_TH = ' class="n"'
+
+
 def _operating_table(report, records):
     """The "What to run" table. DERIVED from the records whenever there are any, so it cannot
     disagree with the dashboard's table over the same run set (issue #13): a hand-authored
@@ -634,7 +663,12 @@ def _operating_table(report, records):
     derived = operating_points(records)
     pts = [_operating_row(r) for r in derived] if derived else (report.get("operating_points") or [])
     if not pts:
-        return ""
+        # Nothing held the floor. Say so in the lexicon's words -- the dashboard renders the same
+        # sentence here (ScenarioDetail's OperatingTable). Returning "" printed the "one row per
+        # load ... read the flags off it" blurb above empty space, which reads like a broken page
+        # rather than a finding (issue #13 review). With no records at all there is nothing to
+        # report either way, so stay silent.
+        return (f'<p class="op-none">{esc(lexicon.OBJECTIVE["none"])}</p>' if records else "")
     cols = lexicon.OPERATING_COLUMNS
     rows = []
     for p in pts:
@@ -650,10 +684,17 @@ def _operating_table(report, records):
         name = (f'<div class="op-name">{esc(p["series"])}</div>' if p.get("series") else "")
         var = (f'<div class="op-var">{esc(p["variant"])}</div>' if p.get("variant") else "")
         cells = [f'<td class="n hero">{esc(p.get("conc"))}</td>', f"<td>{name}{var}{fl}</td>"]
-        cells += [f'<td class="n">{_num(p.get(c))}</td>' for c in cols[2:]]
+        # Formatted through the metric's lexicon `digits`, like the dashboard's
+        # `fnum(v, metric(col).digits)` -- NOT _num's own heuristic, which rounded `cl` to 143.9
+        # where the dashboard showed 144 (issue #13 review).
+        cells += [f'<td class="n">{_fnum(p.get(c), lexicon.metric(c, "digits"))}</td>'
+                  for c in cols[2:]]
         rows.append(f'<tr>{"".join(cells)}</tr>')
+    # The attribute is a plain single-quoted literal rather than an escaped one inside the
+    # f-string: a backslash in an f-string expression is a syntax error before Python 3.12
+    # (PEP 701 lifted it), and nothing here needs a 3.12 floor.
     heads = "".join(
-        f'<th{"" if i < 2 else " class=\"n\""}>{esc(lexicon.label(c))}</th>'
+        f'<th{NUMERIC_TH if i >= 2 else ""}>{esc(lexicon.label(c))}</th>'
         for i, c in enumerate(cols))
     return (f'<table class="short"><thead><tr>{heads}</tr></thead>'
             f'<tbody>{"".join(rows)}</tbody></table>')
@@ -664,14 +705,19 @@ def _what_to_run(report, records):
     if not prose and not records:
         return ""
     num = report.get("recommendation_num", 9)
+    pts = operating_points(records)
+    table = _operating_table(report, records)
     # The objective the rows are ranked on is STATED, not implied: the issue asks for the two
     # surfaces to rank on the same objective *and say which*. The dashboard prints the same
-    # sentence (lexicon.objective.blurb) over its own copy of this table.
+    # sentence (lexicon.objective.blurb) over its own copy of this table. It is dropped when there
+    # is no table to describe -- "pick a load and read the flags off it" over an empty section is
+    # worse than saying nothing.
     # ONE prose block: two adjacent .prose divs lost the inter-paragraph spacing, so the shared
     # blurb ran straight on from the brain's last sentence.
-    body = _prose(list(prose or []) + [lexicon.OBJECTIVE["blurb"]])
+    paras = list(prose or []) + ([lexicon.OBJECTIVE["blurb"]] if pts else [])
+    body = _prose(paras) if paras else ""
     return (f'<section class="finding"><h2><span class="num">{num}</span>What to run</h2>'
-            f'{body}{_operating_table(report, records)}</section>')
+            f'{body}{table}</section>')
 
 
 def _glossary(report):

@@ -124,7 +124,7 @@
     },
     "route": {
       "label": "routing",
-      "help": "The policy that picks an instance for each request."
+      "help": "The llm-d EndpointPicker configuration that picks an instance for each request; \"default\" is the router's own built-in one."
     },
     "scorers": {
       "label": "route scorers",

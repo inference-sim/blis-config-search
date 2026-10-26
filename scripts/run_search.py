@@ -184,7 +184,7 @@ def per_user(metrics):
 
 
 def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, seed=0,
-           model_entry=None, run_timeout=120):
+           model_entry=None, run_timeout=120, max_parallel=1):
     """Probe every candidate topology over a concurrency ramp; return runs, finalists, dropped.
 
     `model_entry` is the catalog row (for `arch`); when omitted the search is dense-only, which is
@@ -214,7 +214,46 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
     ramp = concurrency_ramp(budget, replay)
     runs, finalists, dropped = [], [], []
 
-    def probe(topo):
+    def probe_batch(topos):
+        """Probe several candidates CONCURRENTLY, then fold their results in input order.
+
+        Candidates are independent of one another (each climbs its own ramp and the ramp is
+        fixed, not adaptive), so they parallelise cleanly. What must NOT vary is the order in
+        which results are folded in: `runs` ordering, `c_star` selection and the winner all have
+        to come from a stable ordering of the batch rather than from whichever worker finished
+        first, or the recommendation stops being reproducible. So each candidate's own probe
+        stays sequential (it needs its early break), workers run candidate-wide, and the results
+        are collected by INPUT index.
+
+        A replay is memory-hungry in a way a generated-workload run is not: it parses a ~569 MB
+        corpus per process and peaks around 4.2 GiB RSS, where sweep_pool's default assumption is
+        1 GiB. Hence the explicit per-worker footprint below.
+        """
+        topos = list(topos)
+        if not topos:
+            return
+        if len(topos) == 1 or max_parallel == 1:
+            for t in topos:
+                _probe_one(t, runs.append, finalists.append, dropped.append)
+            return
+        import concurrent.futures
+        results = [None] * len(topos)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel) as ex:
+            futs = {}
+            for i, t in enumerate(topos):
+                # Each candidate collects into its OWN lists; nothing is shared until the fold.
+                local = {"runs": [], "fin": [], "drop": []}
+                results[i] = local
+                futs[ex.submit(_probe_one, t, local["runs"].append, local["fin"].append,
+                               local["drop"].append)] = i
+            for f in concurrent.futures.as_completed(futs):
+                f.result()          # surface any worker exception rather than losing the shape
+        for local in results:       # fold in INPUT order -> deterministic regardless of timing
+            runs.extend(local["runs"])
+            finalists.extend(local["fin"])
+            dropped.extend(local["drop"])
+
+    def _probe_one(topo, add_run, add_finalist, add_dropped):
         """Probe one candidate up the ramp; append its runs and either a finalist or a dropped row.
 
         `label` is provisional — the final labels are assigned once, after every candidate is in,
@@ -229,7 +268,7 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
             rec = run_blis.run_one(blis, catalog, registry, scenarios_dir, model, hardware,
                                    engine_version, workload, nreq, seed,
                                    None, cfg, phase="probe", timeout=run_timeout, replay=replay)
-            runs.append(rec)
+            add_run(rec)
             m = rec.get("metrics") or {}
             # rec["error"] is set on rc=0 runs too: run_blis._completion_issue flags a run that is
             # incomplete / overloaded / still queued. Such a run has a tokens_per_sec but is NOT a
@@ -255,17 +294,17 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
         if c_star is None:
             # Record WHY, so pareto.json shows the shapes that were tried and failed rather than
             # leaving a single survivor looking like the whole search space.
-            dropped.append({"label": label, "config": topo, "gpus": gpus,
-                            "reason": (first_error or "no probe met the interactivity floor")})
+            add_dropped({"label": label, "config": topo, "gpus": gpus,
+                         "reason": (first_error or "no probe met the interactivity floor")})
             return
         c_use = max(1, int(round(headroom * c_star)))
         at = min((p for p in curve if p["concurrency"] <= c_use), key=lambda p: abs(p["concurrency"] - c_use), default=None)
         if at is None:
-            dropped.append({"label": label, "config": topo, "gpus": gpus,
-                            "reason": f"no probe at or below the usable load c={c_use}"})
+            add_dropped({"label": label, "config": topo, "gpus": gpus,
+                         "reason": f"no probe at or below the usable load c={c_use}"})
             return
         tps = at["tokens_per_sec"]
-        finalists.append({
+        add_finalist({
             "label": label,
             "config": topo, "gpus": gpus, "c_star": c_star, "c_use": c_use,
             "at_c_use": {"tokens_per_sec": tps, "tokens_per_sec_per_gpu": round(tps / gpus, 1),
@@ -282,9 +321,9 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
     for cap in footprint_tiers(budget):
         seen = {tuple(sorted(c.items())) for c in (f["config"] for f in finalists)} | \
                {tuple(sorted(c.items())) for c in (d["config"] for d in dropped)}
-        for topo in topologies.candidate_topologies(budget, model_entry, MAX_CANDIDATES, cap):
-            if tuple(sorted(topo.items())) not in seen:
-                probe(topo)
+        probe_batch(topo for topo in topologies.candidate_topologies(
+            budget, model_entry, MAX_CANDIDATES, cap)
+            if tuple(sorted(topo.items())) not in seen)
         if finalists:
             break
 
@@ -292,9 +331,10 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
     # limits are real levers — on kimi-k2.5 routing swung throughput 2.3x and max_num_seqs=64 cost
     # 29% — but crossing them with every shape and load would be thousands of near-identical runs.
     # Refining the top few shapes finds the same binding knob for ~1/9th of the budget.
-    for base in rank_finalists(finalists)[:REFINE_TOP]:
-        for variant in topologies.knob_variants(base["config"]):
-            probe(variant)
+    # The refinement batch is built from the ranking BEFORE any of it runs, so the set of
+    # variants explored does not depend on worker timing.
+    probe_batch(variant for base in rank_finalists(finalists)[:REFINE_TOP]
+                for variant in topologies.knob_variants(base["config"]))
 
     relabel(finalists, dropped)
     return runs, finalists, (floor_rate, floor_itl, headroom, dropped)
@@ -355,6 +395,13 @@ def main(argv=None):
     # wrong file fails loudly rather than replaying different traffic under the same name.
     ap.add_argument("--corpus", help="replay corpus file (required by a replay submission)")
     ap.add_argument("--corpus-cache", help="dir for parsed-corpus snapshots (a large speedup)")
+    # Candidates probe independently, so they parallelise; results are still folded in input
+    # order, so the recommendation does not depend on worker timing. Default 1 keeps the old
+    # sequential behaviour for anyone who does not ask for width.
+    ap.add_argument("--max-parallel", type=int, default=1,
+                    help="probe this many candidate topologies at once (default 1). A replay "
+                         "peaks near 4.2 GiB RSS per run -- it parses the whole corpus -- so "
+                         "size this against RAM, not just cores")
     args = ap.parse_args(argv)
 
     sub = os.path.abspath(args.submission)
@@ -397,7 +444,7 @@ def main(argv=None):
           f"{scenario.get('hardware')} ({_workload_label(scenario)})…", flush=True)
     runs, finalists, (floor_rate, floor_itl, headroom, dropped) = search(
         scenario, blis, args.catalog, args.registry, scen_dir, num_requests=args.num_requests,
-        model_entry=entry, run_timeout=args.run_timeout)
+        model_entry=entry, run_timeout=args.run_timeout, max_parallel=max(1, args.max_parallel))
     if not finalists:
         detail = "; ".join(f"{d['label']}: {d['reason'][:120]}" for d in dropped[:4])
         raise SystemExit("no servable configuration found for this scenario (nothing met the "

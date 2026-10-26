@@ -7,6 +7,7 @@ Covers the three defects that made the deepseek-v4-pro report recommend the weak
 candidate enumeration that never varied EP/dp, a concurrency ramp that saturated against a
 fixed --num-requests, and failed shapes vanishing instead of landing in pareto.json's dropped[].
 """
+import json
 import os
 import sys
 
@@ -77,14 +78,15 @@ class FakeRunner:
         return rec
 
 
-def run(sc, runner):
+def run(sc, runner, max_parallel=1):
     """Call search() with the runner stubbed, tolerating either return arity."""
     import run_blis
     orig = run_blis.run_one
     run_blis.run_one = runner
     try:
         return run_search.search(sc, "/nonexistent/blis", "/cat", "/reg", "/tmp/scen",
-                                 num_requests=80, seed=0, model_entry=MOE)
+                                 num_requests=80, seed=0, model_entry=MOE,
+                                 max_parallel=max_parallel)
     finally:
         run_blis.run_one = orig
 
@@ -346,6 +348,40 @@ def test_shape_workload_passes_no_replay():
     check(all(c.get("num_requests") for c in r.calls), "requests are offered for a shape")
 
 
+class SlowUnevenRunner(FakeRunner):
+    """Finishes candidates in a deliberately different order than they were submitted, so a
+    fold that depended on completion order would reorder the ledger and could change the
+    winner."""
+
+    def __call__(self, *a, **kw):
+        import random
+        import time
+        config = kw.get("config") or a[11]
+        # Narrow-tp shapes "finish" last; wide ones first -- the reverse of submission order.
+        time.sleep(0.004 * (config.get("tp", 1) % 5) + random.random() * 0.002)
+        return super().__call__(*a, **kw)
+
+
+def test_parallel_probing_matches_sequential_exactly():
+    print("parallel probing is byte-identical to sequential")
+    sc = scenario(budget=64)
+    seq_runs, seq_fin, seq_rest = run(sc, SlowUnevenRunner(), max_parallel=1)
+    par_runs, par_fin, par_rest = run(sc, SlowUnevenRunner(), max_parallel=6)
+    # The ledger itself must match in ORDER, not merely as a set: report.py and the gallery read
+    # runs.jsonl positionally, and "stable input order" is the determinism claim (INV-6).
+    check(json.dumps(seq_runs, sort_keys=True) == json.dumps(par_runs, sort_keys=True),
+          f"runs.jsonl is identical and in the same order "
+          f"({len(seq_runs)} vs {len(par_runs)} runs)")
+    check(json.dumps(seq_fin, sort_keys=True) == json.dumps(par_fin, sort_keys=True),
+          "finalists are identical in the same order")
+    check(json.dumps(seq_rest[3], sort_keys=True) == json.dumps(par_rest[3], sort_keys=True),
+          "dropped[] is identical in the same order")
+    w_seq = run_search.rank_finalists(seq_fin)[0]
+    w_par = run_search.rank_finalists(par_fin)[0]
+    check(run_search.winner_name(w_seq) == run_search.winner_name(w_par),
+          f"the same winner is chosen ({run_search.winner_name(w_seq)})")
+
+
 if __name__ == "__main__":
     test_explores_ep()
     test_ep_wins_when_it_is_better()
@@ -361,5 +397,6 @@ if __name__ == "__main__":
     test_dense_model_is_unchanged()
     test_replay_workload_takes_the_replay_path()
     test_shape_workload_passes_no_replay()
+    test_parallel_probing_matches_sequential_exactly()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

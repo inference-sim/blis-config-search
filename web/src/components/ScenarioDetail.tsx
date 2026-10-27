@@ -169,12 +169,31 @@ export function PointDetail({ r, onClose, pinned = true, scenarioHasCmd = true }
         <section>
           <h5>Routing &amp; policy</h5>
           {defList([
-            ['routing_policy', r.route || 'round-robin'],
+            /* v0.12.0 routes through the embedded llm-d router: the value is an EndpointPicker
+               configuration, and 'default' is the router's own built-in one. The old
+               'round-robin' fallback named a policy llm-d dropped. */
+            ['routing', r.route || 'default'],
             ['routing_scorers', r.scorers],
             ['scheduler', r.schedp ?? 'default'],
             ['admission_policy', r.admit ?? 'always-admit'],
             ['prefill/decode', r.pd],
-            ['draft tokens (MTP)', r.mtp || 'off'],
+          ])}
+        </section>
+        <section>
+          {/* Speculative decoding gets its own block: the depth alone does not identify the
+              deployment (which drafter?) and does not explain the per-user number, which is
+              AL-scaled under drafting rather than 1000/ITL. */}
+          <h5>Speculative decoding</h5>
+          {defList([
+            ['drafter', r.spec ?? 'off'],
+            ['draft tokens (K)', r.mtp || 'off'],
+            ['acceptance length', finite(r.al) ? `${fnum(r.al as number, 2)} tok/step` : null],
+            ['acceptance measured', r.al_src],
+            ['per-user basis', r.pu_basis === 'derived-from-acceptance'
+              ? 'acceptance-scaled (AL x 1000 / ITL p99)'
+              : r.pu_basis === 'step-estimate-withheld'
+                ? 'withheld: drafting on, acceptance unresolved'
+                : null],
           ])}
         </section>
         <section>

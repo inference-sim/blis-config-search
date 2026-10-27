@@ -1005,5 +1005,56 @@ class Parity(unittest.TestCase):
             self.assertTrue(src.get("help"), f"{key} has no help text")
 
 
+class PerUserUnderDrafting(unittest.TestCase):
+    """Under speculative decoding BLIS logs ITL per VERIFICATION STEP, and a step emits AL tokens.
+    The naive 1000/ITL is then a step rate: on deepseek-v4.1-flash at K=5 it reads 30.3
+    tok/s/user where the real per-token rate is 106.4, which would mark the fastest configuration
+    measured a floor violation."""
+
+    def _run(self, *, k=0, al=None, itl=32.995):
+        dep = {"parallel": {"tp": 4}, "num_instances": 1, "gpus": 4,
+               "engine": {"max_num_batched_tokens": 8192, "max_num_seqs": 256}}
+        if k:
+            dep["engine"]["speculative"] = {"method": "dspark", "num_spec_tokens": k}
+            if al:
+                dep["acceptance"] = {"acceptance_length": al, "source": "test (b200)"}
+        return {"concurrency": 8, "config": {"tp": 4}, "deployment": dep,
+                "returncode": 0, "metrics": {"tokens_per_sec": 1041.5, "itl_p99_ms": itl,
+                                             "injected_requests": 40, "completed_requests": 40}}
+
+    def test_no_drafting_uses_the_direct_rate(self):
+        r = report.build_records([self._run()], {})[0]
+        self.assertAlmostEqual(r["pu"], 1000 / 32.995, places=1)
+        self.assertEqual(r["pu_basis"], "")
+
+    def test_drafting_with_acceptance_scales_by_al(self):
+        r = report.build_records([self._run(k=5, al=3.51)], {})[0]
+        self.assertAlmostEqual(r["pu"], 3.51 * 1000 / 32.995, places=1)
+        self.assertEqual(r["pu_basis"], "derived-from-acceptance")
+        self.assertEqual(r["al"], 3.51)
+        self.assertEqual(r["mtp"], 5)
+        self.assertEqual(r["spec"], "dspark")
+
+    def test_the_derived_rate_is_above_the_naive_one(self):
+        """The whole point: the naive axis would reject this config against a 50 tok/s/user floor
+        while the correct one clears it comfortably."""
+        r = report.build_records([self._run(k=5, al=3.51)], {})[0]
+        self.assertLess(1000 / 32.995, 50)        # naive: looks like a violation
+        self.assertGreater(r["pu"], 50)           # derived: clears the floor
+
+    def test_drafting_without_acceptance_withholds_the_rate(self):
+        """An unknown acceptance factor means an unknown multiple -- publish nothing."""
+        r = report.build_records([self._run(k=5, al=None)], {})[0]
+        self.assertIsNone(r["pu"])
+        self.assertEqual(r["pu_basis"], "step-estimate-withheld")
+        self.assertTrue(r["pu_is_step_estimate"])
+
+    def test_depth_is_read_from_the_resolved_deployment(self):
+        """Reading only the flat candidate key missed every run whose depth came from the
+        scenario's nested engine.speculative block."""
+        r = report.build_records([self._run(k=3, al=2.9)], {})[0]
+        self.assertEqual(r["mtp"], 3)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

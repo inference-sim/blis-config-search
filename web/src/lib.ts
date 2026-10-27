@@ -240,9 +240,11 @@ export type MetricKey = 'cl' | 'pu' | 'itl' | 'ttft' | 'p95' | 'conc'
 const METRIC_KEYS: MetricKey[] = ['cl', 'pu', 'itl', 'ttft', 'p95', 'conc']
 export const METRICS: { key: MetricKey; label: string; unit: string; digits: number }[] =
   METRIC_KEYS.map((key) => ({ key, ...lex.metric(key) }))
-export type FacetField = 'series' | 'tp' | 'ni' | 'gpus' | 'epw' | 'ok' | 'src' | 'pd' | 'route' | 'a2a' | 'mtp' | 'mns' | 'mnbt'
+export type FacetField = 'series' | 'tp' | 'ni' | 'gpus' | 'epw' | 'ok' | 'src' | 'pd' | 'route' | 'a2a' | 'spec' | 'mtp' | 'mns' | 'mnbt'
 const FACET_KEYS: FacetField[] = [
-  'series', 'tp', 'ni', 'gpus', 'epw', 'ok', 'src', 'pd', 'route', 'a2a', 'mtp', 'mns', 'mnbt',
+  // `spec` (the drafter) sits beside `mtp` (the draft depth): a depth alone does not say WHICH
+  // speculator ran, and the two are filtered together in practice.
+  'series', 'tp', 'ni', 'gpus', 'epw', 'ok', 'src', 'pd', 'route', 'a2a', 'spec', 'mtp', 'mns', 'mnbt',
 ]
 export const FACETS: { key: FacetField; label: string }[] =
   FACET_KEYS.map((key) => ({ key, label: lex.label(key) }))

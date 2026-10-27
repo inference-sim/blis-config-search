@@ -153,8 +153,26 @@ def candidate_topologies(gpu_budget, model_entry=None, max_candidates=12,
 # rather than being presented as a lever this workload has shown.
 ROUTING_ARMS = ("routing/prefix-affinity.yaml", "routing/queue-kv.yaml")
 
+# SPECULATIVE DECODING is a first-class axis for a model that ships a drafter, not an exotic knob:
+# deepseek-v4.1-flash's catalog graph declares a `dspark` speculator with num_spec_tokens 5, and
+# the registry carries MEASURED acceptance lengths for it (InferenceX SPEED-Bench coding curves,
+# K=1..5, both thinking modes). Measured on b200 / 1x TP4 + EP / chatbot: K=0 924.5 tok/s,
+# K=1 692.8 (-25%, AL 1.81 does not pay for the draft), K=3 954.7, K=5 1041.5 (+13%) -- so the
+# depth matters and the direction is not monotonic at small K.
+#
+# K is swept as a coordinate refinement like any other knob. The drafter itself is NOT swept: it
+# is a property of the model (dspark here, mtp on deepseek-v4-pro, deepseek_mtp on glm-5.2), and
+# run_blis fills it from the model's graph.
+#
+# NOTE on the per-user axis: under drafting BLIS logs ITL per VERIFICATION STEP, and a step emits
+# AL tokens, so the per-token rate is AL x 1000 / ITL p99. The naive 1000/ITL understates it by
+# the whole acceptance factor and would mark every drafting config a floor violation. run_blis
+# records the resolved AL on each row and report.py scales by it.
+SPECULATIVE_ARMS = (1, 3, 5)
+
 KNOB_TIERS = (
     # one entry per knob: (key, values to probe besides the default)
+    ("num_speculative_tokens", SPECULATIVE_ARMS),       # drafting OFF is the baseline
     ("router_config", ROUTING_ARMS),                    # the router's own default IS the baseline
     ("max_num_seqs", (64,)),                            # the batch-width constraint that binds
     ("max_num_batched_tokens", (2048,)),                # the prefill-admission constraint
@@ -192,7 +210,8 @@ def label(cand):
 
 # Readable knob names, spelled out on purpose: "b2k" for max_num_batched_tokens=2048 tells a
 # reader nothing. Mirrors report.KNOB_NAMES, keyed by candidate-config key.
-KNOB_NAMES = {"router_config": "routing", "routing_policy": "routing",
+KNOB_NAMES = {"num_speculative_tokens": "draft tokens", "speculative_method": "drafter",
+              "router_config": "routing", "routing_policy": "routing",
               "routing_scorers": "scorers",
               "max_num_batched_tokens": "batch tokens", "max_num_seqs": "max seqs",
               "block_size": "block size", "gpu_memory_utilization": "gpu mem util",
@@ -211,6 +230,8 @@ def routing_arm_name(path):
 
 def knob_phrase(key, value):
     """Spelled-out description of one knob setting, e.g. "batch tokens 2,048"."""
+    if key == "num_speculative_tokens":
+        return "no drafting" if not value else f"{value} draft token{'s' if value != 1 else ''}"
     if key == "router_config":
         return f"{routing_arm_name(value)} routing"
     if key == "routing_policy":

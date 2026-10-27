@@ -585,9 +585,11 @@ function axesSearched(recs: RunRecord[]): string[] {
     { key: 'mnbt', label: 'max-num-batched-tokens' },
     { key: 'bs', label: 'block-size' },
     { key: 'gmu', label: 'gpu-memory-utilization' },
-    { key: 'route', label: 'routing policy' },
+    { key: 'route', label: 'routing' },
     { key: 'pd', label: 'prefill/decode' },
-    { key: 'mtp', label: 'speculative tokens' },
+    { key: 'spec', label: 'drafter' },
+    { key: 'mtp', label: 'draft tokens' },
+    { key: 'al', label: 'acceptance length' },
   ]
   const out: string[] = []
   for (const d of dims) {

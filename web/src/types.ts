@@ -73,7 +73,17 @@ export interface RunRecord {
   series: string
   route: string
   pd: string
+  /** Draft depth K (0 = speculative decoding off). */
   mtp: number
+  /** The speculative method the model drafted with (dspark, mtp, eagle3, …); null when off. */
+  spec?: string | null
+  /** Acceptance length the run was priced with: mean tokens accepted per verification step. */
+  al?: number | null
+  /** Where that acceptance was measured, e.g. "inferencex-golden-al (b200)". */
+  al_src?: string | null
+  /** How `pu` was obtained: "" direct, "derived-from-acceptance" (AL-scaled — the correct
+   *  per-token rate under drafting), "step-estimate-withheld" (drafting on, AL unknown). */
+  pu_basis?: string
   mnbt: number | null
   mns: number | null
   epw?: number | string | null

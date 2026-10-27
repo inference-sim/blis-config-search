@@ -263,21 +263,34 @@ def _feasible(run, floor, slos):
 def _per_user_rate(run, mtp):
     """Per-user token rate (pu), on the SAME p99 basis as pareto.json's tok_per_s_per_user and the
     interactivity floor -- so one page never shows two incompatible per-user numbers for a point
-    (review F3). Prefer the engine's authoritative per-token field (tok_per_s_per_user). Else fall
-    back to 1000/itl_p99_ms, and ONLY when one decode step == one token (mtp == 0): under speculative
-    decoding BLIS logs ITL per decode STEP, so 1000/ITL is a step rate that undercounts the per-token
-    rate -- we return pu=None (flagged) rather than publish a wrong number (QA G1).
-    Returns (pu_or_None, is_mtp_without_authoritative_field)."""
+    (review F3). Prefer the engine's authoritative per-token field (tok_per_s_per_user).
+
+    Without that field the basis is 1000/itl_p99_ms, which is a per-TOKEN rate only when one decode
+    step emits one token. Under speculative decoding a step emits the ACCEPTANCE LENGTH of tokens,
+    so the per-token rate is AL x 1000 / itl_p99 and the naive form understates it by the whole
+    acceptance factor -- on deepseek-v4.1-flash at K=5 that is 30.3 against 106.4 tok/s/user, which
+    would read as a floor violation for the fastest configuration measured.
+
+    So when the run records the acceptance it was priced with (deployment.acceptance, written by
+    run_blis), scale by it and flag the row as derived. When drafting is on but no acceptance was
+    resolved, the factor is unknown: return None rather than publish a number that is wrong by an
+    unknown multiple (QA G1).
+
+    Returns (pu_or_None, basis) where basis is "" for a direct rate, "derived-from-acceptance" for
+    an AL-scaled one, and "step-estimate-withheld" when drafting is on and AL is unknown."""
     m = run.get("metrics") or {}
     authoritative = _as_num(m.get("tok_per_s_per_user"))
     if authoritative is not None:
-        return round(authoritative, 2), False
+        return round(authoritative, 2), ""
     itl_p99 = _as_num(m.get("itl_p99_ms"))
     if not itl_p99:
-        return None, False
+        return None, ""
     if mtp:
-        return None, True   # step rate would undercount; do not fabricate a per-token number
-    return round(1000.0 / itl_p99, 2), False
+        al = _as_num(((run.get("deployment") or {}).get("acceptance") or {}).get("acceptance_length"))
+        if al and al > 0:
+            return round(al * 1000.0 / itl_p99, 2), "derived-from-acceptance"
+        return None, "step-estimate-withheld"   # unknown factor; do not fabricate
+    return round(1000.0 / itl_p99, 2), ""
 
 
 GPUS_PER_NODE = 8
@@ -322,8 +335,15 @@ def build_records(runs, scenario):
         gpus = dep.get("gpus") or (par.get("tp", 1) * (dep.get("num_instances", 1) or 1))
         tp = par.get("tp", cfg.get("tp"))
         ni = dep.get("num_instances", cfg.get("num_instances", 1))
-        mtp = cfg.get("num_speculative_tokens", 0) or 0
-        pu, pu_is_step_estimate = _per_user_rate(r, mtp)
+        # Draft depth. The authoritative place is the RESOLVED deployment's nested
+        # engine.speculative block (what BLIS was actually told); the flat candidate key is the
+        # fallback for a ledger row written before that block existed. Reading only the candidate
+        # key missed every drafting run whose depth came from the scenario.
+        mtp = int((eng.get("speculative") or {}).get("num_spec_tokens")
+                  or cfg.get("num_speculative_tokens") or 0)
+        spec_method = ((eng.get("speculative") or {}).get("method")
+                       or cfg.get("speculative_method") or None)
+        pu, pu_basis = _per_user_rate(r, mtp)
         out.append({
             "id": r.get("config_hash") or f"run-{i}",
             "src": r.get("phase", "run"),
@@ -344,6 +364,9 @@ def build_records(runs, scenario):
             "admit": cfg.get("admission_policy"),
             "pd": "colocated" if not (cfg.get("prefill_instances") or cfg.get("decode_instances")) else "disagg",
             "mtp": mtp,
+            # The drafter, so the facet distinguishes dspark from mtp/eagle rather than only
+            # showing a depth. None when drafting is off.
+            "spec": spec_method,
             "mnbt": eng.get("max_num_batched_tokens"),
             "mns": eng.get("max_num_seqs"),
             # all-to-all backend: the engine field when the search swept it, else the EP state.
@@ -354,7 +377,15 @@ def build_records(runs, scenario):
             "epw": (par.get("tp", 1) * par.get("dp", 1)) if par.get("enable_expert_parallel") else None,
             # metrics (reference short keys)
             "pu": pu,                              # per-user tok/s (see _per_user_rate)
-            "pu_is_step_estimate": pu_is_step_estimate,   # True = 1000/itl fallback under MTP (undercount)
+            # How `pu` was obtained: "" direct, "derived-from-acceptance" (AL-scaled, the correct
+            # per-token rate under drafting), "step-estimate-withheld" (drafting on, AL unknown ->
+            # pu is null rather than wrong). Kept as the old boolean too, for consumers that read it.
+            "pu_basis": pu_basis,
+            "pu_is_step_estimate": pu_basis == "step-estimate-withheld",
+            # The acceptance length this row was priced with, and where it was measured, so a
+            # reader can see that an H100 row reuses a B200 measurement.
+            "al": _as_num(((r.get("deployment") or {}).get("acceptance") or {}).get("acceptance_length")),
+            "al_src": ((r.get("deployment") or {}).get("acceptance") or {}).get("source"),
             "cl": round(m["tokens_per_sec"], 1) if m.get("tokens_per_sec") is not None else None,
             # Deployment detail for the click-to-inspect panel: what BLIS actually consumed.
             "pp": par.get("pp", 1),

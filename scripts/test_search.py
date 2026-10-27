@@ -217,7 +217,8 @@ def test_labels_are_topology_and_variant_is_separate():
         v = f["variant"]
         check(not any(t in v for t in ("b2k", "b8k", "seq6", "mem0")),
               f"variant avoids invented abbreviations: {v!r}")
-        check(any(w in v for w in ("routing", "batch tokens", "max seqs", "gpu mem util")),
+        check(any(w in v for w in ("routing", "batch tokens", "max seqs", "gpu mem util",
+                                   "draft token", "drafting", "drafter")),
               f"variant names the knob in words: {v!r}")
     # label + variant together must still identify a run uniquely
     keys = [(f["label"], f.get("variant", "")) for f in finalists]

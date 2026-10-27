@@ -470,5 +470,108 @@ class RouterBlockInScenario(unittest.TestCase):
             shutil.rmtree(d)
 
 
+class SpeculativeDecoding(unittest.TestCase):
+    """Drafting is priced by v0.12.0 + registry v0.2.0; the runner used to refuse it outright as
+    "not yet validated on the kernel backend", which was true of v0.10.0 only."""
+
+    def test_depth_becomes_a_nested_engine_block(self):
+        _, eng, _, _ = run_blis.classify_config({"tp": 4, "num_speculative_tokens": 5})
+        self.assertEqual(eng["speculative"], {"num_spec_tokens": 5})
+
+    def test_method_is_carried_when_stated(self):
+        _, eng, _, _ = run_blis.classify_config(
+            {"tp": 4, "num_speculative_tokens": 3, "speculative_method": "dspark"})
+        self.assertEqual(eng["speculative"], {"method": "dspark", "num_spec_tokens": 3})
+
+    def test_zero_depth_is_drafting_off(self):
+        _, eng, _, _ = run_blis.classify_config({"tp": 4, "num_speculative_tokens": 0})
+        self.assertNotIn("speculative", eng)
+
+    def test_method_without_depth_is_refused(self):
+        """Naming a drafter while drafting 0 tokens would record a drafter that never ran."""
+        with self.assertRaises(run_blis.ConfigError):
+            run_blis.classify_config({"tp": 4, "speculative_method": "dspark"})
+
+    def test_acceptance_selectors_go_to_the_cli(self):
+        _, _, cli, _ = run_blis.classify_config(
+            {"tp": 4, "num_speculative_tokens": 5,
+             "speculative_category": "coding", "speculative_thinking": "on"})
+        self.assertEqual(cli, {"speculative_category": "coding", "speculative_thinking": "on"})
+        cmd = run_blis.build_cmd("/b", None, "/r", "/s", "s.yaml", None, None, 0, None, None, cli)
+        self.assertEqual(cmd[cmd.index("--speculative-category") + 1], "coding")
+        self.assertEqual(cmd[cmd.index("--speculative-thinking") + 1], "on")
+
+    def test_nested_block_is_rendered_as_yaml_not_json_flow(self):
+        """json.dumps on the dict would emit flow style, which the strict loader rejects."""
+        y = run_blis.scenario_yaml("m", "b200", "0.29.0", dict(run_blis.PARALLEL_DEFAULTS),
+                                   {"block_size": 128,
+                                    "speculative": {"method": "dspark", "num_spec_tokens": 5}},
+                                   "n")
+        self.assertIn("      speculative:\n", y)
+        self.assertIn('        method: "dspark"', y)
+        self.assertIn("        num_spec_tokens: 5", y)
+        self.assertNotIn('{"method"', y)
+
+    def test_drafter_is_read_from_the_models_own_graph(self):
+        """The right drafter is a property of the MODEL (dspark here, mtp on v4-pro), so it is
+        read from graph.yaml rather than hardcoded or demanded from every caller."""
+        with tempfile.TemporaryDirectory() as d:
+            mdir = os.path.join(d, "models", "m")
+            os.makedirs(mdir)
+            with open(os.path.join(mdir, "graph.yaml"), "w") as f:
+                f.write("kind: ModelGraph\nspeculator:\n  method: dspark\n  num_spec_tokens: 5\n"
+                        "stack:\n  pattern: [a]\n")
+            run_blis._SPEC_CACHE.clear()
+            self.assertEqual(run_blis.graph_speculator(d, "m"), "dspark")
+
+    def test_model_with_no_speculator_reads_empty(self):
+        with tempfile.TemporaryDirectory() as d:
+            mdir = os.path.join(d, "models", "m")
+            os.makedirs(mdir)
+            with open(os.path.join(mdir, "graph.yaml"), "w") as f:
+                f.write("kind: ModelGraph\nstack:\n  pattern: [a]\n")
+            run_blis._SPEC_CACHE.clear()
+            self.assertEqual(run_blis.graph_speculator(d, "m"), "")
+
+
+class AcceptanceLength(unittest.TestCase):
+    """The acceptance length is what makes the per-user axis correct under drafting, and BLIS
+    never echoes it, so the runner resolves and records it."""
+
+    PROFILES = ("kind: AcceptanceProfileSet\nname: test-al\nprofiles:\n"
+                "- model: deepseek-v4.1-flash\n  speculative_method: dspark\n"
+                "  num_spec_tokens: 5\n  thinking: 'on'\n  category: coding\n"
+                "  acceptance_length: 3.51\n  provenance:\n    hardware: b200\n")
+
+    def _reg(self, d):
+        os.makedirs(os.path.join(d, "acceptance"), exist_ok=True)
+        with open(os.path.join(d, "acceptance", "p.yaml"), "w") as f:
+            f.write(self.PROFILES)
+        run_blis._AL_CACHE.clear()
+
+    def test_resolves_the_measured_value_with_provenance(self):
+        with tempfile.TemporaryDirectory() as d:
+            self._reg(d)
+            al, src = run_blis.acceptance_length(
+                d, "deepseek-v4.1-flash", "dspark", 5, "on", "coding")
+        self.assertEqual(al, 3.51)
+        self.assertIn("b200", src)
+
+    def test_unmatched_key_resolves_to_none(self):
+        """An unknown acceptance factor must yield None, so the report withholds `pu` rather than
+        publishing a rate wrong by an unknown multiple."""
+        with tempfile.TemporaryDirectory() as d:
+            self._reg(d)
+            al, _ = run_blis.acceptance_length(
+                d, "deepseek-v4.1-flash", "dspark", 4, "on", "coding")   # K=4 absent
+        self.assertIsNone(al)
+
+    def test_registry_without_acceptance_dir_is_not_an_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            run_blis._AL_CACHE.clear()
+            self.assertEqual(run_blis.acceptance_length(d, "m", "dspark", 5, "on", "coding"),
+                             (None, None))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

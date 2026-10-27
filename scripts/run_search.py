@@ -235,6 +235,15 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
     # peak prompt+output exceeds the deployment's window is dropped -- at the 32768 default that
     # is the entire corpus ("no trace fits max_context_length 32768").
     base_engine = dict(scenario.get("engine") or {})
+    # Acceptance selectors for a drafting candidate. BLIS REFUSES a drafting scenario whose
+    # acceptance does not resolve ("the workload states no thinking mode, which selects the
+    # profile"), so these must accompany every num_speculative_tokens > 0 run. They describe the
+    # TRAFFIC, so they come from the workload: the AgentX replay declares category `coding` and
+    # thinking `on`, and a submission may override either.
+    accept = dict(scenario.get("acceptance") or {})
+    if replay:
+        accept.setdefault("speculative_category", replay.get("category") or "coding")
+        accept.setdefault("speculative_thinking", str(replay.get("thinking") or "on"))
     floor = scenario.get("interactivity_floor") or {}
     floor_itl = float(floor.get("itl_p99_ms_max", 20.0))
     floor_rate = float(floor.get("tok_per_s_per_user", 50.0))
@@ -293,6 +302,10 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
         curve, c_star, first_error = [], None, None
         for c in ramp:
             cfg = {**base_engine, **topo, "concurrency": c}
+            # Only a DRAFTING run carries the acceptance selectors; passing them with drafting off
+            # would record selectors that chose nothing.
+            if cfg.get("num_speculative_tokens"):
+                cfg = {**accept, **cfg}
             # A replay is bounded by its sending window, not a request count.
             nreq = None if replay else requests_for(c, num_requests)
             rec = run_blis.run_one(blis, catalog, registry, scenarios_dir, model, hardware,
@@ -338,6 +351,8 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
         at = next((p for p in curve if p["concurrency"] == c_use), None)
         if at is None:
             cfg = {**base_engine, **topo, "concurrency": c_use}
+            if cfg.get("num_speculative_tokens"):
+                cfg = {**accept, **cfg}
             nreq = None if replay else requests_for(c_use, num_requests)
             rec = run_blis.run_one(blis, catalog, registry, scenarios_dir, model, hardware,
                                    engine_version, workload, nreq, seed, None, cfg,

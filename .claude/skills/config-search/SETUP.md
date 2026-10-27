@@ -35,8 +35,10 @@ cannot be reproduced arm-for-arm.
 ```bash
 git clone --branch 0.3.0 --depth 1 https://github.com/inference-sim/blis-catalog.git
 export BLIS_CATALOG=$PWD/blis-catalog
-git clone --branch v0.1.1 --depth 1 https://github.com/inference-sim/blis-registry.git
-export BLIS_REGISTRY=$PWD/blis-registry      # MUST be v0.1.1: it carries cost-model-memory
+git clone --branch v0.2.0 --depth 1 https://github.com/inference-sim/blis-registry.git
+export BLIS_REGISTRY=$PWD/blis-registry      # MUST be v0.2.0: it carries cost-model-memory AND
+                                             # acceptance/, the measured speculative-decoding
+                                             # acceptance lengths (v0.1.1 has no acceptance/)
 ```
 
 A model runs only if it is in the catalog (NS-6). `glm-5.3-flash`, `glm-5.3`, and `qwen3-14b` all

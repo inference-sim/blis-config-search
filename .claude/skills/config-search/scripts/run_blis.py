@@ -24,6 +24,25 @@ COEFFICIENTS = ["cost-model-primitives", "cost-model-collectives", "cost-model-h
 SCENARIO_PARALLEL = ("tp", "pp", "dp", "enable_expert_parallel")       # -> scenario Deployment.parallel
 SCENARIO_ENGINE = ("quantization", "cache_dtype", "block_size", "max_num_batched_tokens",
                    "max_num_seqs", "max_model_len", "cudagraph_mode", "gpu_memory_utilization")
+# Speculative decoding IS priced by the kernel (v0.12.0 + registry v0.2.0) -- the earlier runner
+# refused it as "not yet validated on the kernel backend", which was true of v0.10.0 and is stale.
+# It is a nested `speculative: {method, num_spec_tokens}` block on the pool's engine
+# (blis-schemas v0.5.0 Deployment.Pool.Engine.Speculative), so the two candidate keys below are
+# folded into that block rather than emitted as flat engine fields.
+#
+# The ACCEPTANCE (how many drafted tokens land) is not a deployment property: it depends on the
+# model, drafter and traffic. BLIS resolves it from the registry's acceptance/ profiles, selected
+# by the workload's category and thinking mode, and REFUSES a drafting scenario whose acceptance
+# does not resolve ("its acceptance does not resolve: ... state one"). So a spec-decode run must
+# also carry the selectors -- see SPECULATIVE_CLI.
+SCENARIO_SPECULATIVE = ("speculative_method", "num_speculative_tokens")
+# Acceptance selectors / overrides. These are CLI, not scenario: they describe the WORKLOAD's
+# acceptance behaviour, not the deployment.
+SPECULATIVE_CLI = {"speculative_category": "--speculative-category",
+                   "speculative_thinking": "--speculative-thinking",
+                   "speculative_acceptance_length": "--speculative-acceptance-length",
+                   "speculative_acceptance_rate": "--speculative-acceptance-rate",
+                   "speculative_fallback_category": "--speculative-fallback-category"}
 CLI_FLAGS = {"num_instances": "--num-instances", "concurrency": "--concurrency",
              "scheduler": "--scheduler", "preemption_policy": "--preemption-policy"}
 # The llm-d EndpointPickerConfig this deployment routes with, as a path. Named by the scenario's
@@ -84,9 +103,6 @@ UNSUPPORTED = {
     "decode_instances": "PD disaggregation is not supported yet (single colocated pool only)",
     "prefill_tp": "per-role PD TP is not supported yet (single colocated pool only)",
     "decode_tp": "per-role PD TP is not supported yet (single colocated pool only)",
-    "num_speculative_tokens": "speculative decoding is not yet validated on the kernel backend",
-    "speculative_acceptance_rate": "speculative decoding is not yet validated on the kernel backend",
-    "speculative_method": "speculative decoding is not yet validated on the kernel backend",
     "long_prefill_token_threshold": "not a kernel scenario field (chunked-prefill threshold is engine-internal)",
 }
 
@@ -96,13 +112,22 @@ class ConfigError(ValueError):
 
 
 def classify_config(config):
-    """Split a candidate into (parallel, engine, cli, router); raise ConfigError on unknown keys."""
+    """Split a candidate into (parallel, engine, cli, router); raise ConfigError on unknown keys.
+
+    The speculative keys are folded into engine["speculative"], the nested block the schema wants,
+    and the acceptance selectors go to the CLI.
+    """
     parallel, engine, cli, router = dict(PARALLEL_DEFAULTS), dict(ENGINE_DEFAULTS), {}, {}
+    spec = {}
     for k, v in config.items():
         if k in SCENARIO_PARALLEL:
             parallel[k] = v
         elif k in SCENARIO_ENGINE:
             engine[k] = v
+        elif k in SCENARIO_SPECULATIVE:
+            spec[k] = v
+        elif k in SPECULATIVE_CLI:
+            cli[k] = v
         elif k in SCENARIO_ROUTER:
             router[k] = v
         elif k in CLI_FLAGS:
@@ -111,8 +136,21 @@ def classify_config(config):
             raise ConfigError(f"{k!r}: {UNSUPPORTED[k]}")
         else:
             supported = (sorted(SCENARIO_PARALLEL) + sorted(SCENARIO_ENGINE)
+                         + sorted(SCENARIO_SPECULATIVE) + sorted(SPECULATIVE_CLI)
                          + sorted(SCENARIO_ROUTER) + sorted(CLI_FLAGS))
             raise ConfigError(f"{k!r}: unknown key; supported = {supported}")
+    if spec:
+        k = int(spec.get("num_speculative_tokens") or 0)
+        if k > 0:
+            # `method` defaults to the speculator the model's own graph declares; naming it here
+            # would hardcode one model's drafter (deepseek-v4.1-flash is dspark, glm-5.2 is mtp).
+            method = spec.get("speculative_method")
+            engine["speculative"] = ({"method": method, "num_spec_tokens": k} if method
+                                     else {"num_spec_tokens": k})
+        elif spec.get("speculative_method"):
+            raise ConfigError(
+                "speculative_method with num_speculative_tokens 0 (or unset): drafting 0 tokens is "
+                "speculative decoding OFF, so naming a method would record a drafter that never ran")
     rc = router.get("router_config")
     if rc is not None and not os.path.exists(rc):
         # Fail here rather than let BLIS fail per-run: a typo'd EPP path would otherwise cost a
@@ -257,6 +295,104 @@ def load_workload_shape(catalog, workload):
             f"must carry one (a replay workload is not runnable through `blis run`)")
     _PRESET_CACHE[key] = out
     return out
+
+
+# The acceptance length a drafting run resolved. BLIS applies it internally but does NOT echo it
+# in the metrics, and it is the number the per-user axis needs: under speculative decoding BLIS
+# logs ITL per VERIFICATION STEP, and one step emits AL tokens, so the per-token rate is
+# AL x 1000 / ITL_p99 and the naive 1000/ITL understates it by the full acceptance factor. On
+# deepseek-v4.1-flash at K=5 that is the difference between 27.7 tok/s/user (looks like a floor
+# violation) and 97.4 (the real rate) -- i.e. the naive axis would reject every drafting config.
+#
+# The profile key is exactly what the run already states: (model, method, K, thinking, category),
+# so the same lookup BLIS does can be reproduced here and RECORDED on the row.
+_AL_CACHE = {}
+
+
+def acceptance_length(registry, model, method, k, thinking, category):
+    """The measured acceptance length for this (model, method, K, thinking, category), or None.
+
+    Read from the registry's acceptance/ profiles (registry v0.2.0+; v0.1.1 has no acceptance/).
+    None means no profile matched -- the caller must then NOT publish a derived per-user rate,
+    because the acceptance factor is unknown.
+
+    Returns (al, source) where source is the profile set's name plus the hardware it was measured
+    on, so a report can state that an H100 run reuses a B200 measurement rather than implying it
+    was measured there. The profile set itself asks for that: "Acceptance depends mostly on the
+    model, drafter and workload rather than the chip; a resolution on another part records the
+    reuse."
+    """
+    if not (registry and model and method and k and thinking and category):
+        return None, None
+    key = (registry, model, method, int(k), str(thinking), str(category))
+    if key in _AL_CACHE:
+        return _AL_CACHE[key]
+    found = (None, None)
+    adir = os.path.join(registry, "acceptance")
+    try:
+        names = sorted(n for n in os.listdir(adir) if n.endswith((".yaml", ".yml")))
+    except OSError:
+        _AL_CACHE[key] = found
+        return found
+    for name in names:
+        try:
+            import yaml                      # only needed on the drafting path
+            doc = yaml.safe_load(open(os.path.join(adir, name), encoding="utf-8")) or {}
+        except Exception:
+            continue
+        for prof in doc.get("profiles") or []:
+            if (str(prof.get("model")) == model
+                    and str(prof.get("speculative_method")) == method
+                    and int(prof.get("num_spec_tokens") or 0) == int(k)
+                    and str(prof.get("thinking")) == str(thinking)
+                    and str(prof.get("category")) == str(category)):
+                al = prof.get("acceptance_length")
+                hw = ((prof.get("provenance") or {}).get("hardware") or "unrecorded")
+                if al:
+                    found = (float(al), f"{doc.get('name') or name} ({hw})")
+                break
+        if found[0] is not None:
+            break
+    _AL_CACHE[key] = found
+    return found
+
+
+_SPEC_CACHE = {}
+
+
+def graph_speculator(catalog, model):
+    """The speculator method the model's own catalog graph declares, or "" when it has none.
+
+    The engine REQUIRES a method on a drafting deployment ('engine.speculative.method "" is not
+    accepted ... it accepts deepseek_mtp, dflash, ... dspark, eagle, ...'), and the right value is
+    a property of the MODEL, not of this search: deepseek-v4.1-flash drafts with `dspark`,
+    glm-5.2 with `mtp`. So read it out of graph.yaml's `speculator:` block rather than hardcoding
+    one model's drafter or making every caller state it.
+
+    An empty answer means the model ships no speculator, which is also the honest signal that
+    speculative decoding is not available for it.
+    """
+    if not catalog or not model:
+        return ""
+    key = (catalog, model)
+    if key not in _SPEC_CACHE:
+        path = os.path.join(catalog, "models", model, "graph.yaml")
+        method, in_spec = "", False
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    if not line[:1].isspace():
+                        in_spec = line.startswith("speculator:")
+                        continue
+                    if in_spec:
+                        t = line.strip()
+                        if t.startswith("method:"):
+                            method = t.split(":", 1)[1].strip().strip('"\'')
+                            break
+        except OSError:
+            method = ""
+        _SPEC_CACHE[key] = method
+    return _SPEC_CACHE[key]
 
 
 _ARCH_CACHE = {}
@@ -423,8 +559,20 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
     """Render a two-doc Scenario+Deployment YAML (no external yaml dep). Omitted engine keys (e.g.
     quantization when unset) let the checkpoint/engine govern."""
     def block(d, indent):
+        """Render a flat mapping, plus the one NESTED value the engine takes (`speculative`).
+
+        json.dumps on a dict would emit JSON-flow style, which the strict loader rejects for this
+        field, so a dict value is rendered as an indented sub-block instead.
+        """
         pad = " " * indent
-        return "\n".join(f"{pad}{k}: {json.dumps(v)}" for k, v in d.items())
+        out = []
+        for k, v in d.items():
+            if isinstance(v, dict):
+                out.append(f"{pad}{k}:")
+                out.extend(f"{pad}  {kk}: {json.dumps(vv)}" for kk, vv in v.items())
+            else:
+                out.append(f"{pad}{k}: {json.dumps(v)}")
+        return "\n".join(out)
     nodes = pool_nodes(parallel, num_instances)
     # A multi-node cluster MUST name a fabric: BLIS resolves cross-node cost from the fabric,
     # not the chip, and refuses the scenario otherwise ("scenario.cluster.fabric: required for
@@ -495,6 +643,14 @@ def resolve_defaults(blis, defaults):
     return beside if os.path.exists(beside) else None
 
 
+def _cli_flag(key):
+    """The CLI flag for a cli-slot candidate key: a deployment knob or an acceptance selector."""
+    try:
+        return CLI_FLAGS[key]
+    except KeyError:
+        return SPECULATIVE_CLI[key]
+
+
 def build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed, defaults, cli,
                      replay):
     """The `blis replay --agentic-scenario` command for a trace-REPLAY workload.
@@ -534,7 +690,7 @@ def build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed
     if seed is not None:
         cmd += ["--seed", str(seed)]
     for k, v in cli.items():
-        cmd += [CLI_FLAGS[k], str(v)]
+        cmd += [_cli_flag(k), str(v)]
     return cmd
 
 
@@ -562,7 +718,7 @@ def build_cmd(blis, catalog, registry, scenarios_dir, scenario_name, workload, n
     if horizon is not None:
         cmd += ["--horizon", str(horizon)]
     for k, v in cli.items():
-        cmd += [CLI_FLAGS[k], str(v)]
+        cmd += [_cli_flag(k), str(v)]
     return cmd
 
 
@@ -600,6 +756,37 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     # Fill block_size per MODEL when the candidate did not pin one (see default_block_size): the
     # adapter requires a value, and DSA models require it to be a multiple of 64.
     engine.setdefault("block_size", default_block_size(catalog, model, hardware))
+    # Fill the drafter from the MODEL's graph when a candidate asked for drafting without naming
+    # one (the engine requires a method; see graph_speculator). A model with no speculator is
+    # refused here rather than by BLIS, so the error names the model instead of an empty string.
+    spec = engine.get("speculative")
+    if spec and not spec.get("method"):
+        method = graph_speculator(catalog, model)
+        if not method:
+            rec.update({"deployment": None, "cmd": None, "returncode": None, "wall_s": 0.0,
+                        "metrics": {}, "metrics_all_instances": [],
+                        "error": (f"unsupported config: speculative decoding requested but "
+                                  f"{model!r} declares no speculator in its catalog graph"),
+                        "stdout_tail": "", "stderr_tail": ""})
+            return rec
+        spec["method"] = method
+    # Resolve and RECORD the acceptance length a drafting run will be priced with. BLIS applies it
+    # but never echoes it, and the per-user axis is wrong without it (see acceptance_length).
+    acceptance = None
+    if spec:
+        al, al_src = acceptance_length(registry, model, spec.get("method"),
+                                       spec.get("num_spec_tokens"),
+                                       cli.get("speculative_thinking"),
+                                       cli.get("speculative_category"))
+        if al:
+            acceptance = {"acceptance_length": al, "source": al_src,
+                          "num_spec_tokens": spec.get("num_spec_tokens"),
+                          "method": spec.get("method"),
+                          # True when the profile was measured on another part. The profile set
+                          # says acceptance is mostly model/drafter/workload rather than chip and
+                          # asks that reuse be recorded, so a report can state it.
+                          "reused_from_other_hardware": bool(
+                              al_src and hardware and f"({hardware})" not in al_src)}
     scenario_name = write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine,
                                    num_instances, DEFAULT_FABRIC, router)
     if replay:
@@ -628,6 +815,9 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
         "deployment": {"parallel": parallel, "engine": engine, "num_instances": num_instances,
                        "footprint_gpus_per_instance": fp, "gpus": fp * num_instances,
                        "scenario": scenario_name, "router": router or None,
+                       # The acceptance the drafting run was priced with, so the report can
+                       # derive a correct per-token rate instead of a per-STEP one.
+                       "acceptance": acceptance,
                        "workload": ({"kind": "replay", **replay} if replay
                                     else {"kind": "shape", "preset": workload})},
         "cmd": cmd, "returncode": rc, "wall_s": round(time.time() - t0, 3),

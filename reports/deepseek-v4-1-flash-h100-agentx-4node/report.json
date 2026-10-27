@@ -32,7 +32,7 @@
   "hero": [
     {
       "h": "What was tested",
-      "html": "Every expert-parallel and tensor-parallel layout that fills 32 GPUs, probed up a session-lane ladder and refined one engine knob at a time \u2014 117 runs, 15 servable finalists, 12 shapes the simulator refused or that missed the floor."
+      "html": "Every expert-parallel and tensor-parallel layout that fills 32 GPUs, probed up a session-lane ladder and refined one engine knob at a time \u2014 138 runs, 18 servable finalists, 12 shapes the simulator refused or that missed the floor."
     },
     {
       "h": "What was found",
@@ -72,7 +72,7 @@
       "figure": "scale_bars",
       "num": 3,
       "prose": [
-        "The search runs every expert-parallel candidate beside its non-EP control, because the direction is meant to be measured rather than assumed. Here the comparison is not close: <b>every one of the 5 non-EP controls failed outright</b>, and all 15 finalists are expert-parallel.",
+        "The search runs every expert-parallel candidate beside its non-EP control, because the direction is meant to be measured rather than assumed. Here the comparison is not close: <b>every one of the 5 non-EP controls failed outright</b>, and all 18 finalists are expert-parallel.",
         "The failures are memory, not throughput \u2014 <i>\u201cNo available memory for the cache blocks\u201d</i>, or a per-rank fixed occupancy above the 79.2 GiB device. Sharding the experts is what makes a 256k-token context fit on this part at all. It is also why the narrow-TP shapes die even with EP on: the expert-parallel width is derived as tp \u00d7 dp, so a width of 1 shards nothing."
       ],
       "title": "Expert parallelism is load-bearing, not an optimisation"
@@ -83,13 +83,25 @@
       "num": 4,
       "prose": [
         "Refinement moves one knob at a time off the winning topology, so any difference is attributable. Nothing improved on the defaults \u2014 these knobs <b>constrain</b>:",
-        "<ul><li><code>queue-kv routing</code>: 8.3 tok/s/GPU, -60.7% \u2014 and it halves usable capacity, C* 64 \u2192 32</li><li><code>batch tokens 2,048</code>: 18.7 tok/s/GPU, -11.4%</li><li><code>prefix-affinity routing</code>: 20.4 tok/s/GPU, -3.3%</li><li><code>max seqs 64</code>: 20.8 tok/s/GPU, -1.4%</li></ul>",
-        "The expensive one is <code>queue-kv routing</code> at -60.7%. It is not a small scheduling inefficiency: routing on queue depth and KV utilisation drops the servable ceiling from 64 lanes to 32, so the deployment loses half its capacity. Scoring on instantaneous KV pressure is actively wrong when every request arrives carrying ~91,042 tokens of context \u2014 the instance that looks least loaded is the one about to be handed an enormous prefill."
+        "<ul><li><code>1 draft token</code>: 6.0 tok/s/GPU, -71.6% \u2014 and it halves usable capacity, C* 64 \u2192 32</li><li><code>3 draft tokens</code>: 7.2 tok/s/GPU, -65.9% \u2014 and it halves usable capacity, C* 64 \u2192 32</li><li><code>5 draft tokens</code>: 7.6 tok/s/GPU, -64.0% \u2014 and it halves usable capacity, C* 64 \u2192 32</li><li><code>queue-kv routing</code>: 8.3 tok/s/GPU, -60.7% \u2014 and it halves usable capacity, C* 64 \u2192 32</li><li><code>batch tokens 2,048</code>: 18.7 tok/s/GPU, -11.4%</li><li><code>prefix-affinity routing</code>: 20.4 tok/s/GPU, -3.3%</li><li><code>max seqs 64</code>: 20.8 tok/s/GPU, -1.4%</li></ul>",
+        "The expensive one is <code>1 draft token</code> at -71.6%. It is not a small scheduling inefficiency: routing on queue depth and KV utilisation drops the servable ceiling from 64 lanes to 32, so the deployment loses half its capacity. Scoring on instantaneous KV pressure is actively wrong when every request arrives carrying ~91,042 tokens of context \u2014 the instance that looks least loaded is the one about to be handed an enormous prefill."
       ],
       "title": "The knobs that bind, and the one that really hurts"
     },
     {
       "num": 5,
+      "prose": [
+        "This model ships its own drafter \u2014 the catalog graph declares a <code>dspark</code> speculator \u2014 so draft depth is a real deployment choice, not an exotic knob. Each depth is run against the no-drafting baseline on the winning topology:",
+        "<ul><li><b>K=1</b>: 6.0 tok/s/GPU, -71.6% against no drafting, acceptance length 1.81, ceiling 32 lanes</li><li><b>K=3</b>: 7.2 tok/s/GPU, -65.9% against no drafting, acceptance length 2.9, ceiling 32 lanes</li><li><b>K=5</b>: 7.6 tok/s/GPU, -64.0% against no drafting, acceptance length 3.51, ceiling 32 lanes</li></ul>",
+        "Read those percentages carefully: each arm is scored at <i>its own</i> usable load, and drafting moves that load. A depth whose ceiling drops is therefore scored at a lower session count than the baseline, which makes it look worse than it is at any load they share \u2014 the matched-load table below is the comparison that answers \u201cshould I turn this on\u201d. Here the ceiling falls for K=1 (32 lanes against the baseline\u2019s 64), K=3 (32 lanes against the baseline\u2019s 64), K=5 (32 lanes against the baseline\u2019s 64).",
+        "<b>How to read the per-user rate on these rows.</b> Under drafting the engine reports the inter-token latency of a <i>verification step</i>, and one step emits as many tokens as the target accepts. So the per-user token rate is the acceptance length times 1000/ITL p99, not 1000/ITL p99 \u2014 the naive reading understates a drafting configuration by the whole acceptance factor and can make the fastest configuration measured look like a floor violation. The rows above use the acceptance-scaled rate, and the explorer labels it as derived.",
+        "<b>At matched load</b>, drafting is a clear throughput win \u2014 but it moves the interactivity cliff, so the two arms' own usable loads are not the same load. Output tok/s at each session count, with the change against no drafting:<table class=\"short\"><thead><tr><th>sessions</th><th class=\"n\">no drafting</th><th class=\"n\">K=1</th><th class=\"n\">K=3</th><th class=\"n\">K=5</th></tr></thead><tbody><tr><td class=\"n\">4</td><td class=\"n\">145.2</td><td class=\"n\">99.6 <span class=\"op-var\">-31%</span></td><td class=\"n\">147.8 <span class=\"op-var\">+2%</span></td><td class=\"n\">165.5 <span class=\"op-var\">+14%</span></td></tr><tr><td class=\"n\">8</td><td class=\"n\">110.5</td><td class=\"n\">142.2 <span class=\"op-var\">+29%</span></td><td class=\"n\">157.9 <span class=\"op-var\">+43%</span></td><td class=\"n\">159.0 <span class=\"op-var\">+44%</span></td></tr><tr><td class=\"n\">16</td><td class=\"n\">142.1</td><td class=\"n\">191.2 <span class=\"op-var\">+35%</span></td><td class=\"n\">230.3 <span class=\"op-var\">+62%</span></td><td class=\"n\">242.2 <span class=\"op-var\">+70%</span></td></tr><tr><td class=\"n\">32</td><td class=\"n\">423.5</td><td class=\"n\">508.0 <span class=\"op-var\">+20%</span></td><td class=\"n\">584.8 <span class=\"op-var\">+38%</span></td><td class=\"n\">598.8 <span class=\"op-var\">+41%</span></td></tr><tr><td class=\"n\">51</td><td class=\"n\">675.2</td><td class=\"n\">652.7 <span class=\"op-var\">-3%</span></td><td class=\"n\">735.5 <span class=\"op-var\">+9%</span></td><td class=\"n\">762.5 <span class=\"op-var\">+13%</span></td></tr><tr><td class=\"n\">64</td><td class=\"n\">786.9</td><td class=\"n\">724.2 <span class=\"op-var\">-8%</span></td><td class=\"n\">877.8 <span class=\"op-var\">+12%</span></td><td class=\"n\">895.8 <span class=\"op-var\">+14%</span></td></tr><tr><td class=\"n\">128</td><td class=\"n\">1,139.2</td><td class=\"n\">980.3 <span class=\"op-var\">-14%</span></td><td class=\"n\">1,133.7 <span class=\"op-var\">-0%</span></td><td class=\"n\">1,110.0 <span class=\"op-var\">-3%</span></td></tr></tbody></table><p>The servable ceiling, however, falls: no drafting holds 64 lanes while K=1 at 32 lanes, K=3 at 32 lanes, K=5 at 32 lanes. Drafting spends decode compute verifying tokens, which is compute the baseline spends on concurrency \u2014 so the knob trades <i>sessions</i> for <i>per-session speed</i>. Set it from which of those you are short of: at a fixed session count below the drafting cliff it is close to free throughput, and above that cliff it costs you the sessions.</p>",
+        "The acceptance lengths are measured, not assumed: they come from <code>inferencex-golden-al (b200)</code> in blis-registry, keyed by this model, drafter, depth, thinking mode and workload category. They were measured on another part and reused here; the profile set states that acceptance depends mostly on the model, drafter and workload rather than the chip, and asks that the reuse be recorded, so it is recorded on every row."
+      ],
+      "title": "Speculative decoding, and what it does to the interactivity number"
+    },
+    {
+      "num": 6,
       "prose": [
         "The same search at 32 and 64 GPUs on H100 makes the scaling explicit. Going from 32 to 64 GPUs multiplies fleet throughput by <b>1.62x</b> (675.2 to 1,092.7 output tok/s) and the servable ceiling by 2.00x (64 to 128 lanes).",
         "Per-GPU efficiency therefore <b>falls</b> from 21.1 to 17.1 tok/s/GPU (0.81x). Capacity scales but efficiency does not: the second half of the cluster is doing real work \u2014 the ceiling genuinely doubles \u2014 while each GPU does less of it. For a fixed interactivity target that is the honest trade, and it means the larger cluster is the right buy only if you need the extra 64 lanes of capacity, not if you are chasing tokens per GPU."
@@ -97,6 +109,6 @@
       "title": "What doubling the cluster buys"
     }
   ],
-  "standfirst": "A configuration search over 117 BLIS replay runs on 32\u00d7 H100, driven by the recorded AgentX agentic traffic rather than a synthetic request shape. The winner is <b>4x TP8 + EP</b> at 675.2 output tok/s (21.1 per GPU) while every user still reads at 113.5 tok/s.",
+  "standfirst": "A configuration search over 138 BLIS replay runs on 32\u00d7 H100, driven by the recorded AgentX agentic traffic rather than a synthetic request shape. The winner is <b>4x TP8 + EP</b> at 675.2 output tok/s (21.1 per GPU) while every user still reads at 113.5 tok/s.",
   "title": "Serving DeepSeek-V4.1-Flash to coding agents on 4 H100 nodes"
 }

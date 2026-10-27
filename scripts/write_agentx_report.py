@@ -277,6 +277,37 @@ def _scaling_section(num):
 # non-monotonic (K=1 was -25% on b200 chatbot because AL 1.81 does not pay for the draft, K=5
 # +13%). It also changes what the per-user axis MEANS, which a reader has to be told. So it gets
 # its own section rather than a bullet among the knobs that bind downward.
+
+def _draft_matched():
+    """Baseline vs each draft depth AT THE SAME LOADS, plus where each arm's cliff falls.
+
+    The at-c_use numbers alone are misleading here for the same reason they were for expert
+    parallelism: drafting MOVES C*, so each arm's own usable load is a different load, and the
+    comparison then mixes "drafting is faster" with "drafting serves fewer sessions". Measured on
+    h100 4x TP8 + EP, drafting at K=5 is +13% to +70% at matched load yet its ITL cliff arrives
+    between 32 and 51 lanes where the baseline reaches 64 -- a real trade a reader has to see.
+    """
+    base = next((f for f in fin if f["label"] == win["label"] and not f.get("variant")), None)
+    if not base:
+        return [], None
+    bl = {p["concurrency"]: p for p in base.get("curve") or []}
+    out = []
+    for f in fin:
+        if f["label"] != win["label"]:
+            continue
+        k = int((f.get("config") or {}).get("num_speculative_tokens") or 0)
+        if not k:
+            continue
+        pts = []
+        for p in f.get("curve") or []:
+            b = bl.get(p["concurrency"])
+            if b and b["tokens_per_sec"]:
+                pts.append((p["concurrency"], b["tokens_per_sec"], p["tokens_per_sec"],
+                            100 * (p["tokens_per_sec"] - b["tokens_per_sec"]) / b["tokens_per_sec"],
+                            b.get("tok_per_s_per_user"), p.get("tok_per_s_per_user")))
+        out.append((k, f["c_star"], pts))
+    return sorted(out), base
+
 def _draft_rows():
     """(K, tok/s/GPU, delta% vs no drafting, C*, AL, AL source) for each drafting variant of the
     winning topology."""
@@ -303,6 +334,41 @@ def _draft_rows():
     return sorted(out)
 
 
+def _draft_matched_prose():
+    """The matched-load table plus what it means for setting the knob."""
+    arms, base = _draft_matched()
+    if not arms or not base:
+        return ""
+    head = ("<table class=\"short\"><thead><tr><th>sessions</th><th class=\"n\">no drafting</th>"
+            + "".join(f'<th class="n">K={k}</th>' for k, _, _ in arms)
+            + "</tr></thead><tbody>")
+    loads = sorted({c for _, _, pts in arms for c, *_ in pts})
+    body = ""
+    for c in loads:
+        cells = ""
+        baseval = None
+        for k, _, pts in arms:
+            hit = next((t for t in pts if t[0] == c), None)
+            if hit:
+                baseval = hit[1]
+                cells += f'<td class="n">{n(hit[2])} <span class="op-var">{hit[3]:+.0f}%</span></td>'
+            else:
+                cells += '<td class="n">\u2014</td>'
+        body += (f'<tr><td class="n">{c}</td>'
+                 f'<td class="n">{n(baseval) if baseval else "\u2014"}</td>{cells}</tr>')
+    tbl = head + body + "</tbody></table>"
+    cliffs = ", ".join(f"K={k} at {cs} lanes" for k, cs, _ in arms)
+    return (f"<b>At matched load</b>, drafting is a clear throughput win \u2014 but it moves the "
+            f"interactivity cliff, so the two arms' own usable loads are not the same load. Output "
+            f"tok/s at each session count, with the change against no drafting:{tbl}"
+            f"<p>The servable ceiling, however, falls: no drafting holds {base['c_star']} lanes "
+            f"while {cliffs}. Drafting spends decode compute verifying tokens, which is compute "
+            f"the baseline spends on concurrency \u2014 so the knob trades <i>sessions</i> for "
+            f"<i>per-session speed</i>. Set it from which of those you are short of: at a fixed "
+            f"session count below the drafting cliff it is close to free throughput, and above "
+            f"that cliff it costs you the sessions.</p>")
+
+
 def _draft_section(num):
     rows = _draft_rows()
     if not rows:
@@ -325,11 +391,17 @@ def _draft_section(num):
          f"deployment choice, not an exotic knob. Each depth is run against the no-drafting "
          f"baseline on the winning topology:"),
         items,
-        (f"The best depth here is <b>K={best[0]}</b> at {best[2]:+.1f}%" +
-         (f", and the worst is K={worst[0]} at {worst[2]:+.1f}% \u2014 drafting is <i>not</i> "
-          f"monotonic in depth, because a short draft spends compute on tokens the target then "
-          f"rejects."
-          if worst[2] < 0 else ". Every depth tried beat the baseline.")),
+        (f"Read those percentages carefully: each arm is scored at <i>its own</i> usable load, and "
+         f"drafting moves that load. A depth whose ceiling drops is therefore scored at a lower "
+         f"session count than the baseline, which makes it look worse than it is at any load they "
+         f"share \u2014 the matched-load table below is the comparison that answers \u201cshould "
+         f"I turn this on\u201d. "
+         + (f"Here the ceiling falls for "
+            + ", ".join(f"K={k} ({cs} lanes against the baseline\u2019s {win['c_star']})"
+                        for k, _, _, cs, _, _ in rows if cs != win["c_star"])
+            + "." if any(r[3] != win["c_star"] for r in rows) else
+            f"Here every depth holds the baseline\u2019s {win['c_star']}-lane ceiling, so the "
+            f"figures above are already like-for-like.")),
         (f"<b>How to read the per-user rate on these rows.</b> Under drafting the engine reports "
          f"the inter-token latency of a <i>verification step</i>, and one step emits as many "
          f"tokens as the target accepts. So the per-user token rate is the acceptance length times "
@@ -337,6 +409,7 @@ def _draft_section(num):
          f"configuration by the whole acceptance factor and can make the fastest configuration "
          f"measured look like a floor violation. The rows above use the acceptance-scaled rate, "
          f"and the explorer labels it as derived."),
+        _draft_matched_prose(),
         (f"The acceptance lengths are measured, not assumed: they come from "
          f"<code>{src}</code> in blis-registry, keyed by this model, drafter, depth, thinking mode "
          f"and workload category."

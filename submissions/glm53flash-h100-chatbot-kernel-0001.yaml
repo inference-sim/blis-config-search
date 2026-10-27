@@ -1,0 +1,22 @@
+# GLM-5.3-Flash on 16x H100, ShareGPT-shaped chatbot traffic.
+#
+# NAMED to match the existing run directory (run_search derives the run id from the submission's
+# file name), so re-running REPLACES reports/glm53flash-h100-chatbot-kernel-0001 rather than
+# adding a second glm card beside it. The other glm submission in this directory
+# (glm-5-3-flash-h100-chatbot.yaml) is a different, 128-GPU scenario and is left alone.
+model: glm-5.3-flash
+hardware: h100
+gpu_budget: 16
+workload:
+  preset: chatbot
+engine:
+  # Exactly the precision the original run resolved, so the re-run differs ONLY in the workload
+  # fix. Precision is never defaulted: an unset value lets the checkpoint govern, which would
+  # silently mis-price a non-FP8 model.
+  quantization: fp8
+  cache_dtype: fp8
+objective: dual-pareto
+interactivity_floor:
+  tok_per_s_per_user: 50.0
+headroom: 0.8
+seed: 0

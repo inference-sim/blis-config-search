@@ -111,15 +111,47 @@ worst_knob = knobs[0] if knobs else None
 DEV_GIB = {"h100": "79.2", "h200": "141.0", "b200": "178.4", "b300": "178.4"}
 
 def _ep_pairs():
-    """(label, EP tok/s/GPU, control tok/s/GPU) for every topology whose BOTH arms are servable."""
-    base = {f["label"]: f["at_c_use"]["tokens_per_sec_per_gpu"] for f in fin if not f.get("variant")}
+    """Per topology with BOTH arms servable: (label, EP, control, same-load EP, same-load ctl, Cstar_ep, Cstar_ctl).
+
+    The at-c_use figures alone are NOT a clean EP comparison: when EP raises C*, the two arms are
+    measured at DIFFERENT loads, and the ratio then mixes "EP is faster" with "EP serves more
+    sessions". On B200 4x TP2xDP4 that read as +155.8% when the same-load gain is +1.5% and the
+    real effect is that EP doubles the ceiling (C* 32 -> 64). So report both, from a load both
+    arms actually ran.
+    """
+    byl = {f["label"]: f for f in fin if not f.get("variant")}
     out = []
-    for lab, pg in sorted(base.items()):
-        if "+ EP" in lab:
-            ctl = lab.replace(" + EP", "")
-            if ctl in base:
-                out.append((lab, pg, base[ctl]))
+    for lab in sorted(byl):
+        if "+ EP" not in lab:
+            continue
+        ctl = lab.replace(" + EP", "")
+        if ctl not in byl:
+            continue
+        e, c = byl[lab], byl[ctl]
+        # the highest load BOTH arms measured, so the comparison is like-for-like
+        shared = sorted({p["concurrency"] for p in e["curve"]}
+                        & {p["concurrency"] for p in c["curve"]})
+        se = sc_ = None
+        if shared:
+            at = max(shared)
+            se = next(p["tokens_per_sec"] for p in e["curve"] if p["concurrency"] == at) / e["gpus"]
+            sc_ = next(p["tokens_per_sec"] for p in c["curve"] if p["concurrency"] == at) / c["gpus"]
+        out.append((lab, e["at_c_use"]["tokens_per_sec_per_gpu"],
+                    c["at_c_use"]["tokens_per_sec_per_gpu"], se, sc_,
+                    e["c_star"], c["c_star"], (max(shared) if shared else None)))
     return out
+
+def _h100_drop_count():
+    """How many shapes the sibling H100 run lost to memory, for the contrast. 12 is the measured
+    figure; read it from that run when it is present rather than hard-coding."""
+    here = os.path.basename(os.path.abspath(D))
+    sib = here.replace("-b200-", "-h100-").replace("-h200-", "-h100-")
+    path = os.path.join(os.path.dirname(os.path.abspath(D)), sib, "pareto.json")
+    try:
+        return len(json.load(open(path)).get("dropped") or [])
+    except Exception:
+        return "several"
+
 
 def _ep_section():
     pairs = _ep_pairs()
@@ -141,30 +173,47 @@ def _ep_section():
              f"narrow-TP shapes die even with EP on: the expert-parallel width is derived as "
              f"tp \u00d7 dp, so a width of 1 shards nothing."),
           ]}
-    lo = min(100 * (e - c) / c for _, e, c in pairs)
-    hi = max(100 * (e - c) / c for _, e, c in pairs)
-    rows = "<ul>" + "".join(
-        f"<li><code>{lab}</code>: {n(e)} vs {n(c)} tok/s/GPU, {100*(e-c)/c:+.1f}%</li>"
-        for lab, e, c in sorted(pairs, key=lambda x: -(100 * (x[1] - x[2]) / x[2]))) + "</ul>"
+    # Rank and quote the SAME-LOAD gain, which is the part attributable to EP itself; the capacity
+    # change is stated separately because it is a different effect with a different implication.
+    def samegain(t):
+        _, _, _, se, sc_, _, _, _ = t
+        return (100 * (se - sc_) / sc_) if (se and sc_) else 0.0
+    lo = min(samegain(t) for t in pairs)
+    hi = max(samegain(t) for t in pairs)
+    def row(t):
+        lab, e, c, se, sc_, cse, csc, at = t
+        bit = (f"<li><code>{lab}</code>: {samegain(t):+.1f}% at a matched {at} lanes "
+               f"({n(se)} vs {n(sc_)} tok/s/GPU)")
+        if cse and csc and cse != csc:
+            bit += (f" — and it moves the servable ceiling {csc} → {cse} lanes, which is what the "
+                    f"{n(e)} vs {n(c)} tok/s/GPU at each arm's own usable load reflects")
+        return bit + "</li>"
+    rows = "<ul>" + "".join(row(t) for t in sorted(pairs, key=lambda t: -samegain(t))) + "</ul>"
     return {
       "num": 3, "title": "Expert parallelism helps here \u2014 but it is not what rescues the fit",
       "figure": "scale_bars",
       "caption_note": "Both arms of each topology are shown where both were servable.",
       "prose": [
         (f"Every expert-parallel candidate is run beside its non-EP control, so the direction is "
-         f"measured rather than assumed. On {hw} the controls <b>do</b> run, and expert parallelism "
-         f"is worth between {lo:+.1f}% and {hi:+.1f}% depending on the layout:"),
+         f"measured rather than assumed. On {hw} the controls <b>do</b> run. Compared at a load "
+         f"both arms served, expert parallelism is worth between {lo:+.1f}% and {hi:+.1f}% — "
+         f"modest. Where it earns its place is <i>capacity</i>: it raises the servable ceiling, "
+         f"which is a different claim from being faster per token:"),
         rows,
-        (f"That is a real but modest gain, and it is worth contrasting with the same search on a "
-         f"smaller-memory part: on an 79.2 GiB H100 <i>no</i> non-EP control survives at all. The "
-         f"difference is headroom \u2014 with {dev} GiB per device the weights and a 256k-token KV "
-         f"pool fit without sharding the experts, so EP becomes an optimisation rather than a "
-         f"precondition."
+        (f"It is worth contrasting that with the same search on a smaller-memory part: on a "
+         f"79.2 GiB H100 <i>no</i> non-EP control survives at all. The difference is headroom "
+         f"\u2014 with {dev} GiB per device the weights and a 256k-token KV pool fit without "
+         f"sharding the experts, so here EP is an optimisation rather than a precondition."
          if sc["hardware"] != "h100" else
-         f"That is a real but modest gain."),
-        (f"What does still bind is the footprint: {len(pa['dropped'])} shape(s) were refused, and the "
-         f"narrow-TP layouts that survive scale badly because the expert-parallel width is derived as "
-         f"tp \u00d7 dp \u2014 a width of 1 shards nothing."),
+         f"That is a real but modest gain at matched load."),
+        ((f"The footprint still binds: {len(pa['dropped'])} shape(s) were refused outright. And the "
+          f"narrow-TP layouts that do survive scale badly, because the expert-parallel width is "
+          f"derived as tp \u00d7 dp \u2014 a width of 1 shards nothing.")
+         if pa["dropped"] else
+         (f"On this part the footprint stops binding altogether: <b>no shape was refused</b>, where "
+          f"the 79.2 GiB H100 run lost {{}} of them to memory. What still separates the layouts is "
+          f"sharding width \u2014 the expert-parallel width is derived as tp \u00d7 dp, so the "
+          f"narrow-TP arms shard nothing and scale badly.").format(_h100_drop_count())),
       ]}
 
 

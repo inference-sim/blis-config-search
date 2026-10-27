@@ -72,10 +72,10 @@
       "figure": "scale_bars",
       "num": 3,
       "prose": [
-        "Every expert-parallel candidate is run beside its non-EP control, so the direction is measured rather than assumed. On H200 the controls <b>do</b> run, and expert parallelism is worth between +0.0% and +11.3% depending on the layout:",
-        "<ul><li><code>4x TP2xDP4 + EP</code>: 5.9 vs 5.3 tok/s/GPU, +11.3%</li><li><code>4x TP4xDP2 + EP</code>: 17.7 vs 16.7 tok/s/GPU, +6.0%</li><li><code>4x TP8 + EP</code>: 22.0 vs 21.7 tok/s/GPU, +1.4%</li><li><code>4x TP1xDP8 + EP</code>: 1.8 vs 1.8 tok/s/GPU, +0.0%</li></ul>",
-        "That is a real but modest gain, and it is worth contrasting with the same search on a smaller-memory part: on an 79.2 GiB H100 <i>no</i> non-EP control survives at all. The difference is headroom \u2014 with 141.0 GiB per device the weights and a 256k-token KV pool fit without sharding the experts, so EP becomes an optimisation rather than a precondition.",
-        "What does still bind is the footprint: 3 shape(s) were refused, and the narrow-TP layouts that survive scale badly because the expert-parallel width is derived as tp \u00d7 dp \u2014 a width of 1 shards nothing."
+        "Every expert-parallel candidate is run beside its non-EP control, so the direction is measured rather than assumed. On H200 the controls <b>do</b> run. Compared at a load both arms served, expert parallelism is worth between +3.7% and +29.7% \u2014 modest. Where it earns its place is <i>capacity</i>: it raises the servable ceiling, which is a different claim from being faster per token:",
+        "<ul><li><code>4x TP1xDP8 + EP</code>: +29.7% at a matched 128 lanes (8.0 vs 6.2 tok/s/GPU)</li><li><code>4x TP2xDP4 + EP</code>: +26.6% at a matched 128 lanes (19.3 vs 15.2 tok/s/GPU)</li><li><code>4x TP4xDP2 + EP</code>: +12.5% at a matched 128 lanes (30.8 vs 27.3 tok/s/GPU)</li><li><code>4x TP8 + EP</code>: +3.7% at a matched 128 lanes (43.8 vs 42.2 tok/s/GPU)</li></ul>",
+        "It is worth contrasting that with the same search on a smaller-memory part: on a 79.2 GiB H100 <i>no</i> non-EP control survives at all. The difference is headroom \u2014 with 141.0 GiB per device the weights and a 256k-token KV pool fit without sharding the experts, so here EP is an optimisation rather than a precondition.",
+        "The footprint still binds: 3 shape(s) were refused outright. And the narrow-TP layouts that do survive scale badly, because the expert-parallel width is derived as tp \u00d7 dp \u2014 a width of 1 shards nothing."
       ],
       "title": "Expert parallelism helps here \u2014 but it is not what rescues the fit"
     },

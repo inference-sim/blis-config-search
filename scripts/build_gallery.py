@@ -37,7 +37,28 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # for build_cata
 import report as report_py  # noqa: E402
 
 RUN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
-KNOWN_HARDWARE = {"h100", "h200", "gb200", "a100", "mi300x"}
+# The hardware names a run may claim. Read from the CATALOG, which is the authority on what BLIS
+# can actually price (NS-6), with the old hardcoded set kept only as an offline fallback. The
+# hardcoded set had drifted both ways: it listed `mi300x`, which the catalog does not carry, and
+# omitted `b200`/`b300`/`l40s`, which it does -- so a legitimate B200 report failed the build with
+# "unknown hardware 'b200'".
+_FALLBACK_HARDWARE = {"h100", "h200", "gb200", "a100", "mi300x"}
+
+
+def _known_hardware():
+    try:
+        import build_catalog
+        cat = build_catalog.build(os.path.join(ROOT, os.pardir))
+        names = {str(g.get("name", "")).lower() for g in (cat.get("hardware") or [])}
+        names |= {n.split("-")[0] for n in names if n}      # gb200-nvl72 -> gb200
+        if names:
+            return names | _FALLBACK_HARDWARE
+    except Exception:
+        pass
+    return set(_FALLBACK_HARDWARE)
+
+
+KNOWN_HARDWARE = _known_hardware()
 # Report-data files copied verbatim next to the rendered index.html (so a report stays
 # regenerable from the published site). Nothing executable; no arbitrary contributor files.
 REPORT_DATA_FILES = ("scenario.json", "pareto.json", "runs.jsonl", "report.json")

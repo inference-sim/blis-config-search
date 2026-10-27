@@ -1,0 +1,96 @@
+{
+  "explore_prose": [
+    "Each row below is one BLIS replay run. The load axis is <b>session-tree lanes</b>, not in-flight requests: one lane drives a whole agent trajectory that fans out into many sub-requests, so a lane is worth far more concurrency than a single chat turn.",
+    "The interactivity floor is the default 50 tok/s per user (ITL p99 \u2264 20 ms)."
+  ],
+  "glossary": [
+    {
+      "def": "One live agent trajectory, not one request.",
+      "id": "g-lane",
+      "long": "An AgentX lane replays a whole recorded coding session: a main turn, its sub-agent groups and their inner requests. One lane therefore puts many requests in flight, which is why the lane ladder is much shorter than a request-concurrency ramp.",
+      "term": "session-tree lane"
+    },
+    {
+      "def": "tp \u00d7 pcp \u00d7 dp \u2014 derived, never declared.",
+      "id": "g-epw",
+      "long": "A width of 1 shards no experts, so it neither saves memory nor costs collectives. This is why adding dp rescues a layout that failed at the same tp.",
+      "term": "expert-parallel width"
+    },
+    {
+      "def": "C* is the highest load meeting the floor; the recommendation is 0.8 \u00d7 C*.",
+      "id": "g-cstar",
+      "long": "The reported figures are measured AT the usable load, not read off a nearby rung of the ladder, so the throughput quoted is the throughput at the load recommended.",
+      "term": "C* and usable load"
+    },
+    {
+      "def": "About 109 input tokens per output token on this corpus.",
+      "id": "g-prefill",
+      "long": "Output tok/s per GPU is the ranking metric but a poor description of the machine's work here: most of each request is reading context, so a low output rate can coexist with very high total token throughput.",
+      "term": "prefill-dominated"
+    }
+  ],
+  "hero": [
+    {
+      "h": "What was tested",
+      "html": "Every expert-parallel and tensor-parallel layout that fills 32 GPUs, probed up a session-lane ladder and refined one engine knob at a time \u2014 189 runs, 27 servable finalists, 0 shapes the simulator refused or that missed the floor."
+    },
+    {
+      "h": "What was found",
+      "html": "This is a <b>prefill-dominated</b> workload: 94,734 input tokens per request against 872 output, about <b>109:1</b>. Output tok/s per GPU reads low by chatbot standards because almost all the work is reading context \u2014 the winner is ingesting roughly 139,780 input tok/s."
+    },
+    {
+      "h": "What to run",
+      "html": "<b>8x TP4 + EP</b> at 102 concurrent agent sessions (80% of the measured ceiling of 128). Expert parallelism is not optional here: <b>every</b> non-EP control ran out of memory before serving a request.",
+      "run": true
+    }
+  ],
+  "meta": [
+    "BLIS discrete-event simulation",
+    "blis-latency-kernel v0.3.0",
+    "AgentX MVP replay (393 recorded Claude Code trajectories)",
+    "32\u00d7 B200 \u00b7 4 nodes"
+  ],
+  "recommendation_num": 9,
+  "recommendation_prose": [
+    "<b>8x TP4 + EP</b> at 102 concurrent agent sessions, on the b200 deployment flags in the table below. That is 1,286.9 output tok/s across 32 GPUs (40.2 per GPU) at 144.4 tok/s per user and ITL p99 6.9 ms.",
+    "Leave the engine knobs at their defaults. None of the refinements helped, and the routing profiles in particular cost capacity on this traffic.",
+    "These are simulator predictions over a recorded corpus, not a live cluster measurement. The corpus is pinned by sha256, so the traffic is reproducible; the pricing is the blis-latency-kernel cost model and should be spot-checked against real serving data before anyone sizes a cluster from it."
+  ],
+  "sections": [
+    {
+      "caption_note": "The winner's ceiling is <b>128 lanes</b>; the recommendation sits at 102, measured directly rather than interpolated.",
+      "figure": "operating_curve",
+      "num": 2,
+      "prose": [
+        "Throughput climbs almost linearly with lanes and then falls off a cliff. 8x TP4 + EP holds 135.2 tok/s per user at 128 lanes.",
+        "The cliff is why the recommendation is 102 lanes and not the ceiling: at the ceiling there is no headroom for a burst, and this workload's bursts are whole agent trajectories waking up at once."
+      ],
+      "title": "The operating curve, and where it stops"
+    },
+    {
+      "caption_note": "Both arms of each topology are shown where both were servable.",
+      "figure": "scale_bars",
+      "num": 3,
+      "prose": [
+        "Every expert-parallel candidate is run beside its non-EP control, so the direction is measured rather than assumed. On B200 the controls <b>do</b> run. Compared at a load both arms served, expert parallelism is worth between +0.0% and +13.1% \u2014 modest. Where it earns its place is <i>capacity</i>: it raises the servable ceiling, which is a different claim from being faster per token:",
+        "<ul><li><code>4x TP2xDP4 + EP</code>: +13.1% at a matched 128 lanes (37.8 vs 33.4 tok/s/GPU) \u2014 and it moves the servable ceiling 32 \u2192 64 lanes, which is what the 19.7 vs 7.7 tok/s/GPU at each arm's own usable load reflects</li><li><code>4x TP8 + EP</code>: +3.0% at a matched 128 lanes (56.2 vs 54.5 tok/s/GPU)</li><li><code>8x TP4 + EP</code>: +2.7% at a matched 128 lanes (57.4 vs 55.9 tok/s/GPU)</li><li><code>4x TP4xDP2 + EP</code>: +2.7% at a matched 128 lanes (44.5 vs 43.3 tok/s/GPU)</li><li><code>4x TP1xDP8 + EP</code>: +0.0% at a matched 128 lanes (25.9 vs 25.9 tok/s/GPU)</li></ul>",
+        "It is worth contrasting that with the same search on a smaller-memory part: on a 79.2 GiB H100 <i>no</i> non-EP control survives at all. The difference is headroom \u2014 with 178.4 GiB per device the weights and a 256k-token KV pool fit without sharding the experts, so here EP is an optimisation rather than a precondition.",
+        "On this part the footprint stops binding altogether: <b>no shape was refused</b>, where the 79.2 GiB H100 run lost 12 of them to memory. What still separates the layouts is sharding width \u2014 the expert-parallel width is derived as tp \u00d7 dp, so the narrow-TP arms shard nothing and scale badly."
+      ],
+      "title": "Expert parallelism helps here \u2014 but it is not what rescues the fit"
+    },
+    {
+      "caption_note": "Crosses are runs that missed the interactivity floor.",
+      "figure": "tail_scatter",
+      "num": 4,
+      "prose": [
+        "Refinement moves one knob at a time off the winning topology, so any difference is attributable. Nothing improved on the defaults \u2014 these knobs <b>constrain</b>:",
+        "<ul><li><code>queue-kv routing</code>: 23.7 tok/s/GPU, -41.0% \u2014 and it halves usable capacity, C* 128 \u2192 64</li><li><code>batch tokens 2,048</code>: 35.2 tok/s/GPU, -12.4%</li><li><code>prefix-affinity routing</code>: 39.6 tok/s/GPU, -1.5%</li><li><code>gpu mem util 0.7</code>: 39.8 tok/s/GPU, -1.0%</li><li><code>max seqs 64</code>: 40.3 tok/s/GPU, +0.2%</li></ul>",
+        "The expensive one is <code>queue-kv routing</code> at -41.0%. It is not a small scheduling inefficiency: routing on queue depth and KV utilisation drops the servable ceiling from 128 lanes to 64, so the deployment loses half its capacity. Scoring on instantaneous KV pressure is actively wrong when every request arrives carrying ~94,734 tokens of context \u2014 the instance that looks least loaded is the one about to be handed an enormous prefill."
+      ],
+      "title": "The knobs that bind, and the one that really hurts"
+    }
+  ],
+  "standfirst": "A configuration search over 189 BLIS replay runs on 32\u00d7 B200, driven by the recorded AgentX agentic traffic rather than a synthetic request shape. The winner is <b>8x TP4 + EP</b> at 1,286.9 output tok/s (40.2 per GPU) while every user still reads at 144.4 tok/s.",
+  "title": "Serving DeepSeek-V4.1-Flash to coding agents on 4 B200 nodes"
+}

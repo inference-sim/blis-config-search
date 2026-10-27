@@ -40,7 +40,7 @@
     },
     {
       "h": "What to run",
-      "html": "<b>8x TP4 + EP</b> at 102 concurrent agent sessions (80% of the measured ceiling of 128). Expert parallelism is not optional here: <b>every</b> non-EP control ran out of memory before serving a request.",
+      "html": "<b>8x TP4 + EP (1 draft token)</b> at 102 concurrent agent sessions (80% of the measured ceiling of 128). Expert parallelism is not optional here: <b>every</b> non-EP control ran out of memory before serving a request.",
       "run": true
     }
   ],
@@ -52,7 +52,7 @@
   ],
   "recommendation_num": 9,
   "recommendation_prose": [
-    "<b>8x TP4 + EP</b> at 102 concurrent agent sessions, on the b200 deployment flags in the table below. That is 1,286.9 output tok/s across 32 GPUs (40.2 per GPU) at 144.4 tok/s per user and ITL p99 6.9 ms.",
+    "<b>8x TP4 + EP (1 draft token)</b> at 102 concurrent agent sessions, on the b200 deployment flags in the table below. That is 1,392.3 output tok/s across 32 GPUs (43.5 per GPU) at 101.9 tok/s per user and ITL p99 17.8 ms.",
     "Leave the engine knobs at their defaults. None of the refinements helped, and the routing profiles in particular cost capacity on this traffic.",
     "These are simulator predictions over a recorded corpus, not a live cluster measurement. The corpus is pinned by sha256, so the traffic is reproducible; the pricing is the blis-latency-kernel cost model and should be spot-checked against real serving data before anyone sizes a cluster from it."
   ],
@@ -62,7 +62,7 @@
       "figure": "operating_curve",
       "num": 2,
       "prose": [
-        "Throughput climbs almost linearly with lanes and then falls off a cliff. 8x TP4 + EP holds 135.2 tok/s per user at 128 lanes.",
+        "Throughput climbs almost linearly with lanes and then falls off a cliff. 8x TP4 + EP (1 draft token) holds 52.7 tok/s per user at 128 lanes.",
         "The cliff is why the recommendation is 102 lanes and not the ceiling: at the ceiling there is no headroom for a burst, and this workload's bursts are whole agent trajectories waking up at once."
       ],
       "title": "The operating curve, and where it stops"
@@ -103,6 +103,6 @@
       "title": "Speculative decoding, and what it does to the interactivity number"
     }
   ],
-  "standfirst": "A configuration search over 210 BLIS replay runs on 32\u00d7 B200, driven by the recorded AgentX agentic traffic rather than a synthetic request shape. The winner is <b>8x TP4 + EP</b> at 1,286.9 output tok/s (40.2 per GPU) while every user still reads at 144.4 tok/s.",
+  "standfirst": "A configuration search over 210 BLIS replay runs on 32\u00d7 B200, driven by the recorded AgentX agentic traffic rather than a synthetic request shape. The winner is <b>8x TP4 + EP (1 draft token)</b> at 1,392.3 output tok/s (43.5 per GPU) while every user still reads at 101.9 tok/s.",
   "title": "Serving DeepSeek-V4.1-Flash to coding agents on 4 B200 nodes"
 }

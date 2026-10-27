@@ -1,28 +1,22 @@
 {
-  "_source": "REAL kernel run",
-  "run_id": "glm53flash-h100-chatbot-kernel-0001",
-  "model": "glm-5.3-flash",
-  "hardware": "h100",
   "gpu_budget": 16,
+  "hardware": "h100",
+  "headroom": 0.8,
+  "interactivity_floor": {
+    "itl_p99_ms_max": 20.0,
+    "tok_per_s_per_user": 50.0
+  },
+  "model": "glm-5.3-flash",
+  "objective": "dual-pareto",
+  "pinned_stack": {
+    "blis": "v0.12.0",
+    "catalog": "0.3.0",
+    "kernel": "v0.3.0",
+    "registry": "v0.2.0"
+  },
+  "run_id": "glm53flash-h100-chatbot-kernel-0001",
+  "seed": 0,
   "workload": {
     "preset": "chatbot"
-  },
-  "objective": "dual-pareto",
-  "interactivity_floor": {
-    "tok_per_s_per_user": 50,
-    "itl_p99_ms_max": 20.0
-  },
-  "headroom": 0.8,
-  "slos": {},
-  "workload_params": {
-    "num_requests": 200
-  },
-  "seed": 0,
-  "latency_model": "blis-latency-kernel",
-  "pinned_stack": {
-    "blis": "PR#1851 @ 99bec1b6",
-    "kernel": "v0.1.0",
-    "catalog": "0.2.1",
-    "registry": "v0.1.1"
   }
 }

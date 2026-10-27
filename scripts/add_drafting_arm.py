@@ -180,6 +180,28 @@ def main(argv=None):
         })
 
     pa["finalists"] = run_search.rank_finalists(pa["finalists"])
+
+    # gallery.json is a SIDECAR of display counts, not derived at render time, so appending runs
+    # without refreshing it leaves the card quoting the pre-drafting totals (189 where the ledger
+    # now holds 210). Recount from the ledger, and refresh the winner blurb, which may have
+    # changed: on b200 the drafting arm took the recommendation.
+    gpath = os.path.join(D, "gallery.json")
+    if os.path.isfile(gpath):
+        g = json.load(open(gpath))
+        floor_itl = float(floor.get("itl_p99_ms_max", 20.0))
+        g["n_runs"] = len(runs)
+        g["n_servable"] = sum(
+            1 for r in runs
+            if r.get("returncode") == 0
+            and (r.get("metrics") or {}).get("itl_p99_ms", 1e9) <= floor_itl)
+        top = pa["finalists"][0]
+        pa["winner"] = {**(pa.get("winner") or {}),
+                        "chosen": run_search.winner_name(top),
+                        "label": top["label"], "variant": top.get("variant", ""),
+                        "reason": run_search.winner_reason(top, floor_rate, headroom)}
+        g["reason"] = pa["winner"]["reason"]
+        with open(gpath, "w") as f:
+            json.dump(g, f, indent=2, sort_keys=True)
     with open(os.path.join(D, "runs.jsonl"), "w") as f:
         for r in runs:
             f.write(json.dumps(r, sort_keys=True) + "\n")

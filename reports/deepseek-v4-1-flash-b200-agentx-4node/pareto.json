@@ -2353,7 +2353,7 @@
   "objective": "dual-pareto",
   "winner": {
     "budget_max": "8x TP4 + EP",
-    "chosen": "8x TP4 + EP",
+    "chosen": "8x TP4 + EP (1 draft token)",
     "efficiency_per_gpu": "8x TP4 + EP",
     "label": "8x TP4 + EP",
     "move_trail": [
@@ -2362,7 +2362,7 @@
       "probed a session-lane ramp per topology with real BLIS replay runs (ladder to 128 lanes)",
       "ranked finalists on usable capacity (headroom 0.8)"
     ],
-    "reason": "8x TP4 + EP at default engine and routing settings gives the most tok/s/GPU (40.2 tok/s/GPU, 1286.9 tok/s fleet) while holding the 50 tok/s/user floor; usable load c=102 (C*=128, headroom 0.8).",
-    "variant": ""
+    "reason": "8x TP4 + EP with 1 draft token gives the most tok/s/GPU (43.5 tok/s/GPU, 1392.3 tok/s fleet) while holding the 50 tok/s/user floor; usable load c=102 (C*=128, headroom 0.8).",
+    "variant": "1 draft token"
   }
 }

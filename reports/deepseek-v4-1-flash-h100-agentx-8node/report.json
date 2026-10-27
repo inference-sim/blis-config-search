@@ -1,0 +1,102 @@
+{
+  "explore_prose": [
+    "Each row below is one BLIS replay run. The load axis is <b>session-tree lanes</b>, not in-flight requests: one lane drives a whole agent trajectory that fans out into many sub-requests, so a lane is worth far more concurrency than a single chat turn.",
+    "The interactivity floor is the default <b>50 tok/s per user</b> (ITL p99 \u2264 20 ms). That is a <i>chatbot</i> floor, and it is worth saying plainly that it may be the wrong one for an agent: these requests carry 93,331 tokens of context and their p99 time-to-first-token is 11 s, so a user waits seconds before the first token regardless of how fast the stream then runs. It is kept because it discriminates sharply on this workload \u2014 the winner holds 103.3 tok/s/user at 128 lanes and collapses to 2.5 at 256"
+  ],
+  "glossary": [
+    {
+      "def": "One live agent trajectory, not one request.",
+      "id": "g-lane",
+      "long": "An AgentX lane replays a whole recorded coding session: a main turn, its sub-agent groups and their inner requests. One lane therefore puts many requests in flight, which is why the lane ladder is much shorter than a request-concurrency ramp.",
+      "term": "session-tree lane"
+    },
+    {
+      "def": "tp \u00d7 pcp \u00d7 dp \u2014 derived, never declared.",
+      "id": "g-epw",
+      "long": "A width of 1 shards no experts, so it neither saves memory nor costs collectives. This is why adding dp rescues a layout that failed at the same tp.",
+      "term": "expert-parallel width"
+    },
+    {
+      "def": "C* is the highest load meeting the floor; the recommendation is 0.8 \u00d7 C*.",
+      "id": "g-cstar",
+      "long": "The reported figures are measured AT the usable load, not read off a nearby rung of the ladder, so the throughput quoted is the throughput at the load recommended.",
+      "term": "C* and usable load"
+    },
+    {
+      "def": "About 108 input tokens per output token on this corpus.",
+      "id": "g-prefill",
+      "long": "Output tok/s per GPU is the ranking metric but a poor description of the machine's work here: most of each request is reading context, so a low output rate can coexist with very high total token throughput.",
+      "term": "prefill-dominated"
+    }
+  ],
+  "hero": [
+    {
+      "h": "What was tested",
+      "html": "Every expert-parallel and tensor-parallel layout that fills 64 GPUs, probed up a session-lane ladder and refined one engine knob at a time \u2014 132 runs, 15 servable finalists, 12 shapes the simulator refused or that missed the floor."
+    },
+    {
+      "h": "What was found",
+      "html": "This is a <b>prefill-dominated</b> workload: 93,331 input tokens per request against 861 output, about <b>108:1</b>. Output tok/s per GPU reads low by chatbot standards because almost all the work is reading context \u2014 the winner is ingesting roughly 118,470 input tok/s."
+    },
+    {
+      "h": "What to run",
+      "html": "<b>8x TP8 + EP</b> at 102 concurrent agent sessions (80% of the measured ceiling of 128). Expert parallelism is not optional here: <b>every</b> non-EP control ran out of memory before serving a request.",
+      "run": true
+    }
+  ],
+  "meta": [
+    "BLIS discrete-event simulation",
+    "blis-latency-kernel v0.3.0",
+    "AgentX MVP replay (393 recorded Claude Code trajectories)",
+    "64\u00d7 H100 \u00b7 8 nodes"
+  ],
+  "recommendation_num": 9,
+  "recommendation_prose": [
+    "<b>8x TP8 + EP</b> at 102 concurrent agent sessions, on the h100 deployment flags in the table below. That is 1,092.7 output tok/s across 64 GPUs (17.1 per GPU) at 110.2 tok/s per user and ITL p99 9.1 ms.",
+    "Leave the engine knobs at their defaults. None of the refinements helped, and the routing profiles in particular cost capacity on this traffic.",
+    "These are simulator predictions over a recorded corpus, not a live cluster measurement. The corpus is pinned by sha256, so the traffic is reproducible; the pricing is the blis-latency-kernel cost model and should be spot-checked against real serving data before anyone sizes a cluster from it."
+  ],
+  "sections": [
+    {
+      "caption_note": "The winner's ceiling is <b>128 lanes</b>; the recommendation sits at 102, measured directly rather than interpolated.",
+      "figure": "operating_curve",
+      "num": 2,
+      "prose": [
+        "Throughput climbs almost linearly with lanes and then falls off a cliff. 8x TP8 + EP holds 103.3 tok/s per user at 128 lanes, and at 256 lanes per-user rate collapses to 2.5 tok/s while ITL p99 jumps from 9.7 ms to 400 ms.",
+        "The cliff is why the recommendation is 102 lanes and not the ceiling: at the ceiling there is no headroom for a burst, and this workload's bursts are whole agent trajectories waking up at once."
+      ],
+      "title": "The operating curve, and where it stops"
+    },
+    {
+      "caption_note": "Only expert-parallel layouts appear: no control produced a servable run.",
+      "figure": "scale_bars",
+      "num": 3,
+      "prose": [
+        "The search runs every expert-parallel candidate beside its non-EP control, because the direction is meant to be measured rather than assumed. Here the comparison is not close: <b>every one of the 5 non-EP controls failed outright</b>, and all 15 finalists are expert-parallel.",
+        "The failures are memory, not throughput \u2014 <i>\u201cNo available memory for the cache blocks\u201d</i>, or a per-rank fixed occupancy above the 79.2 GiB device. Sharding the experts is what makes a 256k-token context fit on this part at all. It is also why the narrow-TP shapes die even with EP on: the expert-parallel width is derived as tp \u00d7 dp, so a width of 1 shards nothing."
+      ],
+      "title": "Expert parallelism is load-bearing, not an optimisation"
+    },
+    {
+      "caption_note": "Crosses are runs that missed the interactivity floor.",
+      "figure": "tail_scatter",
+      "num": 4,
+      "prose": [
+        "Refinement moves one knob at a time off the winning topology, so any difference is attributable. Nothing improved on the defaults \u2014 these knobs <b>constrain</b>:",
+        "<ul><li><code>queue-kv routing</code>: 9.3 tok/s/GPU, -45.6% \u2014 and it halves usable capacity, C* 128 \u2192 64</li><li><code>batch tokens 2,048</code>: 10.1 tok/s/GPU, -40.9% \u2014 and it halves usable capacity, C* 128 \u2192 64</li><li><code>prefix-affinity routing</code>: 16.6 tok/s/GPU, -2.9%</li><li><code>max seqs 64</code>: 16.8 tok/s/GPU, -1.8%</li></ul>",
+        "The expensive one is <code>queue-kv routing</code> at -45.6%. It is not a small scheduling inefficiency: routing on queue depth and KV utilisation drops the servable ceiling from 128 lanes to 64, so the deployment loses half its capacity. Scoring on instantaneous KV pressure is actively wrong when every request arrives carrying ~93,331 tokens of context \u2014 the instance that looks least loaded is the one about to be handed an enormous prefill."
+      ],
+      "title": "The knobs that bind, and the one that really hurts"
+    },
+    {
+      "num": 5,
+      "prose": [
+        "The same search at 32 and 64 GPUs on H100 makes the scaling explicit. Going from 32 to 64 GPUs multiplies fleet throughput by <b>1.62x</b> (675.2 to 1,092.7 output tok/s) and the servable ceiling by 2.00x (64 to 128 lanes).",
+        "Per-GPU efficiency therefore <b>falls</b> from 21.1 to 17.1 tok/s/GPU (0.81x). Capacity scales but efficiency does not: the second half of the cluster is doing real work \u2014 the ceiling genuinely doubles \u2014 while each GPU does less of it. For a fixed interactivity target that is the honest trade, and it means the larger cluster is the right buy only if you need the extra 64 lanes of capacity, not if you are chasing tokens per GPU."
+      ],
+      "title": "What doubling the cluster buys"
+    }
+  ],
+  "standfirst": "A configuration search over 132 BLIS replay runs on 64\u00d7 H100, driven by the recorded AgentX agentic traffic rather than a synthetic request shape. The winner is <b>8x TP8 + EP</b> at 1,092.7 output tok/s (17.1 per GPU) while every user still reads at 110.2 tok/s.",
+  "title": "Serving DeepSeek-V4.1-Flash to coding agents on 8 H100 nodes"
+}

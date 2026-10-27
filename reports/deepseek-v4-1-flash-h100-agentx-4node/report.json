@@ -87,6 +87,14 @@
         "The expensive one is <code>queue-kv routing</code> at -60.7%. It is not a small scheduling inefficiency: routing on queue depth and KV utilisation drops the servable ceiling from 64 lanes to 32, so the deployment loses half its capacity. Scoring on instantaneous KV pressure is actively wrong when every request arrives carrying ~91,042 tokens of context \u2014 the instance that looks least loaded is the one about to be handed an enormous prefill."
       ],
       "title": "The knobs that bind, and the one that really hurts"
+    },
+    {
+      "num": 5,
+      "prose": [
+        "The same search at 32 and 64 GPUs on H100 makes the scaling explicit. Going from 32 to 64 GPUs multiplies fleet throughput by <b>1.62x</b> (675.2 to 1,092.7 output tok/s) and the servable ceiling by 2.00x (64 to 128 lanes).",
+        "Per-GPU efficiency therefore <b>falls</b> from 21.1 to 17.1 tok/s/GPU (0.81x). Capacity scales but efficiency does not: the second half of the cluster is doing real work \u2014 the ceiling genuinely doubles \u2014 while each GPU does less of it. For a fixed interactivity target that is the honest trade, and it means the larger cluster is the right buy only if you need the extra 64 lanes of capacity, not if you are chasing tokens per GPU."
+      ],
+      "title": "What doubling the cluster buys"
     }
   ],
   "standfirst": "A configuration search over 117 BLIS replay runs on 32\u00d7 H100, driven by the recorded AgentX agentic traffic rather than a synthetic request shape. The winner is <b>4x TP8 + EP</b> at 675.2 output tok/s (21.1 per GPU) while every user still reads at 113.5 tok/s.",

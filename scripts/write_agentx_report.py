@@ -167,6 +167,60 @@ def _ep_section():
          f"tp \u00d7 dp \u2014 a width of 1 shards nothing."),
       ]}
 
+
+# --- scaling against the sibling budget, when that run exists ---------------------------------
+# The six reports come in 4-node/8-node pairs on the same part, so each can say what doubling the
+# cluster actually bought. Measured rather than assumed: on H100 doubling 32 -> 64 GPUs doubled
+# CAPACITY (C* 64 -> 128 lanes) but multiplied throughput by only 1.62, so per-GPU efficiency
+# FELL. A report that quoted only its own numbers would hide that.
+def _sibling():
+    """The same model+hardware run at the other node count, or None."""
+    here = os.path.basename(os.path.abspath(D))
+    for a, b in (("-4node", "-8node"), ("-8node", "-4node")):
+        if here.endswith(a):
+            cand = os.path.join(os.path.dirname(os.path.abspath(D)), here[: -len(a)] + b)
+            if os.path.isfile(os.path.join(cand, "pareto.json")):
+                return cand
+    return None
+
+def _scaling_section(num):
+    sib = _sibling()
+    if not sib:
+        return None
+    sp = json.load(open(f"{sib}/pareto.json"))
+    ss = json.load(open(f"{sib}/scenario.json"))
+    sw = next((f for f in sp["finalists"] if f["label"] == sp["winner"]["chosen"]), None)
+    if not sw:
+        return None
+    sa = sw["at_c_use"]
+    sg, mg = ss["gpu_budget"], gpus
+    small, large = (sa, wa) if sg < mg else (wa, sa)
+    small_g, large_g = (sg, mg) if sg < mg else (mg, sg)
+    small_c, large_c = (sw["c_star"], win["c_star"]) if sg < mg else (win["c_star"], sw["c_star"])
+    tps_x = large["tokens_per_sec"] / small["tokens_per_sec"]
+    pg_x = large["tokens_per_sec_per_gpu"] / small["tokens_per_sec_per_gpu"]
+    cap_x = large_c / small_c if small_c else 0
+    return {
+      "num": num,
+      "title": f"What doubling the cluster buys",
+      "prose": [
+        (f"The same search at {small_g} and {large_g} GPUs on {hw} makes the scaling explicit. "
+         f"Going from {small_g} to {large_g} GPUs multiplies fleet throughput by "
+         f"<b>{tps_x:.2f}x</b> ({n(small['tokens_per_sec'])} to {n(large['tokens_per_sec'])} output "
+         f"tok/s) and the servable ceiling by {cap_x:.2f}x ({small_c} to {large_c} lanes)."),
+        (f"Per-GPU efficiency therefore <b>{'falls' if pg_x < 1 else 'rises'}</b> "
+         f"{'from' if pg_x < 1 else 'from'} {n(small['tokens_per_sec_per_gpu'])} to "
+         f"{n(large['tokens_per_sec_per_gpu'])} tok/s/GPU ({pg_x:.2f}x). "
+         + (f"Capacity scales but efficiency does not: the second half of the cluster is doing "
+            f"real work \u2014 the ceiling genuinely doubles \u2014 while each GPU does less of it. "
+            f"For a fixed interactivity target that is the honest trade, and it means the larger "
+            f"cluster is the right buy only if you need the extra {large_c - small_c} lanes of "
+            f"capacity, not if you are chasing tokens per GPU."
+            if pg_x < 1 else
+            f"Efficiency holds up at the larger size, so the bigger cluster is the better buy on "
+            f"both axes.")),
+      ]}
+
 rep = {
   "title": f"Serving DeepSeek-V4.1-Flash to coding agents on {nodes} {hw} nodes",
   "standfirst": (
@@ -278,6 +332,13 @@ rep = {
               "with very high total token throughput.")},
   ],
 }
+# The scaling section only exists when the sibling budget has been searched, so it is appended
+# rather than inlined -- a report for a part whose pair has not run yet simply omits it.
+_scale = _scaling_section(num=5)
+if _scale:
+    rep["sections"].append(_scale)
+rep["sections"] = [s for s in rep["sections"] if s]
+
 json.dump(rep, open(f"{D}/report.json", "w"), indent=2, sort_keys=True)
 print(f"wrote {D}/report.json")
 print("  winner:", pa["winner"]["chosen"])

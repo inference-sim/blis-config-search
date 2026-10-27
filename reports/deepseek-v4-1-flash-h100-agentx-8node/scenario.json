@@ -1,0 +1,30 @@
+{
+  "gpu_budget": 64,
+  "hardware": "h100",
+  "headroom": 0.8,
+  "interactivity_floor": {
+    "itl_p99_ms_max": 20.0,
+    "tok_per_s_per_user": 50.0
+  },
+  "model": "deepseek-v4.1-flash",
+  "objective": "dual-pareto",
+  "pinned_stack": {
+    "blis": "v0.12.0",
+    "catalog": "0.3.0",
+    "kernel": "v0.3.0",
+    "registry": "v0.1.1"
+  },
+  "run_id": "deepseek-v4-1-flash-h100-agentx-8node",
+  "seed": 42,
+  "workload": {
+    "replay": {
+      "benchmark_duration": "900s",
+      "corpus": "/Users/jchen/go/src/inference-sim/inference-sim/traces.jsonl",
+      "corpus_cache": "/tmp/agx-cache",
+      "corpus_sha256": "e39cd2ff3eba21d4a3664be51da743ac3d2149a1933898cafc7bfeac8147eeef",
+      "grace_period": "inf",
+      "max_context_length": "max_model_len",
+      "scenario": "inferencex-agentx-mvp"
+    }
+  }
+}

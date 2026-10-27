@@ -1,0 +1,8 @@
+{
+  "generated": "2026-10-26",
+  "isl_osl": "replay \u00b7 ~93,578 in / 865 out per request",
+  "n_runs": 132,
+  "n_servable": 88,
+  "reason": "8x TP8 + EP at default engine and routing settings gives the most tok/s/GPU (17.1 tok/s/GPU, 1092.7 tok/s fleet) while holding the 50 tok/s/user floor; usable load c=102 (C*=128, headroom 0.8).",
+  "synthetic": false
+}

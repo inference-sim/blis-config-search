@@ -30,6 +30,17 @@ the grid to sweep it displays correctly.
 GPUS_PER_NODE = 8          # a per-instance footprint beyond one node needs a fabric (see run_blis)
 TP_TIERS = (1, 2, 4, 8, 16, 32, 64)    # powers of two; past 8 the instance spans nodes
 DP_TIERS = (1, 2, 4, 8)
+# COST NOTE (measured on deepseek-v4.1-flash / AgentX replay / 32 GPUs, 2026-10-26). The narrow-tp
+# arms are the expensive half of a search and have never placed: tp<=2 took 39% of total BLIS wall
+# time on H100 and 30% on H200, and scored 1.8-5.9 tok/s/GPU against the winners' 21-31. The cause
+# is structural -- expert-parallel width is derived as tp x dp, so a wide-dp/narrow-tp layout both
+# shards poorly AND makes the simulation expensive (8 DP ranks step in lockstep).
+#
+# They are kept anyway, deliberately: "narrow TP collapses, and here is the curve" is a FINDING the
+# reports state, and dropping the arm would leave a lone survivor looking like the whole search
+# space (the thing `dropped[]` exists to prevent). If a campaign is wall-clock bound, bound the
+# grid by raising the floor here rather than by truncating max_candidates, and say in the report
+# that the grid was bounded.
 
 
 def is_moe(model_entry):

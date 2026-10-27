@@ -270,6 +270,85 @@ def _scaling_section(num):
             f"both axes.")),
       ]}
 
+
+# --- speculative decoding, its own section ----------------------------------------------------
+# Drafting is not an engine THROTTLE like max_num_seqs or gpu_memory_utilization: those only ever
+# constrain, while drafting can genuinely raise throughput, and its own measured curve is
+# non-monotonic (K=1 was -25% on b200 chatbot because AL 1.81 does not pay for the draft, K=5
+# +13%). It also changes what the per-user axis MEANS, which a reader has to be told. So it gets
+# its own section rather than a bullet among the knobs that bind downward.
+def _draft_rows():
+    """(K, tok/s/GPU, delta% vs no drafting, C*, AL, AL source) for each drafting variant of the
+    winning topology."""
+    out = []
+    for f in fin:
+        if f["label"] != win["label"]:
+            continue
+        k = int((f.get("config") or {}).get("num_speculative_tokens") or 0)
+        if not k:
+            continue
+        a = f["at_c_use"]
+        al, src = None, None
+        for r in ok:          # the acceptance is recorded on the run, not on the finalist
+            d = r.get("deployment") or {}
+            if (((d.get("engine") or {}).get("speculative") or {}).get("num_spec_tokens") == k
+                    and (d.get("parallel") or {}).get("tp") == win["config"].get("tp")
+                    and d.get("num_instances") == win["config"].get("num_instances")):
+                acc = d.get("acceptance") or {}
+                al, src = acc.get("acceptance_length"), acc.get("source")
+                break
+        out.append((k, a["tokens_per_sec_per_gpu"],
+                    100 * (a["tokens_per_sec_per_gpu"] - bpg) / bpg if bpg else 0.0,
+                    f["c_star"], al, src))
+    return sorted(out)
+
+
+def _draft_section(num):
+    rows = _draft_rows()
+    if not rows:
+        return None
+    best = max(rows, key=lambda r: r[1])
+    worst = min(rows, key=lambda r: r[1])
+    src = next((r[5] for r in rows if r[5]), None)
+    reused = src and f"({sc['hardware']})" not in src
+    items = "<ul>" + "".join(
+        f"<li><b>K={k}</b>: {n(pg)} tok/s/GPU, {d:+.1f}% against no drafting"
+        + (f", acceptance length {al}" if al else ", acceptance unresolved")
+        + (f", ceiling {cs} lanes" if cs != win["c_star"] else "")
+        + "</li>" for k, pg, d, cs, al, _ in rows) + "</ul>"
+    return {
+      "num": num,
+      "title": "Speculative decoding, and what it does to the interactivity number",
+      "prose": [
+        (f"This model ships its own drafter \u2014 the catalog graph declares a "
+         f"<code>{rows and 'dspark' or ''}</code> speculator \u2014 so draft depth is a real "
+         f"deployment choice, not an exotic knob. Each depth is run against the no-drafting "
+         f"baseline on the winning topology:"),
+        items,
+        (f"The best depth here is <b>K={best[0]}</b> at {best[2]:+.1f}%" +
+         (f", and the worst is K={worst[0]} at {worst[2]:+.1f}% \u2014 drafting is <i>not</i> "
+          f"monotonic in depth, because a short draft spends compute on tokens the target then "
+          f"rejects."
+          if worst[2] < 0 else ". Every depth tried beat the baseline.")),
+        (f"<b>How to read the per-user rate on these rows.</b> Under drafting the engine reports "
+         f"the inter-token latency of a <i>verification step</i>, and one step emits as many "
+         f"tokens as the target accepts. So the per-user token rate is the acceptance length times "
+         f"1000/ITL p99, not 1000/ITL p99 \u2014 the naive reading understates a drafting "
+         f"configuration by the whole acceptance factor and can make the fastest configuration "
+         f"measured look like a floor violation. The rows above use the acceptance-scaled rate, "
+         f"and the explorer labels it as derived."),
+        (f"The acceptance lengths are measured, not assumed: they come from "
+         f"<code>{src}</code> in blis-registry, keyed by this model, drafter, depth, thinking mode "
+         f"and workload category."
+         + (f" They were measured on another part and reused here; the profile set states that "
+            f"acceptance depends mostly on the model, drafter and workload rather than the chip, "
+            f"and asks that the reuse be recorded, so it is recorded on every row."
+            if reused else "")
+         if src else
+         f"Where a depth has no matching acceptance profile, the per-user rate is left blank "
+         f"rather than published at an unknown multiple."),
+      ]}
+
 rep = {
   "title": f"Serving DeepSeek-V4.1-Flash to coding agents on {nodes} {hw} nodes",
   "standfirst": (
@@ -383,7 +462,10 @@ rep = {
 }
 # The scaling section only exists when the sibling budget has been searched, so it is appended
 # rather than inlined -- a report for a part whose pair has not run yet simply omits it.
-_scale = _scaling_section(num=5)
+_draft = _draft_section(num=5)
+if _draft:
+    rep["sections"].append(_draft)
+_scale = _scaling_section(num=6 if _draft else 5)
 if _scale:
     rep["sections"].append(_scale)
 rep["sections"] = [s for s in rep["sections"] if s]

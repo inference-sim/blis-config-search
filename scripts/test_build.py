@@ -146,14 +146,29 @@ def test_validation():
         except bg.Invalid:
             check(True, "bad dir name raises Invalid")
 
-        # unknown hardware
-        badhw = os.path.join(tmp, "qwen3-14b-zzz-chatbot-0002")
-        _mk_run_dir(badhw, "qwen3-14b-zzz-chatbot-0002", hardware="zzz")
-        try:
-            bg.validate_and_project(badhw)
-            check(False, "unknown hardware should raise")
-        except bg.Invalid:
-            check(True, "unknown hardware raises Invalid")
+        # Hardware is validated by FORM, not against an allowlist. An allowlist drifted from the
+        # catalog in both directions and, when it was made to READ the catalog, turned this pure
+        # offline transform into something that depended on a sibling clone -- so it passed
+        # locally and failed in CI, where no ../blis-catalog exists. BLIS already refuses a chip
+        # it cannot price (NS-6); what this build needs is that the value is a safe token.
+        for hw in ("b200", "b300", "l40s", "gb200-nvl72", "a100-80"):
+            ok_dir = os.path.join(tmp, f"qwen3-14b-{hw}-chatbot-0003")
+            _mk_run_dir(ok_dir, f"qwen3-14b-{hw}-chatbot-0003", hardware=hw)
+            try:
+                _, row = bg.validate_and_project(ok_dir)
+                check(row["hardware"] == hw.upper(), f"real catalog part {hw!r} is accepted")
+            except bg.Invalid as e:
+                check(False, f"{hw!r} should be accepted, got {e}")
+
+        # ... while an unsafe value still raises, since hardware reaches file names and the page.
+        for hw in ("../etc", "Z Z", "a" * 64, "9bad", ""):
+            badhw = os.path.join(tmp, "qwen3-14b-bad-chatbot-0004")
+            _mk_run_dir(badhw, "qwen3-14b-bad-chatbot-0004", hardware=hw)
+            try:
+                bg.validate_and_project(badhw)
+                check(False, f"unsafe hardware {hw!r} should raise")
+            except bg.Invalid:
+                check(True, f"unsafe hardware {hw!r} raises Invalid")
     finally:
         shutil.rmtree(tmp)
 

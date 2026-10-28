@@ -37,28 +37,19 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # for build_cata
 import report as report_py  # noqa: E402
 
 RUN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
-# The hardware names a run may claim. Read from the CATALOG, which is the authority on what BLIS
-# can actually price (NS-6), with the old hardcoded set kept only as an offline fallback. The
-# hardcoded set had drifted both ways: it listed `mi300x`, which the catalog does not carry, and
-# omitted `b200`/`b300`/`l40s`, which it does -- so a legitimate B200 report failed the build with
-# "unknown hardware 'b200'".
-_FALLBACK_HARDWARE = {"h100", "h200", "gb200", "a100", "mi300x"}
-
-
-def _known_hardware():
-    try:
-        import build_catalog
-        cat = build_catalog.build(os.path.join(ROOT, os.pardir))
-        names = {str(g.get("name", "")).lower() for g in (cat.get("hardware") or [])}
-        names |= {n.split("-")[0] for n in names if n}      # gb200-nvl72 -> gb200
-        if names:
-            return names | _FALLBACK_HARDWARE
-    except Exception:
-        pass
-    return set(_FALLBACK_HARDWARE)
-
-
-KNOWN_HARDWARE = _known_hardware()
+# Hardware is validated by FORM, not against an allowlist.
+#
+# This was a hardcoded set, which drifted both ways: it listed `mi300x`, which blis-catalog does
+# not carry, and omitted `b200`/`b300`/`l40s`, which it does -- so a legitimate B200 report failed
+# the build with "unknown hardware 'b200'". Reading the set from the catalog instead looked like
+# the fix, but it made a pure, offline transform depend on a SIBLING CLONE: CI has no
+# ../blis-catalog, so the lookup silently fell back to the stale set and failed there while
+# passing locally. That is worse than the original bug, because it only shows up in CI.
+#
+# The authority on what hardware a run used is the RUN, which BLIS already refused to produce for
+# a chip it cannot price (NS-6) -- re-deciding that here adds nothing. What this build does need is
+# that the value is a safe, well-formed token, since it reaches file names and the page.
+HARDWARE_RE = re.compile(r"^[a-z][a-z0-9.-]{1,31}$")
 # Report-data files copied verbatim next to the rendered index.html (so a report stays
 # regenerable from the published site). Nothing executable; no arbitrary contributor files.
 REPORT_DATA_FILES = ("scenario.json", "pareto.json", "runs.jsonl", "report.json")
@@ -111,8 +102,9 @@ def validate_and_project(run_dir):
 
     model = str(_req(scenario, "model", name))
     hardware = str(_req(scenario, "hardware", name)).lower()
-    if hardware not in KNOWN_HARDWARE:
-        raise Invalid(f"{name}: unknown hardware {hardware!r} (allowed: {sorted(KNOWN_HARDWARE)})")
+    if not HARDWARE_RE.match(hardware):
+        raise Invalid(f"{name}: hardware {hardware!r} is not a safe catalog key "
+                      f"(expected lowercase letters, digits, dots and dashes)")
     gpu_budget = int(_num(_req(scenario, "gpu_budget", name), name, 1, 100000))
     workload = _workload_name(scenario)
 

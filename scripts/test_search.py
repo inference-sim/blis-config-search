@@ -51,6 +51,12 @@ class FakeRunner:
                  workload, num_requests, seed, horizon, config, phase="probe", timeout=120,
                  defaults=None, replay=None):
         self.calls.append(dict(config, num_requests=num_requests))
+        # Record the seed EVERY run was issued with, so a test can assert the submission's seed
+        # reached BLIS rather than the search's default (namasl review #1).
+        self.seeds = getattr(self, "seeds", [])
+        self.seeds.append(seed)
+        self.phases = getattr(self, "phases", [])
+        self.phases.append(phase)
         self.replays = getattr(self, "replays", [])
         self.replays.append(replay)
         tp, dp = config.get("tp", 1), config.get("dp", 1)
@@ -409,6 +415,145 @@ def test_c_use_run_is_labelled_as_its_own_phase():
     check("c_use" in phases, f"c_use runs are labelled (phases seen: {sorted(p for p in phases if p)})")
 
 
+def test_submission_seed_reaches_every_run():
+    """The submission's seed must be the seed BLIS is given, on EVERY phase.
+
+    main() used to call search() without forwarding scenario["seed"], so the search ran on its
+    default seed=0 while scenario.json recorded the submission's seed. A later pass that read the
+    recorded seed (add_drafting_arm) then replayed DIFFERENT traffic than the baseline it was
+    compared against -- AgentX picks each lane's trajectory start from the seed, so the committed
+    "matched-load" tables compared two different workloads (namasl review #1)."""
+    print("the submission's seed reaches every run, and is recorded truthfully")
+    import run_blis
+    sc = scenario(budget=64)
+    sc["seed"] = 42                                     # NONZERO: 0 would hide the bug
+    r = FakeRunner()
+    orig = run_blis.run_one
+    run_blis.run_one = r
+    try:
+        run_search.search(sc, "/nonexistent/blis", "/cat", "/reg", "/tmp/scen",
+                          num_requests=80, seed=run_search.scenario_seed(sc),
+                          model_entry=MOE)
+    finally:
+        run_blis.run_one = orig
+    seeds = set(r.seeds)
+    check(seeds == {42}, f"every run used the submission's seed 42 (saw {sorted(seeds)})")
+    # and specifically on the later phases, which is where the split showed up in the ledgers
+    by_phase = {}
+    for ph, sd in zip(r.phases, r.seeds):
+        by_phase.setdefault(ph, set()).add(sd)
+    for ph, sds in sorted(by_phase.items()):
+        check(sds == {42}, f"phase {ph!r} ran at seed 42 (saw {sorted(sds)})")
+    check(run_search.scenario_seed({"seed": 42}) == 42, "scenario_seed reads an explicit seed")
+    check(run_search.scenario_seed({}) == 0, "scenario_seed defaults to 0 when unstated")
+    check(run_search.scenario_seed({"seed": None}) == 0, "a null seed is 0, not a crash")
+
+
+def test_per_user_is_acceptance_aware_in_the_search():
+    """The search must score a drafting arm on the per-TOKEN rate.
+
+    per_user() returned a raw 1000/ITL, but under drafting BLIS reports a VERIFICATION-STEP
+    latency, so the search understated every drafting arm by the whole acceptance factor and could
+    reject a configuration report.py then displayed as comfortably above the floor
+    (namasl review #2)."""
+    print("the search scores drafting arms on the acceptance-scaled per-token rate")
+    drafting = {"metrics": {"itl_p99_ms": 20.0},
+                "deployment": {"engine": {"speculative": {"num_spec_tokens": 3}},
+                               "acceptance": {"acceptance_length": 3.0}},
+                "config": {"num_speculative_tokens": 3}}
+    check(run_search.per_user(drafting) == 150.0,
+          f"AL-scaled: 3.0 x 1000/20 = 150, got {run_search.per_user(drafting)}")
+    withheld = {"metrics": {"itl_p99_ms": 20.0}, "config": {"num_speculative_tokens": 3}}
+    check(run_search.per_user(withheld) is None,
+          "no resolved acceptance -> no number (never a known-wrong one)")
+    plain = {"metrics": {"itl_p99_ms": 20.0}}
+    check(run_search.per_user(plain) == 50.0, "drafting off -> step == token -> 1000/20 = 50")
+    # worst instance, not the aggregate: the floor promises a rate to EVERY user
+    uneven = {"metrics": {"itl_p99_ms": 10.0},
+              "metrics_all_instances": [{"itl_p99_ms": 10.0}, {"itl_p99_ms": 50.0}]}
+    check(run_search.per_user(uneven) == 20.0,
+          f"worst instance sets the rate (20, not 100), got {run_search.per_user(uneven)}")
+    # and the search agrees with the report on the same run
+    import sys as _sys
+    _sys.path.insert(0, os.path.join(ROOT, ".claude", "skills", "config-search", "scripts"))
+    import report as _report
+    pu_report, _basis = _report._per_user_rate(drafting)
+    check(abs(pu_report - run_search.per_user(drafting)) < 0.05,
+          f"search {run_search.per_user(drafting)} == report {pu_report} on one run")
+
+
+def _fin(label, tpg, tps, c_star=128, **extra):
+    return dict({"label": label, "config": {}, "gpus": 32, "c_star": c_star, "c_use": 102,
+                 "at_c_use": {"tokens_per_sec": tps, "tokens_per_sec_per_gpu": tpg,
+                              "tok_per_s_per_user": 90.0, "itl_p99_ms": 11.0,
+                              "ttft_p99_ms": 0.0, "preemption_count": 0,
+                              "measured_at_concurrency": 102},
+                 "curve": []}, **extra)
+
+
+def test_partially_explored_arm_does_not_win_a_near_tie():
+    """A drafting arm swept on ONE topology cannot take the global recommendation on a near-tie.
+
+    add_drafting_arm sweeps K only on the no-drafting winner, then inserts those rows into the
+    global finalist ranking -- and on B200 that changed the overall winner, with the untested
+    runner-up 0.2% behind. Drafting changes throughput AND C*, so an untested topology could well
+    be better with drafting on: the comparison was never run (namasl review #4)."""
+    print("a drafting arm swept on one topology does not win a near-tie")
+    scope = {"drafting_scope": {"swept_on": "8x TP4 + EP", "topologies_swept": 1,
+                                "note": "winner only"}}
+    # 40.2 vs 40.1 tok/s/GPU: inside TIE_TOLERANCE, i.e. not evidence of anything.
+    draft = _fin("8x TP4 + EP", 40.2, 1392.3, variant="1 draft token", **scope)
+    plain = _fin("4x TP8 + EP", 40.1, 1282.8)
+    ranked = run_search.rank_finalists([draft, plain])
+    check(ranked[0] is plain,
+          f"the fully-explored topology leads a near-tie (got {run_search.winner_name(ranked[0])})")
+    check(run_search.partially_explored(draft), "the drafting arm is flagged as partially explored")
+    check(not run_search.partially_explored(plain), "a normal finalist is not flagged")
+
+    # A CLEAR win still ranks: 48 vs 40.1 is well outside the tolerance, so the comparison means
+    # something even though only one topology was swept.
+    big = _fin("8x TP4 + EP", 48.0, 1700.0, variant="1 draft token", **scope)
+    ranked2 = run_search.rank_finalists([big, plain])
+    check(ranked2[0] is big, "a clear drafting win still takes the top slot")
+    # ...and when it does, the reason says what was actually tested.
+    reason = run_search.winner_reason(ranked2[0], 50.0, 0.8)
+    check("not swept on the other topologies" in reason,
+          f"the winner reason states the scope limit (got: {reason[-120:]!r})")
+    check("best draft depth for" in reason, "the reason frames it as best-for-this-topology")
+
+
+def test_provenance_split_is_detected():
+    """A ledger whose rows span seeds or stacks is not a comparable set."""
+    print("a ledger that spans seeds or stacks is flagged, not silently rendered")
+    sys.path.insert(0, os.path.join(ROOT, ".claude", "skills", "config-search", "scripts"))
+    import report as _report
+    split = [{"cmd": ["blis", "replay", "--seed", "0"]},
+             {"cmd": ["blis", "replay", "--seed", "42"]}]
+    msg = _report.provenance_split(split)
+    check("2 seeds" in msg, f"a seed split is reported (got {msg!r})")
+    one = [{"cmd": ["blis", "replay", "--seed", "42"]},
+           {"cmd": ["blis", "replay", "--seed", "42"]}]
+    check(_report.provenance_split(one) == "", "a coherent ledger is not flagged")
+    stacks = [{"pinned_stack": {"registry": "v0.1.1"}}, {"pinned_stack": {"registry": "v0.2.0"}}]
+    check("distinct resolved stacks" in _report.provenance_split(stacks),
+          "a stack split is reported")
+
+
+def test_pinned_stack_records_resolved_identity():
+    """pins.env names an INTENTION; the report must record what actually priced the runs."""
+    print("pinned_stack records resolved commits/digest, not just the pin names")
+    ps = run_search._pinned_stack(None, None, None)
+    check("blis" in ps and "registry" in ps, "the pin names are still recorded")
+    # With real checkouts it resolves commits; without them it must not invent any.
+    check("resolved" not in ps or ps["resolved"] == {},
+          "no resolved block is fabricated when nothing is on disk")
+    cat = os.path.join(ROOT, os.pardir, "blis-catalog")
+    if os.path.isdir(os.path.join(cat, ".git")):
+        ps2 = run_search._pinned_stack(None, cat, None)
+        got = ((ps2.get("resolved") or {}).get("catalog") or {}).get("commit")
+        check(bool(got) and len(got) == 40, f"the catalog commit is resolved (got {got!r})")
+
+
 if __name__ == "__main__":
     test_explores_ep()
     test_ep_wins_when_it_is_better()
@@ -427,5 +572,10 @@ if __name__ == "__main__":
     test_parallel_probing_matches_sequential_exactly()
     test_c_use_is_measured_not_substituted()
     test_c_use_run_is_labelled_as_its_own_phase()
+    test_submission_seed_reaches_every_run()
+    test_per_user_is_acceptance_aware_in_the_search()
+    test_partially_explored_arm_does_not_win_a_near_tie()
+    test_provenance_split_is_detected()
+    test_pinned_stack_records_resolved_identity()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

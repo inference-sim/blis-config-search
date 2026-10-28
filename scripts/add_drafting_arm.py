@@ -55,6 +55,27 @@ def main(argv=None):
     rep = run_search._replay_of(sc)
     if rep is None:
         raise SystemExit(f"{D}: not a replay run; this pass is written for the AgentX replay")
+
+    # The drafting arms are compared against the baseline runs in THIS ledger at matched loads, so
+    # they must replay the same seeded traffic. AgentX picks each lane's trajectory start from the
+    # seed; a mismatch silently compares two different workloads and the "matched-load" table is
+    # meaningless. Refuse rather than produce it (namasl review #1).
+    seed = run_search.scenario_seed(sc)
+    ledger_seeds = set()
+    for r in runs:
+        cmd = r.get("cmd") or []
+        if "--seed" in cmd:
+            try:
+                ledger_seeds.add(int(cmd[cmd.index("--seed") + 1]))
+            except (IndexError, ValueError):
+                pass
+    stale = ledger_seeds - {seed}
+    if stale:
+        raise SystemExit(
+            f"{D}: the committed runs were priced at seed(s) {sorted(stale)} but scenario.json "
+            f"says {seed}. A drafting arm added at {seed} would be compared, load for load, "
+            f"against a baseline that replayed DIFFERENT traffic. Re-run the search so the whole "
+            f"ledger shares one seed, then add the drafting arm.")
     rep = dict(rep, corpus=os.path.abspath(args.corpus))
     if args.corpus_cache:
         rep["corpus_cache"] = os.path.abspath(args.corpus_cache)
@@ -120,7 +141,7 @@ def main(argv=None):
         out[i] = run_blis.run_one(args.blis, args.catalog, args.registry,
                                   os.path.join("/tmp", "cs-draft-scen"), model, hardware,
                                   sc.get("engine_version", "0.29.0"), None, None,
-                                  int(sc.get("seed", 0) or 0), None, cfg,
+                                  run_search.scenario_seed(sc), None, cfg,
                                   phase="draft", timeout=args.run_timeout, replay=rep)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.max_parallel)) as ex:
@@ -136,10 +157,12 @@ def main(argv=None):
         m = rec.get("metrics") or {}
         if rec.get("returncode") != 0 or not m.get("tokens_per_sec") or rec.get("error"):
             continue
-        al = ((rec.get("deployment") or {}).get("acceptance") or {}).get("acceptance_length")
         itl = m.get("itl_p99_ms")
-        # The per-TOKEN rate under drafting: a step emits AL tokens (see run_blis.acceptance_length).
-        pu = round(al * 1000.0 / itl, 1) if (al and itl) else None
+        # ONE definition for the per-token rate: acceptance-scaled, worst-instance
+        # (run_blis.per_user_rate) -- the same one the search scores on and the report judges
+        # feasibility with, so this pass cannot publish a rate the report contradicts
+        # (namasl review #2).
+        pu = run_search.per_user(rec)
         curves.setdefault(k, []).append(
             {"concurrency": c, "tokens_per_sec": round(m["tokens_per_sec"], 1),
              "itl_p99_ms": itl, "tok_per_s_per_user": pu,
@@ -169,6 +192,14 @@ def main(argv=None):
             "label": win["label"],
             "variant": topologies.knob_phrase("num_speculative_tokens", k),
             "config": {**topo, **accept, "num_speculative_tokens": k},
+            # This arm was swept ONLY on the topology that won with drafting off. Drafting changes
+            # both throughput and C*, so it may well have changed WHICH topology is best -- an
+            # untested shape could beat this one with drafting on. The scope is recorded on the row
+            # so the ranking can refuse to call it a global optimum (namasl review #4).
+            "drafting_scope": {"swept_on": win["label"],
+                               "topologies_swept": 1,
+                               "note": "draft depth explored on the no-drafting winner only; "
+                                       "other topologies were not re-tested with drafting on"},
             "gpus": gpus, "c_star": c_star, "c_use": c_use,
             "at_c_use": {"tokens_per_sec": tps, "tokens_per_sec_per_gpu": round(tps / gpus, 1),
                          "tok_per_s_per_user": at["tok_per_s_per_user"],
@@ -188,12 +219,13 @@ def main(argv=None):
     gpath = os.path.join(D, "gallery.json")
     if os.path.isfile(gpath):
         g = json.load(open(gpath))
-        floor_itl = float(floor.get("itl_p99_ms_max", 20.0))
         g["n_runs"] = len(runs)
-        g["n_servable"] = sum(
-            1 for r in runs
-            if r.get("returncode") == 0
-            and (r.get("metrics") or {}).get("itl_p99_ms", 1e9) <= floor_itl)
+        # Acceptance-aware, worst-instance basis -- the same test the search and the report use.
+        # Counting raw aggregate ITL against the cap miscounted every drafting run, whose ITL is a
+        # verification-step latency (namasl review #2).
+        g["n_servable"] = sum(1 for r in runs
+                              if r.get("returncode") == 0
+                              and (run_search.per_user(r) or 0) >= floor_rate)
         top = pa["finalists"][0]
         pa["winner"] = {**(pa.get("winner") or {}),
                         "chosen": run_search.winner_name(top),

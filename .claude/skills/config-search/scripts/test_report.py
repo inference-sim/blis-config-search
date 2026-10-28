@@ -43,14 +43,32 @@ class Records(unittest.TestCase):
         self.assertEqual(len(self.recs), 27)
 
     def test_pu_on_p99_basis_matching_floor_and_artifact(self):
-        # pu is on the p99 basis (1000/itl_p99 when no authoritative field), the SAME basis as the
-        # interactivity floor and pareto.json's tok_per_s_per_user -- so the page never shows two
-        # incompatible per-user numbers for a point (review F3). The fixture runs carry no
-        # tok_per_s_per_user, so this exercises the p99 fallback.
+        # pu is on the p99 basis, the SAME basis as the interactivity floor, _feasible and
+        # pareto.json's tok_per_s_per_user -- so the page never shows two incompatible per-user
+        # numbers for a point (review F3). The basis is the WORST INSTANCE's p99, not the
+        # aggregate's: the floor promises a rate to every user, and scoring the displayed rate on
+        # the aggregate while judging feasibility on the worst instance is what let a row read
+        # 101.9 tok/s/user and be marked infeasible at 31.8 ms at once (namasl review #2).
+        # The fixture runs carry no tok_per_s_per_user, so this exercises the fallback.
         for r, run in zip(self.recs, self.runs):
-            p99 = (run.get("metrics") or {}).get("itl_p99_ms")
-            if p99:
-                self.assertAlmostEqual(r["pu"], round(1000.0 / p99, 2), places=2)
+            worst, missing = report._metric_any(run, "itl_p99_ms")
+            if not missing and worst:
+                self.assertAlmostEqual(r["pu"], round(1000.0 / worst, 2), places=2)
+                self.assertGreaterEqual(worst, (run.get("metrics") or {})["itl_p99_ms"])
+
+    def test_pu_basis_is_the_worst_instance_not_the_aggregate(self):
+        # Explicit: one instance breaching while the aggregate passes must lower pu and fail the
+        # floor. 10 ms aggregate reads 100 tok/s/user, but the breaching instance at 50 ms means a
+        # real user is getting 20 -- below a 50 tok/s floor (namasl review #2).
+        run = {"returncode": 0,
+               "metrics": {"itl_p99_ms": 10.0},
+               "metrics_all_instances": [{"itl_p99_ms": 10.0}, {"itl_p99_ms": 50.0}]}
+        pu, basis = report._per_user_rate(run)
+        self.assertEqual(pu, 20.0)
+        self.assertEqual(basis, "")
+        ok, viol = report._feasible(run, {"tok_per_s_per_user": 50}, {})
+        self.assertFalse(ok)
+        self.assertTrue(any("tok_per_s_per_user" in v for v in viol), viol)
 
     def test_per_gpu_series_from_deployment(self):
         # 4x TP4 => gpus 16, read from deployment not the flat config
@@ -96,8 +114,12 @@ class Records(unittest.TestCase):
         for r, run in zip(self.recs, self.runs):
             m = run.get("metrics") or {}
             if m.get("itl_p99_ms"):
-                self.assertAlmostEqual(r["itl"], round(m["itl_p99_ms"], 3), places=3,
-                                       msg="itl must be p99, matching the floor and pu")
+                # p99, and on the same WORST-INSTANCE basis as pu and _feasible. The aggregate is
+                # kept under itl_aggregate rather than dropped (namasl review #2).
+                worst, _ = report._metric_any(run, "itl_p99_ms")
+                self.assertAlmostEqual(r["itl"], round(worst, 3), places=3,
+                                       msg="itl must be the worst instance's p99, matching pu")
+                self.assertAlmostEqual(r["itl_aggregate"], round(m["itl_p99_ms"], 3), places=3)
             if m.get("scheduling_delay_p99_ms") is not None:
                 self.assertAlmostEqual(r["sched"], m["scheduling_delay_p99_ms"], places=3)
             # pu is derived from the same p99 ITL, so the two can never disagree
@@ -574,13 +596,28 @@ class QaRegressions(unittest.TestCase):
         self.assertFalse(is_step)
 
     def test_g1_pu_null_under_mtp_not_wrong_number(self):
-        run = {"metrics": {"itl_p99_ms": 5.0}}             # no authoritative field
-        pu, is_step = report._per_user_rate(run, mtp=3)
+        # Drafting on, no resolved acceptance -> withhold. The depth is read from the run itself
+        # (deployment.engine.speculative, else the flat candidate key), so a caller cannot pass a
+        # depth that disagrees with what BLIS was told.
+        drafting = {"metrics": {"itl_p99_ms": 5.0},
+                    "config": {"num_speculative_tokens": 3}}
+        pu, basis = report._per_user_rate(drafting)
         self.assertIsNone(pu)                              # NOT the known-wrong step rate (1000/5)
-        self.assertTrue(is_step)                           # flagged so the report can explain the gap
-        pu0, is_step0 = report._per_user_rate(run, mtp=0)
+        self.assertEqual(basis, "step-estimate-withheld")  # flagged so the report explains the gap
+        # ... and a withheld rate cannot pass the floor by default.
+        ok, viol = report._feasible(drafting, {"tok_per_s_per_user": 50}, {})
+        self.assertFalse(ok)
+        self.assertTrue(any("acceptance" in v for v in viol), viol)
+        # With a resolved acceptance the rate is AL-scaled, not the raw step rate.
+        priced = dict(drafting, deployment={"engine": {"speculative": {"num_spec_tokens": 3}},
+                                            "acceptance": {"acceptance_length": 2.5}})
+        pu2, basis2 = report._per_user_rate(priced)
+        self.assertEqual(pu2, 500.0)                       # 2.5 x 1000/5
+        self.assertEqual(basis2, "derived-from-acceptance")
+        plain = {"metrics": {"itl_p99_ms": 5.0}}
+        pu0, basis0 = report._per_user_rate(plain)
         self.assertEqual(pu0, 200.0)                       # no MTP -> step == token, real p99 rate
-        self.assertFalse(is_step0)
+        self.assertEqual(basis0, "")
 
     # F3 — pu fallback is on the p99 basis (matches floor + artifact), not mean
     def test_f3_pu_fallback_uses_p99_not_mean(self):
@@ -607,10 +644,13 @@ class QaRegressions(unittest.TestCase):
     # F2 — a floor given only as tok_per_s_per_user still enforces (derived p99 cap)
     def test_f2_rate_only_floor_is_enforced(self):
         self.assertEqual(report._floor_itl_p99_max({"tok_per_s_per_user": 50}), 20.0)
-        # a run at itl_p99 25 ms (> 20 cap implied by 50 tok/s) must be rejected
+        self.assertEqual(report._floor_rate({"itl_p99_ms_max": 20.0}), 50.0)
+        # a run at itl_p99 25 ms (40 tok/s/user, under the 50 floor) must be rejected. The
+        # violation now names the per-token rate, because that is the basis the floor is stated in
+        # and the only one that is correct under drafting (namasl review #2).
         ok, viol = report._feasible({"metrics": {"itl_p99_ms": 25}}, {"tok_per_s_per_user": 50}, {})
         self.assertFalse(ok)
-        self.assertTrue(any("itl_p99_ms" in v for v in viol))
+        self.assertTrue(any("tok_per_s_per_user" in v for v in viol), viol)
 
     def test_g1_records_carry_the_flag(self):
         recs = report.build_records(self.runs, self.sc)

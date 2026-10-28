@@ -56,13 +56,67 @@ def _replay_of(scenario):
     return wl.get("replay") if isinstance(wl, dict) else None
 
 
-def _pinned_stack():
-    """The pinned stack recorded into scenario.json, from pins.env."""
+def _git_identity(path):
+    """(describe, commit) for a checkout, or (None, None) when it is not a git tree.
+
+    A pin NAME is an intention; the commit is what actually priced the runs. Recording only the
+    name let two halves of one report be priced by different registry contents under the same
+    label (namasl review #3)."""
+    import subprocess
+    def _q(*args):
+        try:
+            out = subprocess.run(args, cwd=path, capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return (out.stdout or "").strip() or None if out.returncode == 0 else None
+    if not (path and os.path.isdir(path)):
+        return None, None
+    desc = _q("git", "describe", "--tags", "--always", "--dirty")
+    commit = _q("git", "rev-parse", "HEAD")
+    return desc, commit
+
+
+def _file_digest(path):
+    """sha256 of a file, or None. The simulator binary has no `version` subcommand, so its digest
+    is the only thing that identifies which build priced a run."""
+    if not (path and os.path.isfile(path)):
+        return None
+    import hashlib
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+    except OSError:
+        return None
+    return h.hexdigest()
+
+
+def _pinned_stack(blis=None, catalog=None, registry=None):
+    """What actually priced these runs, recorded into scenario.json.
+
+    pins.env gives the intended REFS; this also resolves each dependency to the commit that was
+    checked out and the simulator to its binary digest, so a reader can verify that every run in a
+    ledger was priced by one cost model. Without that, a report whose baseline ran before a
+    registry bump and whose drafting arms ran after carried a single `registry: v0.1.1` label and
+    nothing contradicted it (namasl review #3).
+    """
     pins = build_catalog.read_pins()
-    return {"blis": pins.get("BLIS_REF", "unpinned"),
-            "kernel": pins.get("KERNEL_REF", "unpinned"),
-            "catalog": pins.get("CATALOG_REF", "unpinned"),
-            "registry": pins.get("REGISTRY_REF", "unpinned")}
+    out = {"blis": pins.get("BLIS_REF", "unpinned"),
+           "kernel": pins.get("KERNEL_REF", "unpinned"),
+           "catalog": pins.get("CATALOG_REF", "unpinned"),
+           "registry": pins.get("REGISTRY_REF", "unpinned")}
+    resolved = {}
+    for name, path in (("catalog", catalog), ("registry", registry)):
+        desc, commit = _git_identity(path)
+        if desc or commit:
+            resolved[name] = {"describe": desc, "commit": commit}
+    digest = _file_digest(blis)
+    if digest:
+        resolved["blis"] = {"sha256": digest}
+    if resolved:
+        out["resolved"] = resolved
+    return out
 
 
 def _corpus_traffic_note(runs):
@@ -142,11 +196,26 @@ def concurrency_ramp(gpu_budget, replay=None):
 TIE_TOLERANCE = 0.005
 
 
+def partially_explored(f):
+    """True when a finalist's winning knob was explored on only PART of the search space.
+
+    A drafting arm added by add_drafting_arm.py is swept on the no-drafting winner alone. Drafting
+    changes throughput AND C*, so such a row establishes "the best draft depth for that topology",
+    not "the best topology+drafting combination" -- promoting it to the global recommendation
+    claims an optimum the experiment did not test (namasl review #4)."""
+    return bool((f.get("drafting_scope") or {}).get("topologies_swept", 0) == 1)
+
+
 def rank_finalists(finalists):
     """Best first: most tok/s/GPU, then most tok/s — but a near-tie prefers the SIMPLER config.
 
     Simpler = fewer engine/routing knobs set away from their defaults. A recommendation should
     only carry a knob when that knob earned its place.
+
+    A PARTIALLY EXPLORED arm (see partially_explored) cannot take the top slot on a near-tie: its
+    knob was never tried on the shapes it is being ranked against, so a sub-tolerance win over an
+    untested topology is not evidence. It still ranks on a clear win, where the margin exceeds the
+    tie tolerance and the comparison means something.
     """
     knobs = [k for k, _ in topologies.KNOB_TIERS]
     nknobs = lambda f: sum(1 for k in knobs if f["config"].get(k) is not None)
@@ -157,7 +226,9 @@ def rank_finalists(finalists):
         # Bucket by relative distance from the best, so everything inside the tolerance compares
         # equal on efficiency and the knob count decides.
         bucket = 0 if best <= 0 else int((best - pg) / (best * TIE_TOLERANCE))
-        return (bucket, nknobs(f), -(f["at_c_use"]["tokens_per_sec"] or 0))
+        # Inside the top bucket, a fully-explored config outranks a partially-explored one.
+        scope = 1 if (bucket == 0 and partially_explored(f)) else 0
+        return (bucket, scope, nknobs(f), -(f["at_c_use"]["tokens_per_sec"] or 0))
 
     return sorted(finalists, key=key)
 
@@ -178,10 +249,17 @@ def winner_reason(f, floor_rate, headroom):
     a = f["at_c_use"]
     v = f.get("variant")
     how = (f"with {v}" if v else "at default engine and routing settings")
+    # A partially-explored knob must be framed for what it is: the best setting FOR THIS TOPOLOGY,
+    # not a tested global optimum (namasl review #4).
+    scope = ""
+    if partially_explored(f):
+        scope = (f" This is the best draft depth for {f['label']} — draft depth was not swept on "
+                 f"the other topologies, so it is not established as the best overall "
+                 f"topology+drafting combination.")
     return (f"{f['label']} {how} gives the most tok/s/GPU "
             f"({a['tokens_per_sec_per_gpu']:g} tok/s/GPU, {a['tokens_per_sec']:g} tok/s fleet) "
             f"while holding the {floor_rate:g} tok/s/user floor; "
-            f"usable load c={f['c_use']} (C*={f['c_star']}, headroom {headroom:g}).")
+            f"usable load c={f['c_use']} (C*={f['c_star']}, headroom {headroom:g}).{scope}")
 
 
 def footprint_tiers(gpu_budget):
@@ -206,11 +284,20 @@ def requests_for(concurrency, base=80):
     return max(base, concurrency * 4)
 
 
-def per_user(metrics):
-    """Per-user tok/s on the floor's p99 basis: 1000 / ITL p99 (report.py's fallback; the
-    engine does not emit tok_per_s_per_user directly)."""
-    itl = metrics.get("itl_p99_ms")
-    return round(1000.0 / itl, 1) if itl else None
+def scenario_seed(scenario):
+    """The ONE seed a scenario runs under. Every path -- the search ramp, the c_use probe, the
+    drafting pass, and the seed recorded in scenario.json -- must read the seed through here, so a
+    run's recorded seed is always the seed BLIS was given (namasl review #1)."""
+    return int((scenario or {}).get("seed", 0) or 0)
+
+
+def per_user(rec):
+    """Per-user tok/s for a recorded run, through the ONE acceptance-aware, worst-instance
+    definition in run_blis.per_user_rate -- the same one report.py's feasibility test and displayed
+    number use, so the search can no longer reject a configuration the report shows as servable
+    (namasl review #2)."""
+    pu, _basis, _itl = run_blis.per_user_rate(rec)
+    return round(pu, 1) if pu is not None else None
 
 
 def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, seed=0,
@@ -326,8 +413,14 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
                 if rec.get("returncode") not in (0, None):
                     break
                 continue
-            pu = per_user(m)
-            servable = pu is not None and pu >= floor_rate and (m.get("itl_p99_ms", 1e9) <= floor_itl)
+            pu = per_user(rec)
+            # Servability is the per-TOKEN rate against the floor, on the worst-instance,
+            # acceptance-scaled basis (run_blis.per_user_rate). The old second clause compared the
+            # RAW p99 ITL to the floor's cap, which under drafting is a VERIFICATION-STEP latency
+            # and so rejected arms whose per-token rate is comfortably above the floor. The rate
+            # test already subsumes it: AL x 1000/itl >= floor_rate is exactly itl/AL <= floor_itl
+            # (namasl review #2).
+            servable = pu is not None and pu >= floor_rate
             pt = {"concurrency": c, "tokens_per_sec": round(m["tokens_per_sec"], 1),
                   "itl_p99_ms": m.get("itl_p99_ms"), "tok_per_s_per_user": pu,
                   "preemption_count": m.get("preemption_count", 0)}
@@ -360,7 +453,7 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
             add_run(rec)
             m = rec.get("metrics") or {}
             if rec.get("returncode") == 0 and m.get("tokens_per_sec") and not rec.get("error"):
-                pu = per_user(m)
+                pu = per_user(rec)
                 at = {"concurrency": c_use, "tokens_per_sec": round(m["tokens_per_sec"], 1),
                       "itl_p99_ms": m.get("itl_p99_ms"), "tok_per_s_per_user": pu,
                       "preemption_count": m.get("preemption_count", 0)}
@@ -520,8 +613,14 @@ def main(argv=None):
     arch = (entry or {}).get("arch", "unknown")
     print(f"searching {scenario.get('model')} ({arch}) on {scenario.get('gpu_budget')}x "
           f"{scenario.get('hardware')} ({_workload_label(scenario)})…", flush=True)
+    # The submission's seed MUST reach every run. Omitting it left `search` on its default seed=0
+    # while scenario.json recorded the submission's 42, so a later pass that read the recorded seed
+    # (add_drafting_arm) replayed DIFFERENT traffic than the baseline it was compared against --
+    # AgentX uses the seed to choose each lane's trajectory start, so the "matched-load" tables
+    # were not matched workloads (namasl review #1).
     runs, finalists, (floor_rate, floor_itl, headroom, dropped) = search(
         scenario, blis, args.catalog, args.registry, scen_dir, num_requests=args.num_requests,
+        seed=scenario_seed(scenario),
         model_entry=entry, run_timeout=args.run_timeout, max_parallel=max(1, args.max_parallel))
     if not finalists:
         detail = "; ".join(f"{d['label']}: {d['reason'][:120]}" for d in dropped[:4])
@@ -531,7 +630,10 @@ def main(argv=None):
     # winner: dual-pareto proxy — most tok/s/GPU, tie-break total tok/s
     finalists[:] = rank_finalists(finalists)
     winner = finalists[0]
-    n_servable = sum(1 for r in runs if (r.get("metrics") or {}).get("itl_p99_ms", 1e9) <= floor_itl and r.get("returncode") == 0)
+    # Same acceptance-aware basis as servability above, so the headline count cannot disagree with
+    # the rows the report marks servable (namasl review #2).
+    n_servable = sum(1 for r in runs
+                     if r.get("returncode") == 0 and (per_user(r) or 0) >= floor_rate)
 
     scenario_out = {"run_id": run_id, "model": scenario["model"], "hardware": scenario["hardware"],
                     "gpu_budget": scenario["gpu_budget"], "workload": scenario.get("workload"),
@@ -541,7 +643,7 @@ def main(argv=None):
                     # Which simulator priced these runs. pins.env is the single source of truth
                     # (build_catalog.read_pins); without this the report footer printed "?" for
                     # every component of the stack.
-                    "pinned_stack": _pinned_stack()}
+                    "pinned_stack": _pinned_stack(blis, args.catalog, args.registry)}
     # The move trail must say what was actually explored: the previous wording ("single-node
     # topologies") described a tp-only sweep and gave no hint that EP was never tried.
     ep_runs = sum(1 for r in runs if ((r.get("deployment") or {}).get("parallel") or {})

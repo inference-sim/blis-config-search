@@ -357,6 +357,77 @@ def acceptance_length(registry, model, method, k, thinking, category):
     return found
 
 
+def draft_depth(run):
+    """The draft depth a recorded run actually ran at, 0 when drafting was off.
+
+    The authoritative place is the RESOLVED deployment's engine.speculative block (what BLIS was
+    told); the flat candidate key is the fallback for a row written before that block existed."""
+    cfg = run.get("config") or {}
+    eng = ((run.get("deployment") or {}).get("engine") or {})
+    return int((eng.get("speculative") or {}).get("num_spec_tokens")
+               or cfg.get("num_speculative_tokens") or 0)
+
+
+def run_acceptance(run):
+    """The acceptance length this run was priced with, or None when none was resolved."""
+    acc = ((run.get("deployment") or {}).get("acceptance") or {})
+    try:
+        al = float(acc.get("acceptance_length"))
+    except (TypeError, ValueError):
+        return None
+    return al if al > 0 else None
+
+
+def worst_itl_p99(run):
+    """The WORST (max) p99 ITL across the cluster aggregate AND every per-instance metric.
+
+    A latency floor can be met in the aggregate yet violated on one instance, so feasibility is
+    judged on the worst instance. Returns (worst, missing_everywhere)."""
+    vals = []
+    try:
+        agg = float((run.get("metrics") or {}).get("itl_p99_ms"))
+        vals.append(agg)
+    except (TypeError, ValueError):
+        pass
+    for inst in (run.get("metrics_all_instances") or []):
+        if isinstance(inst, dict):
+            try:
+                vals.append(float(inst.get("itl_p99_ms")))
+            except (TypeError, ValueError):
+                pass
+    return (max(vals), False) if vals else (None, True)
+
+
+def per_user_rate(run):
+    """THE per-user token rate for a recorded run -- the one definition the search, the report's
+    feasibility test and the displayed number all use (namasl review #2).
+
+    Two things make this more than 1000/ITL:
+
+    * Under speculative decoding BLIS reports the ITL of a VERIFICATION STEP, and one step emits
+      the ACCEPTANCE LENGTH of tokens. The per-TOKEN rate is therefore AL x 1000/ITL; the naive
+      form understates a drafting arm by the whole acceptance factor.
+    * The basis is the WORST INSTANCE, not the aggregate, because that is what the floor promises
+      every user. Scoring the displayed rate on the aggregate while testing feasibility on the
+      worst instance is how a row came to be shown at 101.9 tok/s/user and simultaneously marked
+      infeasible at 31.8 ms ITL.
+
+    Returns (rate_or_None, basis, itl_used) where basis is "" for a direct rate,
+    "derived-from-acceptance" for an AL-scaled one, and "step-estimate-withheld" when drafting is
+    on and the acceptance is unknown -- an unknown multiple is never published as a number.
+    """
+    itl, missing = worst_itl_p99(run)
+    if missing or not itl:
+        return None, "", None
+    mtp = draft_depth(run)
+    if mtp:
+        al = run_acceptance(run)
+        if al is None:
+            return None, "step-estimate-withheld", itl
+        return al * 1000.0 / itl, "derived-from-acceptance", itl
+    return 1000.0 / itl, "", itl
+
+
 _SPEC_CACHE = {}
 
 

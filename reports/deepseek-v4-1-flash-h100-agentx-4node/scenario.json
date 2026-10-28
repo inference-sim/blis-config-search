@@ -12,7 +12,20 @@
     "blis": "v0.12.0",
     "catalog": "0.3.0",
     "kernel": "v0.3.0",
-    "registry": "v0.1.1"
+    "registry": "v0.2.0",
+    "resolved": {
+      "blis": {
+        "sha256": "02b5b0335501b46b7a90235484be5e644159b946a40def4fbd6392b760b132c0"
+      },
+      "catalog": {
+        "commit": "676326ec6c708e91ec4981bd6b03922a7fe60512",
+        "describe": "0.3.0"
+      },
+      "registry": {
+        "commit": "7f6662d7188dc3dc873a37623e1f7bbfe1d6081b",
+        "describe": "v0.2.0"
+      }
+    }
   },
   "run_id": "deepseek-v4-1-flash-h100-agentx-4node",
   "seed": 42,

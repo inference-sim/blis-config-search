@@ -1,8 +1,8 @@
 {
-  "generated": "2026-10-26",
-  "isl_osl": "replay \u00b7 ~82,866 in / 828 out per request",
-  "n_runs": 138,
-  "n_servable": 84,
-  "reason": "4x TP8 + EP at default engine and routing settings gives the most tok/s/GPU (21.1 tok/s/GPU, 675.2 tok/s fleet) while holding the 50 tok/s/user floor; usable load c=51 (C*=64, headroom 0.8).",
+  "generated": "2026-10-28",
+  "isl_osl": "replay \u00b7 ~80,903 in / 913 out per request",
+  "n_runs": 180,
+  "n_servable": 98,
+  "reason": "4x TP8 + EP at default engine and routing settings gives the most tok/s/GPU (22.4 tok/s/GPU, 717.6 tok/s fleet) while holding the 50 tok/s/user floor; usable load c=51 (C*=64, headroom 0.8).",
   "synthetic": false
 }

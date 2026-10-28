@@ -22,6 +22,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import report
+import run_blis
 import figures
 import lexicon
 
@@ -589,11 +590,26 @@ class QaRegressions(unittest.TestCase):
         self.sc, self.pa, self.runs, self.rep, _ = report.load_run_dir(FIXTURE)
 
     # G1 — pu under speculative decoding
-    def test_g1_pu_prefers_authoritative_field(self):
-        run = {"metrics": {"tok_per_s_per_user": 90.0, "itl_p99_ms": 5.0}}
-        pu, is_step = report._per_user_rate(run, mtp=3)
-        self.assertEqual(pu, 90.0)
-        self.assertFalse(is_step)
+    def test_g1_no_second_per_user_path_via_authoritative_field(self):
+        """A `metrics.tok_per_s_per_user` field must NOT short-circuit the one definition.
+
+        _per_user_rate used to prefer that field and return it RAW -- an aggregate, neither
+        acceptance-scaled nor worst-instance -- while _feasible always judged through
+        run_blis.per_user_rate. Nothing writes the field today, so they agreed by luck; the day
+        the engine emits it the displayed rate and the verdict would diverge again, which is the
+        split the unification closed. Note how wrong the old answer was: this is a K=3 drafting
+        run, so the raw 90.0 ignores the acceptance factor entirely (susiejojo review #1)."""
+        run = {"metrics": {"tok_per_s_per_user": 90.0, "itl_p99_ms": 5.0},
+               "deployment": {"engine": {"speculative": {"num_spec_tokens": 3}},
+                              "acceptance": {"acceptance_length": 2.0}},
+               "config": {"num_speculative_tokens": 3}}
+        pu, basis = report._per_user_rate(run)
+        self.assertEqual(pu, 400.0)                    # 2.0 x 1000/5, NOT the raw 90.0
+        self.assertEqual(basis, "derived-from-acceptance")
+        # and the displayed rate agrees with what _feasible judges on, field or no field
+        rate, fbasis, _itl = run_blis.per_user_rate(run)
+        self.assertAlmostEqual(pu, round(rate, 2), places=2)
+        self.assertEqual(basis, fbasis)
 
     def test_g1_pu_null_under_mtp_not_wrong_number(self):
         # Drafting on, no resolved acceptance -> withhold. The depth is read from the run itself

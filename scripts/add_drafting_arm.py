@@ -63,8 +63,15 @@ def main(argv=None):
 
     model, hardware = sc["model"], sc["hardware"]
     chosen = (pa.get("winner") or {}).get("chosen", "")
-    win = next((f for f in pa["finalists"] if f["label"] == chosen and not f.get("variant")),
-               None) or next((f for f in pa["finalists"] if f["label"] == chosen), None)
+    # Match on winner_name(), which is how `chosen` was WRITTEN -- topology plus the parenthesised
+    # knob delta. Comparing against the bare label failed for every winner that carries a variant
+    # ("8x TP4 + EP (1 draft token)" never equals "8x TP4 + EP"), so this raised "cannot find the
+    # winning finalist" on exactly the reports whose winner had a knob. Fall back to the bare
+    # label for a pareto.json written before winner_name existed (susiejojo review #4).
+    win = (next((f for f in pa["finalists"] if run_search.winner_name(f) == chosen), None)
+           or next((f for f in pa["finalists"]
+                    if f["label"] == chosen and not f.get("variant")), None)
+           or next((f for f in pa["finalists"] if f["label"] == chosen), None))
     if not win:
         raise SystemExit(f"{D}: cannot find the winning finalist {chosen!r}")
 

@@ -188,10 +188,15 @@ def validate_and_project(run_dir):
         "generated": str(gallery.get("generated", "")),
         "winner": winner, "finalists": finalists,
         "reason": str(gallery.get("reason") or (pareto.get("winner") or {}).get("reason", "")),
-        # A run-dir-authored caveat about the DATA itself (not the recommendation), shown on the
-        # card and banners the report. Used for the reports whose workload label does not match
-        # the traffic they were priced on -- see _CAVEAT_BANNER.
-        "caveat": str(gallery.get("caveat", "")),
+        # A caveat about the DATA itself (not the recommendation), shown on the card and bannered
+        # into the report. Two sources, joined: the run dir may author one (used for the reports
+        # whose workload label did not match the traffic they were priced on), and
+        # provenance_split() COMPUTES one for a ledger whose rows were not all priced the same way.
+        #
+        # The computed half was missing, so a card could show a clean headline for a report whose
+        # own footer carried "runs span 2 seeds ... registry v0.1.1" -- the gallery hid exactly the
+        # problem the footer disclosed (susiejojo UI review).
+        "caveat": _caveat_text(gallery, run_dir),
     }
     return run_id, row
 
@@ -208,6 +213,31 @@ _MOCK_BANNER = ('<div role="note" style="font:600 13px/1.5 system-ui,sans-serif;
                 'padding:10px 14px;border:1px solid #d8b984;background:#f6e8ca;color:#6b4508;border-radius:6px">'
                 'MOCK scenario — illustrative placeholder data for the gallery demo, not a BLIS measurement. '
                 'Do not deploy from these numbers.</div>')
+
+
+def _caveat_text(gallery, run_dir):
+    """The run dir's authored caveat, plus any provenance incoherence computed from its ledger."""
+    parts = []
+    authored = str(gallery.get("caveat", "") or "").strip()
+    if authored:
+        parts.append(authored)
+    runs = []
+    path = os.path.join(run_dir, "runs.jsonl")
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        runs.append(json.loads(line))
+                    except ValueError:
+                        pass
+    except OSError:
+        runs = []
+    split = report_py.provenance_split(runs)
+    if split:
+        parts.append(f"Provenance: {split}.")
+    return " ".join(parts)
 
 
 def _caveat_banner(text):

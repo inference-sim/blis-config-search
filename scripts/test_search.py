@@ -14,6 +14,7 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import run_search  # noqa: E402
+import topologies  # noqa: E402
 from run_search import _workload_label  # noqa: E402
 
 PASS = 0
@@ -563,6 +564,81 @@ def test_backfill_refuses_a_ledger_that_already_swept_drafting():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_finalist_must_meet_the_floor_at_its_usable_load():
+    """c_star proves a shape was servable at SOME load, not at c_use.
+
+    The dedicated c_use run was admitted without re-checking the floor, so a shape with one slow
+    instance could pass the ramp and still be published as a servable finalist. In the regenerated
+    h200 data that produced "4x TP1xDP8 + EP, 0.8 tok/s/user" in pareto.json -- ranked as
+    servable, 60x below the 50 tok/s floor (susiejojo review)."""
+    print("a finalist that misses the floor at c_use is dropped, not published")
+
+    class OneSlowInstanceAtCUse(FakeRunner):
+        """Servable along the ramp, but at the c_use rung one instance is catastrophically slow."""
+        def __call__(self, *a, **kw):
+            rec = super().__call__(*a, **kw)
+            cfg = a[11] if len(a) > 11 else kw.get("config", {})
+            if rec.get("returncode") == 0 and kw.get("phase") == "c_use":
+                # aggregate still looks fine; the worst instance does not
+                rec["metrics_all_instances"] = [{"itl_p99_ms": rec["metrics"]["itl_p99_ms"]},
+                                                {"itl_p99_ms": 1305.0}]
+            return rec
+
+    r = OneSlowInstanceAtCUse()
+    runs, finalists, (floor_rate, _fi, _h, dropped) = run(scenario(budget=64), r)
+    for f in finalists:
+        pu = f["at_c_use"].get("tok_per_s_per_user")
+        check(pu is not None and pu >= floor_rate,
+              f"finalist {f['label']} meets the floor at c_use (pu={pu}, floor={floor_rate})")
+    check(any("usable load" in (d.get("reason") or "") for d in dropped),
+          "the dropped shape says it missed the floor at its usable load")
+
+
+def test_curve_itl_shares_the_per_user_basis():
+    """A row may not pair a worst-instance pu with an aggregate ITL.
+
+    "0.8 tok/s/user at 13.2 ms" is impossible arithmetic (1000/13.2 = 75.8) and is the same
+    displayed-vs-judged split the per-user unification closed, reappearing in the curve."""
+    print("the curve's ITL is on the same worst-instance basis as its per-user rate")
+    rec = {"returncode": 0, "metrics": {"itl_p99_ms": 13.195, "tokens_per_sec": 65.5},
+           "metrics_all_instances": [{"itl_p99_ms": 13.19}, {"itl_p99_ms": 1305.63}]}
+    itl = run_search._worst_itl(rec)
+    pu = run_search.per_user(rec)
+    check(abs(itl - 1305.63) < 0.01, f"ITL is the worst instance (got {itl})")
+    check(abs(pu - 1000.0 / itl) < 0.1,
+          f"pu == 1000/itl on the SAME basis ({pu} vs {1000.0 / itl:.1f})")
+
+
+def test_tighter_explicit_itl_cap_is_still_enforced():
+    """The rate test subsumes an ITL cap only when rate x cap == 1000."""
+    print("an explicit ITL cap tighter than the rate implies is still enforced")
+    sc = scenario(budget=64)
+    # 50 tok/s/user implies a 20 ms cap; ask for 5 ms, which the rate test does NOT cover.
+    sc["interactivity_floor"] = {"tok_per_s_per_user": 50.0, "itl_p99_ms_max": 5.0}
+    r = FakeRunner()
+    runs, finalists, _ = run(sc, r)
+    for f in finalists:
+        itl = f["at_c_use"].get("itl_p99_ms")
+        check(itl is not None and itl <= 5.0,
+              f"finalist {f['label']} honors the tighter 5 ms cap (got {itl})")
+
+
+def test_no_drafting_sweep_without_a_speculator():
+    """A model whose graph declares no speculator must not have draft depth swept.
+
+    kimi-k2.5 declares none, so its search issued 108 drafting runs that were ALL refused by
+    run_blis, and the dashboard then rendered "drafter: off" beside "draft tokens (K): 1" for each
+    (susiejojo UI review)."""
+    print("draft depth is not swept on a model with no speculator")
+    variants = topologies.knob_variants({"tp": 8, "num_instances": 4},
+                                        skip=("num_speculative_tokens",))
+    check(not any("num_speculative_tokens" in v for v in variants),
+          "skip=() removes the drafting arms from the refinement grid")
+    full = topologies.knob_variants({"tp": 8, "num_instances": 4})
+    check(any("num_speculative_tokens" in v for v in full),
+          "and they are present when the model HAS a speculator")
+
+
 def test_provenance_split_is_detected():
     """A ledger whose rows span seeds or stacks is not a comparable set."""
     print("a ledger that spans seeds or stacks is flagged, not silently rendered")
@@ -578,6 +654,21 @@ def test_provenance_split_is_detected():
     stacks = [{"pinned_stack": {"registry": "v0.1.1"}}, {"pinned_stack": {"registry": "v0.2.0"}}]
     check("distinct resolved stacks" in _report.provenance_split(stacks),
           "a stack split is reported")
+    # The stack branch must be reachable from REAL pipeline output, not only from an injected key:
+    # run_blis.run_one now stamps every row via row_stack(). Before that, pinned_stack lived only
+    # at scenario level, so no run row carried one and this branch guarded an unreachable path --
+    # the test passed while the check could never fire (susiejojo review #2).
+    import run_blis as _rb
+    st = _rb.row_stack(os.path.join(ROOT, ".build", "blis"),
+                       os.path.join(ROOT, os.pardir, "blis-catalog"),
+                       os.path.join(ROOT, os.pardir, "blis-registry"))
+    if st:
+        check(isinstance(st, dict) and st, f"row_stack resolves a real stack identity ({st})")
+        rows = [{"pinned_stack": st}, {"pinned_stack": {**st, "registry": "deadbeefcafe"}}]
+        check("distinct resolved stacks" in _report.provenance_split(rows),
+              "and a split between two REAL row stacks is detected")
+        check(_report.provenance_split([{"pinned_stack": st}, {"pinned_stack": dict(st)}]) == "",
+              "two rows priced by the same stack are not flagged")
 
 
 def test_pinned_stack_records_resolved_identity():
@@ -617,6 +708,10 @@ if __name__ == "__main__":
     test_per_user_is_acceptance_aware_in_the_search()
     test_partially_explored_arm_does_not_win_a_near_tie()
     test_backfill_refuses_a_ledger_that_already_swept_drafting()
+    test_finalist_must_meet_the_floor_at_its_usable_load()
+    test_curve_itl_shares_the_per_user_basis()
+    test_tighter_explicit_itl_cap_is_still_enforced()
+    test_no_drafting_sweep_without_a_speculator()
     test_provenance_split_is_detected()
     test_pinned_stack_records_resolved_identity()
     print(f"\n{PASS} passed, {FAIL} failed")

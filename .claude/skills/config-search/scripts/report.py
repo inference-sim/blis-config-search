@@ -291,15 +291,18 @@ def _per_user_rate(run, mtp=0):
     the same one _feasible judges on, so a row can no longer be displayed above the floor while
     being marked infeasible (namasl review #2).
 
-    Prefer the engine's authoritative per-token field when it emits one; otherwise the basis is
-    AL x 1000/worst-instance ITL under drafting and 1000/worst-instance ITL without it. `mtp` is
-    accepted for call-site compatibility but the depth is read from the run itself.
+    The basis is AL x 1000/worst-instance ITL under drafting and 1000/worst-instance ITL without
+    it. `mtp` is accepted for call-site compatibility but the depth is read from the run itself.
+
+    There is deliberately NO short-circuit on a `metrics.tok_per_s_per_user` field. An earlier
+    version preferred it and returned it raw -- an aggregate, neither acceptance-scaled nor
+    worst-instance -- while _feasible always judged through run_blis.per_user_rate. Nothing writes
+    that field today, so the two agreed by luck; the day the engine emits it, the displayed rate
+    and the feasibility verdict would diverge again, which is the exact split this unification
+    closed. One definition means one definition (susiejojo review #1).
 
     Returns (pu_or_None, basis) where basis is "" for a direct rate, "derived-from-acceptance" for
     an AL-scaled one, and "step-estimate-withheld" when drafting is on and AL is unknown."""
-    authoritative = _as_num((run.get("metrics") or {}).get("tok_per_s_per_user"))
-    if authoritative is not None:
-        return round(authoritative, 2), ""
     pu, basis, _itl = run_blis.per_user_rate(run)
     return (round(pu, 2) if pu is not None else None), basis
 

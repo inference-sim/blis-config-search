@@ -793,6 +793,48 @@ def build_cmd(blis, catalog, registry, scenarios_dir, scenario_name, workload, n
     return cmd
 
 
+_STACK_CACHE = {}
+
+
+def row_stack(blis, catalog, registry):
+    """A compact per-ROW identity of the cost model that priced this run.
+
+    report.provenance_split() detects a ledger whose rows were not all priced the same way, but its
+    stack branch could never fire: the stack was recorded only at SCENARIO level, so no run row
+    carried one and the branch's unit test passed by injecting a key the pipeline never wrote
+    (susiejojo review #2). Recording it per row is what makes the check real -- it is what would
+    have caught the v0.1.1/v0.2.0 split in the committed reports from the artifacts alone, rather
+    than from the commit dates.
+
+    Cheap: the digests/commits are resolved once per process and cached."""
+    key = (blis, catalog, registry)
+    if key in _STACK_CACHE:
+        return _STACK_CACHE[key]
+    out = {}
+    for name, path in (("catalog", catalog), ("registry", registry)):
+        head = None
+        if path and os.path.isdir(path):
+            try:
+                pr = subprocess.run(["git", "rev-parse", "HEAD"], cwd=path,
+                                    capture_output=True, text=True, timeout=10)
+                head = (pr.stdout or "").strip()[:12] or None if pr.returncode == 0 else None
+            except (OSError, subprocess.SubprocessError):
+                head = None
+        if head:
+            out[name] = head
+    if blis and os.path.isfile(blis):
+        h = hashlib.sha256()
+        try:
+            with open(blis, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+            out["blis"] = h.hexdigest()[:12]
+        except OSError:
+            pass
+    _STACK_CACHE[key] = out
+    return out
+
+
 def _record_shell(config, phase):
     return {"config": config, "concurrency": config.get("concurrency"),
             "config_hash": hashlib.sha1(json.dumps(config, sort_keys=True).encode()).hexdigest()[:12],
@@ -809,6 +851,9 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     None the run is a generated-workload `blis run` as before.
     """
     rec = _record_shell(config, phase)
+    # Which cost model priced THIS row (see row_stack): makes provenance_split's stack branch able
+    # to fire on real data instead of guarding an unreachable path.
+    rec["pinned_stack"] = row_stack(blis, catalog, registry)
     try:
         parallel, engine, cli, router = classify_config(config)
         # Resolve the preset's token shape so a closed-loop run actually prices the traffic it

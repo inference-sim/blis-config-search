@@ -291,6 +291,12 @@ def scenario_seed(scenario):
     return int((scenario or {}).get("seed", 0) or 0)
 
 
+def _worst_itl(rec):
+    """The p99 ITL on the same worst-instance basis as per_user(), rounded for display."""
+    itl, missing = run_blis.worst_itl_p99(rec)
+    return None if missing else round(itl, 3)
+
+
 def per_user(rec):
     """Per-user tok/s for a recorded run, through the ONE acceptance-aware, worst-instance
     definition in run_blis.per_user_rate -- the same one report.py's feasibility test and displayed
@@ -332,8 +338,17 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
         accept.setdefault("speculative_category", replay.get("category") or "coding")
         accept.setdefault("speculative_thinking", str(replay.get("thinking") or "on"))
     floor = scenario.get("interactivity_floor") or {}
-    floor_itl = float(floor.get("itl_p99_ms_max", 20.0))
     floor_rate = float(floor.get("tok_per_s_per_user", 50.0))
+    # Servability is tested as a per-TOKEN RATE (per_user >= floor_rate), which subsumes an ITL cap
+    # only when rate x cap == 1000: AL x 1000/itl >= rate  <=>  itl/AL <= 1000/rate. Every checked-in
+    # scenario states only the rate, so the cap is derived and the identity holds exactly. A scenario
+    # that states a TIGHTER explicit cap would silently lose that half of the floor, so enforce it
+    # as a second clause instead of trusting the subsumption (susiejojo review #3).
+    floor_itl = float(floor.get("itl_p99_ms_max", 1000.0 / floor_rate if floor_rate else 20.0))
+    # The cap the rate test already guarantees. A cap at or above this is redundant; a tighter one
+    # is a real extra constraint and is applied per-run below.
+    implied_itl = 1000.0 / floor_rate if floor_rate else float("inf")
+    floor_itl_binds = floor_itl < implied_itl - 1e-9
     headroom = float(scenario.get("headroom", 0.8))
     engine_version = scenario.get("engine_version", "0.29.0")
 
@@ -421,8 +436,20 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
             # test already subsumes it: AL x 1000/itl >= floor_rate is exactly itl/AL <= floor_itl
             # (namasl review #2).
             servable = pu is not None and pu >= floor_rate
+            if servable and floor_itl_binds:
+                # An explicit cap tighter than 1000/floor_rate is not subsumed by the rate test.
+                # Compare on the per-TOKEN latency (step ITL / AL under drafting), the same basis
+                # the rate uses, so the two clauses cannot disagree about what a token costs.
+                _w, _missing = run_blis.worst_itl_p99(rec)
+                _al = run_blis.run_acceptance(rec) or 1.0
+                servable = (not _missing) and _w is not None and (_w / _al) <= floor_itl
+            # The ITL on the row must be the SAME basis as pu (worst instance), or a finalist
+            # reads "0.8 tok/s/user at 13.2 ms" -- impossible arithmetic, and the same
+            # displayed-vs-judged split the per-user unification closed. The aggregate is kept
+            # alongside rather than dropped (susiejojo review).
             pt = {"concurrency": c, "tokens_per_sec": round(m["tokens_per_sec"], 1),
-                  "itl_p99_ms": m.get("itl_p99_ms"), "tok_per_s_per_user": pu,
+                  "itl_p99_ms": _worst_itl(rec), "itl_p99_ms_aggregate": m.get("itl_p99_ms"),
+                  "tok_per_s_per_user": pu,
                   "preemption_count": m.get("preemption_count", 0)}
             curve.append(pt)
             if servable:
@@ -455,7 +482,8 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
             if rec.get("returncode") == 0 and m.get("tokens_per_sec") and not rec.get("error"):
                 pu = per_user(rec)
                 at = {"concurrency": c_use, "tokens_per_sec": round(m["tokens_per_sec"], 1),
-                      "itl_p99_ms": m.get("itl_p99_ms"), "tok_per_s_per_user": pu,
+                      "itl_p99_ms": _worst_itl(rec), "itl_p99_ms_aggregate": m.get("itl_p99_ms"),
+                      "tok_per_s_per_user": pu,
                       "preemption_count": m.get("preemption_count", 0)}
                 # Keep the curve ordered by load, so the figures draw it correctly.
                 curve.append(at)
@@ -468,6 +496,20 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
         if at is None:
             add_dropped({"label": label, "config": topo, "gpus": gpus,
                          "reason": f"no probe at or below the usable load c={c_use}"})
+            return
+        # A finalist must meet the floor AT THE LOAD IT IS RECOMMENDED FOR. c_star says the shape
+        # was servable at SOME load; it does not follow that it is servable at c_use, and a shape
+        # with one slow instance can pass the ramp and fail here. Admitting it anyway put rows
+        # like "4x TP1xDP8 + EP, 0.8 tok/s/user" into pareto.json as servable finalists -- above
+        # the floor by the search's own ranking, 60x below it in fact (susiejojo review).
+        at_pu = at.get("tok_per_s_per_user")
+        if at_pu is None or at_pu < floor_rate:
+            add_dropped({"label": label, "config": topo, "gpus": gpus,
+                         "reason": (f"servable to c*={c_star} but misses the "
+                                    f"{floor_rate:g} tok/s/user floor at its usable load "
+                                    f"c={at['concurrency']}: "
+                                    + (f"{at_pu:.1f} tok/s/user" if at_pu is not None
+                                       else "per-user rate unavailable"))})
             return
         tps = at["tokens_per_sec"]
         add_finalist({
@@ -504,8 +546,17 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
     # Refining the top few shapes finds the same binding knob for ~1/9th of the budget.
     # The refinement batch is built from the ranking BEFORE any of it runs, so the set of
     # variants explored does not depend on worker timing.
+    # Knobs this model cannot take are not swept: a model whose catalog graph declares no
+    # speculator refuses every drafting run (run_blis.run_one checks), so sweeping draft depth
+    # would spend the budget on certain refusals -- 108 of them on kimi-k2.5 -- and leave rows the
+    # dashboard renders as "drafter: off, K=1" (susiejojo UI review).
+    skip_knobs = ()
+    if not run_blis.graph_speculator(catalog, model):
+        skip_knobs = ("num_speculative_tokens",)
+        print(f"  {model}: no speculator in its catalog graph — skipping the draft-depth sweep",
+              flush=True)
     probe_batch(variant for base in rank_finalists(finalists)[:REFINE_TOP]
-                for variant in topologies.knob_variants(base["config"]))
+                for variant in topologies.knob_variants(base["config"], skip=skip_knobs))
 
     relabel(finalists, dropped)
     return runs, finalists, (floor_rate, floor_itl, headroom, dropped)

@@ -180,15 +180,22 @@ KNOB_TIERS = (
 )
 
 
-def knob_variants(topology):
+def knob_variants(topology, skip=()):
     """One-knob-at-a-time refinements of `topology`, in stable order.
 
     Each returned candidate is the topology plus EXACTLY ONE engine/routing knob, so a result that
     differs is attributable to that knob. The topology itself is never altered — these refine a
     shape the search has already found servable.
+
+    `skip` names knobs this deployment cannot take. Sweeping one anyway spends real runs on
+    certain refusals and leaves contradictory rows in the ledger: kimi-k2.5 declares no speculator,
+    so its search issued 108 drafting runs that were ALL refused, and the dashboard then rendered
+    "drafter: off" beside "draft tokens (K): 1" for each (susiejojo UI review).
     """
     out = []
     for key, values in KNOB_TIERS:
+        if key in skip:
+            continue
         for v in values:
             out.append({**topology, key: v})
     return out

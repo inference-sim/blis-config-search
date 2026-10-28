@@ -45,6 +45,22 @@ def main(argv=None):
     pa = json.load(open(os.path.join(D, "pareto.json")))
     runs = [json.loads(l) for l in open(os.path.join(D, "runs.jsonl")) if l.strip()]
 
+    # This pass is a BACKFILL for run dirs whose search predates native drafting. run_search has
+    # swept num_speculative_tokens as a refinement knob since 921c6a7 (on REFINE_TOP topologies,
+    # which is the broader experiment namasl asked for), so on a ledger that already holds drafting
+    # runs this pass would:
+    #   * append DUPLICATE finalists for configs the search already measured, and
+    #   * measure them WORSE, because it reuses the baseline's concurrency ladder rather than the
+    #     drafting arm's own c_use rung (K=5 landed at c=16 where the search measured c=26).
+    # Refuse instead of corrupting the ledger; a re-run search needs no backfill.
+    already = sorted({run_blis.draft_depth(r) for r in runs if run_blis.draft_depth(r)})
+    if already:
+        raise SystemExit(
+            f"{D}: the search already swept draft depth (K={already} present in runs.jsonl), and "
+            f"on more topologies than this pass covers. This backfill is only for run dirs whose "
+            f"search predates native drafting -- running it here would append duplicate finalists "
+            f"measured on the wrong ladder. Nothing to do.")
+
     model, hardware = sc["model"], sc["hardware"]
     chosen = (pa.get("winner") or {}).get("chosen", "")
     win = next((f for f in pa["finalists"] if f["label"] == chosen and not f.get("variant")),
@@ -55,6 +71,7 @@ def main(argv=None):
     rep = run_search._replay_of(sc)
     if rep is None:
         raise SystemExit(f"{D}: not a replay run; this pass is written for the AgentX replay")
+
 
     # The drafting arms are compared against the baseline runs in THIS ledger at matched loads, so
     # they must replay the same seeded traffic. AgentX picks each lane's trajectory start from the

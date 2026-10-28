@@ -522,6 +522,47 @@ def test_partially_explored_arm_does_not_win_a_near_tie():
     check("best draft depth for" in reason, "the reason frames it as best-for-this-topology")
 
 
+def test_backfill_refuses_a_ledger_that_already_swept_drafting():
+    """add_drafting_arm is a BACKFILL and must refuse a freshly-searched dir.
+
+    run_search has swept num_speculative_tokens as a refinement knob since 921c6a7, on the top
+    REFINE_TOP topologies. add_drafting_arm was written two hours later for the reports whose
+    searches predated that. Run on a dir that already has drafting runs it appends DUPLICATE
+    finalists -- and measures them worse, on the baseline's ladder instead of the arm's own c_use
+    rung (observed: K=5 at c=16 where the search measured c=26)."""
+    print("the drafting backfill refuses a ledger whose search already swept K")
+    import add_drafting_arm, run_blis, tempfile, shutil
+    d = tempfile.mkdtemp()
+    try:
+        json.dump({"model": "deepseek-v4.1-flash", "hardware": "h100", "gpu_budget": 32,
+                   "seed": 42, "workload": {"replay": {"scenario": "x", "corpus_sha256": "a"}},
+                   "interactivity_floor": {"tok_per_s_per_user": 50.0}},
+                  open(os.path.join(d, "scenario.json"), "w"))
+        json.dump({"finalists": [], "winner": {"chosen": "x"}},
+                  open(os.path.join(d, "pareto.json"), "w"))
+        with open(os.path.join(d, "runs.jsonl"), "w") as f:
+            f.write(json.dumps({"cmd": ["blis", "replay", "--seed", "42"], "phase": "probe",
+                                "returncode": 0,
+                                "deployment": {"engine": {"speculative": {"num_spec_tokens": 3}}},
+                                "config": {"num_speculative_tokens": 3}}) + "\n")
+        try:
+            add_drafting_arm.main([d, "--corpus", "/nonexistent",
+                                   "--catalog", "/cat", "--registry", "/reg"])
+            check(False, "it should have refused a ledger that already holds drafting runs")
+        except SystemExit as e:
+            check("already swept draft depth" in str(e),
+                  f"refused with the right reason (got {str(e)[:90]!r})")
+        # sanity: draft_depth reads the resolved block, which is what the guard keys on
+        check(run_blis.draft_depth({"deployment": {"engine": {"speculative":
+                                                              {"num_spec_tokens": 5}}}}) == 5,
+              "draft_depth reads the resolved deployment block")
+        check(run_blis.draft_depth({"config": {"num_speculative_tokens": 1}}) == 1,
+              "draft_depth falls back to the flat candidate key")
+        check(run_blis.draft_depth({}) == 0, "no drafting -> 0")
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def test_provenance_split_is_detected():
     """A ledger whose rows span seeds or stacks is not a comparable set."""
     print("a ledger that spans seeds or stacks is flagged, not silently rendered")
@@ -575,6 +616,7 @@ if __name__ == "__main__":
     test_submission_seed_reaches_every_run()
     test_per_user_is_acceptance_aware_in_the_search()
     test_partially_explored_arm_does_not_win_a_near_tie()
+    test_backfill_refuses_a_ledger_that_already_swept_drafting()
     test_provenance_split_is_detected()
     test_pinned_stack_records_resolved_identity()
     print(f"\n{PASS} passed, {FAIL} failed")

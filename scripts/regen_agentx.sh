@@ -23,11 +23,11 @@ python3 -I scripts/run_search.py --submission "$SUB" \
   --corpus "$CORPUS" --corpus-cache /tmp/agx-cache \
   --run-timeout 1800 --max-parallel 3
 
-# 2. the drafting arm, at that same seed (add_drafting_arm refuses a seed that disagrees)
-python3 -I scripts/add_drafting_arm.py "$D" \
-  --blis .build/blis --catalog ../blis-catalog --registry ../blis-registry \
-  --corpus "$CORPUS" --corpus-cache /tmp/agx-cache \
-  --run-timeout 1800 --max-parallel 3
+# 2. NO drafting backfill. run_search sweeps num_speculative_tokens itself, as a refinement knob
+#    on the top topologies -- so a freshly-searched dir already holds its drafting arms, measured
+#    on each arm's OWN ladder. scripts/add_drafting_arm.py is a backfill for dirs whose search
+#    predates that, and it now refuses to run here (it would append duplicates measured on the
+#    baseline's ladder).
 
 # 3. the narrative, read out of the data
 python3 -I scripts/write_agentx_report.py "$D"

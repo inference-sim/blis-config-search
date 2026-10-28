@@ -614,6 +614,77 @@ class Contract(unittest.TestCase):
             self.assertIn((f["config"]["tp"], f["config"]["num_instances"]), shapes)
 
 
+class NarrativeSelector(unittest.TestCase):
+    """write_agentx_report must describe the run it recommends, variant winners included."""
+
+    @staticmethod
+    def _identity(cfg, dep=None):
+        """Mirror of write_agentx_report._identity, loaded without executing that script.
+
+        The generator is a top-level script (it runs on import), so the helper is re-derived here
+        from its source rather than imported."""
+        import importlib.util
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.dirname(HERE)))), "scripts", "write_agentx_report.py")
+        src = open(path, encoding="utf-8").read()
+        start = src.index("_REFINE_BASELINE = {")
+        end = src.index("\n\n\n", src.index("def _identity("))
+        ns = {}
+        exec(src[start:end], ns)          # the two helpers only, no script body
+        return ns["_identity"](cfg, dep)
+
+    def test_variant_winner_selects_its_own_run_not_the_baseline(self):
+        """A drafting winner must not be described by the no-drafting run at the same load.
+
+        The old selector matched tp/dp/instances and merely EXCLUDED four knob keys, so for the
+        b200 winner `8x TP4 + EP (1 draft token)` at c=102 it took the no-drafting baseline
+        (1286.9 tok/s) instead of the K=1 run (1392.3). The traffic averages and measured input
+        tok/s then described a configuration the report was not recommending (namasl review)."""
+        win_cfg = {"tp": 4, "dp": 1, "num_instances": 8, "enable_expert_parallel": True,
+                   "num_speculative_tokens": 1, "speculative_category": "coding"}
+        # the winner's OWN run: resolved deployment carries the drafting block, and its recorded
+        # config carries the resolved engine defaults the finalist never states
+        k1 = {"config": {**win_cfg, "concurrency": 102, "max_num_seqs": 256,
+                         "max_num_batched_tokens": 8192, "gpu_memory_utilization": 0.9,
+                         "cache_dtype": "fp8_ds_mla", "max_model_len": 262144},
+              "deployment": {"parallel": {"tp": 4, "dp": 1, "enable_expert_parallel": True},
+                             "num_instances": 8,
+                             "engine": {"max_num_seqs": 256, "max_num_batched_tokens": 8192,
+                                        "gpu_memory_utilization": 0.9, "block_size": 128,
+                                        "speculative": {"method": "dspark",
+                                                        "num_spec_tokens": 1}}}}
+        # the no-drafting baseline at the same load and topology -- what used to be selected
+        base = {"config": {k: v for k, v in k1["config"].items()
+                           if k not in ("num_speculative_tokens", "speculative_category")},
+                "deployment": {"parallel": {"tp": 4, "dp": 1, "enable_expert_parallel": True},
+                               "num_instances": 8,
+                               "engine": {"max_num_seqs": 256, "max_num_batched_tokens": 8192,
+                                          "gpu_memory_utilization": 0.9, "block_size": 128}}}
+        wid = self._identity(win_cfg)
+        self.assertEqual(self._identity(k1["config"], k1["deployment"]), wid,
+                         "the winner's own run must match its finalist identity")
+        self.assertNotEqual(self._identity(base["config"], base["deployment"]), wid,
+                            "the no-drafting baseline must NOT match a drafting winner")
+
+    def test_identity_separates_refinement_variants(self):
+        """`max seqs 64` is a different candidate from the default, and both match their own run."""
+        topo = {"tp": 8, "dp": 1, "num_instances": 4, "enable_expert_parallel": True}
+        dflt = self._identity(topo)
+        var = self._identity({**topo, "max_num_seqs": 64})
+        self.assertNotEqual(dflt, var, "a refined variant is a distinct identity")
+        # a run of the DEFAULT carries the resolved baseline (256), which must normalise to the
+        # finalist that states nothing -- this is what made the winner unmatchable when the
+        # comparison keyed on mere key presence
+        run_default = {"config": {**topo, "max_num_seqs": 256, "max_num_batched_tokens": 8192,
+                                  "gpu_memory_utilization": 0.9},
+                       "deployment": {"parallel": {"tp": 8, "dp": 1,
+                                                   "enable_expert_parallel": True},
+                                      "num_instances": 4,
+                                      "engine": {"max_num_seqs": 256}}}
+        self.assertEqual(self._identity(run_default["config"], run_default["deployment"]), dflt,
+                         "a resolved baseline value normalises to the unset finalist")
+
+
 class QaRegressions(unittest.TestCase):
     """Regression tests for the cross-vendor qa-review findings on PR #6 (G1-G8)."""
 

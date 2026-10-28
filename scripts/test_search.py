@@ -421,7 +421,7 @@ def test_submission_seed_reaches_every_run():
 
     main() used to call search() without forwarding scenario["seed"], so the search ran on its
     default seed=0 while scenario.json recorded the submission's seed. A later pass that read the
-    recorded seed (add_drafting_arm) then replayed DIFFERENT traffic than the baseline it was
+    recorded seed (the retired drafting backfill) then replayed DIFFERENT traffic than the one it was
     compared against -- AgentX picks each lane's trajectory start from the seed, so the committed
     "matched-load" tables compared two different workloads (namasl review #1)."""
     print("the submission's seed reaches every run, and is recorded truthfully")
@@ -495,7 +495,7 @@ def _fin(label, tpg, tps, c_star=128, **extra):
 def test_partially_explored_arm_does_not_win_a_near_tie():
     """A drafting arm swept on ONE topology cannot take the global recommendation on a near-tie.
 
-    add_drafting_arm sweeps K only on the no-drafting winner, then inserts those rows into the
+    The retired drafting backfill swept K only on the no-drafting winner and inserted those rows into the
     global finalist ranking -- and on B200 that changed the overall winner, with the untested
     runner-up 0.2% behind. Drafting changes throughput AND C*, so an untested topology could well
     be better with drafting on: the comparison was never run (namasl review #4)."""
@@ -521,47 +521,6 @@ def test_partially_explored_arm_does_not_win_a_near_tie():
     check("not swept on the other topologies" in reason,
           f"the winner reason states the scope limit (got: {reason[-120:]!r})")
     check("best draft depth for" in reason, "the reason frames it as best-for-this-topology")
-
-
-def test_backfill_refuses_a_ledger_that_already_swept_drafting():
-    """add_drafting_arm is a BACKFILL and must refuse a freshly-searched dir.
-
-    run_search has swept num_speculative_tokens as a refinement knob since 921c6a7, on the top
-    REFINE_TOP topologies. add_drafting_arm was written two hours later for the reports whose
-    searches predated that. Run on a dir that already has drafting runs it appends DUPLICATE
-    finalists -- and measures them worse, on the baseline's ladder instead of the arm's own c_use
-    rung (observed: K=5 at c=16 where the search measured c=26)."""
-    print("the drafting backfill refuses a ledger whose search already swept K")
-    import add_drafting_arm, run_blis, tempfile, shutil
-    d = tempfile.mkdtemp()
-    try:
-        json.dump({"model": "deepseek-v4.1-flash", "hardware": "h100", "gpu_budget": 32,
-                   "seed": 42, "workload": {"replay": {"scenario": "x", "corpus_sha256": "a"}},
-                   "interactivity_floor": {"tok_per_s_per_user": 50.0}},
-                  open(os.path.join(d, "scenario.json"), "w"))
-        json.dump({"finalists": [], "winner": {"chosen": "x"}},
-                  open(os.path.join(d, "pareto.json"), "w"))
-        with open(os.path.join(d, "runs.jsonl"), "w") as f:
-            f.write(json.dumps({"cmd": ["blis", "replay", "--seed", "42"], "phase": "probe",
-                                "returncode": 0,
-                                "deployment": {"engine": {"speculative": {"num_spec_tokens": 3}}},
-                                "config": {"num_speculative_tokens": 3}}) + "\n")
-        try:
-            add_drafting_arm.main([d, "--corpus", "/nonexistent",
-                                   "--catalog", "/cat", "--registry", "/reg"])
-            check(False, "it should have refused a ledger that already holds drafting runs")
-        except SystemExit as e:
-            check("already swept draft depth" in str(e),
-                  f"refused with the right reason (got {str(e)[:90]!r})")
-        # sanity: draft_depth reads the resolved block, which is what the guard keys on
-        check(run_blis.draft_depth({"deployment": {"engine": {"speculative":
-                                                              {"num_spec_tokens": 5}}}}) == 5,
-              "draft_depth reads the resolved deployment block")
-        check(run_blis.draft_depth({"config": {"num_speculative_tokens": 1}}) == 1,
-              "draft_depth falls back to the flat candidate key")
-        check(run_blis.draft_depth({}) == 0, "no drafting -> 0")
-    finally:
-        shutil.rmtree(d, ignore_errors=True)
 
 
 def test_operating_point_itself_must_meet_the_floor():
@@ -790,7 +749,6 @@ if __name__ == "__main__":
     test_submission_seed_reaches_every_run()
     test_per_user_is_acceptance_aware_in_the_search()
     test_partially_explored_arm_does_not_win_a_near_tie()
-    test_backfill_refuses_a_ledger_that_already_swept_drafting()
     test_operating_point_itself_must_meet_the_floor()
     test_recommended_load_is_the_servable_load_everywhere()
     test_curve_itl_shares_the_per_user_basis()

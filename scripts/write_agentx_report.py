@@ -52,6 +52,60 @@ wa = win["at_c_use"]
 # the ratio from the largest-input run and multiplied the winner's throughput by it, which mixed
 # two runs and produced an input-tok/s figure belonging to neither.)
 KNOB_KEYS = ("router_config", "max_num_seqs", "max_num_batched_tokens", "gpu_memory_utilization")
+
+# The knobs that DISTINGUISH one candidate from another, and nothing else.
+#
+# Matching tp/dp/instances and merely EXCLUDING four knob keys silently accepted a different
+# configuration: on the b200 artifact the winner is `8x TP4 + EP (1 draft token)` at c=102, and the
+# old selector took the no-drafting baseline (1286.9 tok/s) instead of the K=1 run (1392.3) -- so
+# the traffic averages and measured input tok/s described a configuration the report was not
+# recommending, while the comment above claimed they came from "the SAME run the throughput figures
+# do" (namasl review).
+#
+# This list is deliberately the SEARCH's axes (topology + EP + drafting depth + the refinement
+# knobs), not every engine field. A finalist's `config` is the candidate the search chose; the run
+# also carries scenario-wide engine settings (cache_dtype, max_model_len, block_size, ...) that the
+# candidate never states, so comparing those would make the winner unmatchable. The refinement
+# knobs are compared as "set away from the default or not", which is exactly what makes a variant
+# a distinct candidate.
+# Each refinement knob with the value a run carries when the candidate did NOT set it. A run's
+# recorded `config` holds the RESOLVED engine settings (max_num_seqs 256, batched tokens 8192,
+# gpu_mem_util 0.9 on these scenarios), while a finalist's config holds only what the search
+# actually varied -- so "is this key present" cannot distinguish them. Comparing against the
+# baseline value can: a refined variant is the one whose value DIFFERS from it.
+_REFINE_BASELINE = {"router_config": None, "max_num_seqs": 256,
+                    "max_num_batched_tokens": 8192, "gpu_memory_utilization": 0.9}
+_REFINE_KNOBS = tuple(_REFINE_BASELINE)
+
+
+def _identity(cfg, dep=None):
+    """The search-axis identity of a run or finalist, for exact comparison.
+
+    Topology and drafting come from the RESOLVED deployment when present (what BLIS was actually
+    told), falling back to the flat candidate config. Absent and default-valued knobs normalise
+    together, so a candidate that never set `enable_expert_parallel` matches a deployment that
+    resolved it to False."""
+    dep = dep or {}
+    par = dep.get("parallel") or {}
+    eng = dep.get("engine") or {}
+    spec = eng.get("speculative") or {}
+    ident = [
+        par.get("tp", cfg.get("tp")),
+        par.get("dp", cfg.get("dp", 1)) or 1,
+        dep.get("num_instances", cfg.get("num_instances", 1)),
+        bool(par.get("enable_expert_parallel", cfg.get("enable_expert_parallel", False))),
+        int(spec.get("num_spec_tokens") or cfg.get("num_speculative_tokens") or 0),
+    ]
+    # A refinement knob counts only when its value is AWAY FROM the baseline: that is what
+    # distinguishes "8x TP4 + EP" from "8x TP4 + EP (max seqs 64)". Normalising an unset key and a
+    # baseline-valued key to the same None is what lets a finalist (which states neither) match the
+    # run that measured it (which states the resolved baseline).
+    for k in _REFINE_KNOBS:
+        v = cfg.get(k, _REFINE_BASELINE[k])
+        ident.append(None if v == _REFINE_BASELINE[k] else v)
+    return tuple(ident)
+
+
 # How the recommended load relates to the ceiling. Normally it IS 80% of C*, but when the search
 # backed off (the 0.8xC* target measured below the floor) saying "80% of the measured ceiling"
 # would be arithmetically false -- and the whole point of the back-off is that the target load was
@@ -65,16 +119,21 @@ _load_basis = (f"the highest servable measured load; 80% of the ceiling ({_c_tar
 
 
 def _is_winner_c_use(r):
-    d = r.get("deployment") or {}
-    par = d.get("parallel") or {}
-    cfg = r.get("config") or {}
     return (r.get("concurrency") == win["c_use"]
-            and par.get("tp") == win["config"].get("tp")
-            and par.get("dp", 1) == win["config"].get("dp", 1)
-            and d.get("num_instances") == win["config"].get("num_instances")
-            and not any(k in cfg for k in KNOB_KEYS))
-big = next((r for r in ok if _is_winner_c_use(r)),
-           max(ok, key=lambda r: r["metrics"].get("total_input_tokens", 0)))
+            and _identity(r.get("config") or {}, r.get("deployment")) == _WIN_IDENTITY)
+
+
+# The winner's identity, from its own finalist config. A finalist carries no resolved deployment,
+# so this reads the candidate side; _identity normalises both to the same tuple.
+_WIN_IDENTITY = _identity(win["config"])
+_matches = [r for r in ok if _is_winner_c_use(r)]
+if not _matches:
+    # Never silently describe another configuration: if the winner's own run is not in the ledger
+    # the narrative must say which run it is describing instead.
+    print(f"  WARNING: no ledger run matches the winner at c={win['c_use']}; "
+          f"traffic statistics fall back to the largest-input run", file=sys.stderr)
+big = (_matches[0] if _matches
+       else max(ok, key=lambda r: r["metrics"].get("total_input_tokens", 0)))
 bm = big["metrics"]; bc = bm["completed_requests"]
 in_per = bm["total_input_tokens"] / bc
 out_per = bm["total_output_tokens"] / bc
@@ -92,7 +151,7 @@ for f in fin:
         best[k] = f
 ranked = sorted(best.values(), key=lambda f: -f["at_c_use"]["tokens_per_sec_per_gpu"])
 
-# The topology draft depth was actually swept on. add_drafting_arm sweeps K on the topology that
+# The topology draft depth was actually swept on. The search sweeps K on the topology that
 # won with drafting OFF, and the ranking may then hand the recommendation back to a different shape
 # (it refuses to let a partially-explored arm win a near-tie -- namasl review #4). Anchoring the
 # drafting section on `win` would make it silently vanish in exactly that case, so anchor it on the

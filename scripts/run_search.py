@@ -199,7 +199,8 @@ TIE_TOLERANCE = 0.005
 def partially_explored(f):
     """True when a finalist's winning knob was explored on only PART of the search space.
 
-    A drafting arm added by add_drafting_arm.py is swept on the no-drafting winner alone. Drafting
+    A drafting arm backfilled onto a finished run dir is swept on the no-drafting winner alone
+    (that path is retired; the search sweeps K itself, on REFINE_TOP topologies). Drafting
     changes throughput AND C*, so such a row establishes "the best draft depth for that topology",
     not "the best topology+drafting combination" -- promoting it to the global recommendation
     claims an optimum the experiment did not test (namasl review #4)."""
@@ -711,7 +712,7 @@ def main(argv=None):
           f"{scenario.get('hardware')} ({_workload_label(scenario)})…", flush=True)
     # The submission's seed MUST reach every run. Omitting it left `search` on its default seed=0
     # while scenario.json recorded the submission's 42, so a later pass that read the recorded seed
-    # (add_drafting_arm) replayed DIFFERENT traffic than the baseline it was compared against --
+    # (the since-retired drafting backfill) replayed DIFFERENT traffic than its baseline --
     # AgentX uses the seed to choose each lane's trajectory start, so the "matched-load" tables
     # were not matched workloads (namasl review #1).
     runs, finalists, (floor_rate, floor_itl, headroom, dropped) = search(

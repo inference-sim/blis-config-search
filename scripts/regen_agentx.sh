@@ -23,11 +23,11 @@ python3 -I scripts/run_search.py --submission "$SUB" \
   --corpus "$CORPUS" --corpus-cache /tmp/agx-cache \
   --run-timeout 1800 --max-parallel 3
 
-# 2. NO drafting backfill. run_search sweeps num_speculative_tokens itself, as a refinement knob
-#    on the top topologies -- so a freshly-searched dir already holds its drafting arms, measured
-#    on each arm's OWN ladder. scripts/add_drafting_arm.py is a backfill for dirs whose search
-#    predates that, and it now refuses to run here (it would append duplicates measured on the
-#    baseline's ladder).
+# 2. NO drafting backfill step. run_search sweeps num_speculative_tokens itself, as a refinement
+#    knob on the top topologies, so a freshly-searched dir already holds its drafting arms measured
+#    on each arm's OWN ladder. The separate backfill pass that predated that is retired: it
+#    duplicated finalists, measured them on the baseline's ladder, and kept its own
+#    operating-point logic that could publish an unservable recommendation.
 
 # 3. the narrative, read out of the data
 python3 -I scripts/write_agentx_report.py "$D"

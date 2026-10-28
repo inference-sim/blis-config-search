@@ -488,28 +488,36 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
                 # Keep the curve ordered by load, so the figures draw it correctly.
                 curve.append(at)
                 curve.sort(key=lambda p: p["concurrency"])
+        # THE OPERATING POINT ITSELF MUST MEET THE FLOOR.
+        #
+        # c_star says the shape was servable at SOME load; it does not follow that it is servable
+        # at c_use. These curves are NOT monotonic -- one slow instance at a particular load is
+        # enough -- so a shape can pass the ramp either side of c_use and fail exactly there. The
+        # h100 `batch tokens 2,048` arm passes c=8 and c=16 at ~104 and ~103 tok/s/user, yet its
+        # dedicated c=13 point has an instance at 226 ms and falls to 4.4; h200's 4x TP1xDP8 + EP
+        # lands at 0.8. Assigning the dedicated run to `at` whenever it merely RETURNED metrics
+        # published both as operating points (namasl review).
+        #
+        # So: prefer the dedicated c_use measurement, but only if it is servable; else fall back to
+        # the highest SERVABLE measured point at or below c_use (never an unservable one, and
+        # never an interpolation) and let measured_at_concurrency say where the numbers came from;
+        # else drop the shape with its reason. A shape that is genuinely servable at a lower load
+        # is still worth recommending -- at that load.
+        def _servable_pt(p):
+            pu = p.get("tok_per_s_per_user")
+            return pu is not None and pu >= floor_rate
+
+        if at is not None and not _servable_pt(at):
+            at = None          # measured, but not an operating point we may publish
         if at is None:
-            # The dedicated c_use run failed, so fall back to the best probe at or below it and
-            # say so, rather than dropping a shape that IS servable at c_star.
-            at = min((p for p in curve if p["concurrency"] <= c_use),
-                     key=lambda p: abs(p["concurrency"] - c_use), default=None)
+            at = max((p for p in curve if p["concurrency"] <= c_use and _servable_pt(p)),
+                     key=lambda p: p["concurrency"], default=None)
         if at is None:
+            tried = sorted({p["concurrency"] for p in curve if p["concurrency"] <= c_use})
             add_dropped({"label": label, "config": topo, "gpus": gpus,
-                         "reason": f"no probe at or below the usable load c={c_use}"})
-            return
-        # A finalist must meet the floor AT THE LOAD IT IS RECOMMENDED FOR. c_star says the shape
-        # was servable at SOME load; it does not follow that it is servable at c_use, and a shape
-        # with one slow instance can pass the ramp and fail here. Admitting it anyway put rows
-        # like "4x TP1xDP8 + EP, 0.8 tok/s/user" into pareto.json as servable finalists -- above
-        # the floor by the search's own ranking, 60x below it in fact (susiejojo review).
-        at_pu = at.get("tok_per_s_per_user")
-        if at_pu is None or at_pu < floor_rate:
-            add_dropped({"label": label, "config": topo, "gpus": gpus,
-                         "reason": (f"servable to c*={c_star} but misses the "
-                                    f"{floor_rate:g} tok/s/user floor at its usable load "
-                                    f"c={at['concurrency']}: "
-                                    + (f"{at_pu:.1f} tok/s/user" if at_pu is not None
-                                       else "per-user rate unavailable"))})
+                         "reason": (f"servable to c*={c_star} but no measured point at or below "
+                                    f"its usable load c={c_use} meets the {floor_rate:g} "
+                                    f"tok/s/user floor (tried c={tried or '[]'})")})
             return
         tps = at["tokens_per_sec"]
         add_finalist({
@@ -519,10 +527,18 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
                          "tok_per_s_per_user": at["tok_per_s_per_user"], "itl_p99_ms": at["itl_p99_ms"],
                          "ttft_p99_ms": 0.0, "preemption_count": at.get("preemption_count", 0),
                          # The load these numbers were actually MEASURED at. Normally c_use; it
-                         # differs only when the dedicated c_use run failed and the nearest lower
-                         # probe stood in, and then the discrepancy must be visible rather than
-                         # presented as the figure at c_use.
-                         "measured_at_concurrency": at["concurrency"]},
+                         # differs when the dedicated c_use run failed OR came back unservable
+                         # (these curves are not monotonic) and the highest servable measured
+                         # point below it stood in. Either way the discrepancy must be visible
+                         # rather than presented as the figure at c_use.
+                         "measured_at_concurrency": at["concurrency"],
+                         # Why it differs, when it does -- so a reader does not have to infer it
+                         # from the gap (namasl review).
+                         **({"operating_point_note": (
+                             f"the dedicated c={c_use} measurement did not meet the "
+                             f"{floor_rate:g} tok/s/user floor; this is the highest servable "
+                             f"measured point at or below it")}
+                            if at["concurrency"] != c_use else {})},
             "curve": curve,
         })
 

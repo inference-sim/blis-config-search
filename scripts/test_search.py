@@ -564,34 +564,68 @@ def test_backfill_refuses_a_ledger_that_already_swept_drafting():
         shutil.rmtree(d, ignore_errors=True)
 
 
-def test_finalist_must_meet_the_floor_at_its_usable_load():
-    """c_star proves a shape was servable at SOME load, not at c_use.
+def test_operating_point_itself_must_meet_the_floor():
+    """The published operating point must be a MEASURED, SERVABLE point.
 
-    The dedicated c_use run was admitted without re-checking the floor, so a shape with one slow
-    instance could pass the ramp and still be published as a servable finalist. In the regenerated
-    h200 data that produced "4x TP1xDP8 + EP, 0.8 tok/s/user" in pareto.json -- ranked as
-    servable, 60x below the 50 tok/s floor (susiejojo review)."""
-    print("a finalist that misses the floor at c_use is dropped, not published")
+    c_star proves the shape was servable at SOME load. These curves are not monotonic -- one slow
+    instance at a particular load is enough -- so a shape can pass the ramp either side of c_use
+    and fail exactly there. The dedicated c_use run was assigned to `at` whenever it merely
+    RETURNED metrics, with the fallback reachable only when `at is None`, so a
+    successful-but-unservable point became the finalist's operating point: h100's
+    `batch tokens 2,048` arm passes c=8 and c=16 at ~104/~103 tok/s/user yet published its c=13
+    point at 4.4, and h200's 4x TP1xDP8 + EP published 0.8 (namasl review).
 
-    class OneSlowInstanceAtCUse(FakeRunner):
-        """Servable along the ramp, but at the c_use rung one instance is catastrophically slow."""
-        def __call__(self, *a, **kw):
-            rec = super().__call__(*a, **kw)
-            cfg = a[11] if len(a) > 11 else kw.get("config", {})
-            if rec.get("returncode") == 0 and kw.get("phase") == "c_use":
-                # aggregate still looks fine; the worst instance does not
+    Required behaviour: prefer the dedicated c_use measurement when servable; else the HIGHEST
+    SERVABLE measured point at or below c_use, with measured_at_concurrency exposing where the
+    numbers came from; else drop the shape. Never publish an unservable point, never interpolate.
+    """
+    print("the published operating point is measured, servable, and says where it came from")
+
+    class UnservableAtCUseOnly(FakeRunner):
+        """Servable on every ramp rung, catastrophic ONLY at the dedicated c_use load.
+
+        This is the non-monotonic shape the review asks for: C* passes, the c_use point fails.
+        """
+        def __call__(self, blis, catalog, registry, scenarios_dir, model, hardware,
+                     engine_version, workload, num_requests, seed, horizon, config,
+                     phase="probe", timeout=120, defaults=None, replay=None):
+            rec = super().__call__(blis, catalog, registry, scenarios_dir, model, hardware,
+                                   engine_version, workload, num_requests, seed, horizon, config,
+                                   phase=phase, timeout=timeout, defaults=defaults, replay=replay)
+            if rec.get("returncode") == 0 and phase == "c_use":
+                # one instance at 226 ms, as observed in the h100 ledger
                 rec["metrics_all_instances"] = [{"itl_p99_ms": rec["metrics"]["itl_p99_ms"]},
-                                                {"itl_p99_ms": 1305.0}]
+                                                {"itl_p99_ms": 226.0}]
             return rec
 
-    r = OneSlowInstanceAtCUse()
+    r = UnservableAtCUseOnly()
     runs, finalists, (floor_rate, _fi, _h, dropped) = run(scenario(budget=64), r)
+    check(bool(finalists), "shapes servable below c_use are still published, not all dropped")
     for f in finalists:
-        pu = f["at_c_use"].get("tok_per_s_per_user")
+        a = f["at_c_use"]
+        pu = a.get("tok_per_s_per_user")
         check(pu is not None and pu >= floor_rate,
-              f"finalist {f['label']} meets the floor at c_use (pu={pu}, floor={floor_rate})")
-    check(any("usable load" in (d.get("reason") or "") for d in dropped),
-          "the dropped shape says it missed the floor at its usable load")
+              f"{f['label']}: operating point meets the floor (pu={pu}, floor={floor_rate})")
+        # the point must be one actually MEASURED, i.e. present on the curve at that load
+        mac = a.get("measured_at_concurrency")
+        onc = [p for p in f["curve"] if p["concurrency"] == mac]
+        check(len(onc) >= 1, f"{f['label']}: operating point c={mac} is a measured curve point")
+        check(abs((onc[0].get("tok_per_s_per_user") or -1) - pu) < 0.05,
+              f"{f['label']}: published pu matches the measurement at c={mac}")
+        check(mac <= f["c_use"], f"{f['label']}: fallback never exceeds c_use ({mac} <= {f['c_use']})")
+        if mac != f["c_use"]:
+            check("did not meet" in (a.get("operating_point_note") or ""),
+                  f"{f['label']}: a substituted point explains itself")
+    # and a shape with NOTHING servable at or below c_use is dropped, with the reason
+    class NeverServable(FakeRunner):
+        def __call__(self, *a, **kw):
+            rec = super().__call__(*a, **kw)
+            if rec.get("returncode") == 0:
+                rec["metrics_all_instances"] = [{"itl_p99_ms": 900.0}]
+            return rec
+    _runs, fin2, (_fr, _fi2, _h2, dropped2) = run(scenario(budget=64), NeverServable())
+    check(not fin2, "a shape unservable at every load yields no finalist")
+    check(bool(dropped2), "and it lands in dropped[] with a reason")
 
 
 def test_curve_itl_shares_the_per_user_basis():
@@ -708,7 +742,7 @@ if __name__ == "__main__":
     test_per_user_is_acceptance_aware_in_the_search()
     test_partially_explored_arm_does_not_win_a_near_tie()
     test_backfill_refuses_a_ledger_that_already_swept_drafting()
-    test_finalist_must_meet_the_floor_at_its_usable_load()
+    test_operating_point_itself_must_meet_the_floor()
     test_curve_itl_shares_the_per_user_basis()
     test_tighter_explicit_itl_cap_is_still_enforced()
     test_no_drafting_sweep_without_a_speculator()

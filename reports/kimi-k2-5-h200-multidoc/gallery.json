@@ -1,9 +1,8 @@
 {
-  "caveat": "Workload label caveat: these runs were priced on BLIS's default 512/512-token request distribution, not on the multidoc shape this report names. `blis run --workload` is silently ignored when --concurrency is set, so every run here generated ~519/513 tokens per request instead of the preset's 10240/1536. The topology comparison and the per-GPU ranking are still real BLIS measurements, but they describe that default traffic -- treat the absolute throughput as being for a 10240-token workload with caution. Fixed in the runner; this report predates the fix and has not been re-run.",
-  "generated": "2026-10-21",
+  "generated": "2026-10-27",
   "isl_osl": "",
-  "n_runs": 280,
-  "n_servable": 257,
-  "reason": "64x TP4xDP2 + EP with least-loaded routing gives the most tok/s/GPU (67 tok/s/GPU, 34307.6 tok/s fleet) while holding the 50 tok/s/user floor; usable load c=819 (C*=1024, headroom 0.8).",
+  "n_runs": 387,
+  "n_servable": 233,
+  "reason": "64x TP4xDP2 + EP at default engine and routing settings gives the most tok/s/GPU (43.8 tok/s/GPU, 22426.8 tok/s fleet) while holding the 50 tok/s/user floor; usable load c=410 (C*=512, headroom 0.8).",
   "synthetic": false
 }

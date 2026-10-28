@@ -14,6 +14,8 @@ former routing features". The rows that matter for this search:
 | scorer `queue-depth` | `queue.yaml` (`queue-scorer` + `max-score-picker`) |
 | scorer `load-aware` | `load-aware.yaml` |
 | scorer `prefix-affinity` | `prefix-affinity.yaml` (`approx-prefix-cache-producer` + `prefix-cache-scorer`) |
+| `--pd-decider always` | `pd-always.yaml` (`disagg-profile-handler` + `always-disagg-pd-decider`) |
+| `--pd-decider prefix-threshold --pd-prefix-threshold 16` | `pd-prefix.yaml` (`prefix-based-pd-decider`, `nonCachedTokens: 16`) |
 | `--routing-policy round-robin` / `least-loaded` / `always-busiest` | **dropped upstream** — "the llm-d router has no such policy". `random-picker` (`random.yaml`) is the nearest neutral baseline. |
 
 `least-loaded` was the biggest lever the earlier campaigns measured (+84% tok/s/GPU on

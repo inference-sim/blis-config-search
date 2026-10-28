@@ -628,6 +628,55 @@ def test_operating_point_itself_must_meet_the_floor():
     check(bool(dropped2), "and it lands in dropped[] with a reason")
 
 
+def test_recommended_load_is_the_servable_load_everywhere():
+    """c_use IS the recommendation, and every consumer must name the servable load.
+
+    The previous fix put the servable measurement into at_c_use but left c_use at the 0.8xC*
+    target -- so winner_reason said "usable load c=13", the report said "run at 13 concurrent
+    sessions", the UI card showed 13 and the traffic statistics were read from the raw c=13 run,
+    all beside c=8's figures, for a load the measurement had just proved unservable
+    (namasl review)."""
+    print("the recommended load is the measured servable load, and the reason says so")
+
+    class UnservableAtTarget(FakeRunner):
+        def __call__(self, blis, catalog, registry, scenarios_dir, model, hardware,
+                     engine_version, workload, num_requests, seed, horizon, config,
+                     phase="probe", timeout=120, defaults=None, replay=None):
+            rec = super().__call__(blis, catalog, registry, scenarios_dir, model, hardware,
+                                   engine_version, workload, num_requests, seed, horizon, config,
+                                   phase=phase, timeout=timeout, defaults=defaults, replay=replay)
+            if rec.get("returncode") == 0 and phase == "c_use":
+                rec["metrics_all_instances"] = [{"itl_p99_ms": rec["metrics"]["itl_p99_ms"]},
+                                                {"itl_p99_ms": 226.0}]
+            return rec
+
+    runs, finalists, (floor_rate, _fi, headroom, _d) = run(scenario(budget=64), UnservableAtTarget())
+    backed = [f for f in finalists if f.get("c_use_target") != f["c_use"]]
+    check(bool(backed), "the fixture produced at least one backed-off finalist")
+    for f in finalists:
+        a = f["at_c_use"]
+        target = f.get("c_use_target")
+        check(target == round(headroom * f["c_star"]),
+              f"{f['label']}: c_use_target is the 0.8xC* arithmetic ({target})")
+        # c_use is the measured, servable load -- the single number every consumer reads
+        check(a["measured_at_concurrency"] == f["c_use"],
+              f"{f['label']}: c_use == measured_at ({f['c_use']} vs {a['measured_at_concurrency']})")
+        check(a["tok_per_s_per_user"] >= floor_rate,
+              f"{f['label']}: the recommended load meets the floor")
+        on = [p for p in f["curve"] if p["concurrency"] == f["c_use"]]
+        check(len(on) == 1 and abs(on[0]["tok_per_s_per_user"] - a["tok_per_s_per_user"]) < 0.05,
+              f"{f['label']}: at_c_use == curve[c_use] still holds")
+        check(f["c_use"] <= target, f"{f['label']}: a back-off only lowers the load")
+        reason = run_search.winner_reason(f, floor_rate, headroom)
+        check(f"usable load c={f['c_use']}" in reason,
+              f"{f['label']}: winner_reason names the servable load, not the target")
+        if f["c_use"] != target:
+            check("backs off" in reason,
+                  f"{f['label']}: winner_reason explains the back-off -- got {reason[-130:]!r}")
+            check("backed off from the 0.8xC* target" in (a.get("operating_point_note") or ""),
+                  f"{f['label']}: the row's note names the target it backed off from")
+
+
 def test_curve_itl_shares_the_per_user_basis():
     """A row may not pair a worst-instance pu with an aggregate ITL.
 
@@ -743,6 +792,7 @@ if __name__ == "__main__":
     test_partially_explored_arm_does_not_win_a_near_tie()
     test_backfill_refuses_a_ledger_that_already_swept_drafting()
     test_operating_point_itself_must_meet_the_floor()
+    test_recommended_load_is_the_servable_load_everywhere()
     test_curve_itl_shares_the_per_user_basis()
     test_tighter_explicit_itl_cap_is_still_enforced()
     test_no_drafting_sweep_without_a_speculator()

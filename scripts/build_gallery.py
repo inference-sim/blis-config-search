@@ -134,15 +134,20 @@ def validate_and_project(run_dir):
             "ni": int(f.get("config", {}).get("num_instances", 0) or 0),
             "gpus": int(_num(f.get("gpus", 0), f"{name}:{label} gpus", 0, 100000)),
             "c_use": int(_num(f.get("c_use", 0), f"{name}:{label} c_use", 0, 1e7)),
+            # The 0.8xC* target, when the recommendation backed off below it. Omitted when they
+            # agree, so the UI only mentions it where there is something to explain.
+            **({"c_use_target": int(_num(f.get("c_use_target"), f"{name}:{label} c_use_target",
+                                         0, 1e7))}
+               if f.get("c_use_target") not in (None, f.get("c_use")) else {}),
             "tps": _num(at.get("tokens_per_sec", 0), f"{name}:{label} tps", 0, 1e9),
             "tps_per_gpu": _num(at.get("tokens_per_sec_per_gpu", 0), f"{name}:{label} tps/gpu", 0, 1e9),
             "per_user": _num(at.get("tok_per_s_per_user", 0), f"{name}:{label} per_user", 0, 1e6),
             "itl_p99": _num(at.get("itl_p99_ms", 0), f"{name}:{label} itl", 0, 1e6),
-            # The load the numbers above were MEASURED at. It equals c_use for a well-formed
-            # finalist; it differs only when the dedicated c_use run failed and a lower probe
-            # stood in, and the card pairs these figures with c_use, so a silent substitution
-            # would read as the throughput at a load never run. Absent in a run dir written
-            # before the field existed -> fall back to c_use rather than inventing a mismatch.
+            # The load the numbers above were MEASURED at. c_use is now the RECOMMENDED load and
+            # is always the load measured, so these agree for a current run dir; they can still
+            # differ in one written before that change, and the card pairs these figures with
+            # c_use, so a silent substitution would read as the throughput at a load never run.
+            # Absent in an older run dir -> fall back to c_use rather than inventing a mismatch.
             "measured_at": int(_num(at.get("measured_at_concurrency", f.get("c_use", 0)) or 0,
                                     f"{name}:{label} measured_at", 0, 1e7)),
         }

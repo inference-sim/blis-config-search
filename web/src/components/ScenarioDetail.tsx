@@ -981,7 +981,10 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
             <div><dt>tok/s/GPU</dt><dd className="num best">{fnum(w.tps_per_gpu)}</dd></div>
             <div><dt>tok/s/user</dt><dd className="num best">{fnum(w.per_user)}</dd></div>
             <div><dt>ITL p99 (ms)</dt><dd className="num best">{fnum(w.itl_p99, 2)}</dd></div>
-            <div><dt>GPUs · load</dt><dd className="num"><span className="num">{fnum(w.gpus, 0)}</span> · c<span className="num">{fnum(w.c_use, 0)}</span></dd></div>
+            {/* c_use is the recommended load AND the load measured. When it backed off below the
+                0.8xC* target, say so here rather than showing a bare number that looks like the
+                target. */}
+            <div><dt>GPUs · load</dt><dd className="num"><span className="num">{fnum(w.gpus, 0)}</span> · c<span className="num">{fnum(w.c_use, 0)}</span>{w.c_use_target != null && w.c_use_target !== w.c_use && <span className="note" title={`the 0.8xC* target of c${w.c_use_target} measured below the interactivity floor, so the recommendation is the highest servable measured load`}> (backed off from c{w.c_use_target})</span>}</dd></div>
           </div>
         </div>
         {runnersUp.length > 0 && (

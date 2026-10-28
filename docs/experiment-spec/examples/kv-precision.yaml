@@ -1,0 +1,21 @@
+# Dense model: does an fp8 KV cache buy capacity, and does it change the best topology?
+name: qwen3-14b-h100-chatbot-kv
+
+scenario:
+  model: qwen3-14b
+  hardware: h100
+  workload: chatbot
+  gpus: 16
+  slo: {itl_p99: 20ms}
+  concurrency: [1, 2, 4, 8, 16, 32, 64, 128, 256]
+
+sweeps:
+  - name: bf16-kv
+    num-instances: [2, 4, 8, 16]       # tp x num-instances = 16
+    parallel: {tp: [1, 2, 4, 8]}       # dense: no dp, no EP
+    engine: {cache_dtype: [auto]}
+
+  - name: fp8-kv
+    num-instances: [2, 4, 8, 16]
+    parallel: {tp: [1, 2, 4, 8]}
+    engine: {cache_dtype: [fp8]}

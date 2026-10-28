@@ -353,8 +353,15 @@ def test_catalog():
                   f"replay {w['name']} states no ISL/OSL distribution")
         sg = next((w for w in cat["workloads"] if w["name"] == "sharegpt"), None)
         if sg:  # present once blis-catalog#(sharegpt) lands; skipped against an older checkout
-            check(sg["kind"] == "shape" and sg["isl_mean"] == 208 and sg["osl_mean"] == 185,
-                  "sharegpt preset projects its measured ISL/OSL")
+            # 223/200, the MEASURED pair the catalog states, with its provenance in the file:
+            # ShareGPT_V3_unfiltered_cleaned_split.json under Qwen/Qwen2.5-14B, vLLM's three-rule
+            # filter (min_len 4, max_prompt_len 1024 on the prompt ALONE, max_total_len 2048), over
+            # the 82,744 qualifying pairs. The old 208/185 here predates blis-catalog#44 landing
+            # the measurement; reading the 1024 as a COMBINED cap is the specific error that review
+            # caught, and its signature is osl_max ~979 instead of the correct 1917.
+            check(sg["kind"] == "shape" and sg["isl_mean"] == 223 and sg["osl_mean"] == 200,
+                  f"sharegpt preset projects its measured ISL/OSL "
+                  f"(got {sg.get('isl_mean')}/{sg.get('osl_mean')}, expected 223/200)")
     else:
         print("  (sibling repos absent — catalog empty; that is the graceful path)")
 

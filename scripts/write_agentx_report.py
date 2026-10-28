@@ -52,6 +52,18 @@ wa = win["at_c_use"]
 # the ratio from the largest-input run and multiplied the winner's throughput by it, which mixed
 # two runs and produced an input-tok/s figure belonging to neither.)
 KNOB_KEYS = ("router_config", "max_num_seqs", "max_num_batched_tokens", "gpu_memory_utilization")
+# How the recommended load relates to the ceiling. Normally it IS 80% of C*, but when the search
+# backed off (the 0.8xC* target measured below the floor) saying "80% of the measured ceiling"
+# would be arithmetically false -- and the whole point of the back-off is that the target load was
+# not servable (namasl review).
+_c_target = win.get("c_use_target", win["c_use"])
+_backed_off = _c_target != win["c_use"]
+_load_basis = (f"the highest servable measured load; 80% of the ceiling ({_c_target}) measured "
+               f"below the floor"
+               if _backed_off else
+               f"80% of the measured ceiling of {win['c_star']}")
+
+
 def _is_winner_c_use(r):
     d = r.get("deployment") or {}
     par = d.get("parallel") or {}
@@ -463,7 +475,7 @@ rep = {
               f"ingesting roughly {n(in_tps,0)} input tok/s.")},
     {"h": "What to run", "run": True,
      "html": (f"<b>{pa['winner']['chosen']}</b> at {win['c_use']} concurrent agent sessions "
-              f"(80% of the measured ceiling of {win['c_star']}). Expert parallelism is not optional "
+              f"({_load_basis}). Expert parallelism is not optional "
               f"here: <b>every</b> non-EP control ran out of memory before serving a request.")},
   ],
   "explore_prose": [
@@ -483,7 +495,9 @@ rep = {
     {"num": 2, "title": "The operating curve, and where it stops",
      "figure": "operating_curve",
      "caption_note": (f"The winner's ceiling is <b>{win['c_star']} lanes</b>; the recommendation sits at "
-                      f"{win['c_use']}, measured directly rather than interpolated."),
+                      f"{win['c_use']}, measured directly rather than interpolated."
+                      + (f" It backs off from the 0.8xC* target of {_c_target}, which measured "
+                         f"below the interactivity floor." if _backed_off else "")),
      "prose": [
        (f"Throughput climbs almost linearly with lanes and then falls off a cliff. "
         f"{pa['winner']['chosen']} holds {n(knee_lo['tok_per_s_per_user'])} tok/s per user at "
@@ -493,7 +507,10 @@ rep = {
          f"{n(knee_lo['itl_p99_ms'])} ms to {n(knee_hi['itl_p99_ms'],0)} ms." if knee_hi else ".")),
        (f"The cliff is why the recommendation is {win['c_use']} lanes and not the ceiling: at the ceiling "
         f"there is no headroom for a burst, and this workload's bursts are whole agent trajectories "
-        f"waking up at once."),
+        f"waking up at once."
+        + (f" This shape backs off further still: the 0.8xC* load of {_c_target} itself measured "
+           f"below the floor, so the recommendation is the highest load actually measured servable."
+           if _backed_off else "")),
      ]},
     _ep_section(),
     {"num": 4, "title": "The knobs that bind, and the one that really hurts",

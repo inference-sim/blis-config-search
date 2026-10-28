@@ -256,10 +256,19 @@ def winner_reason(f, floor_rate, headroom):
         scope = (f" This is the best draft depth for {f['label']} — draft depth was not swept on "
                  f"the other topologies, so it is not established as the best overall "
                  f"topology+drafting combination.")
+    # When the recommendation backed off below the 0.8 x C* target, say so here: this sentence is
+    # what the gallery card and the report's "what to run" both quote, so it is where a reader
+    # would otherwise be told to run a load the search rejected (namasl review).
+    target = f.get("c_use_target")
+    headroom_txt = (f"C*={f['c_star']}, headroom {headroom:g}"
+                    if target in (None, f["c_use"]) else
+                    f"C*={f['c_star']}, headroom {headroom:g} targets c={target}, but that load "
+                    f"measured below the floor, so the recommendation backs off to the highest "
+                    f"servable measured load")
     return (f"{f['label']} {how} gives the most tok/s/GPU "
             f"({a['tokens_per_sec_per_gpu']:g} tok/s/GPU, {a['tokens_per_sec']:g} tok/s fleet) "
             f"while holding the {floor_rate:g} tok/s/user floor; "
-            f"usable load c={f['c_use']} (C*={f['c_star']}, headroom {headroom:g}).{scope}")
+            f"usable load c={f['c_use']} ({headroom_txt}).{scope}")
 
 
 def footprint_tiers(gpu_budget):
@@ -520,9 +529,25 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
                                     f"tok/s/user floor (tried c={tried or '[]'})")})
             return
         tps = at["tokens_per_sec"]
+        # THE RECOMMENDED LOAD IS THE LOAD THAT WAS MEASURED SERVABLE.
+        #
+        # c_use was the 0.8 x C* TARGET, and when the operating point backs off to a lower servable
+        # rung the target is no longer what we are recommending. Leaving c_use at the target while
+        # at_c_use held the lower rung's metrics split the recommendation in two: winner_reason said
+        # "usable load c=13", the report said "run at 13 concurrent sessions ... measured directly",
+        # the UI card showed 13, and the traffic statistics were read from the raw c=13 run -- all
+        # beside c=8's performance figures, for a load the measurement had just proved unservable
+        # (namasl review).
+        #
+        # So c_use IS the recommendation, and c_use_target keeps the arithmetic that produced it.
+        # Every consumer reads c_use, so they all now agree on the servable load.
+        c_use_target, c_use = c_use, at["concurrency"]
         add_finalist({
             "label": label,
             "config": topo, "gpus": gpus, "c_star": c_star, "c_use": c_use,
+            # The 0.8 x C* target this shape aimed at. Equal to c_use unless the dedicated run at
+            # the target was unservable and the search backed off to the highest servable rung.
+            "c_use_target": c_use_target,
             "at_c_use": {"tokens_per_sec": tps, "tokens_per_sec_per_gpu": round(tps / gpus, 1),
                          "tok_per_s_per_user": at["tok_per_s_per_user"], "itl_p99_ms": at["itl_p99_ms"],
                          "ttft_p99_ms": 0.0, "preemption_count": at.get("preemption_count", 0),
@@ -531,14 +556,18 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
                          # (these curves are not monotonic) and the highest servable measured
                          # point below it stood in. Either way the discrepancy must be visible
                          # rather than presented as the figure at c_use.
+                         # Always equal to c_use now (c_use IS the measured servable load); kept
+                         # because the report contract and the explorer both read it, and it still
+                         # states plainly that the figures are a measurement, not an interpolation.
                          "measured_at_concurrency": at["concurrency"],
-                         # Why it differs, when it does -- so a reader does not have to infer it
-                         # from the gap (namasl review).
+                         # Why the recommendation is below the 0.8 x C* target, when it is -- so a
+                         # reader does not have to infer it from the gap (namasl review).
                          **({"operating_point_note": (
-                             f"the dedicated c={c_use} measurement did not meet the "
-                             f"{floor_rate:g} tok/s/user floor; this is the highest servable "
-                             f"measured point at or below it")}
-                            if at["concurrency"] != c_use else {})},
+                             f"backed off from the 0.8xC* target c={c_use_target}: that load "
+                             f"measured below the {floor_rate:g} tok/s/user floor, so the "
+                             f"recommendation is the highest servable measured load at or "
+                             f"below it")}
+                            if c_use != c_use_target else {})},
             "curve": curve,
         })
 

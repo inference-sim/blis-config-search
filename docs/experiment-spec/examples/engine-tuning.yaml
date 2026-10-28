@@ -1,0 +1,42 @@
+# Once the topology is fixed, which vLLM engine knobs move capacity?
+name: glm-5-3-flash-h100-chatbot-engine
+
+scenario:
+  model: glm-5.3-flash
+  hardware: h100
+  workload: chatbot
+  gpus: 16
+  slo: {itl_p99: 20ms}
+  concurrency: [1, 2, 4, 8, 16, 32, 64, 128, 256]   # closed-loop users
+
+sweeps:
+  - name: batching
+    num-instances: [2]
+    parallel:
+      tp: [8]
+      enable_expert_parallel: [true]
+    engine:
+      cache_dtype: [fp8]
+      max_num_seqs: [32, 64, 128, 256, 512, 1024]
+      max_num_batched_tokens: [2048, 4096, 8192, 16384, 32768]
+
+  - name: kv-memory
+    num-instances: [2]
+    parallel:
+      tp: [8]
+      enable_expert_parallel: [true]
+    engine:
+      cache_dtype: [auto, fp8]
+      gpu_memory_utilization: [0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
+      block_size: [64, 128]
+
+  - name: admission
+    num-instances: [2]
+    parallel:
+      tp: [8]
+      enable_expert_parallel: [true]
+    engine:
+      cache_dtype: [fp8]
+      long_prefill_token_threshold: [0, 512, 2048]
+      max_num_active_seqs: [0, 128, 256]      # 0 = max_num_seqs
+      watermark: [0.0, 0.01, 0.05]            # fraction of KV blocks kept free at admission

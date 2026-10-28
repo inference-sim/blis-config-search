@@ -565,16 +565,47 @@ class Contract(unittest.TestCase):
         self.sc, self.pa, self.runs, _, _ = report.load_run_dir(FIXTURE)
 
     def test_at_c_use_matches_curve(self):
+        """at_c_use is the measurement at c_use -- and c_use is now the RECOMMENDED load.
+
+        c_use used to be the 0.8xC* target, which the operating point could legitimately differ
+        from; the figures then described one load while c_use named another, and every consumer
+        (winner_reason, "what to run", the UI card, traffic-stat selection) recommended the load
+        the measurement had rejected. c_use is the measured servable load now, so this identity
+        holds by construction and c_use_target carries the arithmetic (namasl review)."""
         for f in self.pa["finalists"]:
             pt = next((p for p in f["curve"] if p["concurrency"] == f["c_use"]), None)
-            self.assertIsNotNone(pt)
+            self.assertIsNotNone(pt, f"{f['label']}: c_use={f['c_use']} is not a measured point")
             for k in ("tokens_per_sec", "itl_p99_ms", "tok_per_s_per_user"):
                 self.assertEqual(f["at_c_use"][k], pt[k])
+            self.assertEqual(f["at_c_use"].get("measured_at_concurrency", f["c_use"]), f["c_use"])
 
-    def test_c_use_is_headroom_times_c_star(self):
+    def test_c_use_is_headroom_times_c_star_or_an_explained_backoff(self):
+        """c_use == round(h x C*) unless the search backed off, and then it must say so.
+
+        A back-off is not a contract violation, it is the fix for recommending an unservable load
+        -- but it must be visible: c_use_target keeps the target, c_use <= target, and the row
+        carries an operating_point_note (namasl review)."""
         h = self.pa.get("headroom", self.sc.get("headroom"))
         for f in self.pa["finalists"]:
-            self.assertEqual(f["c_use"], round(h * f["c_star"]))
+            target = f.get("c_use_target", f["c_use"])
+            self.assertEqual(target, round(h * f["c_star"]),
+                             f"{f['label']}: c_use_target must be the 0.8xC* arithmetic")
+            if f["c_use"] != target:
+                self.assertLess(f["c_use"], target,
+                                f"{f['label']}: a back-off only ever lowers the load")
+                self.assertTrue(f["at_c_use"].get("operating_point_note"),
+                                f"{f['label']}: a backed-off recommendation must explain itself")
+
+    def test_recommended_load_meets_the_floor(self):
+        """Whatever c_use says, that load must have been measured servable."""
+        floor = (self.pa.get("interactivity_floor")
+                 or self.sc.get("interactivity_floor") or {})
+        fr = float(floor.get("tok_per_s_per_user") or 0)
+        for f in self.pa["finalists"]:
+            pu = f["at_c_use"].get("tok_per_s_per_user")
+            self.assertIsNotNone(pu, f"{f['label']}: no per-user rate at the recommended load")
+            self.assertGreaterEqual(pu, fr,
+                                    f"{f['label']}: recommends c={f['c_use']} at {pu} < {fr}")
 
     def test_finalist_topologies_in_runs(self):
         shapes = {(r.get("deployment", {}).get("parallel", {}).get("tp"),

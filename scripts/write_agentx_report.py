@@ -80,6 +80,15 @@ for f in fin:
         best[k] = f
 ranked = sorted(best.values(), key=lambda f: -f["at_c_use"]["tokens_per_sec_per_gpu"])
 
+# The topology draft depth was actually swept on. add_drafting_arm sweeps K on the topology that
+# won with drafting OFF, and the ranking may then hand the recommendation back to a different shape
+# (it refuses to let a partially-explored arm win a near-tie -- namasl review #4). Anchoring the
+# drafting section on `win` would make it silently vanish in exactly that case, so anchor it on the
+# label the drafting arms are actually on.
+_draft_arms = [f for f in fin if (f.get("config") or {}).get("num_speculative_tokens")]
+draft_label = _draft_arms[0]["label"] if _draft_arms else win["label"]
+draft_base = next((f for f in fin if f["label"] == draft_label and not f.get("variant")), None)
+
 # knob deltas on the winning topology
 base = next((f for f in fin if f["label"] == win["label"] and not f.get("variant")), win)
 bpg = base["at_c_use"]["tokens_per_sec_per_gpu"]
@@ -287,13 +296,13 @@ def _draft_matched():
     h100 4x TP8 + EP, drafting at K=5 is +13% to +70% at matched load yet its ITL cliff arrives
     between 32 and 51 lanes where the baseline reaches 64 -- a real trade a reader has to see.
     """
-    base = next((f for f in fin if f["label"] == win["label"] and not f.get("variant")), None)
+    base = draft_base
     if not base:
         return [], None
     bl = {p["concurrency"]: p for p in base.get("curve") or []}
     out = []
     for f in fin:
-        if f["label"] != win["label"]:
+        if f["label"] != draft_label:
             continue
         k = int((f.get("config") or {}).get("num_speculative_tokens") or 0)
         if not k:
@@ -312,8 +321,10 @@ def _draft_rows():
     """(K, tok/s/GPU, delta% vs no drafting, C*, AL, AL source) for each drafting variant of the
     winning topology."""
     out = []
+    dbpg = (draft_base or {}).get("at_c_use", {}).get("tokens_per_sec_per_gpu") or bpg
+    dcfg = (draft_base or win)["config"]
     for f in fin:
-        if f["label"] != win["label"]:
+        if f["label"] != draft_label:
             continue
         k = int((f.get("config") or {}).get("num_speculative_tokens") or 0)
         if not k:
@@ -323,13 +334,13 @@ def _draft_rows():
         for r in ok:          # the acceptance is recorded on the run, not on the finalist
             d = r.get("deployment") or {}
             if (((d.get("engine") or {}).get("speculative") or {}).get("num_spec_tokens") == k
-                    and (d.get("parallel") or {}).get("tp") == win["config"].get("tp")
-                    and d.get("num_instances") == win["config"].get("num_instances")):
+                    and (d.get("parallel") or {}).get("tp") == dcfg.get("tp")
+                    and d.get("num_instances") == dcfg.get("num_instances")):
                 acc = d.get("acceptance") or {}
                 al, src = acc.get("acceptance_length"), acc.get("source")
                 break
         out.append((k, a["tokens_per_sec_per_gpu"],
-                    100 * (a["tokens_per_sec_per_gpu"] - bpg) / bpg if bpg else 0.0,
+                    100 * (a["tokens_per_sec_per_gpu"] - dbpg) / dbpg if dbpg else 0.0,
                     f["c_star"], al, src))
     return sorted(out)
 
@@ -373,6 +384,11 @@ def _draft_section(num):
     rows = _draft_rows()
     if not rows:
         return None
+    # The ceiling these arms are compared against is the no-drafting ceiling OF THE TOPOLOGY THEY
+    # WERE SWEPT ON, which the scope rule can make different from the recommended shape
+    # (namasl review #4).
+    _dcs = (draft_base or win)["c_star"]
+    _dlabel = draft_label
     best = max(rows, key=lambda r: r[1])
     worst = min(rows, key=lambda r: r[1])
     src = next((r[5] for r in rows if r[5]), None)
@@ -380,7 +396,7 @@ def _draft_section(num):
     items = "<ul>" + "".join(
         f"<li><b>K={k}</b>: {n(pg)} tok/s/GPU, {d:+.1f}% against no drafting"
         + (f", acceptance length {al}" if al else ", acceptance unresolved")
-        + (f", ceiling {cs} lanes" if cs != win["c_star"] else "")
+        + (f", ceiling {cs} lanes" if cs != _dcs else "")
         + "</li>" for k, pg, d, cs, al, _ in rows) + "</ul>"
     return {
       "num": num,
@@ -397,10 +413,10 @@ def _draft_section(num):
          f"share \u2014 the matched-load table below is the comparison that answers \u201cshould "
          f"I turn this on\u201d. "
          + (f"Here the ceiling falls for "
-            + ", ".join(f"K={k} ({cs} lanes against the baseline\u2019s {win['c_star']})"
-                        for k, _, _, cs, _, _ in rows if cs != win["c_star"])
-            + "." if any(r[3] != win["c_star"] for r in rows) else
-            f"Here every depth holds the baseline\u2019s {win['c_star']}-lane ceiling, so the "
+            + ", ".join(f"K={k} ({cs} lanes against the baseline\u2019s {_dcs})"
+                        for k, _, _, cs, _, _ in rows if cs != _dcs)
+            + "." if any(r[3] != _dcs for r in rows) else
+            f"Here every depth holds the baseline\u2019s {_dcs}-lane ceiling, so the "
             f"figures above are already like-for-like.")),
         (f"<b>How to read the per-user rate on these rows.</b> Under drafting the engine reports "
          f"the inter-token latency of a <i>verification step</i>, and one step emits as many "

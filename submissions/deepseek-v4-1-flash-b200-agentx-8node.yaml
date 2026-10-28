@@ -1,3 +1,11 @@
+# NOT YET SEARCHED. This submission is committed so the scenario is reproducible, but no
+# report accompanies it: the 8-node searches on the faster parts are the slowest of the six
+# (more candidates on a part that serves more requests inside the fixed 900 s window) and
+# were interrupted before producing output. Run it with:
+#
+#   python3 -I scripts/run_search.py --submission submissions/deepseek-v4-1-flash-b200-agentx-8node.yaml \
+#     --corpus <traces.jsonl> --corpus-cache /tmp/agx-cache --run-timeout 1800 --max-parallel 3
+#
 # DeepSeek-V4.1-Flash on a 8-node b200 cluster (64 GPUs), serving InferenceX's AgentX
 # MVP agentic workload.
 #

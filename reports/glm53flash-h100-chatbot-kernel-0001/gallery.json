@@ -1,8 +1,8 @@
 {
-  "generated": "2026-10-18",
-  "isl_osl": "ShareGPT",
-  "n_runs": 27,
-  "n_servable": 17,
-  "reason": "Most output tok/s on the budget while holding \u226550 tok/s/user on every instance.",
+  "generated": "2026-10-27",
+  "isl_osl": "",
+  "n_runs": 197,
+  "n_servable": 92,
+  "reason": "2x TP8 + EP at default engine and routing settings gives the most tok/s/GPU (26.7 tok/s/GPU, 427.3 tok/s fleet) while holding the 50 tok/s/user floor; usable load c=3 (C*=4, headroom 0.8).",
   "synthetic": false
 }

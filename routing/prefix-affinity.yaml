@@ -1,0 +1,15 @@
+# scorer `prefix-affinity` -> approx-prefix-cache-producer + prefix-cache-scorer. Keeps requests
+# sharing a prefix on the instance that served the group first -- the arm most likely to matter on
+# an agentic replay, whose trajectories re-send a growing shared context.
+apiVersion: llm-d.ai/v1
+kind: EndpointPickerConfig
+plugins:
+- type: approx-prefix-cache-producer
+- type: prefix-cache-scorer
+- type: max-score-picker
+- type: single-profile-handler
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: prefix-cache-scorer
+  - pluginRef: max-score-picker

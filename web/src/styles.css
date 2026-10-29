@@ -75,6 +75,7 @@ h3.subhead:first-of-type{margin-top:18px}
 
 /* ---- badges + chips ---- */
 .mock{display:inline-block;font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;padding:1px 6px;border-radius:3px;background:var(--warn-bg);color:var(--warn-ink);border:1px solid var(--warn-line);vertical-align:middle}
+.caveat{display:inline-block;font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;padding:1px 6px;border-radius:3px;background:var(--warn-bg);color:var(--warn-ink);border:1px solid var(--warn-line);vertical-align:middle;margin-left:6px;cursor:help}
 .ver{display:inline-block;font-size:9.5px;font-family:var(--font-mono);padding:1px 5px;border-radius:3px;background:var(--accent-soft);color:var(--accent-ink);border:1px solid var(--accent);margin-left:6px}
 .specchips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 10px}
 .spec{font-family:var(--font-mono);font-size:11px;padding:1px 7px;border:1px solid var(--line-strong);border-radius:3px;color:var(--muted);background:var(--panel)}

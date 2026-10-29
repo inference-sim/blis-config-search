@@ -12,7 +12,7 @@
     ],
     "rule": "Among the SERVABLE runs at one load, the operating point is the run with the highest tok/s per GPU; ties break on fleet tok/s, then tok/s per user, then run id (so the pick is deterministic, not iteration-order dependent).",
     "why": "tok/s per GPU is the efficiency half of the dual-Pareto objective the search optimises and picks its own winner on, so the 'What to run' table, the recommendation card and the search winner all rank on one number. Ranking by per-user rate instead made the table recommend the fastest-per-user shape while the card above recommended the most efficient one: on kimi-k2.5 that is TP8+EP at 23 tok/s/GPU versus the winner's TP4xDP2+EP at 67.",
-    "blurb": "One row per load: the most efficient configuration that still held the floor there, and the flags to deploy it with. Rows are ranked on tok/s per GPU — the objective the search picks its winner on. Pick the load you expect, then read the flags off it.",
+    "blurb": "One row per load: the most efficient configuration that still held the floor there, and the flags to deploy it with. Rows are ranked on tok/s per GPU \u2014 the objective the search picks its winner on. Pick the load you expect, then read the flags off it.",
     "none": "No run held the interactivity floor, so there is no operating point to recommend. The full run log lists every run and why each one missed."
   },
   "metrics": {
@@ -20,25 +20,25 @@
       "label": "sessions",
       "unit": "sessions",
       "digits": 0,
-      "help": "Concurrent sessions — simultaneous users/requests — at this operating point."
+      "help": "Concurrent sessions \u2014 simultaneous users/requests \u2014 at this operating point."
     },
     "pu": {
       "label": "tok/s per user",
       "unit": "tok/s",
       "digits": 1,
-      "help": "Output tokens per second a single session sees — the interactivity each caller feels. On a p99 basis, the same basis as the interactivity floor."
+      "help": "Output tokens per second a single session sees \u2014 the interactivity each caller feels. On a p99 basis, the same basis as the interactivity floor."
     },
     "cl": {
       "label": "tok/s fleet",
       "unit": "tok/s",
       "digits": 0,
-      "help": "Total output tokens per second across every instance and GPU in the deployment — the whole config's serving capacity."
+      "help": "Total output tokens per second across every instance and GPU in the deployment \u2014 the whole config's serving capacity."
     },
     "tpg": {
       "label": "tok/s per GPU",
       "unit": "tok/s",
       "digits": 1,
-      "help": "Fleet throughput divided by total GPUs — how efficiently each GPU is used."
+      "help": "Fleet throughput divided by total GPUs \u2014 how efficiently each GPU is used."
     },
     "itl": {
       "label": "TPOT p99",
@@ -62,7 +62,7 @@
       "label": "E2E p95",
       "unit": "ms",
       "digits": 0,
-      "help": "End-to-end latency of the slowest 95% of sessions — the tail check on a fast-looking config."
+      "help": "End-to-end latency of the slowest 95% of sessions \u2014 the tail check on a fast-looking config."
     },
     "sched": {
       "label": "queue delay p99",
@@ -75,12 +75,17 @@
       "unit": "",
       "digits": 2,
       "help": "Fraction of prompt tokens served from the prefix cache."
+    },
+    "al": {
+      "label": "acceptance length",
+      "unit": "tokens/step",
+      "help": "Mean tokens accepted per verification step (AL), from the registry's measured acceptance profile. Under drafting one step emits AL tokens, so the per-user rate is AL x 1000 / ITL p99 rather than 1000 / ITL p99."
     }
   },
   "facets": {
     "series": {
       "label": "configuration",
-      "help": "The serving topology — GPUs, tensor/data/expert parallelism and instance count."
+      "help": "The serving topology \u2014 GPUs, tensor/data/expert parallelism and instance count."
     },
     "variant": {
       "label": "knob delta",
@@ -124,7 +129,7 @@
     },
     "route": {
       "label": "routing",
-      "help": "The policy that picks an instance for each request."
+      "help": "The llm-d EndpointPicker configuration that picks an instance for each request; \"default\" is the router's own built-in one."
     },
     "scorers": {
       "label": "route scorers",
@@ -160,7 +165,11 @@
     },
     "mtp": {
       "label": "draft tokens",
-      "help": "Speculative-decoding draft depth (--num-speculative-tokens); 0 is off."
+      "help": "Speculative-decoding draft depth K (engine.speculative.num_spec_tokens); 0 is off."
+    },
+    "spec": {
+      "label": "drafter",
+      "help": "The speculative method the model drafts with (dspark, mtp, eagle3, \u2026); empty when drafting is off."
     }
   },
   "axes": {
@@ -206,6 +215,10 @@
       "flag": "--gpu-memory-utilization"
     },
     {
+      "key": "spec",
+      "flag": "--speculative-method"
+    },
+    {
       "key": "mtp",
       "flag": "--num-speculative-tokens"
     },
@@ -232,6 +245,10 @@
     "route": [
       "round-robin",
       "default"
+    ],
+    "spec": [
+      null,
+      ""
     ]
   },
   "operating_columns": [
@@ -253,7 +270,7 @@
       "xl": "@axes.cl_log",
       "yl": "@axes.pu",
       "caption": "Each configuration trades tok/s per user for tok/s fleet, until it falls off a cliff. One line per configuration, walking the load up; the number beside each marker is the session count. Filled markers hold the interactivity floor, hollow ones break a limit. The dashed line is the floor itself.",
-      "read": "One line per configuration, walking the load up. Flat is good — it means adding sessions has not yet slowed anyone down. Where a line turns down is its knee: the first load that breaks the floor."
+      "read": "One line per configuration, walking the load up. Flat is good \u2014 it means adding sessions has not yet slowed anyone down. Where a line turns down is its knee: the first load that breaks the floor."
     },
     "per_user_vs_load": {
       "surfaces": [
@@ -263,16 +280,16 @@
       "xl": "@axes.conc",
       "yl": "@axes.pu",
       "caption": "Each configuration trades tok/s per user for tok/s fleet, until it falls off a cliff. One line per configuration, walking the load up. Filled markers hold the interactivity floor, hollow ones break a limit.",
-      "read": "One line per configuration, walking the load up. Flat is good — it means adding sessions has not yet slowed anyone down. The violet line marks that configuration's knee, the first load that breaks the floor."
+      "read": "One line per configuration, walking the load up. Flat is good \u2014 it means adding sessions has not yet slowed anyone down. The violet line marks that configuration's knee, the first load that breaks the floor."
     },
     "efficiency_interactivity": {
       "surfaces": [
         "dashboard"
       ],
-      "title": "Efficiency ↔ interactivity",
+      "title": "Efficiency \u2194 interactivity",
       "xl": "@axes.pu",
       "yl": "@axes.tpg",
-      "caption": "tok/s per GPU against tok/s per user, one point per run — the two halves of the search objective, plotted against each other.",
+      "caption": "tok/s per GPU against tok/s per user, one point per run \u2014 the two halves of the search objective, plotted against each other.",
       "read": "Each point is one run: x is what one caller feels, y is how much each GPU delivers (so configurations compare regardless of how many GPUs they use). Up and to the right is better for everyone; filled points hold the interactivity floor, hollow ones break it. A faint line connects a configuration's runs in load order, so you can trace where adding sessions takes it."
     },
     "latency_vs_load": {
@@ -292,7 +309,7 @@
       "title": "Why the fastest-looking configuration can be the wrong one",
       "xl": "@axes.p95_log",
       "yl": "@axes.pu",
-      "caption": "tok/s per user against the slowest 95% of session latencies. Every run; crosses break a limit. A configuration pushed past its cliff reports a lower tok/s per user AND a longer tail — the two move together, so the tail is a faithful independent check.",
+      "caption": "tok/s per user against the slowest 95% of session latencies. Every run; crosses break a limit. A configuration pushed past its cliff reports a lower tok/s per user AND a longer tail \u2014 the two move together, so the tail is a faithful independent check.",
       "read": "An independent check that a fast-looking configuration is not fast only because it dropped or queued requests."
     },
     "scale_bars": {

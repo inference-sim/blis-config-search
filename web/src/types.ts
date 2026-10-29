@@ -14,7 +14,11 @@ export interface Winner {
   ep?: boolean
   quant?: string | null
   gpus: number | null
+  /** The RECOMMENDED load, and always the load whose measurement the figures below come from. */
   c_use: number | null
+  /** The 0.8xC* target, present only when the recommendation backed off below it because that
+   *  load measured under the interactivity floor. */
+  c_use_target?: number | null
   c_star?: number | null
   tps: number
   tps_per_gpu: number
@@ -30,7 +34,10 @@ export interface Finalist {
   tp: number | null
   ni: number | null
   gpus: number | null
+  /** The RECOMMENDED load, and always the load the figures were measured at. */
   c_use: number | null
+  /** The 0.8xC* target, when the recommendation backed off below it. */
+  c_use_target?: number | null
   tps: number
   tps_per_gpu: number
   per_user: number
@@ -45,6 +52,9 @@ export interface Scenario {
   gpu_budget: number
   workload: string
   isl_osl: string
+  /** A caveat about the DATA itself (not the recommendation): real BLIS runs whose measurement
+   *  does not match what the scenario claims to measure. Empty for a scenario with none. */
+  caveat?: string
   floor: string
   headroom: number | null
   n_runs: number
@@ -70,7 +80,17 @@ export interface RunRecord {
   series: string
   route: string
   pd: string
+  /** Draft depth K (0 = speculative decoding off). */
   mtp: number
+  /** The speculative method the model drafted with (dspark, mtp, eagle3, …); null when off. */
+  spec?: string | null
+  /** Acceptance length the run was priced with: mean tokens accepted per verification step. */
+  al?: number | null
+  /** Where that acceptance was measured, e.g. "inferencex-golden-al (b200)". */
+  al_src?: string | null
+  /** How `pu` was obtained: "" direct, "derived-from-acceptance" (AL-scaled — the correct
+   *  per-token rate under drafting), "step-estimate-withheld" (drafting on, AL unknown). */
+  pu_basis?: string
   mnbt: number | null
   mns: number | null
   epw?: number | string | null

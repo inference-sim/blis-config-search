@@ -134,14 +134,18 @@ def test_knob_variants_cover_the_levers_that_bind():
         for k in ("tp", "dp", "enable_expert_parallel", "num_instances"):
             check(v.get(k) == base.get(k), f"variant preserves {k}: {v}")
     keys = {k for v in vs for k in v if k not in base}
-    # routing is the big one: always-busiest HALVES throughput and 7x's TTFT vs round-robin
-    check("routing_policy" in keys, f"routing_policy is swept (got {sorted(keys)})")
-    pols = {v.get("routing_policy") for v in vs if v.get("routing_policy")}
-    check("always-busiest" not in pols,
-          "the known-pathological policy is not offered as a candidate")
-    for p in pols:
-        check(p in ("round-robin", "least-loaded", "weighted"),
-              f"{p!r} is a policy BLIS accepts")
+    # Routing is still swept, but as an llm-d EndpointPickerConfig FILE: v0.12.0 removed
+    # --routing-policy, so an arm is a path (see routing/README.md) and the old policy names
+    # (round-robin / least-loaded / always-busiest) no longer exist upstream at all.
+    check("router_config" in keys, f"router_config is swept (got {sorted(keys)})")
+    check("routing_policy" not in keys,
+          "the flag v0.12.0 removed is NOT swept (the runner rejects it)")
+    arms = {v.get("router_config") for v in vs if v.get("router_config")}
+    for a in arms:
+        check(str(a).startswith("routing/") and str(a).endswith(".yaml"),
+              f"{a!r} is a routing-arm EPP config path")
+        check(os.path.exists(os.path.join(ROOT, a)),
+              f"{a!r} exists -- an arm naming a missing file fails every refinement run")
     # the batch/KV knobs bind DOWNWARD (max_num_seqs 16 costs 64% throughput), so the grid must
     # probe below the default, not only above it
     mns = {v.get("max_num_seqs") for v in vs if v.get("max_num_seqs")}

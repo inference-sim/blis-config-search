@@ -1,0 +1,12 @@
+# scorer `load-aware` -> load-aware-scorer + max-score-picker.
+apiVersion: llm-d.ai/v1
+kind: EndpointPickerConfig
+plugins:
+- type: load-aware-scorer
+- type: max-score-picker
+- type: single-profile-handler
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: load-aware-scorer
+  - pluginRef: max-score-picker

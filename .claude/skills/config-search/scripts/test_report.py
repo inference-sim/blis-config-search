@@ -22,6 +22,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import report
+import run_blis
 import figures
 import lexicon
 
@@ -43,14 +44,32 @@ class Records(unittest.TestCase):
         self.assertEqual(len(self.recs), 27)
 
     def test_pu_on_p99_basis_matching_floor_and_artifact(self):
-        # pu is on the p99 basis (1000/itl_p99 when no authoritative field), the SAME basis as the
-        # interactivity floor and pareto.json's tok_per_s_per_user -- so the page never shows two
-        # incompatible per-user numbers for a point (review F3). The fixture runs carry no
-        # tok_per_s_per_user, so this exercises the p99 fallback.
+        # pu is on the p99 basis, the SAME basis as the interactivity floor, _feasible and
+        # pareto.json's tok_per_s_per_user -- so the page never shows two incompatible per-user
+        # numbers for a point (review F3). The basis is the WORST INSTANCE's p99, not the
+        # aggregate's: the floor promises a rate to every user, and scoring the displayed rate on
+        # the aggregate while judging feasibility on the worst instance is what let a row read
+        # 101.9 tok/s/user and be marked infeasible at 31.8 ms at once (namasl review #2).
+        # The fixture runs carry no tok_per_s_per_user, so this exercises the fallback.
         for r, run in zip(self.recs, self.runs):
-            p99 = (run.get("metrics") or {}).get("itl_p99_ms")
-            if p99:
-                self.assertAlmostEqual(r["pu"], round(1000.0 / p99, 2), places=2)
+            worst, missing = report._metric_any(run, "itl_p99_ms")
+            if not missing and worst:
+                self.assertAlmostEqual(r["pu"], round(1000.0 / worst, 2), places=2)
+                self.assertGreaterEqual(worst, (run.get("metrics") or {})["itl_p99_ms"])
+
+    def test_pu_basis_is_the_worst_instance_not_the_aggregate(self):
+        # Explicit: one instance breaching while the aggregate passes must lower pu and fail the
+        # floor. 10 ms aggregate reads 100 tok/s/user, but the breaching instance at 50 ms means a
+        # real user is getting 20 -- below a 50 tok/s floor (namasl review #2).
+        run = {"returncode": 0,
+               "metrics": {"itl_p99_ms": 10.0},
+               "metrics_all_instances": [{"itl_p99_ms": 10.0}, {"itl_p99_ms": 50.0}]}
+        pu, basis = report._per_user_rate(run)
+        self.assertEqual(pu, 20.0)
+        self.assertEqual(basis, "")
+        ok, viol = report._feasible(run, {"tok_per_s_per_user": 50}, {})
+        self.assertFalse(ok)
+        self.assertTrue(any("tok_per_s_per_user" in v for v in viol), viol)
 
     def test_per_gpu_series_from_deployment(self):
         # 4x TP4 => gpus 16, read from deployment not the flat config
@@ -96,8 +115,12 @@ class Records(unittest.TestCase):
         for r, run in zip(self.recs, self.runs):
             m = run.get("metrics") or {}
             if m.get("itl_p99_ms"):
-                self.assertAlmostEqual(r["itl"], round(m["itl_p99_ms"], 3), places=3,
-                                       msg="itl must be p99, matching the floor and pu")
+                # p99, and on the same WORST-INSTANCE basis as pu and _feasible. The aggregate is
+                # kept under itl_aggregate rather than dropped (namasl review #2).
+                worst, _ = report._metric_any(run, "itl_p99_ms")
+                self.assertAlmostEqual(r["itl"], round(worst, 3), places=3,
+                                       msg="itl must be the worst instance's p99, matching pu")
+                self.assertAlmostEqual(r["itl_aggregate"], round(m["itl_p99_ms"], 3), places=3)
             if m.get("scheduling_delay_p99_ms") is not None:
                 self.assertAlmostEqual(r["sched"], m["scheduling_delay_p99_ms"], places=3)
             # pu is derived from the same p99 ITL, so the two can never disagree
@@ -542,22 +565,124 @@ class Contract(unittest.TestCase):
         self.sc, self.pa, self.runs, _, _ = report.load_run_dir(FIXTURE)
 
     def test_at_c_use_matches_curve(self):
+        """at_c_use is the measurement at c_use -- and c_use is now the RECOMMENDED load.
+
+        c_use used to be the 0.8xC* target, which the operating point could legitimately differ
+        from; the figures then described one load while c_use named another, and every consumer
+        (winner_reason, "what to run", the UI card, traffic-stat selection) recommended the load
+        the measurement had rejected. c_use is the measured servable load now, so this identity
+        holds by construction and c_use_target carries the arithmetic (namasl review)."""
         for f in self.pa["finalists"]:
             pt = next((p for p in f["curve"] if p["concurrency"] == f["c_use"]), None)
-            self.assertIsNotNone(pt)
+            self.assertIsNotNone(pt, f"{f['label']}: c_use={f['c_use']} is not a measured point")
             for k in ("tokens_per_sec", "itl_p99_ms", "tok_per_s_per_user"):
                 self.assertEqual(f["at_c_use"][k], pt[k])
+            self.assertEqual(f["at_c_use"].get("measured_at_concurrency", f["c_use"]), f["c_use"])
 
-    def test_c_use_is_headroom_times_c_star(self):
+    def test_c_use_is_headroom_times_c_star_or_an_explained_backoff(self):
+        """c_use == round(h x C*) unless the search backed off, and then it must say so.
+
+        A back-off is not a contract violation, it is the fix for recommending an unservable load
+        -- but it must be visible: c_use_target keeps the target, c_use <= target, and the row
+        carries an operating_point_note (namasl review)."""
         h = self.pa.get("headroom", self.sc.get("headroom"))
         for f in self.pa["finalists"]:
-            self.assertEqual(f["c_use"], round(h * f["c_star"]))
+            target = f.get("c_use_target", f["c_use"])
+            self.assertEqual(target, round(h * f["c_star"]),
+                             f"{f['label']}: c_use_target must be the 0.8xC* arithmetic")
+            if f["c_use"] != target:
+                self.assertLess(f["c_use"], target,
+                                f"{f['label']}: a back-off only ever lowers the load")
+                self.assertTrue(f["at_c_use"].get("operating_point_note"),
+                                f"{f['label']}: a backed-off recommendation must explain itself")
+
+    def test_recommended_load_meets_the_floor(self):
+        """Whatever c_use says, that load must have been measured servable."""
+        floor = (self.pa.get("interactivity_floor")
+                 or self.sc.get("interactivity_floor") or {})
+        fr = float(floor.get("tok_per_s_per_user") or 0)
+        for f in self.pa["finalists"]:
+            pu = f["at_c_use"].get("tok_per_s_per_user")
+            self.assertIsNotNone(pu, f"{f['label']}: no per-user rate at the recommended load")
+            self.assertGreaterEqual(pu, fr,
+                                    f"{f['label']}: recommends c={f['c_use']} at {pu} < {fr}")
 
     def test_finalist_topologies_in_runs(self):
         shapes = {(r.get("deployment", {}).get("parallel", {}).get("tp"),
                    r.get("deployment", {}).get("num_instances")) for r in self.runs}
         for f in self.pa["finalists"]:
             self.assertIn((f["config"]["tp"], f["config"]["num_instances"]), shapes)
+
+
+class NarrativeSelector(unittest.TestCase):
+    """write_agentx_report must describe the run it recommends, variant winners included."""
+
+    @staticmethod
+    def _identity(cfg, dep=None):
+        """Mirror of write_agentx_report._identity, loaded without executing that script.
+
+        The generator is a top-level script (it runs on import), so the helper is re-derived here
+        from its source rather than imported."""
+        import importlib.util
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.dirname(HERE)))), "scripts", "write_agentx_report.py")
+        src = open(path, encoding="utf-8").read()
+        start = src.index("_REFINE_BASELINE = {")
+        end = src.index("\n\n\n", src.index("def _identity("))
+        ns = {}
+        exec(src[start:end], ns)          # the two helpers only, no script body
+        return ns["_identity"](cfg, dep)
+
+    def test_variant_winner_selects_its_own_run_not_the_baseline(self):
+        """A drafting winner must not be described by the no-drafting run at the same load.
+
+        The old selector matched tp/dp/instances and merely EXCLUDED four knob keys, so for the
+        b200 winner `8x TP4 + EP (1 draft token)` at c=102 it took the no-drafting baseline
+        (1286.9 tok/s) instead of the K=1 run (1392.3). The traffic averages and measured input
+        tok/s then described a configuration the report was not recommending (namasl review)."""
+        win_cfg = {"tp": 4, "dp": 1, "num_instances": 8, "enable_expert_parallel": True,
+                   "num_speculative_tokens": 1, "speculative_category": "coding"}
+        # the winner's OWN run: resolved deployment carries the drafting block, and its recorded
+        # config carries the resolved engine defaults the finalist never states
+        k1 = {"config": {**win_cfg, "concurrency": 102, "max_num_seqs": 256,
+                         "max_num_batched_tokens": 8192, "gpu_memory_utilization": 0.9,
+                         "cache_dtype": "fp8_ds_mla", "max_model_len": 262144},
+              "deployment": {"parallel": {"tp": 4, "dp": 1, "enable_expert_parallel": True},
+                             "num_instances": 8,
+                             "engine": {"max_num_seqs": 256, "max_num_batched_tokens": 8192,
+                                        "gpu_memory_utilization": 0.9, "block_size": 128,
+                                        "speculative": {"method": "dspark",
+                                                        "num_spec_tokens": 1}}}}
+        # the no-drafting baseline at the same load and topology -- what used to be selected
+        base = {"config": {k: v for k, v in k1["config"].items()
+                           if k not in ("num_speculative_tokens", "speculative_category")},
+                "deployment": {"parallel": {"tp": 4, "dp": 1, "enable_expert_parallel": True},
+                               "num_instances": 8,
+                               "engine": {"max_num_seqs": 256, "max_num_batched_tokens": 8192,
+                                          "gpu_memory_utilization": 0.9, "block_size": 128}}}
+        wid = self._identity(win_cfg)
+        self.assertEqual(self._identity(k1["config"], k1["deployment"]), wid,
+                         "the winner's own run must match its finalist identity")
+        self.assertNotEqual(self._identity(base["config"], base["deployment"]), wid,
+                            "the no-drafting baseline must NOT match a drafting winner")
+
+    def test_identity_separates_refinement_variants(self):
+        """`max seqs 64` is a different candidate from the default, and both match their own run."""
+        topo = {"tp": 8, "dp": 1, "num_instances": 4, "enable_expert_parallel": True}
+        dflt = self._identity(topo)
+        var = self._identity({**topo, "max_num_seqs": 64})
+        self.assertNotEqual(dflt, var, "a refined variant is a distinct identity")
+        # a run of the DEFAULT carries the resolved baseline (256), which must normalise to the
+        # finalist that states nothing -- this is what made the winner unmatchable when the
+        # comparison keyed on mere key presence
+        run_default = {"config": {**topo, "max_num_seqs": 256, "max_num_batched_tokens": 8192,
+                                  "gpu_memory_utilization": 0.9},
+                       "deployment": {"parallel": {"tp": 8, "dp": 1,
+                                                   "enable_expert_parallel": True},
+                                      "num_instances": 4,
+                                      "engine": {"max_num_seqs": 256}}}
+        self.assertEqual(self._identity(run_default["config"], run_default["deployment"]), dflt,
+                         "a resolved baseline value normalises to the unset finalist")
 
 
 class QaRegressions(unittest.TestCase):
@@ -567,20 +692,50 @@ class QaRegressions(unittest.TestCase):
         self.sc, self.pa, self.runs, self.rep, _ = report.load_run_dir(FIXTURE)
 
     # G1 — pu under speculative decoding
-    def test_g1_pu_prefers_authoritative_field(self):
-        run = {"metrics": {"tok_per_s_per_user": 90.0, "itl_p99_ms": 5.0}}
-        pu, is_step = report._per_user_rate(run, mtp=3)
-        self.assertEqual(pu, 90.0)
-        self.assertFalse(is_step)
+    def test_g1_no_second_per_user_path_via_authoritative_field(self):
+        """A `metrics.tok_per_s_per_user` field must NOT short-circuit the one definition.
+
+        _per_user_rate used to prefer that field and return it RAW -- an aggregate, neither
+        acceptance-scaled nor worst-instance -- while _feasible always judged through
+        run_blis.per_user_rate. Nothing writes the field today, so they agreed by luck; the day
+        the engine emits it the displayed rate and the verdict would diverge again, which is the
+        split the unification closed. Note how wrong the old answer was: this is a K=3 drafting
+        run, so the raw 90.0 ignores the acceptance factor entirely (susiejojo review #1)."""
+        run = {"metrics": {"tok_per_s_per_user": 90.0, "itl_p99_ms": 5.0},
+               "deployment": {"engine": {"speculative": {"num_spec_tokens": 3}},
+                              "acceptance": {"acceptance_length": 2.0}},
+               "config": {"num_speculative_tokens": 3}}
+        pu, basis = report._per_user_rate(run)
+        self.assertEqual(pu, 400.0)                    # 2.0 x 1000/5, NOT the raw 90.0
+        self.assertEqual(basis, "derived-from-acceptance")
+        # and the displayed rate agrees with what _feasible judges on, field or no field
+        rate, fbasis, _itl = run_blis.per_user_rate(run)
+        self.assertAlmostEqual(pu, round(rate, 2), places=2)
+        self.assertEqual(basis, fbasis)
 
     def test_g1_pu_null_under_mtp_not_wrong_number(self):
-        run = {"metrics": {"itl_p99_ms": 5.0}}             # no authoritative field
-        pu, is_step = report._per_user_rate(run, mtp=3)
+        # Drafting on, no resolved acceptance -> withhold. The depth is read from the run itself
+        # (deployment.engine.speculative, else the flat candidate key), so a caller cannot pass a
+        # depth that disagrees with what BLIS was told.
+        drafting = {"metrics": {"itl_p99_ms": 5.0},
+                    "config": {"num_speculative_tokens": 3}}
+        pu, basis = report._per_user_rate(drafting)
         self.assertIsNone(pu)                              # NOT the known-wrong step rate (1000/5)
-        self.assertTrue(is_step)                           # flagged so the report can explain the gap
-        pu0, is_step0 = report._per_user_rate(run, mtp=0)
+        self.assertEqual(basis, "step-estimate-withheld")  # flagged so the report explains the gap
+        # ... and a withheld rate cannot pass the floor by default.
+        ok, viol = report._feasible(drafting, {"tok_per_s_per_user": 50}, {})
+        self.assertFalse(ok)
+        self.assertTrue(any("acceptance" in v for v in viol), viol)
+        # With a resolved acceptance the rate is AL-scaled, not the raw step rate.
+        priced = dict(drafting, deployment={"engine": {"speculative": {"num_spec_tokens": 3}},
+                                            "acceptance": {"acceptance_length": 2.5}})
+        pu2, basis2 = report._per_user_rate(priced)
+        self.assertEqual(pu2, 500.0)                       # 2.5 x 1000/5
+        self.assertEqual(basis2, "derived-from-acceptance")
+        plain = {"metrics": {"itl_p99_ms": 5.0}}
+        pu0, basis0 = report._per_user_rate(plain)
         self.assertEqual(pu0, 200.0)                       # no MTP -> step == token, real p99 rate
-        self.assertFalse(is_step0)
+        self.assertEqual(basis0, "")
 
     # F3 — pu fallback is on the p99 basis (matches floor + artifact), not mean
     def test_f3_pu_fallback_uses_p99_not_mean(self):
@@ -607,10 +762,13 @@ class QaRegressions(unittest.TestCase):
     # F2 — a floor given only as tok_per_s_per_user still enforces (derived p99 cap)
     def test_f2_rate_only_floor_is_enforced(self):
         self.assertEqual(report._floor_itl_p99_max({"tok_per_s_per_user": 50}), 20.0)
-        # a run at itl_p99 25 ms (> 20 cap implied by 50 tok/s) must be rejected
+        self.assertEqual(report._floor_rate({"itl_p99_ms_max": 20.0}), 50.0)
+        # a run at itl_p99 25 ms (40 tok/s/user, under the 50 floor) must be rejected. The
+        # violation now names the per-token rate, because that is the basis the floor is stated in
+        # and the only one that is correct under drafting (namasl review #2).
         ok, viol = report._feasible({"metrics": {"itl_p99_ms": 25}}, {"tok_per_s_per_user": 50}, {})
         self.assertFalse(ok)
-        self.assertTrue(any("itl_p99_ms" in v for v in viol))
+        self.assertTrue(any("tok_per_s_per_user" in v for v in viol), viol)
 
     def test_g1_records_carry_the_flag(self):
         recs = report.build_records(self.runs, self.sc)
@@ -1003,6 +1161,57 @@ class Parity(unittest.TestCase):
             self.assertTrue(lexicon.label(key), f"{key} has no label")
             src = lexicon.METRICS.get(key) or lexicon.FACETS[key]
             self.assertTrue(src.get("help"), f"{key} has no help text")
+
+
+class PerUserUnderDrafting(unittest.TestCase):
+    """Under speculative decoding BLIS logs ITL per VERIFICATION STEP, and a step emits AL tokens.
+    The naive 1000/ITL is then a step rate: on deepseek-v4.1-flash at K=5 it reads 30.3
+    tok/s/user where the real per-token rate is 106.4, which would mark the fastest configuration
+    measured a floor violation."""
+
+    def _run(self, *, k=0, al=None, itl=32.995):
+        dep = {"parallel": {"tp": 4}, "num_instances": 1, "gpus": 4,
+               "engine": {"max_num_batched_tokens": 8192, "max_num_seqs": 256}}
+        if k:
+            dep["engine"]["speculative"] = {"method": "dspark", "num_spec_tokens": k}
+            if al:
+                dep["acceptance"] = {"acceptance_length": al, "source": "test (b200)"}
+        return {"concurrency": 8, "config": {"tp": 4}, "deployment": dep,
+                "returncode": 0, "metrics": {"tokens_per_sec": 1041.5, "itl_p99_ms": itl,
+                                             "injected_requests": 40, "completed_requests": 40}}
+
+    def test_no_drafting_uses_the_direct_rate(self):
+        r = report.build_records([self._run()], {})[0]
+        self.assertAlmostEqual(r["pu"], 1000 / 32.995, places=1)
+        self.assertEqual(r["pu_basis"], "")
+
+    def test_drafting_with_acceptance_scales_by_al(self):
+        r = report.build_records([self._run(k=5, al=3.51)], {})[0]
+        self.assertAlmostEqual(r["pu"], 3.51 * 1000 / 32.995, places=1)
+        self.assertEqual(r["pu_basis"], "derived-from-acceptance")
+        self.assertEqual(r["al"], 3.51)
+        self.assertEqual(r["mtp"], 5)
+        self.assertEqual(r["spec"], "dspark")
+
+    def test_the_derived_rate_is_above_the_naive_one(self):
+        """The whole point: the naive axis would reject this config against a 50 tok/s/user floor
+        while the correct one clears it comfortably."""
+        r = report.build_records([self._run(k=5, al=3.51)], {})[0]
+        self.assertLess(1000 / 32.995, 50)        # naive: looks like a violation
+        self.assertGreater(r["pu"], 50)           # derived: clears the floor
+
+    def test_drafting_without_acceptance_withholds_the_rate(self):
+        """An unknown acceptance factor means an unknown multiple -- publish nothing."""
+        r = report.build_records([self._run(k=5, al=None)], {})[0]
+        self.assertIsNone(r["pu"])
+        self.assertEqual(r["pu_basis"], "step-estimate-withheld")
+        self.assertTrue(r["pu_is_step_estimate"])
+
+    def test_depth_is_read_from_the_resolved_deployment(self):
+        """Reading only the flat candidate key missed every run whose depth came from the
+        scenario's nested engine.speculative block."""
+        r = report.build_records([self._run(k=3, al=2.9)], {})[0]
+        self.assertEqual(r["mtp"], 3)
 
 
 if __name__ == "__main__":

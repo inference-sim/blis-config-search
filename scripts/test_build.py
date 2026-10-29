@@ -146,14 +146,29 @@ def test_validation():
         except bg.Invalid:
             check(True, "bad dir name raises Invalid")
 
-        # unknown hardware
-        badhw = os.path.join(tmp, "qwen3-14b-zzz-chatbot-0002")
-        _mk_run_dir(badhw, "qwen3-14b-zzz-chatbot-0002", hardware="zzz")
-        try:
-            bg.validate_and_project(badhw)
-            check(False, "unknown hardware should raise")
-        except bg.Invalid:
-            check(True, "unknown hardware raises Invalid")
+        # Hardware is validated by FORM, not against an allowlist. An allowlist drifted from the
+        # catalog in both directions and, when it was made to READ the catalog, turned this pure
+        # offline transform into something that depended on a sibling clone -- so it passed
+        # locally and failed in CI, where no ../blis-catalog exists. BLIS already refuses a chip
+        # it cannot price (NS-6); what this build needs is that the value is a safe token.
+        for hw in ("b200", "b300", "l40s", "gb200-nvl72", "a100-80"):
+            ok_dir = os.path.join(tmp, f"qwen3-14b-{hw}-chatbot-0003")
+            _mk_run_dir(ok_dir, f"qwen3-14b-{hw}-chatbot-0003", hardware=hw)
+            try:
+                _, row = bg.validate_and_project(ok_dir)
+                check(row["hardware"] == hw.upper(), f"real catalog part {hw!r} is accepted")
+            except bg.Invalid as e:
+                check(False, f"{hw!r} should be accepted, got {e}")
+
+        # ... while an unsafe value still raises, since hardware reaches file names and the page.
+        for hw in ("../etc", "Z Z", "a" * 64, "9bad", ""):
+            badhw = os.path.join(tmp, "qwen3-14b-bad-chatbot-0004")
+            _mk_run_dir(badhw, "qwen3-14b-bad-chatbot-0004", hardware=hw)
+            try:
+                bg.validate_and_project(badhw)
+                check(False, f"unsafe hardware {hw!r} should raise")
+            except bg.Invalid:
+                check(True, f"unsafe hardware {hw!r} raises Invalid")
     finally:
         shutil.rmtree(tmp)
 
@@ -338,8 +353,15 @@ def test_catalog():
                   f"replay {w['name']} states no ISL/OSL distribution")
         sg = next((w for w in cat["workloads"] if w["name"] == "sharegpt"), None)
         if sg:  # present once blis-catalog#(sharegpt) lands; skipped against an older checkout
-            check(sg["kind"] == "shape" and sg["isl_mean"] == 208 and sg["osl_mean"] == 185,
-                  "sharegpt preset projects its measured ISL/OSL")
+            # 223/200, the MEASURED pair the catalog states, with its provenance in the file:
+            # ShareGPT_V3_unfiltered_cleaned_split.json under Qwen/Qwen2.5-14B, vLLM's three-rule
+            # filter (min_len 4, max_prompt_len 1024 on the prompt ALONE, max_total_len 2048), over
+            # the 82,744 qualifying pairs. The old 208/185 here predates blis-catalog#44 landing
+            # the measurement; reading the 1024 as a COMBINED cap is the specific error that review
+            # caught, and its signature is osl_max ~979 instead of the correct 1917.
+            check(sg["kind"] == "shape" and sg["isl_mean"] == 223 and sg["osl_mean"] == 200,
+                  f"sharegpt preset projects its measured ISL/OSL "
+                  f"(got {sg.get('isl_mean')}/{sg.get('osl_mean')}, expected 223/200)")
     else:
         print("  (sibling repos absent — catalog empty; that is the graceful path)")
 

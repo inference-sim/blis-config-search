@@ -5,7 +5,7 @@ import { reportHref } from '../load'
 import { EMPTY_SEL, dash, emphasis, finite, fnum, operatingPoints, resolveHighlight, runFlags, selectRecords, sortRows, toggleHighlight, useSort, type Selection, type SortState } from '../lib'
 import { OBJECTIVE, OPERATING_COLUMNS, figure as fig, help as lexHelp, label as lexLabel, metric } from '../lexicon'
 import { Crossfilter } from './Crossfilter'
-import { MockBadge } from './Reports'
+import { MockBadge, CaveatBadge } from './Reports'
 
 const PALETTE = ['#1f6e5c', '#34366e', '#b5651d', '#a3301f', '#6b7d1f', '#7a4a8c', '#2a7f9e', '#8a6d00']
 
@@ -169,12 +169,31 @@ export function PointDetail({ r, onClose, pinned = true, scenarioHasCmd = true }
         <section>
           <h5>Routing &amp; policy</h5>
           {defList([
-            ['routing_policy', r.route || 'round-robin'],
+            /* v0.12.0 routes through the embedded llm-d router: the value is an EndpointPicker
+               configuration, and 'default' is the router's own built-in one. The old
+               'round-robin' fallback named a policy llm-d dropped. */
+            ['routing', r.route || 'default'],
             ['routing_scorers', r.scorers],
             ['scheduler', r.schedp ?? 'default'],
             ['admission_policy', r.admit ?? 'always-admit'],
             ['prefill/decode', r.pd],
-            ['draft tokens (MTP)', r.mtp || 'off'],
+          ])}
+        </section>
+        <section>
+          {/* Speculative decoding gets its own block: the depth alone does not identify the
+              deployment (which drafter?) and does not explain the per-user number, which is
+              AL-scaled under drafting rather than 1000/ITL. */}
+          <h5>Speculative decoding</h5>
+          {defList([
+            ['drafter', r.spec ?? 'off'],
+            ['draft tokens (K)', r.mtp || 'off'],
+            ['acceptance length', finite(r.al) ? `${fnum(r.al as number, 2)} tok/step` : null],
+            ['acceptance measured', r.al_src],
+            ['per-user basis', r.pu_basis === 'derived-from-acceptance'
+              ? 'acceptance-scaled (AL x 1000 / ITL p99)'
+              : r.pu_basis === 'step-estimate-withheld'
+                ? 'withheld: drafting on, acceptance unresolved'
+                : null],
           ])}
         </section>
         <section>
@@ -585,9 +604,11 @@ function axesSearched(recs: RunRecord[]): string[] {
     { key: 'mnbt', label: 'max-num-batched-tokens' },
     { key: 'bs', label: 'block-size' },
     { key: 'gmu', label: 'gpu-memory-utilization' },
-    { key: 'route', label: 'routing policy' },
+    { key: 'route', label: 'routing' },
     { key: 'pd', label: 'prefill/decode' },
-    { key: 'mtp', label: 'speculative tokens' },
+    { key: 'spec', label: 'drafter' },
+    { key: 'mtp', label: 'draft tokens' },
+    { key: 'al', label: 'acceptance length' },
   ]
   const out: string[] = []
   for (const d of dims) {
@@ -931,7 +952,7 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
   return (
     <div>
       <p className="crumb"><a href="#/reports">← all reports</a></p>
-      <h2 className="viewhead">{s.model}{s.synthetic && <MockBadge />}</h2>
+      <h2 className="viewhead">{s.model}{s.synthetic && <MockBadge />}{!s.synthetic && s.caveat && <CaveatBadge caveat={s.caveat} />}</h2>
       <div className="specchips">
         <span className="spec">{s.hardware}</span><span className="spec">{s.gpu_budget} GPUs</span>
         <span className="spec">{s.workload}</span><span className="spec">{s.isl_osl}</span>
@@ -941,6 +962,9 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
         <a className="fullreport" href={reportHref(s.run_id)} target="_blank" rel="noreferrer">Open full report ↗</a>
       </div>
       {s.synthetic && <div className="warnnote">Mock scenario: synthetic placeholder data, not a real simulation run.</div>}
+      {/* The full caveat, not just the badge: a reader about to copy a deployment out of this
+          page has to be able to read what these runs actually measured. */}
+      {!s.synthetic && s.caveat && <div className="warnnote">{s.caveat}</div>}
 
       <section className="briefing" aria-label="Top configs to try">
         <div className="seclabel2">Top configs to try</div>
@@ -957,7 +981,10 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
             <div><dt>tok/s/GPU</dt><dd className="num best">{fnum(w.tps_per_gpu)}</dd></div>
             <div><dt>tok/s/user</dt><dd className="num best">{fnum(w.per_user)}</dd></div>
             <div><dt>ITL p99 (ms)</dt><dd className="num best">{fnum(w.itl_p99, 2)}</dd></div>
-            <div><dt>GPUs · load</dt><dd className="num"><span className="num">{fnum(w.gpus, 0)}</span> · c<span className="num">{fnum(w.c_use, 0)}</span></dd></div>
+            {/* c_use is the recommended load AND the load measured. When it backed off below the
+                0.8xC* target, say so here rather than showing a bare number that looks like the
+                target. */}
+            <div><dt>GPUs · load</dt><dd className="num"><span className="num">{fnum(w.gpus, 0)}</span> · c<span className="num">{fnum(w.c_use, 0)}</span>{w.c_use_target != null && w.c_use_target !== w.c_use && <span className="note" title={`the 0.8xC* target of c${w.c_use_target} measured below the interactivity floor, so the recommendation is the highest servable measured load`}> (backed off from c{w.c_use_target})</span>}</dd></div>
           </div>
         </div>
         {runnersUp.length > 0 && (

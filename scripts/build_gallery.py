@@ -37,7 +37,19 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # for build_cata
 import report as report_py  # noqa: E402
 
 RUN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
-KNOWN_HARDWARE = {"h100", "h200", "gb200", "a100", "mi300x"}
+# Hardware is validated by FORM, not against an allowlist.
+#
+# This was a hardcoded set, which drifted both ways: it listed `mi300x`, which blis-catalog does
+# not carry, and omitted `b200`/`b300`/`l40s`, which it does -- so a legitimate B200 report failed
+# the build with "unknown hardware 'b200'". Reading the set from the catalog instead looked like
+# the fix, but it made a pure, offline transform depend on a SIBLING CLONE: CI has no
+# ../blis-catalog, so the lookup silently fell back to the stale set and failed there while
+# passing locally. That is worse than the original bug, because it only shows up in CI.
+#
+# The authority on what hardware a run used is the RUN, which BLIS already refused to produce for
+# a chip it cannot price (NS-6) -- re-deciding that here adds nothing. What this build does need is
+# that the value is a safe, well-formed token, since it reaches file names and the page.
+HARDWARE_RE = re.compile(r"^[a-z][a-z0-9.-]{1,31}$")
 # Report-data files copied verbatim next to the rendered index.html (so a report stays
 # regenerable from the published site). Nothing executable; no arbitrary contributor files.
 REPORT_DATA_FILES = ("scenario.json", "pareto.json", "runs.jsonl", "report.json")
@@ -65,7 +77,11 @@ def _workload_name(scenario):
     wl = scenario.get("workload") or {}
     if isinstance(wl, str):
         return wl
-    return wl.get("preset") or wl.get("name") or "workload"
+    # A REPLAY workload has no `preset` -- its traffic is a recorded corpus, named by the harness
+    # scenario it replays. Reading only `preset` labelled every replay row the literal word
+    # "workload", which tells a reader nothing and makes two different replays indistinguishable.
+    rep = wl.get("replay") or {}
+    return wl.get("preset") or rep.get("scenario") or wl.get("name") or "workload"
 
 
 def validate_and_project(run_dir):
@@ -86,8 +102,9 @@ def validate_and_project(run_dir):
 
     model = str(_req(scenario, "model", name))
     hardware = str(_req(scenario, "hardware", name)).lower()
-    if hardware not in KNOWN_HARDWARE:
-        raise Invalid(f"{name}: unknown hardware {hardware!r} (allowed: {sorted(KNOWN_HARDWARE)})")
+    if not HARDWARE_RE.match(hardware):
+        raise Invalid(f"{name}: hardware {hardware!r} is not a safe catalog key "
+                      f"(expected lowercase letters, digits, dots and dashes)")
     gpu_budget = int(_num(_req(scenario, "gpu_budget", name), name, 1, 100000))
     workload = _workload_name(scenario)
 
@@ -117,10 +134,22 @@ def validate_and_project(run_dir):
             "ni": int(f.get("config", {}).get("num_instances", 0) or 0),
             "gpus": int(_num(f.get("gpus", 0), f"{name}:{label} gpus", 0, 100000)),
             "c_use": int(_num(f.get("c_use", 0), f"{name}:{label} c_use", 0, 1e7)),
+            # The 0.8xC* target, when the recommendation backed off below it. Omitted when they
+            # agree, so the UI only mentions it where there is something to explain.
+            **({"c_use_target": int(_num(f.get("c_use_target"), f"{name}:{label} c_use_target",
+                                         0, 1e7))}
+               if f.get("c_use_target") not in (None, f.get("c_use")) else {}),
             "tps": _num(at.get("tokens_per_sec", 0), f"{name}:{label} tps", 0, 1e9),
             "tps_per_gpu": _num(at.get("tokens_per_sec_per_gpu", 0), f"{name}:{label} tps/gpu", 0, 1e9),
             "per_user": _num(at.get("tok_per_s_per_user", 0), f"{name}:{label} per_user", 0, 1e6),
             "itl_p99": _num(at.get("itl_p99_ms", 0), f"{name}:{label} itl", 0, 1e6),
+            # The load the numbers above were MEASURED at. c_use is now the RECOMMENDED load and
+            # is always the load measured, so these agree for a current run dir; they can still
+            # differ in one written before that change, and the card pairs these figures with
+            # c_use, so a silent substitution would read as the throughput at a load never run.
+            # Absent in an older run dir -> fall back to c_use rather than inventing a mismatch.
+            "measured_at": int(_num(at.get("measured_at_concurrency", f.get("c_use", 0)) or 0,
+                                    f"{name}:{label} measured_at", 0, 1e7)),
         }
         finalists.append(row)
         # prefer the explicit (label, variant) pair; fall back to the legacy `chosen` string so a
@@ -164,6 +193,15 @@ def validate_and_project(run_dir):
         "generated": str(gallery.get("generated", "")),
         "winner": winner, "finalists": finalists,
         "reason": str(gallery.get("reason") or (pareto.get("winner") or {}).get("reason", "")),
+        # A caveat about the DATA itself (not the recommendation), shown on the card and bannered
+        # into the report. Two sources, joined: the run dir may author one (used for the reports
+        # whose workload label did not match the traffic they were priced on), and
+        # provenance_split() COMPUTES one for a ledger whose rows were not all priced the same way.
+        #
+        # The computed half was missing, so a card could show a clean headline for a report whose
+        # own footer carried "runs span 2 seeds ... registry v0.1.1" -- the gallery hid exactly the
+        # problem the footer disclosed (susiejojo UI review).
+        "caveat": _caveat_text(gallery, run_dir),
     }
     return run_id, row
 
@@ -182,9 +220,47 @@ _MOCK_BANNER = ('<div role="note" style="font:600 13px/1.5 system-ui,sans-serif;
                 'Do not deploy from these numbers.</div>')
 
 
-def _decorate_report(path, synthetic):
-    """Inject a back-to-gallery link (all reports) and a MOCK banner (synthetic only) just
-    inside the report's .wrap container, without touching report.py."""
+def _caveat_text(gallery, run_dir):
+    """The run dir's authored caveat, plus any provenance incoherence computed from its ledger."""
+    parts = []
+    authored = str(gallery.get("caveat", "") or "").strip()
+    if authored:
+        parts.append(authored)
+    runs = []
+    path = os.path.join(run_dir, "runs.jsonl")
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        runs.append(json.loads(line))
+                    except ValueError:
+                        pass
+    except OSError:
+        runs = []
+    split = report_py.provenance_split(runs)
+    if split:
+        parts.append(f"Provenance: {split}.")
+    return " ".join(parts)
+
+
+def _caveat_banner(text):
+    """A banner for a data caveat the run dir declares in gallery.json's `caveat`.
+
+    Distinct from the MOCK banner: these ARE real BLIS measurements, but something about what
+    they measured does not match what the report says it measured, and a reader deciding a
+    deployment from them has to know that.
+    """
+    return ('<div role="note" style="font:600 13px/1.5 system-ui,sans-serif;margin:14px 0 0;'
+            'padding:10px 14px;border:1px solid #d8b984;background:#f6e8ca;color:#6b4508;'
+            'border-radius:6px">' + report_py.esc(text) + '</div>')
+
+
+def _decorate_report(path, synthetic, caveat=""):
+    """Inject a back-to-gallery link (all reports), a MOCK banner (synthetic only) and a data
+    caveat banner (when the run dir declares one) just inside the report's .wrap container,
+    without touching report.py."""
     try:
         with open(path, encoding="utf-8") as f:
             html = f.read()
@@ -194,7 +270,7 @@ def _decorate_report(path, synthetic):
     i = html.find(anchor)
     if i == -1:
         return
-    inject = _BACK_LINK + (_MOCK_BANNER if synthetic else "")
+    inject = _BACK_LINK + (_MOCK_BANNER if synthetic else "") + (_caveat_banner(caveat) if caveat else "")
     at = i + len(anchor)
     html = html[:at] + inject + html[at:]
     with open(path, "w", encoding="utf-8") as f:
@@ -226,7 +302,7 @@ def build(reports_dir, out_dir, include_mock=True):
         os.makedirs(dest, exist_ok=True)
         scenario, pareto, runs, report, _ = report_py.load_run_dir(rd)
         report_py.write_one(rd, out=os.path.join(dest, "index.html"))
-        _decorate_report(os.path.join(dest, "index.html"), row["synthetic"])
+        _decorate_report(os.path.join(dest, "index.html"), row["synthetic"], row.get("caveat", ""))
         for fn in REPORT_DATA_FILES:
             src = os.path.join(rd, fn)
             if os.path.exists(src):

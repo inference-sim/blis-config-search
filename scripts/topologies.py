@@ -30,6 +30,17 @@ the grid to sweep it displays correctly.
 GPUS_PER_NODE = 8          # a per-instance footprint beyond one node needs a fabric (see run_blis)
 TP_TIERS = (1, 2, 4, 8, 16, 32, 64)    # powers of two; past 8 the instance spans nodes
 DP_TIERS = (1, 2, 4, 8)
+# COST NOTE (measured on deepseek-v4.1-flash / AgentX replay / 32 GPUs, 2026-10-26). The narrow-tp
+# arms are the expensive half of a search and have never placed: tp<=2 took 39% of total BLIS wall
+# time on H100 and 30% on H200, and scored 1.8-5.9 tok/s/GPU against the winners' 21-31. The cause
+# is structural -- expert-parallel width is derived as tp x dp, so a wide-dp/narrow-tp layout both
+# shards poorly AND makes the simulation expensive (8 DP ranks step in lockstep).
+#
+# They are kept anyway, deliberately: "narrow TP collapses, and here is the curve" is a FINDING the
+# reports state, and dropping the arm would leave a lone survivor looking like the whole search
+# space (the thing `dropped[]` exists to prevent). If a campaign is wall-clock bound, bound the
+# grid by raising the floor here rather than by truncating max_candidates, and say in the report
+# that the grid was bounded.
 
 
 def is_moe(model_entry):
@@ -126,28 +137,65 @@ def candidate_topologies(gpu_budget, model_entry=None, max_candidates=12,
 # The lesson: these knobs bind DOWNWARD. Raising them past the default changed nothing measurable,
 # so the grid probes the constrained side (where a real deployment is often forced to sit) rather
 # than spending runs on headroom that does not exist.
+# ROUTING ARMS MOVED. inference-sim v0.12.0 removed --routing-policy (and every other routing /
+# admission flag): routing is the embedded llm-d router now, configured by an
+# EndpointPickerConfig that the scenario's `router:` block names. So a routing arm is a FILE --
+# see routing/README.md for each arm and the former flag it maps from. Upstream dropped
+# round-robin / least-loaded / always-busiest outright ("the llm-d router has no such policy"),
+# so the +84% `least-loaded` result from the kimi-k2.5 campaign has no exact equivalent here and
+# that comparison cannot be reproduced arm-for-arm.
+#
+# Measured on deepseek-v4.1-flash / 4x TP8xDP4 / h100 / chatbot at 64 sessions: the router's
+# default, `queue`, `load-aware`, `queue-kv` and `prefix-affinity` are all byte-identical
+# (5333.7 tok/s), and `random` differs only slightly (5318.8). Uniform synthetic requests over
+# four equal instances leave no imbalance for a scorer to exploit, so the arms are kept for the
+# agentic replay -- whose trajectories vary hugely in size and re-send a growing shared prefix --
+# rather than being presented as a lever this workload has shown.
+ROUTING_ARMS = ("routing/prefix-affinity.yaml", "routing/queue-kv.yaml")
+
+# SPECULATIVE DECODING is a first-class axis for a model that ships a drafter, not an exotic knob:
+# deepseek-v4.1-flash's catalog graph declares a `dspark` speculator with num_spec_tokens 5, and
+# the registry carries MEASURED acceptance lengths for it (InferenceX SPEED-Bench coding curves,
+# K=1..5, both thinking modes). Measured on b200 / 1x TP4 + EP / chatbot: K=0 924.5 tok/s,
+# K=1 692.8 (-25%, AL 1.81 does not pay for the draft), K=3 954.7, K=5 1041.5 (+13%) -- so the
+# depth matters and the direction is not monotonic at small K.
+#
+# K is swept as a coordinate refinement like any other knob. The drafter itself is NOT swept: it
+# is a property of the model (dspark here, mtp on deepseek-v4-pro, deepseek_mtp on glm-5.2), and
+# run_blis fills it from the model's graph.
+#
+# NOTE on the per-user axis: under drafting BLIS logs ITL per VERIFICATION STEP, and a step emits
+# AL tokens, so the per-token rate is AL x 1000 / ITL p99. The naive 1000/ITL understates it by
+# the whole acceptance factor and would mark every drafting config a floor violation. run_blis
+# records the resolved AL on each row and report.py scales by it.
+SPECULATIVE_ARMS = (1, 3, 5)
+
 KNOB_TIERS = (
     # one entry per knob: (key, values to probe besides the default)
-    ("routing_policy", ("least-loaded", "weighted")),   # round-robin IS the default
+    ("num_speculative_tokens", SPECULATIVE_ARMS),       # drafting OFF is the baseline
+    ("router_config", ROUTING_ARMS),                    # the router's own default IS the baseline
     ("max_num_seqs", (64,)),                            # the batch-width constraint that binds
     ("max_num_batched_tokens", (2048,)),                # the prefill-admission constraint
     ("gpu_memory_utilization", (0.7,)),                 # a KV-starved deployment
 )
-# always-busiest is a real BLIS policy but a pathological one (-58% throughput); it is never a
-# recommendation, so it is not spent as a candidate. Valid set: round-robin, least-loaded,
-# weighted, always-busiest.
-EXCLUDED_ROUTING = ("always-busiest",)
 
 
-def knob_variants(topology):
+def knob_variants(topology, skip=()):
     """One-knob-at-a-time refinements of `topology`, in stable order.
 
     Each returned candidate is the topology plus EXACTLY ONE engine/routing knob, so a result that
     differs is attributable to that knob. The topology itself is never altered — these refine a
     shape the search has already found servable.
+
+    `skip` names knobs this deployment cannot take. Sweeping one anyway spends real runs on
+    certain refusals and leaves contradictory rows in the ledger: kimi-k2.5 declares no speculator,
+    so its search issued 108 drafting runs that were ALL refused, and the dashboard then rendered
+    "drafter: off" beside "draft tokens (K): 1" for each (susiejojo UI review).
     """
     out = []
     for key, values in KNOB_TIERS:
+        if key in skip:
+            continue
         for v in values:
             out.append({**topology, key: v})
     return out
@@ -169,14 +217,30 @@ def label(cand):
 
 # Readable knob names, spelled out on purpose: "b2k" for max_num_batched_tokens=2048 tells a
 # reader nothing. Mirrors report.KNOB_NAMES, keyed by candidate-config key.
-KNOB_NAMES = {"routing_policy": "routing", "routing_scorers": "scorers",
+KNOB_NAMES = {"num_speculative_tokens": "draft tokens", "speculative_method": "drafter",
+              "router_config": "routing", "routing_policy": "routing",
+              "routing_scorers": "scorers",
               "max_num_batched_tokens": "batch tokens", "max_num_seqs": "max seqs",
               "block_size": "block size", "gpu_memory_utilization": "gpu mem util",
               "scheduler": "scheduler", "admission_policy": "admission"}
 
 
+def routing_arm_name(path):
+    """The readable name of a routing arm, from its EPP config path.
+
+    "routing/prefix-affinity.yaml" -> "prefix-affinity". The file basename IS the arm's name (see
+    routing/README.md), so a reader sees "prefix-affinity routing" rather than a path.
+    """
+    base = str(path).rsplit("/", 1)[-1]
+    return base[:-5] if base.endswith(".yaml") else base
+
+
 def knob_phrase(key, value):
     """Spelled-out description of one knob setting, e.g. "batch tokens 2,048"."""
+    if key == "num_speculative_tokens":
+        return "no drafting" if not value else f"{value} draft token{'s' if value != 1 else ''}"
+    if key == "router_config":
+        return f"{routing_arm_name(value)} routing"
     if key == "routing_policy":
         return f"{value} routing"
     name = KNOB_NAMES.get(key, key)

@@ -1,0 +1,17 @@
+# `--routing-policy weighted --routing-scorers queue-depth:2,kv-utilization:2` -> a weighted
+# profile with the matching scorers and max-score-picker.
+apiVersion: llm-d.ai/v1
+kind: EndpointPickerConfig
+plugins:
+- type: queue-scorer
+- type: kv-cache-utilization-scorer
+- type: max-score-picker
+- type: single-profile-handler
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: queue-scorer
+    weight: 2.0
+  - pluginRef: kv-cache-utilization-scorer
+    weight: 2.0
+  - pluginRef: max-score-picker

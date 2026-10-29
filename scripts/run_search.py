@@ -50,14 +50,163 @@ def model_entry(model, catalog_root):
     return next((m for m in cat.get("models", []) if m.get("name") == model), None)
 
 
-def concurrency_ramp(gpu_budget):
+def _replay_of(scenario):
+    """The scenario's replay descriptor, or None for a generated-shape workload."""
+    wl = scenario.get("workload") or {}
+    return wl.get("replay") if isinstance(wl, dict) else None
+
+
+def _git_identity(path):
+    """(describe, commit) for a checkout, or (None, None) when it is not a git tree.
+
+    A pin NAME is an intention; the commit is what actually priced the runs. Recording only the
+    name let two halves of one report be priced by different registry contents under the same
+    label (namasl review #3)."""
+    import subprocess
+    def _q(*args):
+        try:
+            out = subprocess.run(args, cwd=path, capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return (out.stdout or "").strip() or None if out.returncode == 0 else None
+    if not (path and os.path.isdir(path)):
+        return None, None
+    desc = _q("git", "describe", "--tags", "--always", "--dirty")
+    commit = _q("git", "rev-parse", "HEAD")
+    return desc, commit
+
+
+def _file_digest(path):
+    """sha256 of a file, or None. The simulator binary has no `version` subcommand, so its digest
+    is the only thing that identifies which build priced a run."""
+    if not (path and os.path.isfile(path)):
+        return None
+    import hashlib
+    h = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+    except OSError:
+        return None
+    return h.hexdigest()
+
+
+def _pinned_stack(blis=None, catalog=None, registry=None):
+    """What actually priced these runs, recorded into scenario.json.
+
+    pins.env gives the intended REFS; this also resolves each dependency to the commit that was
+    checked out and the simulator to its binary digest, so a reader can verify that every run in a
+    ledger was priced by one cost model. Without that, a report whose baseline ran before a
+    registry bump and whose drafting arms ran after carried a single `registry: v0.1.1` label and
+    nothing contradicted it (namasl review #3).
+    """
+    pins = build_catalog.read_pins()
+    out = {"blis": pins.get("BLIS_REF", "unpinned"),
+           "kernel": pins.get("KERNEL_REF", "unpinned"),
+           "catalog": pins.get("CATALOG_REF", "unpinned"),
+           "registry": pins.get("REGISTRY_REF", "unpinned")}
+    resolved = {}
+    for name, path in (("catalog", catalog), ("registry", registry)):
+        desc, commit = _git_identity(path)
+        if desc or commit:
+            resolved[name] = {"describe": desc, "commit": commit}
+    digest = _file_digest(blis)
+    if digest:
+        resolved["blis"] = {"sha256": digest}
+    if resolved:
+        out["resolved"] = resolved
+    return out
+
+
+def pin_mismatches(stack):
+    """Pins whose DECLARED ref disagrees with the checkout that actually ran, as readable strings.
+
+    The `resolved` block exists so this can be checked rather than trusted, and the first thing it
+    caught was real: pins.env said catalog 0.3.0 while every run used 0.4.0 (ba542f0). That made
+    the "one pinned stack" label false even though the only difference was an unused workload file
+    (namasl review). A search now refuses to start on a mismatch instead of recording it quietly.
+    """
+    res = (stack or {}).get("resolved") or {}
+    bad = []
+    for name in ("catalog", "registry"):
+        want = (stack or {}).get(name)
+        got = (res.get(name) or {}).get("describe")
+        # `describe` carries "-dirty"/"-N-gsha" suffixes on an untagged checkout; a declared ref is
+        # satisfied when it is the exact tag.
+        if want and got and got != want:
+            bad.append(f"{name}: pins.env says {want}, checkout is {got}")
+    return bad
+
+
+def _corpus_traffic_note(runs):
+    """A short description of the traffic a replay actually served, measured from the runs.
+
+    A replay cannot advertise a mean ISL/OSL up front, but it CAN report what it served, which is
+    what a reader wants from that slot. Taken from the largest completed run so it describes the
+    corpus rather than a tiny probe.
+    """
+    best = None
+    for r in runs:
+        m = r.get("metrics") or {}
+        c = m.get("completed_requests") or 0
+        if r.get("returncode") == 0 and c and m.get("total_input_tokens"):
+            if best is None or c > (best.get("completed_requests") or 0):
+                best = m
+    if not best:
+        return ""
+    c = best["completed_requests"]
+    return (f"~{round(best['total_input_tokens'] / c):,} in / "
+            f"{round((best.get('total_output_tokens') or 0) / c):,} out per request")
+
+
+def _workload_label(scenario):
+    """How to name this scenario's workload in progress output and the gallery.
+
+    A shape preset is named by its preset; a replay by its harness scenario. A replay has no
+    `preset` at all, so reading only that printed "None" for the agentic runs.
+    """
+    wl = scenario.get("workload") or {}
+    if not isinstance(wl, dict):
+        return str(wl)
+    rep = wl.get("replay") or {}
+    return wl.get("preset") or rep.get("scenario") or "workload"
+
+
+def concurrency_ramp(gpu_budget, replay=None):
     """Probe ladder for a budget, in stable order.
 
     The old ladder was the fixed [1..32] whatever the budget. On 256 GPUs that never reached the
     interactivity limit, so the search ranked shapes on an arbitrary mid-curve point. It also
     saturated: with --num-requests 80, c=128 and c=256 returned byte-identical throughput because
     the request pool ran dry (measured). The ladder now grows with the budget, and `requests_for`
-    keeps every point supplied."""
+    keeps every point supplied.
+
+    A REPLAY's load axis is session-tree LANES, not in-flight requests: one lane drives a whole
+    agentic trajectory whose sub-requests fan out from it, so a lane is worth many concurrent
+    requests and the ladder has to be far shorter. Measured on deepseek-v4.1-flash / h100 /
+    agentx-mvp at one TP8xDP4 instance: 16 lanes holds ITL p99 at 9.2 ms, 24 lanes is already at
+    453 ms, and throughput PEAKS near 48 lanes and then falls. Per instance the knee sits between
+    16 and 32 lanes, and it scales with the fleet (4 instances hold 64 lanes at 10.5 ms), so the
+    ladder is sized per instance-equivalent rather than per GPU.
+    """
+    if replay:
+        # ~8 GPUs per instance-equivalent; probe around the measured per-instance knee and PAST it,
+        # so C* is bracketed rather than merely approached.
+        #
+        # The old top of 32*inst was not enough on a fast part: on 32x B200 the winner still held
+        # 115 tok/s/user at the final rung (c=128) against a floor of 50, so nothing failed above
+        # it and C*=128 was the highest TESTED load, not a measured ceiling -- while the report
+        # called it one and recommended 80% of it (namasl review). The ladder now runs two
+        # doublings further; `_probe_one` stops climbing a shape as soon as it misses the floor, so
+        # the extra rungs cost runs only where capacity has not yet been bracketed.
+        inst = max(1, int(gpu_budget) // topologies.GPUS_PER_NODE)
+        ramp, c = [], 4
+        top = max(128, 128 * inst)
+        while c <= top:
+            ramp.append(c)
+            c *= 2
+        return ramp
     ramp = [1, 2, 4, 8, 16, 24, 32]
     c = 64
     top = max(32, gpu_budget * 2)      # ~2 sessions per GPU is past any interactivity floor
@@ -74,11 +223,27 @@ def concurrency_ramp(gpu_budget):
 TIE_TOLERANCE = 0.005
 
 
+def partially_explored(f):
+    """True when a finalist's winning knob was explored on only PART of the search space.
+
+    A drafting arm backfilled onto a finished run dir is swept on the no-drafting winner alone
+    (that path is retired; the search sweeps K itself, on REFINE_TOP topologies). Drafting
+    changes throughput AND C*, so such a row establishes "the best draft depth for that topology",
+    not "the best topology+drafting combination" -- promoting it to the global recommendation
+    claims an optimum the experiment did not test (namasl review #4)."""
+    return bool((f.get("drafting_scope") or {}).get("topologies_swept", 0) == 1)
+
+
 def rank_finalists(finalists):
     """Best first: most tok/s/GPU, then most tok/s — but a near-tie prefers the SIMPLER config.
 
     Simpler = fewer engine/routing knobs set away from their defaults. A recommendation should
     only carry a knob when that knob earned its place.
+
+    A PARTIALLY EXPLORED arm (see partially_explored) cannot take the top slot on a near-tie: its
+    knob was never tried on the shapes it is being ranked against, so a sub-tolerance win over an
+    untested topology is not evidence. It still ranks on a clear win, where the margin exceeds the
+    tie tolerance and the comparison means something.
     """
     knobs = [k for k, _ in topologies.KNOB_TIERS]
     nknobs = lambda f: sum(1 for k in knobs if f["config"].get(k) is not None)
@@ -89,7 +254,9 @@ def rank_finalists(finalists):
         # Bucket by relative distance from the best, so everything inside the tolerance compares
         # equal on efficiency and the knob count decides.
         bucket = 0 if best <= 0 else int((best - pg) / (best * TIE_TOLERANCE))
-        return (bucket, nknobs(f), -(f["at_c_use"]["tokens_per_sec"] or 0))
+        # Inside the top bucket, a fully-explored config outranks a partially-explored one.
+        scope = 1 if (bucket == 0 and partially_explored(f)) else 0
+        return (bucket, scope, nknobs(f), -(f["at_c_use"]["tokens_per_sec"] or 0))
 
     return sorted(finalists, key=key)
 
@@ -110,10 +277,26 @@ def winner_reason(f, floor_rate, headroom):
     a = f["at_c_use"]
     v = f.get("variant")
     how = (f"with {v}" if v else "at default engine and routing settings")
+    # A partially-explored knob must be framed for what it is: the best setting FOR THIS TOPOLOGY,
+    # not a tested global optimum (namasl review #4).
+    scope = ""
+    if partially_explored(f):
+        scope = (f" This is the best draft depth for {f['label']} — draft depth was not swept on "
+                 f"the other topologies, so it is not established as the best overall "
+                 f"topology+drafting combination.")
+    # When the recommendation backed off below the 0.8 x C* target, say so here: this sentence is
+    # what the gallery card and the report's "what to run" both quote, so it is where a reader
+    # would otherwise be told to run a load the search rejected (namasl review).
+    target = f.get("c_use_target")
+    headroom_txt = (f"C*={f['c_star']}, headroom {headroom:g}"
+                    if target in (None, f["c_use"]) else
+                    f"C*={f['c_star']}, headroom {headroom:g} targets c={target}, but that load "
+                    f"measured below the floor, so the recommendation backs off to the highest "
+                    f"servable measured load")
     return (f"{f['label']} {how} gives the most tok/s/GPU "
             f"({a['tokens_per_sec_per_gpu']:g} tok/s/GPU, {a['tokens_per_sec']:g} tok/s fleet) "
             f"while holding the {floor_rate:g} tok/s/user floor; "
-            f"usable load c={f['c_use']} (C*={f['c_star']}, headroom {headroom:g}).")
+            f"usable load c={f['c_use']} ({headroom_txt}).{scope}")
 
 
 def footprint_tiers(gpu_budget):
@@ -138,15 +321,30 @@ def requests_for(concurrency, base=80):
     return max(base, concurrency * 4)
 
 
-def per_user(metrics):
-    """Per-user tok/s on the floor's p99 basis: 1000 / ITL p99 (report.py's fallback; the
-    engine does not emit tok_per_s_per_user directly)."""
-    itl = metrics.get("itl_p99_ms")
-    return round(1000.0 / itl, 1) if itl else None
+def scenario_seed(scenario):
+    """The ONE seed a scenario runs under. Every path -- the search ramp, the c_use probe, the
+    drafting pass, and the seed recorded in scenario.json -- must read the seed through here, so a
+    run's recorded seed is always the seed BLIS was given (namasl review #1)."""
+    return int((scenario or {}).get("seed", 0) or 0)
+
+
+def _worst_itl(rec):
+    """The p99 ITL on the same worst-instance basis as per_user(), rounded for display."""
+    itl, missing = run_blis.worst_itl_p99(rec)
+    return None if missing else round(itl, 3)
+
+
+def per_user(rec):
+    """Per-user tok/s for a recorded run, through the ONE acceptance-aware, worst-instance
+    definition in run_blis.per_user_rate -- the same one report.py's feasibility test and displayed
+    number use, so the search can no longer reject a configuration the report shows as servable
+    (namasl review #2)."""
+    pu, _basis, _itl = run_blis.per_user_rate(rec)
+    return round(pu, 1) if pu is not None else None
 
 
 def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, seed=0,
-           model_entry=None):
+           model_entry=None, run_timeout=120, max_parallel=1):
     """Probe every candidate topology over a concurrency ramp; return runs, finalists, dropped.
 
     `model_entry` is the catalog row (for `arch`); when omitted the search is dense-only, which is
@@ -158,16 +356,82 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
     budget = int(scenario["gpu_budget"])
     wl = scenario.get("workload") or {}
     workload = wl.get("preset") if isinstance(wl, dict) else wl
+    # A REPLAY workload is a different BLIS subcommand, not a --workload value: its traffic is a
+    # recorded corpus, so there is no ISL/OSL to generate and no request count to offer. The
+    # submission states it under `workload.replay:` and run_blis switches onto `blis replay`.
+    replay = wl.get("replay") if isinstance(wl, dict) else None
+    # Engine knobs every run of this scenario carries (precision, context window, ...). A replay
+    # NEEDS max_model_len raised: the AgentX corpus caps requests at 256k, and every trace whose
+    # peak prompt+output exceeds the deployment's window is dropped -- at the 32768 default that
+    # is the entire corpus ("no trace fits max_context_length 32768").
+    base_engine = dict(scenario.get("engine") or {})
+    # Acceptance selectors for a drafting candidate. BLIS REFUSES a drafting scenario whose
+    # acceptance does not resolve ("the workload states no thinking mode, which selects the
+    # profile"), so these must accompany every num_speculative_tokens > 0 run. They describe the
+    # TRAFFIC, so they come from the workload: the AgentX replay declares category `coding` and
+    # thinking `on`, and a submission may override either.
+    accept = dict(scenario.get("acceptance") or {})
+    if replay:
+        accept.setdefault("speculative_category", replay.get("category") or "coding")
+        accept.setdefault("speculative_thinking", str(replay.get("thinking") or "on"))
     floor = scenario.get("interactivity_floor") or {}
-    floor_itl = float(floor.get("itl_p99_ms_max", 20.0))
     floor_rate = float(floor.get("tok_per_s_per_user", 50.0))
+    # Servability is tested as a per-TOKEN RATE (per_user >= floor_rate), which subsumes an ITL cap
+    # only when rate x cap == 1000: AL x 1000/itl >= rate  <=>  itl/AL <= 1000/rate. Every checked-in
+    # scenario states only the rate, so the cap is derived and the identity holds exactly. A scenario
+    # that states a TIGHTER explicit cap would silently lose that half of the floor, so enforce it
+    # as a second clause instead of trusting the subsumption (susiejojo review #3).
+    floor_itl = float(floor.get("itl_p99_ms_max", 1000.0 / floor_rate if floor_rate else 20.0))
+    # The cap the rate test already guarantees. A cap at or above this is redundant; a tighter one
+    # is a real extra constraint and is applied per-run below.
+    implied_itl = 1000.0 / floor_rate if floor_rate else float("inf")
+    floor_itl_binds = floor_itl < implied_itl - 1e-9
     headroom = float(scenario.get("headroom", 0.8))
     engine_version = scenario.get("engine_version", "0.29.0")
 
-    ramp = concurrency_ramp(budget)
+    ramp = concurrency_ramp(budget, replay)
     runs, finalists, dropped = [], [], []
 
-    def probe(topo):
+    def probe_batch(topos):
+        """Probe several candidates CONCURRENTLY, then fold their results in input order.
+
+        Candidates are independent of one another (each climbs its own ramp and the ramp is
+        fixed, not adaptive), so they parallelise cleanly. What must NOT vary is the order in
+        which results are folded in: `runs` ordering, `c_star` selection and the winner all have
+        to come from a stable ordering of the batch rather than from whichever worker finished
+        first, or the recommendation stops being reproducible. So each candidate's own probe
+        stays sequential (it needs its early break), workers run candidate-wide, and the results
+        are collected by INPUT index.
+
+        A replay is memory-hungry in a way a generated-workload run is not: it parses a ~569 MB
+        corpus per process and peaks around 4.2 GiB RSS, where sweep_pool's default assumption is
+        1 GiB. Hence the explicit per-worker footprint below.
+        """
+        topos = list(topos)
+        if not topos:
+            return
+        if len(topos) == 1 or max_parallel == 1:
+            for t in topos:
+                _probe_one(t, runs.append, finalists.append, dropped.append)
+            return
+        import concurrent.futures
+        results = [None] * len(topos)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel) as ex:
+            futs = {}
+            for i, t in enumerate(topos):
+                # Each candidate collects into its OWN lists; nothing is shared until the fold.
+                local = {"runs": [], "fin": [], "drop": []}
+                results[i] = local
+                futs[ex.submit(_probe_one, t, local["runs"].append, local["fin"].append,
+                               local["drop"].append)] = i
+            for f in concurrent.futures.as_completed(futs):
+                f.result()          # surface any worker exception rather than losing the shape
+        for local in results:       # fold in INPUT order -> deterministic regardless of timing
+            runs.extend(local["runs"])
+            finalists.extend(local["fin"])
+            dropped.extend(local["drop"])
+
+    def _probe_one(topo, add_run, add_finalist, add_dropped):
         """Probe one candidate up the ramp; append its runs and either a finalist or a dropped row.
 
         `label` is provisional — the final labels are assigned once, after every candidate is in,
@@ -176,11 +440,17 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
         gpus = topo["tp"] * topo.get("dp", 1) * topo["num_instances"]
         curve, c_star, first_error = [], None, None
         for c in ramp:
-            cfg = {**topo, "concurrency": c}
+            cfg = {**base_engine, **topo, "concurrency": c}
+            # Only a DRAFTING run carries the acceptance selectors; passing them with drafting off
+            # would record selectors that chose nothing.
+            if cfg.get("num_speculative_tokens"):
+                cfg = {**accept, **cfg}
+            # A replay is bounded by its sending window, not a request count.
+            nreq = None if replay else requests_for(c, num_requests)
             rec = run_blis.run_one(blis, catalog, registry, scenarios_dir, model, hardware,
-                                   engine_version, workload, requests_for(c, num_requests), seed,
-                                   None, cfg, phase="probe")
-            runs.append(rec)
+                                   engine_version, workload, nreq, seed,
+                                   None, cfg, phase="probe", timeout=run_timeout, replay=replay)
+            add_run(rec)
             m = rec.get("metrics") or {}
             # rec["error"] is set on rc=0 runs too: run_blis._completion_issue flags a run that is
             # incomplete / overloaded / still queued. Such a run has a tokens_per_sec but is NOT a
@@ -195,10 +465,28 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
                 if rec.get("returncode") not in (0, None):
                     break
                 continue
-            pu = per_user(m)
-            servable = pu is not None and pu >= floor_rate and (m.get("itl_p99_ms", 1e9) <= floor_itl)
+            pu = per_user(rec)
+            # Servability is the per-TOKEN rate against the floor, on the worst-instance,
+            # acceptance-scaled basis (run_blis.per_user_rate). The old second clause compared the
+            # RAW p99 ITL to the floor's cap, which under drafting is a VERIFICATION-STEP latency
+            # and so rejected arms whose per-token rate is comfortably above the floor. The rate
+            # test already subsumes it: AL x 1000/itl >= floor_rate is exactly itl/AL <= floor_itl
+            # (namasl review #2).
+            servable = pu is not None and pu >= floor_rate
+            if servable and floor_itl_binds:
+                # An explicit cap tighter than 1000/floor_rate is not subsumed by the rate test.
+                # Compare on the per-TOKEN latency (step ITL / AL under drafting), the same basis
+                # the rate uses, so the two clauses cannot disagree about what a token costs.
+                _w, _missing = run_blis.worst_itl_p99(rec)
+                _al = run_blis.run_acceptance(rec) or 1.0
+                servable = (not _missing) and _w is not None and (_w / _al) <= floor_itl
+            # The ITL on the row must be the SAME basis as pu (worst instance), or a finalist
+            # reads "0.8 tok/s/user at 13.2 ms" -- impossible arithmetic, and the same
+            # displayed-vs-judged split the per-user unification closed. The aggregate is kept
+            # alongside rather than dropped (susiejojo review).
             pt = {"concurrency": c, "tokens_per_sec": round(m["tokens_per_sec"], 1),
-                  "itl_p99_ms": m.get("itl_p99_ms"), "tok_per_s_per_user": pu,
+                  "itl_p99_ms": _worst_itl(rec), "itl_p99_ms_aggregate": m.get("itl_p99_ms"),
+                  "tok_per_s_per_user": pu,
                   "preemption_count": m.get("preemption_count", 0)}
             curve.append(pt)
             if servable:
@@ -206,22 +494,112 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
         if c_star is None:
             # Record WHY, so pareto.json shows the shapes that were tried and failed rather than
             # leaving a single survivor looking like the whole search space.
-            dropped.append({"label": label, "config": topo, "gpus": gpus,
-                            "reason": (first_error or "no probe met the interactivity floor")})
+            add_dropped({"label": label, "config": topo, "gpus": gpus,
+                         "reason": (first_error or "no probe met the interactivity floor")})
             return
         c_use = max(1, int(round(headroom * c_star)))
-        at = min((p for p in curve if p["concurrency"] <= c_use), key=lambda p: abs(p["concurrency"] - c_use), default=None)
+        # MEASURE c_use, do not substitute the nearest lower rung. The ramp doubles, so
+        # c_use = 0.8 x c_star almost never lands on a rung: with c*=64 the nearest lower probe is
+        # 32, and reporting that run's throughput as "the throughput at c=51" understated the
+        # winner by 46% (423.5 vs 786.9 tok/s measured here). The same arithmetic understated
+        # every doubling-ramp finalist by ~37%, the committed kimi-k2.5 report included, where
+        # "34,307.6 tok/s at c=819" is really the c=512 measurement. One extra run per finalist
+        # buys a number that is actually the number the report claims.
+        at = next((p for p in curve if p["concurrency"] == c_use), None)
         if at is None:
-            dropped.append({"label": label, "config": topo, "gpus": gpus,
-                            "reason": f"no probe at or below the usable load c={c_use}"})
+            cfg = {**base_engine, **topo, "concurrency": c_use}
+            if cfg.get("num_speculative_tokens"):
+                cfg = {**accept, **cfg}
+            nreq = None if replay else requests_for(c_use, num_requests)
+            rec = run_blis.run_one(blis, catalog, registry, scenarios_dir, model, hardware,
+                                   engine_version, workload, nreq, seed, None, cfg,
+                                   phase="c_use", timeout=run_timeout, replay=replay)
+            add_run(rec)
+            m = rec.get("metrics") or {}
+            if rec.get("returncode") == 0 and m.get("tokens_per_sec") and not rec.get("error"):
+                pu = per_user(rec)
+                at = {"concurrency": c_use, "tokens_per_sec": round(m["tokens_per_sec"], 1),
+                      "itl_p99_ms": _worst_itl(rec), "itl_p99_ms_aggregate": m.get("itl_p99_ms"),
+                      "tok_per_s_per_user": pu,
+                      "preemption_count": m.get("preemption_count", 0)}
+                # Keep the curve ordered by load, so the figures draw it correctly.
+                curve.append(at)
+                curve.sort(key=lambda p: p["concurrency"])
+        # THE OPERATING POINT ITSELF MUST MEET THE FLOOR.
+        #
+        # c_star says the shape was servable at SOME load; it does not follow that it is servable
+        # at c_use. These curves are NOT monotonic -- one slow instance at a particular load is
+        # enough -- so a shape can pass the ramp either side of c_use and fail exactly there. The
+        # h100 `batch tokens 2,048` arm passes c=8 and c=16 at ~104 and ~103 tok/s/user, yet its
+        # dedicated c=13 point has an instance at 226 ms and falls to 4.4; h200's 4x TP1xDP8 + EP
+        # lands at 0.8. Assigning the dedicated run to `at` whenever it merely RETURNED metrics
+        # published both as operating points (namasl review).
+        #
+        # So: prefer the dedicated c_use measurement, but only if it is servable; else fall back to
+        # the highest SERVABLE measured point at or below c_use (never an unservable one, and
+        # never an interpolation) and let measured_at_concurrency say where the numbers came from;
+        # else drop the shape with its reason. A shape that is genuinely servable at a lower load
+        # is still worth recommending -- at that load.
+        def _servable_pt(p):
+            pu = p.get("tok_per_s_per_user")
+            return pu is not None and pu >= floor_rate
+
+        if at is not None and not _servable_pt(at):
+            at = None          # measured, but not an operating point we may publish
+        if at is None:
+            at = max((p for p in curve if p["concurrency"] <= c_use and _servable_pt(p)),
+                     key=lambda p: p["concurrency"], default=None)
+        if at is None:
+            tried = sorted({p["concurrency"] for p in curve if p["concurrency"] <= c_use})
+            add_dropped({"label": label, "config": topo, "gpus": gpus,
+                         "reason": (f"servable to c*={c_star} but no measured point at or below "
+                                    f"its usable load c={c_use} meets the {floor_rate:g} "
+                                    f"tok/s/user floor (tried c={tried or '[]'})")})
             return
         tps = at["tokens_per_sec"]
-        finalists.append({
+        # THE RECOMMENDED LOAD IS THE LOAD THAT WAS MEASURED SERVABLE.
+        #
+        # c_use was the 0.8 x C* TARGET, and when the operating point backs off to a lower servable
+        # rung the target is no longer what we are recommending. Leaving c_use at the target while
+        # at_c_use held the lower rung's metrics split the recommendation in two: winner_reason said
+        # "usable load c=13", the report said "run at 13 concurrent sessions ... measured directly",
+        # the UI card showed 13, and the traffic statistics were read from the raw c=13 run -- all
+        # beside c=8's performance figures, for a load the measurement had just proved unservable
+        # (namasl review).
+        #
+        # So c_use IS the recommendation, and c_use_target keeps the arithmetic that produced it.
+        # Every consumer reads c_use, so they all now agree on the servable load.
+        c_use_target, c_use = c_use, at["concurrency"]
+        add_finalist({
             "label": label,
             "config": topo, "gpus": gpus, "c_star": c_star, "c_use": c_use,
+            # The 0.8 x C* target this shape aimed at. Equal to c_use unless the dedicated run at
+            # the target was unservable and the search backed off to the highest servable rung.
+            "c_use_target": c_use_target,
+            # True when the ramp ran out while this shape was STILL SERVABLE: C* is then the
+            # highest load tested, a lower bound on capacity, not an observed ceiling. The report
+            # must not call it a "measured ceiling" or a "cliff" in that case (namasl review).
+            "c_star_censored": c_star == max(p["concurrency"] for p in curve),
             "at_c_use": {"tokens_per_sec": tps, "tokens_per_sec_per_gpu": round(tps / gpus, 1),
                          "tok_per_s_per_user": at["tok_per_s_per_user"], "itl_p99_ms": at["itl_p99_ms"],
-                         "ttft_p99_ms": 0.0, "preemption_count": at.get("preemption_count", 0)},
+                         "ttft_p99_ms": 0.0, "preemption_count": at.get("preemption_count", 0),
+                         # The load these numbers were actually MEASURED at. Normally c_use; it
+                         # differs when the dedicated c_use run failed OR came back unservable
+                         # (these curves are not monotonic) and the highest servable measured
+                         # point below it stood in. Either way the discrepancy must be visible
+                         # rather than presented as the figure at c_use.
+                         # Always equal to c_use now (c_use IS the measured servable load); kept
+                         # because the report contract and the explorer both read it, and it still
+                         # states plainly that the figures are a measurement, not an interpolation.
+                         "measured_at_concurrency": at["concurrency"],
+                         # Why the recommendation is below the 0.8 x C* target, when it is -- so a
+                         # reader does not have to infer it from the gap (namasl review).
+                         **({"operating_point_note": (
+                             f"backed off from the 0.8xC* target c={c_use_target}: that load "
+                             f"measured below the {floor_rate:g} tok/s/user floor, so the "
+                             f"recommendation is the highest servable measured load at or "
+                             f"below it")}
+                            if c_use != c_use_target else {})},
             "curve": curve,
         })
 
@@ -230,25 +608,65 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
     # GiB per rank at tp=8 on a 141 GiB H200 and only fits from tp=32 up), so widen the per-instance
     # footprint a node at a time rather than reporting "no servable configuration" for a model BLIS
     # can actually run. Escalation only ever ADDS shapes, so a model that fits is unaffected.
+    # How much of the valid space was actually probed. candidate_topologies ranks best-first and
+    # truncates to MAX_CANDIDATES, so the sweep is a RANKED SUBSET, not every valid layout -- on
+    # 32 GPUs it is 12 of 19. The report used to call it "every ... layout that fills N GPUs",
+    # which overstated the coverage (namasl review). Recorded so the narrative can say what it is.
+    # Coverage ACCUMULATES across every footprint tier actually attempted. Recording only the
+    # first tier described a universe the search had already left: on the escalation path (nothing
+    # fits one node, so the search widens to 16/32/64-GPU instances) it claimed "12 of 19" while
+    # 28 distinct topologies had been probed out of 35 valid at the winning cap -- a hero
+    # contradicting its own move trail (namasl review). The AgentX reports never escalate, so
+    # their 12/19 was correct; this is the documented Kimi-style case.
+    probed_labels, cap_reached = set(), None
     for cap in footprint_tiers(budget):
         seen = {tuple(sorted(c.items())) for c in (f["config"] for f in finalists)} | \
                {tuple(sorted(c.items())) for c in (d["config"] for d in dropped)}
-        for topo in topologies.candidate_topologies(budget, model_entry, MAX_CANDIDATES, cap):
-            if tuple(sorted(topo.items())) not in seen:
-                probe(topo)
+        ranked = topologies.candidate_topologies(budget, model_entry, MAX_CANDIDATES, cap)
+        probed_labels |= {topologies.label(c) for c in ranked}
+        cap_reached = cap
+        probe_batch(topo for topo in ranked
+                    if tuple(sorted(topo.items())) not in seen)
         if finalists:
             break
+    # The universe is every valid layout at the WIDEST cap the search reached: that is the space
+    # the recommendation was chosen from.
+    every = topologies.candidate_topologies(budget, model_entry, 10 ** 6, cap_reached) \
+        if cap_reached else []
+    every_labels = [topologies.label(c) for c in every]
+    coverage = {"valid_layouts": len(every_labels),
+                "probed": len(probed_labels),
+                "omitted": [l for l in every_labels if l not in probed_labels],
+                "max_candidates": MAX_CANDIDATES,
+                # Which per-instance footprint caps were attempted, so a reader can see that the
+                # search escalated rather than inferring it from the shapes.
+                "footprint_caps_attempted": [c for c in footprint_tiers(budget)
+                                             if c <= (cap_reached or 0)]}
 
     # Knob refinement, coordinate-wise on the BEST topologies only. Routing and the batch/KV
     # limits are real levers — on kimi-k2.5 routing swung throughput 2.3x and max_num_seqs=64 cost
     # 29% — but crossing them with every shape and load would be thousands of near-identical runs.
     # Refining the top few shapes finds the same binding knob for ~1/9th of the budget.
-    for base in rank_finalists(finalists)[:REFINE_TOP]:
-        for variant in topologies.knob_variants(base["config"]):
-            probe(variant)
+    # The refinement batch is built from the ranking BEFORE any of it runs, so the set of
+    # variants explored does not depend on worker timing.
+    # Knobs this model cannot take are not swept: a model whose catalog graph declares no
+    # speculator refuses every drafting run (run_blis.run_one checks), so sweeping draft depth
+    # would spend the budget on certain refusals -- 108 of them on kimi-k2.5 -- and leave rows the
+    # dashboard renders as "drafter: off, K=1" (susiejojo UI review).
+    skip_knobs = ()
+    if not run_blis.graph_speculator(catalog, model):
+        skip_knobs = ("num_speculative_tokens",)
+        print(f"  {model}: no speculator in its catalog graph — skipping the draft-depth sweep",
+              flush=True)
+    probe_batch(variant for base in rank_finalists(finalists)[:REFINE_TOP]
+                for variant in topologies.knob_variants(base["config"], skip=skip_knobs))
 
     relabel(finalists, dropped)
-    return runs, finalists, (floor_rate, floor_itl, headroom, dropped)
+    # `coverage` goes out with the rest: it is recorded into scenario.json, so leaving it local
+    # meant main() referenced an undefined name AFTER every expensive probe had run -- a NameError
+    # that cost nothing in the unit tests (they call candidate_topologies directly and never reach
+    # this seam) and would have cost a whole regeneration (namasl review).
+    return runs, finalists, (floor_rate, floor_itl, headroom, dropped), coverage
 
 
 def relabel(finalists, dropped):
@@ -297,6 +715,25 @@ def main(argv=None):
     ap.add_argument("--registry", default=os.path.join(ROOT, os.pardir, "blis-registry"))
     ap.add_argument("--out", default=os.path.join(ROOT, "reports"))
     ap.add_argument("--num-requests", type=int, default=80)
+    # A replay parses a ~569 MB corpus and simulates a 900 s sending window, so a run takes far
+    # longer than a generated-workload probe. The default 120 s would time out every one.
+    ap.add_argument("--run-timeout", type=int, default=120,
+                    help="per-BLIS-run timeout in seconds (raise it for a replay workload)")
+    # The corpus is machine-specific and ~569 MB, so the submission states its DIGEST (which
+    # pins the bytes) while the path is supplied here. The digest is checked by BLIS, so a
+    # wrong file fails loudly rather than replaying different traffic under the same name.
+    ap.add_argument("--corpus", help="replay corpus file (required by a replay submission)")
+    ap.add_argument("--corpus-cache", help="dir for parsed-corpus snapshots (a large speedup)")
+    # Candidates probe independently, so they parallelise; results are still folded in input
+    # order, so the recommendation does not depend on worker timing. Default 1 keeps the old
+    # sequential behaviour for anyone who does not ask for width.
+    ap.add_argument("--allow-pin-mismatch", action="store_true",
+                    help="run even when the catalog/registry checkout differs from pins.env "
+                         "(the report then records the checkout that actually ran)")
+    ap.add_argument("--max-parallel", type=int, default=1,
+                    help="probe this many candidate topologies at once (default 1). A replay "
+                         "peaks near 4.2 GiB RSS per run -- it parses the whole corpus -- so "
+                         "size this against RAM, not just cores")
     args = ap.parse_args(argv)
 
     sub = os.path.abspath(args.submission)
@@ -316,13 +753,49 @@ def main(argv=None):
     import tempfile
     scen_dir = tempfile.mkdtemp(prefix="cs-scenarios-")
 
+    # A replay submission needs the corpus path from the command line; fail before any run
+    # rather than once per probe.
+    rep = _replay_of(scenario)
+    if rep is not None:
+        if not args.corpus:
+            raise SystemExit(
+                f"{os.path.basename(sub)} is a replay submission (workload.replay) and needs "
+                f"--corpus: the corpus is not vendored by blis-catalog. Fetch traces.jsonl for "
+                f"{rep.get('scenario')} and pass its path; the submission's corpus_sha256 holds "
+                f"it to the right bytes.")
+        if not os.path.isfile(args.corpus):
+            raise SystemExit(f"--corpus not found at {args.corpus}")
+        rep = dict(rep, corpus=os.path.abspath(args.corpus))
+        if args.corpus_cache:
+            rep["corpus_cache"] = os.path.abspath(args.corpus_cache)
+        scenario = dict(scenario, workload=dict(scenario["workload"], replay=rep))
+
+    # Refuse to run at a stack that is not the stack we claim. Checked BEFORE any BLIS run, so a
+    # mismatch costs seconds rather than an afternoon of measurements under a false label.
+    pinned = _pinned_stack(blis, args.catalog, args.registry)
+    mism = pin_mismatches(pinned)
+    if mism and not args.allow_pin_mismatch:
+        raise SystemExit(
+            "pinned stack does not match the checkouts on disk:\n  "
+            + "\n  ".join(mism)
+            + "\n\nEvery report records this stack as the one that priced it, so running anyway "
+              "would publish a false provenance label. Either check out the pinned refs or update "
+              "pins.env to the version you mean to run (and say so in the commit). "
+              "--allow-pin-mismatch overrides this for a deliberate experiment.")
+
     entry = model_entry(scenario["model"], os.path.abspath(args.catalog))
     arch = (entry or {}).get("arch", "unknown")
     print(f"searching {scenario.get('model')} ({arch}) on {scenario.get('gpu_budget')}x "
-          f"{scenario.get('hardware')} ({(scenario.get('workload') or {}).get('preset')})…", flush=True)
-    runs, finalists, (floor_rate, floor_itl, headroom, dropped) = search(
+          f"{scenario.get('hardware')} ({_workload_label(scenario)})…", flush=True)
+    # The submission's seed MUST reach every run. Omitting it left `search` on its default seed=0
+    # while scenario.json recorded the submission's 42, so a later pass that read the recorded seed
+    # (the since-retired drafting backfill) replayed DIFFERENT traffic than its baseline --
+    # AgentX uses the seed to choose each lane's trajectory start, so the "matched-load" tables
+    # were not matched workloads (namasl review #1).
+    runs, finalists, (floor_rate, floor_itl, headroom, dropped), coverage = search(
         scenario, blis, args.catalog, args.registry, scen_dir, num_requests=args.num_requests,
-        model_entry=entry)
+        seed=scenario_seed(scenario),
+        model_entry=entry, run_timeout=args.run_timeout, max_parallel=max(1, args.max_parallel))
     if not finalists:
         detail = "; ".join(f"{d['label']}: {d['reason'][:120]}" for d in dropped[:4])
         raise SystemExit("no servable configuration found for this scenario (nothing met the "
@@ -331,22 +804,41 @@ def main(argv=None):
     # winner: dual-pareto proxy — most tok/s/GPU, tie-break total tok/s
     finalists[:] = rank_finalists(finalists)
     winner = finalists[0]
-    n_servable = sum(1 for r in runs if (r.get("metrics") or {}).get("itl_p99_ms", 1e9) <= floor_itl and r.get("returncode") == 0)
+    # Same acceptance-aware basis as servability above, so the headline count cannot disagree with
+    # the rows the report marks servable (namasl review #2).
+    n_servable = sum(1 for r in runs
+                     if r.get("returncode") == 0 and (per_user(r) or 0) >= floor_rate)
 
     scenario_out = {"run_id": run_id, "model": scenario["model"], "hardware": scenario["hardware"],
                     "gpu_budget": scenario["gpu_budget"], "workload": scenario.get("workload"),
                     "objective": "dual-pareto",
                     "interactivity_floor": {"tok_per_s_per_user": floor_rate, "itl_p99_ms_max": floor_itl},
-                    "headroom": headroom, "seed": 0}
+                    "headroom": headroom, "seed": int(scenario.get("seed", 0) or 0),
+                    # Which simulator priced these runs. pins.env is the single source of truth
+                    # (build_catalog.read_pins); without this the report footer printed "?" for
+                    # every component of the stack.
+                    "pinned_stack": pinned,
+                    # What fraction of the valid layout space the sweep covered (see `coverage`).
+                    "topology_coverage": coverage}
     # The move trail must say what was actually explored: the previous wording ("single-node
     # topologies") described a tp-only sweep and gave no hint that EP was never tried.
     ep_runs = sum(1 for r in runs if ((r.get("deployment") or {}).get("parallel") or {})
                   .get("enable_expert_parallel"))
-    trail = [f"enumerated {len(finalists) + len(dropped)} topologies within budget"
+    # Count DISTINCT topologies, not finalists+dropped. Knob refinement adds a finalist per
+    # variant on the same shape, so the old sum read "36 topologies" where 12 shapes were tried and
+    # the other 24 rows were variants of three of them (namasl review).
+    n_topos = len({f["label"] for f in finalists} | {d["label"] for d in dropped})
+    n_variants = sum(1 for f in finalists if f.get("variant"))
+    trail = [f"enumerated {n_topos} candidate topologies within budget"
              + (f" ({arch}: tp x dp footprints x expert-parallel arms)" if arch == "MoE"
-                else f" ({arch}: tp tiers)"),
-             "probed a concurrency ramp per topology with real BLIS runs"
-             f" (ladder to c={max(concurrency_ramp(int(scenario['gpu_budget'])))})",
+                else f" ({arch}: tp tiers)")
+             + (f", then {n_variants} one-knob refinement arms on the best of them"
+                if n_variants else ""),
+             (f"probed a session-lane ramp per topology with real BLIS replay runs"
+              f" (ladder to {max(concurrency_ramp(int(scenario['gpu_budget']), _replay_of(scenario)))} lanes)"
+              if _replay_of(scenario) else
+              "probed a concurrency ramp per topology with real BLIS runs"
+              f" (ladder to c={max(concurrency_ramp(int(scenario['gpu_budget'])))})"),
              f"ranked finalists on usable capacity (headroom {headroom})"]
     if arch == "MoE":
         trail.insert(1, f"compared expert-parallel against its non-EP control ({ep_runs} EP runs)")
@@ -360,7 +852,15 @@ def main(argv=None):
                          "label": winner["label"], "variant": winner.get("variant", ""),
                          "reason": winner_reason(winner, floor_rate, headroom),
                          "move_trail": trail}}
-    gallery = {"synthetic": False, "isl_osl": "", "generated": __import__("datetime").date.today().isoformat(),
+    # A replay has no ISL/OSL by construction -- its per-request lengths live in the corpus -- so
+    # the chip that would carry a shape's "256/256" describes the traffic instead of rendering
+    # blank. A shape workload keeps the empty string the gallery already expects.
+    rep_out = _replay_of(scenario)
+    isl_osl = ""
+    if rep_out:
+        isl_osl = f"replay · {_corpus_traffic_note(runs)}" if _corpus_traffic_note(runs) else "replay"
+    gallery = {"synthetic": False, "isl_osl": isl_osl,
+               "generated": __import__("datetime").date.today().isoformat(),
                "n_runs": len(runs), "n_servable": n_servable,
                "reason": pareto["winner"]["reason"]}
 

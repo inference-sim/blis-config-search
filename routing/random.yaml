@@ -1,0 +1,12 @@
+# `--routing-policy round-robin` is DROPPED upstream; random-picker is the nearest neutral
+# placement baseline (routing.md: "The nearest configurations are random-picker, and queue-scorer
+# or load-aware-scorer with max-score-picker").
+apiVersion: llm-d.ai/v1
+kind: EndpointPickerConfig
+plugins:
+- type: random-picker
+- type: single-profile-handler
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: random-picker

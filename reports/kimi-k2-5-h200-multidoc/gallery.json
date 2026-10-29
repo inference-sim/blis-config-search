@@ -1,8 +1,8 @@
 {
-  "generated": "2026-10-21",
+  "generated": "2026-10-27",
   "isl_osl": "",
-  "n_runs": 280,
-  "n_servable": 257,
-  "reason": "64x TP4xDP2 + EP with least-loaded routing gives the most tok/s/GPU (67 tok/s/GPU, 34307.6 tok/s fleet) while holding the 50 tok/s/user floor; usable load c=819 (C*=1024, headroom 0.8).",
+  "n_runs": 387,
+  "n_servable": 233,
+  "reason": "64x TP4xDP2 + EP at default engine and routing settings gives the most tok/s/GPU (43.8 tok/s/GPU, 22426.8 tok/s fleet) while holding the 50 tok/s/user floor; usable load c=410 (C*=512, headroom 0.8).",
   "synthetic": false
 }

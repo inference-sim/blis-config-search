@@ -29,6 +29,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import figures  # noqa: E402
 import lexicon  # noqa: E402
+import run_blis  # noqa: E402  -- the ONE per-user / feasibility definition (namasl review #2)
 
 REPORT_DIR = os.path.normpath(os.path.join(HERE, "..", "report"))
 TEMPLATE = os.path.join(REPORT_DIR, "template.html")
@@ -212,6 +213,20 @@ def _metric_any(run, key):
     return None, True   # metric entirely absent (or non-numeric) in aggregate and every instance
 
 
+def _floor_rate(floor):
+    """The per-user token rate the interactivity floor requires. The mirror of
+    _floor_itl_p99_max: honor the explicit rate, else derive it from an itl_p99_ms_max alias, so a
+    scenario that states only the cap is still enforced on the per-token basis."""
+    floor = floor or {}
+    rate = _as_num(floor.get("tok_per_s_per_user"))
+    if rate:
+        return rate
+    cap = _as_num(floor.get("itl_p99_ms_max"))
+    if cap:
+        return 1000.0 / cap
+    return 0.0
+
+
 def _floor_itl_p99_max(floor):
     """The p99 ITL cap the interactivity floor implies. Honor the explicit itl_p99_ms_max alias if
     present; otherwise DERIVE it from the documented tok_per_s_per_user floor (p99 cap = 1000 / rate)
@@ -242,13 +257,24 @@ def _feasible(run, floor, slos):
         viol.append(f"timed_out_requests = {m['timed_out_requests']}")
     if m.get("dropped_unservable"):
         viol.append(f"dropped_unservable = {m['dropped_unservable']}")
+    # The interactivity floor is a per-TOKEN promise, so test the per-TOKEN rate. Comparing the raw
+    # p99 ITL to the cap is wrong under drafting, where BLIS reports a VERIFICATION-STEP latency:
+    # the checked-in B200 K=1/c=102 row was displayed at 101.9 tok/s/user and simultaneously marked
+    # infeasible at "itl_p99_ms = 31.8 > 20.0". Both numbers came from this function and
+    # _per_user_rate disagreeing on two axes at once -- acceptance scaling, and aggregate vs worst
+    # instance. One definition now serves both (namasl review #2).
     itl_max = _floor_itl_p99_max(floor)
     if itl_max is not None:
-        itl, missing = _metric_any(run, "itl_p99_ms")
-        if missing:
+        rate, basis, itl = run_blis.per_user_rate(run)
+        floor_rate = _floor_rate(floor)
+        if basis == "step-estimate-withheld":
+            viol.append("drafting run with no resolved acceptance length (cannot verify floor)")
+        elif rate is None:
             viol.append("itl_p99_ms missing (cannot verify interactivity floor)")
-        elif itl > itl_max:
-            viol.append(f"itl_p99_ms = {itl:.1f} > {itl_max}")
+        elif rate < floor_rate:
+            # Report the step latency AND the per-token basis, so a drafting violation is legible.
+            extra = f" (step itl {itl:.1f} ms)" if basis == "derived-from-acceptance" else ""
+            viol.append(f"tok_per_s_per_user = {rate:.1f} < {floor_rate:g}{extra}")
     for k, cap in (slos or {}).items():
         if cap is None:
             continue
@@ -260,24 +286,25 @@ def _feasible(run, floor, slos):
     return (len(viol) == 0, viol)
 
 
-def _per_user_rate(run, mtp):
-    """Per-user token rate (pu), on the SAME p99 basis as pareto.json's tok_per_s_per_user and the
-    interactivity floor -- so one page never shows two incompatible per-user numbers for a point
-    (review F3). Prefer the engine's authoritative per-token field (tok_per_s_per_user). Else fall
-    back to 1000/itl_p99_ms, and ONLY when one decode step == one token (mtp == 0): under speculative
-    decoding BLIS logs ITL per decode STEP, so 1000/ITL is a step rate that undercounts the per-token
-    rate -- we return pu=None (flagged) rather than publish a wrong number (QA G1).
-    Returns (pu_or_None, is_mtp_without_authoritative_field)."""
-    m = run.get("metrics") or {}
-    authoritative = _as_num(m.get("tok_per_s_per_user"))
-    if authoritative is not None:
-        return round(authoritative, 2), False
-    itl_p99 = _as_num(m.get("itl_p99_ms"))
-    if not itl_p99:
-        return None, False
-    if mtp:
-        return None, True   # step rate would undercount; do not fabricate a per-token number
-    return round(1000.0 / itl_p99, 2), False
+def _per_user_rate(run, mtp=0):
+    """Per-user token rate for display, through the ONE definition in run_blis.per_user_rate --
+    the same one _feasible judges on, so a row can no longer be displayed above the floor while
+    being marked infeasible (namasl review #2).
+
+    The basis is AL x 1000/worst-instance ITL under drafting and 1000/worst-instance ITL without
+    it. `mtp` is accepted for call-site compatibility but the depth is read from the run itself.
+
+    There is deliberately NO short-circuit on a `metrics.tok_per_s_per_user` field. An earlier
+    version preferred it and returned it raw -- an aggregate, neither acceptance-scaled nor
+    worst-instance -- while _feasible always judged through run_blis.per_user_rate. Nothing writes
+    that field today, so the two agreed by luck; the day the engine emits it, the displayed rate
+    and the feasibility verdict would diverge again, which is the exact split this unification
+    closed. One definition means one definition (susiejojo review #1).
+
+    Returns (pu_or_None, basis) where basis is "" for a direct rate, "derived-from-acceptance" for
+    an AL-scaled one, and "step-estimate-withheld" when drafting is on and AL is unknown."""
+    pu, basis, _itl = run_blis.per_user_rate(run)
+    return (round(pu, 2) if pu is not None else None), basis
 
 
 GPUS_PER_NODE = 8
@@ -322,8 +349,15 @@ def build_records(runs, scenario):
         gpus = dep.get("gpus") or (par.get("tp", 1) * (dep.get("num_instances", 1) or 1))
         tp = par.get("tp", cfg.get("tp"))
         ni = dep.get("num_instances", cfg.get("num_instances", 1))
-        mtp = cfg.get("num_speculative_tokens", 0) or 0
-        pu, pu_is_step_estimate = _per_user_rate(r, mtp)
+        # Draft depth. The authoritative place is the RESOLVED deployment's nested
+        # engine.speculative block (what BLIS was actually told); the flat candidate key is the
+        # fallback for a ledger row written before that block existed. Reading only the candidate
+        # key missed every drafting run whose depth came from the scenario.
+        mtp = int((eng.get("speculative") or {}).get("num_spec_tokens")
+                  or cfg.get("num_speculative_tokens") or 0)
+        spec_method = ((eng.get("speculative") or {}).get("method")
+                       or cfg.get("speculative_method") or None)
+        pu, pu_basis = _per_user_rate(r, mtp)
         out.append({
             "id": r.get("config_hash") or f"run-{i}",
             "src": r.get("phase", "run"),
@@ -333,13 +367,20 @@ def build_records(runs, scenario):
             "ni": ni,
             "gpus": gpus,
             "series": _series_label(tp, ni, par),
-            "route": cfg.get("routing_policy", "round-robin"),
+            # Routing: the llm-d EPP arm this run used (v0.12.0+), else the former routing policy
+            # for a run recorded before routing moved into the router. "default" is the router's
+            # own built-in standalone configuration -- NOT the former "round-robin", which llm-d
+            # dropped; naming it round-robin here would assert a policy the router does not have.
+            "route": _routing_arm(cfg),
             "scorers": cfg.get("routing_scorers"),
             # NB: `sched` is the scheduling-DELAY metric; the scheduler policy is `schedp`.
             "schedp": cfg.get("scheduler"),
             "admit": cfg.get("admission_policy"),
             "pd": "colocated" if not (cfg.get("prefill_instances") or cfg.get("decode_instances")) else "disagg",
             "mtp": mtp,
+            # The drafter, so the facet distinguishes dspark from mtp/eagle rather than only
+            # showing a depth. None when drafting is off.
+            "spec": spec_method,
             "mnbt": eng.get("max_num_batched_tokens"),
             "mns": eng.get("max_num_seqs"),
             # all-to-all backend: the engine field when the search swept it, else the EP state.
@@ -350,7 +391,15 @@ def build_records(runs, scenario):
             "epw": (par.get("tp", 1) * par.get("dp", 1)) if par.get("enable_expert_parallel") else None,
             # metrics (reference short keys)
             "pu": pu,                              # per-user tok/s (see _per_user_rate)
-            "pu_is_step_estimate": pu_is_step_estimate,   # True = 1000/itl fallback under MTP (undercount)
+            # How `pu` was obtained: "" direct, "derived-from-acceptance" (AL-scaled, the correct
+            # per-token rate under drafting), "step-estimate-withheld" (drafting on, AL unknown ->
+            # pu is null rather than wrong). Kept as the old boolean too, for consumers that read it.
+            "pu_basis": pu_basis,
+            "pu_is_step_estimate": pu_basis == "step-estimate-withheld",
+            # The acceptance length this row was priced with, and where it was measured, so a
+            # reader can see that an H100 row reuses a B200 measurement.
+            "al": _as_num(((r.get("deployment") or {}).get("acceptance") or {}).get("acceptance_length")),
+            "al_src": ((r.get("deployment") or {}).get("acceptance") or {}).get("source"),
             "cl": round(m["tokens_per_sec"], 1) if m.get("tokens_per_sec") is not None else None,
             # Deployment detail for the click-to-inspect panel: what BLIS actually consumed.
             "pp": par.get("pp", 1),
@@ -372,7 +421,14 @@ def build_records(runs, scenario):
             # Every latency view must share ONE statistic, or switching the explorer's axis
             # silently swaps a mean for a tail: itl/ttft/e2e/sched are all p99 (the basis the
             # interactivity floor and `pu` use). The mean is kept separately under itl_mean.
-            "itl": round(m["itl_p99_ms"], 3) if m.get("itl_p99_ms") else None,
+            #
+            # ITL is the WORST INSTANCE's p99, the same basis `pu` and _feasible judge on: the
+            # floor promises a rate to every user, so a cluster whose aggregate passes while one
+            # instance breaches has not met it. Showing the aggregate here while scoring
+            # feasibility on the worst instance is what let a row read 101.9 tok/s/user and carry
+            # "itl_p99_ms = 31.8 > 20.0" at the same time (namasl review #2).
+            "itl": (lambda v: round(v, 3) if v else None)(_metric_any(r, "itl_p99_ms")[0]),
+            "itl_aggregate": round(m["itl_p99_ms"], 3) if m.get("itl_p99_ms") else None,
             "itl_mean": round(itl_mean, 3) if itl_mean else None,
             "ttft": m.get("ttft_p99_ms"),
             "sched": m.get("scheduling_delay_p99_ms"),
@@ -449,6 +505,25 @@ def _knob_phrase(key, value):
     if key in ("mnbt", "mns", "bs"):
         return f"{name} {value:,}"          # thousands separator: 2,048 not b2k
     return f"{name} {value}"
+
+
+def _routing_arm(cfg):
+    """The routing arm a run used, as a facet value.
+
+    Since inference-sim v0.12.0 routing is an llm-d EndpointPickerConfig named by the scenario's
+    `router:` block, so the arm is identified by that file's basename
+    ("routing/prefix-affinity.yaml" -> "prefix-affinity"). A run recorded BEFORE routing moved
+    carries the former `routing_policy` instead, and is shown as it was.
+
+    No arm means the router's own built-in standalone configuration, reported as "default" --
+    deliberately not "round-robin", which llm-d dropped: naming it that would assert a policy the
+    router does not have.
+    """
+    rc = cfg.get("router_config")
+    if rc:
+        base = str(rc).rsplit("/", 1)[-1]
+        return base[:-5] if base.endswith(".yaml") else base
+    return cfg.get("routing_policy") or "default"
 
 
 def _series_label(tp, ni, par):
@@ -738,7 +813,41 @@ def _glossary(report):
             f'for the short definition.</p></div><dl class="gl-list">{"".join(items)}</dl></section>')
 
 
-def _footer(scenario, pareto, records, n_malformed=0):
+def provenance_split(runs):
+    """Describe a ledger whose rows were NOT all priced by one cost model, else "".
+
+    Two halves of a report can be priced differently and still carry one `pinned_stack` label: the
+    committed DeepSeek reports had baseline rows recorded before the registry was bumped to v0.2.0
+    and drafting rows recorded after, under a single `registry: v0.1.1`. The recorded command
+    contains only a mutable local path, so nothing in the artifacts contradicted the label
+    (namasl review #3).
+
+    What we CAN check from a ledger: the seed every run was issued with, and the resolved stack
+    each row recorded. A split in either means the rows are not comparable, and the report must say
+    so rather than presenting a matched-load table across the boundary.
+    """
+    seeds, stacks = set(), set()
+    for r in runs:
+        cmd = r.get("cmd") or []
+        if "--seed" in cmd:
+            try:
+                seeds.add(int(cmd[cmd.index("--seed") + 1]))
+            except (IndexError, ValueError):
+                pass
+        st = r.get("pinned_stack") or r.get("stack")
+        if isinstance(st, dict):
+            stacks.add(json.dumps(st, sort_keys=True))
+    issues = []
+    if len(seeds) > 1:
+        issues.append(f"runs span {len(seeds)} seeds ({sorted(seeds)}): a matched-load comparison "
+                      f"across them compares different replayed traffic")
+    if len(stacks) > 1:
+        issues.append(f"runs span {len(stacks)} distinct resolved stacks: they were not priced by "
+                      f"one cost model")
+    return "; ".join(issues)
+
+
+def _footer(scenario, pareto, records, n_malformed=0, runs=None):
     # run_path intentionally NOT a parameter: the footer must not depend on the directory path/name
     # (QA G2). The run is identified by the in-data run_id only.
     ps = scenario.get("pinned_stack") or {}
@@ -746,6 +855,23 @@ def _footer(scenario, pareto, records, n_malformed=0):
     if ps:
         stack = (f" · BLIS {esc(ps.get('blis','?'))}, kernel {esc(ps.get('kernel','?'))}, "
                  f"catalog {esc(ps.get('catalog','?'))}, registry {esc(ps.get('registry','?'))}")
+        res = ps.get("resolved") or {}
+        bits = []
+        for name in ("catalog", "registry"):
+            c = ((res.get(name) or {}).get("commit") or "")[:12]
+            if c:
+                bits.append(f"{name} {esc(c)}")
+        bsha = ((res.get("blis") or {}).get("sha256") or "")[:12]
+        if bsha:
+            bits.append(f"blis sha256 {esc(bsha)}")
+        if bits:
+            # The pin NAME is an intention; these are what actually priced the runs.
+            stack += f" (resolved: {', '.join(bits)})"
+    # A ledger whose rows were not all priced the same way must say so IN the report, not leave the
+    # reader to trust a single pinned_stack label (namasl review #3).
+    split = provenance_split(runs or [])
+    if split:
+        stack += (f' · <b>provenance warning:</b> {esc(split)}')
     # Identify the run ONLY by the id carried IN the data (scenario/pareto), never by the directory
     # path or name, so the HTML is a pure function of the run-dir CONTENTS: identical data renders
     # byte-identical no matter where the directory lives or what it is called (QA G2). If the data
@@ -776,7 +902,7 @@ def render_report(scenario, pareto, runs, report, run_path=None, n_malformed=0):
     facts = build_facts(records, scenario, pareto)
     body = (_header(report, scenario, facts) + _hero(report) + _section_measurements(report)
             + _sections(report, records, scenario) + _what_to_run(report, records)
-            + _glossary(report) + _footer(scenario, pareto, records, n_malformed))
+            + _glossary(report) + _footer(scenario, pareto, records, n_malformed, runs))
     with open(TEMPLATE, encoding="utf-8") as f:
         html = f.read()
     title = report.get("title") or facts.get("model") or "config-search report"

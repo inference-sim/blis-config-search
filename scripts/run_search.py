@@ -648,7 +648,11 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
                 for variant in topologies.knob_variants(base["config"], skip=skip_knobs))
 
     relabel(finalists, dropped)
-    return runs, finalists, (floor_rate, floor_itl, headroom, dropped)
+    # `coverage` goes out with the rest: it is recorded into scenario.json, so leaving it local
+    # meant main() referenced an undefined name AFTER every expensive probe had run -- a NameError
+    # that cost nothing in the unit tests (they call candidate_topologies directly and never reach
+    # this seam) and would have cost a whole regeneration (namasl review).
+    return runs, finalists, (floor_rate, floor_itl, headroom, dropped), coverage
 
 
 def relabel(finalists, dropped):
@@ -774,7 +778,7 @@ def main(argv=None):
     # (the since-retired drafting backfill) replayed DIFFERENT traffic than its baseline --
     # AgentX uses the seed to choose each lane's trajectory start, so the "matched-load" tables
     # were not matched workloads (namasl review #1).
-    runs, finalists, (floor_rate, floor_itl, headroom, dropped) = search(
+    runs, finalists, (floor_rate, floor_itl, headroom, dropped), coverage = search(
         scenario, blis, args.catalog, args.registry, scen_dir, num_requests=args.num_requests,
         seed=scenario_seed(scenario),
         model_entry=entry, run_timeout=args.run_timeout, max_parallel=max(1, args.max_parallel))

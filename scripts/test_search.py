@@ -85,17 +85,24 @@ class FakeRunner:
         return rec
 
 
-def run(sc, runner, max_parallel=1):
-    """Call search() with the runner stubbed, tolerating either return arity."""
+def run(sc, runner, max_parallel=1, want_coverage=False):
+    """Call search() with the runner stubbed.
+
+    Returns (runs, finalists, extra) by default -- the shape every caller here unpacks -- and the
+    4-tuple including `coverage` when asked. The old docstring said "tolerating either return
+    arity" while every call site unpacked exactly three, so a change to search()'s contract was
+    invisible to these tests (namasl review)."""
     import run_blis
     orig = run_blis.run_one
     run_blis.run_one = runner
     try:
-        return run_search.search(sc, "/nonexistent/blis", "/cat", "/reg", "/tmp/scen",
-                                 num_requests=80, seed=0, model_entry=MOE,
-                                 max_parallel=max_parallel)
+        out = run_search.search(sc, "/nonexistent/blis", "/cat", "/reg", "/tmp/scen",
+                                num_requests=80, seed=0, model_entry=MOE,
+                                max_parallel=max_parallel)
     finally:
         run_blis.run_one = orig
+    runs, finalists, extra, coverage = out
+    return (runs, finalists, extra, coverage) if want_coverage else (runs, finalists, extra)
 
 
 def test_explores_ep():
@@ -717,6 +724,63 @@ def test_coverage_is_recorded_and_not_overstated():
           f"finalists is NOT a count of topologies")
 
 
+def test_main_writes_topology_coverage_end_to_end():
+    """Run main() to completion and assert the WRITTEN scenario.json.
+
+    This is the seam the unit tests never executed. `coverage` was computed inside search() and
+    referenced in main(), so every expensive BLIS probe would run and the search would then die
+    with `NameError: name 'coverage' is not defined` before writing the report directory -- with CI
+    green, because the other tests call candidate_topologies directly and the run() helper claimed
+    to tolerate any return arity (namasl review).
+
+    So this test drives the real producer: a stubbed runner, a temp --out, and then it reads the
+    file that main() actually wrote."""
+    print("main() writes topology_coverage into scenario.json (producer seam)")
+    import run_blis, tempfile, shutil
+    d = tempfile.mkdtemp()
+    sub = os.path.join(d, "t-coverage.yaml")
+    with open(sub, "w") as f:
+        f.write("model: deepseek-v4-pro\nhardware: h200\ngpu_budget: 64\n"
+                "workload:\n  preset: chatbot\nobjective: dual-pareto\n"
+                "interactivity_floor:\n  tok_per_s_per_user: 50.0\n"
+                "headroom: 0.8\nseed: 42\n")
+    out = os.path.join(d, "out")
+    # main() checks the binary exists before probing; the RUNS are stubbed, so any file will do.
+    fake_blis = os.path.join(d, "blis")
+    open(fake_blis, "w").close()
+    orig = run_blis.run_one
+    run_blis.run_one = FakeRunner()
+    try:
+        run_search.main(["--submission", sub, "--out", out,
+                         "--blis", fake_blis, "--catalog", "/cat", "--registry", "/reg",
+                         "--allow-pin-mismatch"])
+        dirs = [x for x in os.listdir(out) if os.path.isdir(os.path.join(out, x))]
+        check(len(dirs) == 1, f"main() wrote exactly one run dir (got {dirs})")
+        sc = json.load(open(os.path.join(out, dirs[0], "scenario.json")))
+        cov = sc.get("topology_coverage")
+        check(cov is not None, "scenario.json carries topology_coverage")
+        if cov:
+            check(cov.get("valid_layouts", 0) >= cov.get("probed", 0) > 0,
+                  f"coverage counts are sane (got {cov})")
+            check(cov.get("max_candidates") == run_search.MAX_CANDIDATES,
+                  "coverage records the cap that produced it")
+            check(len(cov.get("omitted") or []) == cov["valid_layouts"] - cov["probed"],
+                  "the omitted list accounts for every layout not probed")
+        # and the move trail counts SHAPES, not finalists+variants
+        pa = json.load(open(os.path.join(out, dirs[0], "pareto.json")))
+        trail = " ".join((pa.get("winner") or {}).get("move_trail") or [])
+        check("candidate topologies" in trail, f"the trail names candidate topologies ({trail[:70]})")
+        labels = {f["label"] for f in pa["finalists"]} | {x["label"] for x in (pa.get("dropped") or [])}
+        import re as _re
+        m = _re.search(r"enumerated (\d+) candidate topologies", trail)
+        check(bool(m) and int(m.group(1)) == len(labels),
+              f"the trail's count is the DISTINCT topology count ({m.group(1) if m else '?'} "
+              f"vs {len(labels)} labels, {len(pa['finalists'])} finalists)")
+    finally:
+        run_blis.run_one = orig
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def test_pin_mismatch_is_refused():
     """A declared pin that disagrees with the checkout must stop the search.
 
@@ -841,6 +905,7 @@ if __name__ == "__main__":
     test_tighter_explicit_itl_cap_is_still_enforced()
     test_no_drafting_sweep_without_a_speculator()
     test_coverage_is_recorded_and_not_overstated()
+    test_main_writes_topology_coverage_end_to_end()
     test_pin_mismatch_is_refused()
     test_censored_c_star_is_flagged()
     test_provenance_split_is_detected()

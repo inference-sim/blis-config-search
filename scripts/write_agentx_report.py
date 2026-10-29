@@ -53,6 +53,10 @@ wa = win["at_c_use"]
 # two runs and produced an input-tok/s figure belonging to neither.)
 KNOB_KEYS = ("router_config", "max_num_seqs", "max_num_batched_tokens", "gpu_memory_utilization")
 
+# The interactivity floor every "served" claim in this narrative is judged against.
+FLOOR_RATE = float(((pa.get("interactivity_floor") or sc.get("interactivity_floor") or {})
+                    .get("tok_per_s_per_user")) or 50.0)
+
 # The knobs that DISTINGUISH one candidate from another, and nothing else.
 #
 # Matching tp/dp/instances and merely EXCLUDING four knob keys silently accepted a different
@@ -112,10 +116,79 @@ def _identity(cfg, dep=None):
 # not servable (namasl review).
 _c_target = win.get("c_use_target", win["c_use"])
 _backed_off = _c_target != win["c_use"]
-_load_basis = (f"the highest servable measured load; 80% of the ceiling ({_c_target}) measured "
+# When the ramp ended with this shape still servable, C* is the highest load TESTED -- a lower
+# bound on capacity. Calling it a "measured ceiling" and recommending 80% of it overstates what was
+# established, so say which one it is (namasl review).
+_censored = bool(win.get("c_star_censored"))
+_ceiling_phrase = (f"the highest load tested ({win['c_star']}); capacity was not bracketed, so "
+                   f"this is a lower bound"
+                   if _censored else f"the measured ceiling of {win['c_star']}")
+_load_basis = (f"the highest servable measured load; 80% of {_ceiling_phrase} measured "
                f"below the floor"
-               if _backed_off else
-               f"80% of the measured ceiling of {win['c_star']}")
+               if _backed_off else f"80% of {_ceiling_phrase}")
+
+
+# What the runs actually say about expert parallelism, for the "what to run" line. Asserting
+# "every non-EP control ran out of memory" unconditionally contradicted the artifacts: B200 drops
+# ZERO shapes and its own EP section says the controls run (namasl review).
+def _ep_verdict():
+    dropped = pa.get("dropped") or []
+    n_drop = len(dropped)
+    ctl_ran = any("+ EP" not in f["label"] for f in fin if not f.get("variant"))
+    win_has_ep = "+ EP" in win["label"]
+    if not win_has_ep:
+        return ("The recommendation does not use expert parallelism: "
+                f"{'no EP arm beat it' if ctl_ran else 'the EP arms did not survive'}.")
+    if not ctl_ran and n_drop:
+        return (f"Expert parallelism is not optional here: no non-EP control produced a servable "
+                f"run ({n_drop} shape(s) refused or below the floor).")
+    if not ctl_ran:
+        return "Expert parallelism is not optional here: no non-EP control produced a servable run."
+    pairs = [p for p in _ep_pairs() if p[3] is not None and p[4] and p[4] > 0]
+    if pairs:
+        deltas = sorted(100.0 * (p[3] - p[4]) / p[4] for p in pairs)
+        rng = (f"{deltas[0]:+.1f}%" if len(deltas) == 1
+               else f"{deltas[0]:+.1f}% to {deltas[-1]:+.1f}%")
+        return (f"The non-EP controls do run on this part; compared at the highest load both arms "
+                f"serve, expert parallelism is worth {rng}. Where it earns its place is capacity, "
+                f"not per-token speed.")
+    return ("The non-EP controls do run on this part; expert parallelism is a capacity "
+            "optimisation here rather than a precondition.")
+
+
+def _worst_knob_prose(wk):
+    """Why the worst knob is expensive -- keyed to the knob that actually came last.
+
+    This paragraph used to explain queue/KV routing unconditionally, while the named worst knob was
+    `batch tokens 2,048` on b200/h200/h100-4node and `1 draft token` on h100-8node. The reader got
+    a mechanism for a knob the data did not blame (namasl review)."""
+    name, _pg, delta, cs = wk
+    head = (f"The expensive one is <code>{name}</code> at {delta:+.1f}%. It is not a small "
+            f"scheduling inefficiency: it drops the servable ceiling from {win['c_star']} lanes "
+            f"to {cs}. ")
+    low = name.lower()
+    if "routing" in low or "queue" in low or "kv" in low:
+        return head + (f"Scoring on instantaneous KV pressure is actively wrong when every request "
+                       f"arrives carrying ~{n(in_per,0)} tokens of context \u2014 the instance that "
+                       f"looks least loaded is the one about to be handed an enormous prefill.")
+    if "batch tokens" in low:
+        return head + (f"This workload's requests arrive carrying ~{n(in_per,0)} tokens of context, "
+                       f"so a prefill-admission cap well below that forces each one to be chunked "
+                       f"across many scheduler passes \u2014 the batch limit, not the GPU, becomes "
+                       f"what paces the fleet.")
+    if "draft" in low:
+        return head + ("Drafting spends decode compute verifying tokens, which is compute the "
+                       "baseline spends on concurrency; at this depth the acceptance length does "
+                       "not pay for the draft, so the deployment buys per-session speed with "
+                       "sessions it cannot spare.")
+    if "max seqs" in low:
+        return head + ("A batch-width cap below what the fleet can hold leaves decode slots idle "
+                       "at exactly the loads this deployment is sized for.")
+    if "gpu mem util" in low:
+        return head + ("A smaller KV pool admits fewer concurrent sessions, and this workload's "
+                       "sessions are long-lived agent trajectories that each hold their context "
+                       "for the whole run.")
+    return head
 
 
 def _is_winner_c_use(r):
@@ -157,7 +230,12 @@ ranked = sorted(best.values(), key=lambda f: -f["at_c_use"]["tokens_per_sec_per_
 # drafting section on `win` would make it silently vanish in exactly that case, so anchor it on the
 # label the drafting arms are actually on.
 _draft_arms = [f for f in fin if (f.get("config") or {}).get("num_speculative_tokens")]
-draft_label = _draft_arms[0]["label"] if _draft_arms else win["label"]
+# Prefer the WINNER'S own topology when it has drafting arms. Taking _draft_arms[0] anchored the
+# section to whichever topology happened to sort first -- on b200 that was `4x TP8 + EP` while the
+# winner is `8x TP4 + EP`, so the section said "on the winning topology" about another shape and
+# quoted that shape's 64-lane baseline ceiling instead of the winner's 128 (namasl review).
+draft_label = (win["label"] if any(f["label"] == win["label"] for f in _draft_arms)
+               else (_draft_arms[0]["label"] if _draft_arms else win["label"]))
 draft_base = next((f for f in fin if f["label"] == draft_label and not f.get("variant")), None)
 
 # knob deltas on the winning topology
@@ -208,17 +286,26 @@ def _ep_pairs():
         if ctl not in byl:
             continue
         e, c = byl[lab], byl[ctl]
-        # the highest load BOTH arms measured, so the comparison is like-for-like
-        shared = sorted({p["concurrency"] for p in e["curve"]}
-                        & {p["concurrency"] for p in c["curve"]})
-        se = sc_ = None
-        if shared:
-            at = max(shared)
+        # The highest load at which BOTH arms SERVE -- not merely the highest both measured.
+        #
+        # max(shared) alone picked the top rung regardless of whether either arm was still above
+        # the floor there, and on H200 every pair landed on c=128 where the per-user rates are
+        # 0.6-5.0 against a floor of 50. Two collapsed runs have a ratio, but it is not an
+        # "EP is worth +X% at a load both arms served" claim -- it compares two failures. Taking
+        # the highest BOTH-SERVABLE rung turns H200's +4.4-22.6% into +1.5-14.4% and B200's
+        # +0.0-10.9% into -0.3-5.4%, which is the honest range (namasl review).
+        epu = {p["concurrency"]: (p.get("tok_per_s_per_user") or 0) for p in e["curve"]}
+        cpu = {p["concurrency"]: (p.get("tok_per_s_per_user") or 0) for p in c["curve"]}
+        shared = sorted(set(epu) & set(cpu))
+        both_serve = [x for x in shared if epu[x] >= FLOOR_RATE and cpu[x] >= FLOOR_RATE]
+        se = sc_ = at = None
+        if both_serve:
+            at = max(both_serve)
             se = next(p["tokens_per_sec"] for p in e["curve"] if p["concurrency"] == at) / e["gpus"]
             sc_ = next(p["tokens_per_sec"] for p in c["curve"] if p["concurrency"] == at) / c["gpus"]
         out.append((lab, e["at_c_use"]["tokens_per_sec_per_gpu"],
                     c["at_c_use"]["tokens_per_sec_per_gpu"], se, sc_,
-                    e["c_star"], c["c_star"], (max(shared) if shared else None)))
+                    e["c_star"], c["c_star"], at))
     return out
 
 def _h100_drop_count():
@@ -440,7 +527,21 @@ def _draft_matched_prose():
                  f'<td class="n">{n(baseval) if baseval else "\u2014"}</td>{cells}</tr>')
     tbl = head + body + "</tbody></table>"
     cliffs = ", ".join(f"K={k} at {cs} lanes" for k, cs, _ in arms)
-    return (f"<b>At matched load</b>, drafting is a clear throughput win \u2014 but it moves the "
+    # Read the verdict off the table rather than asserting one. "a clear throughput win" was
+    # unconditional even where every matched-load delta is negative -- b200 K=1 is negative at
+    # every load shown (namasl review).
+    deltas = [t[3] for _, _, pts in arms for t in pts]
+    pos = [d for d in deltas if d > 0]
+    if deltas and not pos:
+        verdict = ("<b>At matched load</b>, drafting does not pay here \u2014 every depth is at or "
+                   "below the no-drafting baseline at every load both ran, and it also moves the")
+    elif deltas and len(pos) == len(deltas):
+        verdict = ("<b>At matched load</b>, drafting is a clear throughput win \u2014 but it moves the")
+    else:
+        verdict = (f"<b>At matched load</b>, drafting pays at some loads and not others "
+                   f"({len(pos)} of {len(deltas)} measured points improve on the baseline) "
+                   f"\u2014 and it moves the")
+    return (f"{verdict} "
             f"interactivity cliff, so the two arms' own usable loads are not the same load. Output "
             f"tok/s at each session count, with the change against no drafting:{tbl}"
             f"<p>The servable ceiling, however, falls: no drafting holds {base['c_star']} lanes "
@@ -534,8 +635,7 @@ rep = {
               f"ingesting roughly {n(in_tps,0)} input tok/s.")},
     {"h": "What to run", "run": True,
      "html": (f"<b>{pa['winner']['chosen']}</b> at {win['c_use']} concurrent agent sessions "
-              f"({_load_basis}). Expert parallelism is not optional "
-              f"here: <b>every</b> non-EP control ran out of memory before serving a request.")},
+              f"({_load_basis}). {_ep_verdict()}")},
   ],
   "explore_prose": [
     (f"Each row below is one BLIS replay run. The load axis is <b>session-tree lanes</b>, not "
@@ -553,20 +653,33 @@ rep = {
   "sections": [
     {"num": 2, "title": "The operating curve, and where it stops",
      "figure": "operating_curve",
-     "caption_note": (f"The winner's ceiling is <b>{win['c_star']} lanes</b>; the recommendation sits at "
+     "caption_note": ((f"The winner is still servable at <b>{win['c_star']} lanes</b>, the highest "
+                       f"load tested \u2014 its ceiling is NOT bracketed, so treat that as a lower "
+                       f"bound. " if _censored else
+                       f"The winner's ceiling is <b>{win['c_star']} lanes</b>. ")
+                      + f"The recommendation sits at "
                       f"{win['c_use']}, measured directly rather than interpolated."
                       + (f" It backs off from the 0.8xC* target of {_c_target}, which measured "
                          f"below the interactivity floor." if _backed_off else "")),
      "prose": [
-       (f"Throughput climbs almost linearly with lanes and then falls off a cliff. "
+       ((f"Throughput climbs almost linearly with lanes and then falls off a cliff. "
+         if knee_hi else
+         f"Throughput climbs almost linearly with lanes and was still climbing at the last load "
+         f"tested \u2014 no cliff was observed for this shape, because the ramp ended first. ") +
         f"{pa['winner']['chosen']} holds {n(knee_lo['tok_per_s_per_user'])} tok/s per user at "
         f"{knee_lo['concurrency']} lanes" +
         (f", and at {knee_hi['concurrency']} lanes per-user rate collapses to "
          f"{n(knee_hi['tok_per_s_per_user'])} tok/s while ITL p99 jumps from "
          f"{n(knee_lo['itl_p99_ms'])} ms to {n(knee_hi['itl_p99_ms'],0)} ms." if knee_hi else ".")),
-       (f"The cliff is why the recommendation is {win['c_use']} lanes and not the ceiling: at the ceiling "
-        f"there is no headroom for a burst, and this workload's bursts are whole agent trajectories "
-        f"waking up at once."
+       ((f"The cliff is why the recommendation is {win['c_use']} lanes and not the ceiling: at the "
+         f"ceiling there is no headroom for a burst, and this workload's bursts are whole agent "
+         f"trajectories waking up at once."
+         if not _censored else
+         f"The recommendation is {win['c_use']} lanes rather than the {win['c_star']} this shape "
+         f"was last seen serving, because a deployment needs headroom for a burst and this "
+         f"workload's bursts are whole agent trajectories waking up at once. Note the ceiling "
+         f"itself is unbracketed here: the shape never missed the floor, so its true capacity is "
+         f"somewhere above {win['c_star']} lanes.")
         + (f" This shape backs off further still: the 0.8xC* load of {_c_target} itself measured "
            f"below the floor, so the recommendation is the highest load actually measured servable."
            if _backed_off else "")),
@@ -582,12 +695,7 @@ rep = {
          f"<li><code>{v}</code>: {n(pg)} tok/s/GPU, {d:+.1f}%"
          + (f" — and it halves usable capacity, C* {win['c_star']} → {cs}" if cs < win["c_star"] else "")
          + "</li>" for v, pg, d, cs in knobs) + "</ul>") ] if knobs else []) + ([
-       (f"The expensive one is <code>{worst_knob[0]}</code> at {worst_knob[2]:+.1f}%. It is not a small "
-        f"scheduling inefficiency: routing on queue depth and KV utilisation drops the servable ceiling "
-        f"from {win['c_star']} lanes to {worst_knob[3]}, so the deployment loses half its capacity. "
-        f"Scoring on instantaneous KV pressure is actively wrong when every request arrives carrying "
-        f"~{n(in_per,0)} tokens of context — the instance that looks least loaded is the one about to "
-        f"be handed an enormous prefill.")
+       (_worst_knob_prose(worst_knob))
        ] if worst_knob and worst_knob[3] < win["c_star"] else [])),
     },
   ],

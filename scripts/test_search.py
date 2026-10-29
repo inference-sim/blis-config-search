@@ -341,9 +341,15 @@ def test_replay_workload_takes_the_replay_path():
           "the scenario's engine knobs reach every run")
     check(all(c.get("cache_dtype") == "fp8_ds_mla" for c in r.calls),
           "the required cache dtype reaches every run")
-    # Lanes, not requests: the ladder is far shorter than the per-GPU one.
+    # Lanes, not requests: the ladder is still far shorter than the per-GPU one, but it must run
+    # PAST the knee so C* is bracketed. The old cap of 128 was not enough on a fast part -- the
+    # b200 winner was still servable at the final rung, so C* was the highest load TESTED and the
+    # report called it a measured ceiling anyway (namasl review).
     lanes = sorted({c["concurrency"] for c in r.calls})
-    check(max(lanes) <= 128, f"the lane ladder stays small (got {lanes})")
+    ramp = run_search.concurrency_ramp(32, replay={"scenario": "x"})
+    check(max(ramp) >= 512, f"the lane ladder reaches past the knee to bracket C* (got {ramp})")
+    check(len(ramp) <= 12, f"and stays a short ladder, not a per-GPU one (got {len(ramp)} rungs)")
+    check(max(lanes) <= max(ramp), f"no run exceeds the ladder (got {lanes})")
     check(_workload_label(sc) == "inferencex-agentx-mvp",
           "a replay is named by its scenario, not a missing preset")
 
@@ -681,6 +687,56 @@ def test_no_drafting_sweep_without_a_speculator():
           "and they are present when the model HAS a speculator")
 
 
+def test_pin_mismatch_is_refused():
+    """A declared pin that disagrees with the checkout must stop the search.
+
+    The `resolved` block exists so this is checkable rather than trusted, and the first thing it
+    caught was real: pins.env said catalog 0.3.0 while every run used 0.4.0 (ba542f0), making the
+    "one pinned stack" label false (namasl review)."""
+    print("a pin that disagrees with the checkout is refused, not recorded quietly")
+    bad = {"catalog": "0.3.0", "registry": "v0.2.0",
+           "resolved": {"catalog": {"describe": "0.4.0", "commit": "ba542f0"},
+                        "registry": {"describe": "v0.2.0", "commit": "7f6662d"}}}
+    m = run_search.pin_mismatches(bad)
+    check(len(m) == 1 and "catalog" in m[0],
+          f"the catalog mismatch is named, the matching registry is not (got {m})")
+    check("0.3.0" in m[0] and "0.4.0" in m[0], "the message states both versions")
+    good = {"catalog": "0.4.0", "resolved": {"catalog": {"describe": "0.4.0"}}}
+    check(run_search.pin_mismatches(good) == [], "a matching pin is silent")
+    # No resolved block (an older run dir) cannot be checked, and must not false-positive.
+    check(run_search.pin_mismatches({"catalog": "0.4.0"}) == [],
+          "an unresolvable stack is not reported as a mismatch")
+
+
+def test_censored_c_star_is_flagged():
+    """When the ramp ends with a shape still servable, C* is a lower bound, not a ceiling.
+
+    The b200 winner held 115 tok/s/user at the final rung against a floor of 50, so nothing failed
+    above it -- yet the report called C* a "measured ceiling", described a "cliff" that was never
+    observed, and recommended 80% of an unbracketed number (namasl review)."""
+    print("a C* that was never bracketed is flagged as censored")
+
+    class NeverFails(FakeRunner):
+        """Servable at every load, so the ramp runs out before capacity does."""
+        def __call__(self, *a, **kw):
+            rec = super().__call__(*a, **kw)
+            if rec.get("returncode") == 0:
+                rec["metrics"]["itl_p99_ms"] = 8.0        # ~125 tok/s/user at every rung
+                rec["metrics_all_instances"] = []
+            return rec
+
+    runs, finalists, _ = run(scenario(budget=64), NeverFails())
+    check(bool(finalists), "the fixture produces finalists")
+    for f in finalists:
+        top = max(p["concurrency"] for p in f["curve"])
+        if f["c_star"] == top:
+            check(f.get("c_star_censored") is True,
+                  f"{f['label']}: C*={f['c_star']} is the top rung, so it must be flagged censored")
+        else:
+            check(f.get("c_star_censored") is False,
+                  f"{f['label']}: a bracketed C* is not flagged")
+
+
 def test_provenance_split_is_detected():
     """A ledger whose rows span seeds or stacks is not a comparable set."""
     print("a ledger that spans seeds or stacks is flagged, not silently rendered")
@@ -754,6 +810,8 @@ if __name__ == "__main__":
     test_curve_itl_shares_the_per_user_basis()
     test_tighter_explicit_itl_cap_is_still_enforced()
     test_no_drafting_sweep_without_a_speculator()
+    test_pin_mismatch_is_refused()
+    test_censored_c_star_is_flagged()
     test_provenance_split_is_detected()
     test_pinned_stack_records_resolved_identity()
     print(f"\n{PASS} passed, {FAIL} failed")

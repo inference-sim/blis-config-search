@@ -33,7 +33,7 @@ cannot be reproduced arm-for-arm.
 ## 2. Catalog + registry (both required by the kernel)
 
 ```bash
-git clone --branch 0.3.0 --depth 1 https://github.com/inference-sim/blis-catalog.git
+git clone --branch 0.4.0 --depth 1 https://github.com/inference-sim/blis-catalog.git
 export BLIS_CATALOG=$PWD/blis-catalog
 git clone --branch v0.2.0 --depth 1 https://github.com/inference-sim/blis-registry.git
 export BLIS_REGISTRY=$PWD/blis-registry      # MUST be v0.2.0: it carries cost-model-memory AND
@@ -42,11 +42,11 @@ export BLIS_REGISTRY=$PWD/blis-registry      # MUST be v0.2.0: it carries cost-m
 ```
 
 A model runs only if it is in the catalog (NS-6). `glm-5.3-flash`, `glm-5.3`, and `qwen3-14b` all
-ship in catalog `0.3.0`, which also adds `deepseek-v4.1-flash` and the `agentx-mvp` replay
+ship in catalog `0.4.0`, which also adds `deepseek-v4.1-flash` and the `agentx-mvp` replay
 workload. The runner generates kernel scenario files into a `--scenarios` dir you choose (e.g.
 `/tmp/cs-scenarios`).
 
-The catalog pin and the binary pin move **together**: catalog `0.3.0`'s model graphs use schema
+The catalog pin and the binary pin move **together**: catalog `0.4.0`'s model graphs use schema
 fields that v0.10.0 cannot decode (it fails with hundreds of `field ... not found in type
 model.Node` errors), and v0.12.0 needs `0.3.0` for the entries above.
 

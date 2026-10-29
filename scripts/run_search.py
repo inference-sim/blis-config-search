@@ -119,6 +119,26 @@ def _pinned_stack(blis=None, catalog=None, registry=None):
     return out
 
 
+def pin_mismatches(stack):
+    """Pins whose DECLARED ref disagrees with the checkout that actually ran, as readable strings.
+
+    The `resolved` block exists so this can be checked rather than trusted, and the first thing it
+    caught was real: pins.env said catalog 0.3.0 while every run used 0.4.0 (ba542f0). That made
+    the "one pinned stack" label false even though the only difference was an unused workload file
+    (namasl review). A search now refuses to start on a mismatch instead of recording it quietly.
+    """
+    res = (stack or {}).get("resolved") or {}
+    bad = []
+    for name in ("catalog", "registry"):
+        want = (stack or {}).get(name)
+        got = (res.get(name) or {}).get("describe")
+        # `describe` carries "-dirty"/"-N-gsha" suffixes on an untagged checkout; a declared ref is
+        # satisfied when it is the exact tag.
+        if want and got and got != want:
+            bad.append(f"{name}: pins.env says {want}, checkout is {got}")
+    return bad
+
+
 def _corpus_traffic_note(runs):
     """A short description of the traffic a replay actually served, measured from the runs.
 
@@ -171,11 +191,18 @@ def concurrency_ramp(gpu_budget, replay=None):
     ladder is sized per instance-equivalent rather than per GPU.
     """
     if replay:
-        # ~8 GPUs per instance-equivalent; probe around the measured per-instance knee and a
-        # couple of doublings past it, so C* is bracketed rather than merely approached.
+        # ~8 GPUs per instance-equivalent; probe around the measured per-instance knee and PAST it,
+        # so C* is bracketed rather than merely approached.
+        #
+        # The old top of 32*inst was not enough on a fast part: on 32x B200 the winner still held
+        # 115 tok/s/user at the final rung (c=128) against a floor of 50, so nothing failed above
+        # it and C*=128 was the highest TESTED load, not a measured ceiling -- while the report
+        # called it one and recommended 80% of it (namasl review). The ladder now runs two
+        # doublings further; `_probe_one` stops climbing a shape as soon as it misses the floor, so
+        # the extra rungs cost runs only where capacity has not yet been bracketed.
         inst = max(1, int(gpu_budget) // topologies.GPUS_PER_NODE)
         ramp, c = [], 4
-        top = max(32, 32 * inst)
+        top = max(128, 128 * inst)
         while c <= top:
             ramp.append(c)
             c *= 2
@@ -549,6 +576,10 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
             # The 0.8 x C* target this shape aimed at. Equal to c_use unless the dedicated run at
             # the target was unservable and the search backed off to the highest servable rung.
             "c_use_target": c_use_target,
+            # True when the ramp ran out while this shape was STILL SERVABLE: C* is then the
+            # highest load tested, a lower bound on capacity, not an observed ceiling. The report
+            # must not call it a "measured ceiling" or a "cliff" in that case (namasl review).
+            "c_star_censored": c_star == max(p["concurrency"] for p in curve),
             "at_c_use": {"tokens_per_sec": tps, "tokens_per_sec_per_gpu": round(tps / gpus, 1),
                          "tok_per_s_per_user": at["tok_per_s_per_user"], "itl_p99_ms": at["itl_p99_ms"],
                          "ttft_p99_ms": 0.0, "preemption_count": at.get("preemption_count", 0),
@@ -666,6 +697,9 @@ def main(argv=None):
     # Candidates probe independently, so they parallelise; results are still folded in input
     # order, so the recommendation does not depend on worker timing. Default 1 keeps the old
     # sequential behaviour for anyone who does not ask for width.
+    ap.add_argument("--allow-pin-mismatch", action="store_true",
+                    help="run even when the catalog/registry checkout differs from pins.env "
+                         "(the report then records the checkout that actually ran)")
     ap.add_argument("--max-parallel", type=int, default=1,
                     help="probe this many candidate topologies at once (default 1). A replay "
                          "peaks near 4.2 GiB RSS per run -- it parses the whole corpus -- so "
@@ -706,6 +740,19 @@ def main(argv=None):
             rep["corpus_cache"] = os.path.abspath(args.corpus_cache)
         scenario = dict(scenario, workload=dict(scenario["workload"], replay=rep))
 
+    # Refuse to run at a stack that is not the stack we claim. Checked BEFORE any BLIS run, so a
+    # mismatch costs seconds rather than an afternoon of measurements under a false label.
+    pinned = _pinned_stack(blis, args.catalog, args.registry)
+    mism = pin_mismatches(pinned)
+    if mism and not args.allow_pin_mismatch:
+        raise SystemExit(
+            "pinned stack does not match the checkouts on disk:\n  "
+            + "\n  ".join(mism)
+            + "\n\nEvery report records this stack as the one that priced it, so running anyway "
+              "would publish a false provenance label. Either check out the pinned refs or update "
+              "pins.env to the version you mean to run (and say so in the commit). "
+              "--allow-pin-mismatch overrides this for a deliberate experiment.")
+
     entry = model_entry(scenario["model"], os.path.abspath(args.catalog))
     arch = (entry or {}).get("arch", "unknown")
     print(f"searching {scenario.get('model')} ({arch}) on {scenario.get('gpu_budget')}x "
@@ -740,7 +787,7 @@ def main(argv=None):
                     # Which simulator priced these runs. pins.env is the single source of truth
                     # (build_catalog.read_pins); without this the report footer printed "?" for
                     # every component of the stack.
-                    "pinned_stack": _pinned_stack(blis, args.catalog, args.registry)}
+                    "pinned_stack": pinned}
     # The move trail must say what was actually explored: the previous wording ("single-node
     # topologies") described a tp-only sweep and gave no hint that EP was never tried.
     ep_runs = sum(1 for r in runs if ((r.get("deployment") or {}).get("parallel") or {})

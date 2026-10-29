@@ -805,6 +805,74 @@ def test_main_writes_topology_coverage_end_to_end():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def test_backfill_reproduces_a_real_search_exactly():
+    """The derived-field backfill must equal what a real search would have recorded.
+
+    topology_coverage and c_star_censored were added after the AgentX reports were searched, and
+    re-searching them to obtain two values that are pure functions of the artifact would cost ~50 h
+    of CPU. Neither depends on a measurement: coverage is candidate_topologies(budget, model, cap)
+    vs the valid set, and c_star_censored is `c_star == max(curve)`. So they can be derived -- but
+    only if the derivation is proven to match the producer, which is what this asserts.
+
+    It also pins the trap validation caught: the backfill must read the SAME catalog the search
+    used, because `arch` decides whether the grid is the MoE tp x dp x EP space (19 valid layouts
+    for deepseek-v4-pro) or the narrow dense one (4)."""
+    print("the derived-field backfill reproduces a real search byte-for-byte")
+    import run_blis, backfill_derived_fields, tempfile, shutil
+    CAT = os.path.join(ROOT, os.pardir, "blis-catalog")
+    if not os.path.isdir(CAT):
+        print("  (skipped: no catalog checkout)")
+        return
+    for label, runner in (("single-node", FakeRunner()),
+                          ("escalation", TooBigForOneNode(fail_small_footprint=False))):
+        d = tempfile.mkdtemp()
+        try:
+            sub = os.path.join(d, "s.yaml")
+            with open(sub, "w") as f:
+                f.write("model: deepseek-v4-pro\nhardware: h200\ngpu_budget: 64\n"
+                        "workload:\n  preset: chatbot\nobjective: dual-pareto\n"
+                        "interactivity_floor:\n  tok_per_s_per_user: 50.0\n"
+                        "headroom: 0.8\nseed: 42\n")
+            fb = os.path.join(d, "blis")
+            open(fb, "w").close()
+            out = os.path.join(d, "out")
+            orig = run_blis.run_one
+            run_blis.run_one = runner
+            try:
+                run_search.main(["--submission", sub, "--out", out, "--blis", fb,
+                                 "--catalog", CAT, "--registry", "/reg",
+                                 "--allow-pin-mismatch"])
+            finally:
+                run_blis.run_one = orig
+            rd = os.path.join(out, os.listdir(out)[0])
+            sc = json.load(open(os.path.join(rd, "scenario.json")))
+            pa = json.load(open(os.path.join(rd, "pareto.json")))
+            truth_cov = dict(sc["topology_coverage"])
+            truth_cen = {f["label"] + "|" + (f.get("variant") or ""): f["c_star_censored"]
+                         for f in pa["finalists"]}
+            # strip what the producer recorded, then re-derive it
+            del sc["topology_coverage"]
+            for f in pa["finalists"]:
+                f.pop("c_star_censored", None)
+            json.dump(sc, open(os.path.join(rd, "scenario.json"), "w"), indent=2, sort_keys=True)
+            json.dump(pa, open(os.path.join(rd, "pareto.json"), "w"), indent=2, sort_keys=True)
+            backfill_derived_fields.main(["--catalog", CAT, rd])
+            g_sc = json.load(open(os.path.join(rd, "scenario.json")))
+            g_pa = json.load(open(os.path.join(rd, "pareto.json")))
+            got = dict(g_sc["topology_coverage"])
+            check(got.pop("derived_post_hoc", None) is True,
+                  f"{label}: a backfilled field is marked derived_post_hoc")
+            check(got == truth_cov,
+                  f"{label}: coverage identical to the producer's "
+                  f"(got {json.dumps(got)} vs {json.dumps(truth_cov)})")
+            got_cen = {f["label"] + "|" + (f.get("variant") or ""): f["c_star_censored"]
+                       for f in g_pa["finalists"]}
+            check(got_cen == truth_cen,
+                  f"{label}: c_star_censored identical on all {len(truth_cen)} finalists")
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
 def test_pin_mismatch_is_refused():
     """A declared pin that disagrees with the checkout must stop the search.
 
@@ -930,6 +998,7 @@ if __name__ == "__main__":
     test_no_drafting_sweep_without_a_speculator()
     test_coverage_is_recorded_and_not_overstated()
     test_main_writes_topology_coverage_end_to_end()
+    test_backfill_reproduces_a_real_search_exactly()
     test_pin_mismatch_is_refused()
     test_censored_c_star_is_flagged()
     test_provenance_split_is_detected()

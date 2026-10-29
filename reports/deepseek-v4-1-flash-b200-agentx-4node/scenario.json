@@ -10,7 +10,8 @@
   "objective": "dual-pareto",
   "pinned_stack": {
     "blis": "v0.12.0",
-    "catalog": "0.3.0",
+    "catalog": "0.4.0",
+    "catalog_declared_at_search_time": "0.3.0",
     "kernel": "v0.3.0",
     "registry": "v0.2.0",
     "resolved": {
@@ -29,6 +30,24 @@
   },
   "run_id": "deepseek-v4-1-flash-b200-agentx-4node",
   "seed": 42,
+  "topology_coverage": {
+    "derived_post_hoc": true,
+    "footprint_caps_attempted": [
+      8
+    ],
+    "max_candidates": 12,
+    "omitted": [
+      "8x TP2xDP2",
+      "8x TP1xDP4",
+      "16x TP2 + EP",
+      "16x TP1xDP2 + EP",
+      "16x TP2",
+      "16x TP1xDP2",
+      "32x TP1"
+    ],
+    "probed": 12,
+    "valid_layouts": 19
+  },
   "workload": {
     "replay": {
       "benchmark_duration": "900s",

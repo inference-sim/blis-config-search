@@ -687,6 +687,36 @@ def test_no_drafting_sweep_without_a_speculator():
           "and they are present when the model HAS a speculator")
 
 
+def test_coverage_is_recorded_and_not_overstated():
+    """The sweep is a RANKED SUBSET of the valid layouts, and must be reported as one.
+
+    candidate_topologies ranks best-first and truncates to MAX_CANDIDATES: on 32 GPUs that is 12 of
+    19 valid single-node-footprint layouts, with 7 omitted. Every hero said "Every ... layout that
+    fills N GPUs", and move_trail said "enumerated 36 topologies" because it summed
+    finalists+dropped AFTER knob refinement -- b200 has 36 finalists but only 12 distinct topology
+    labels, the other 24 being variants on three shapes (namasl review)."""
+    print("topology coverage is recorded, and the trail counts shapes not variants")
+    valid = topologies.candidate_topologies(32, MOE, 10 ** 6, 8)
+    ranked = topologies.candidate_topologies(32, MOE, run_search.MAX_CANDIDATES, 8)
+    check(len(valid) > len(ranked),
+          f"the valid space ({len(valid)}) exceeds what is probed ({len(ranked)})")
+    check(len(ranked) == run_search.MAX_CANDIDATES,
+          f"the sweep is truncated to MAX_CANDIDATES (got {len(ranked)})")
+    # ranking is a prefix: truncation must not reorder, or "highest-ranked N" is a false claim
+    check([topologies.label(c) for c in ranked]
+          == [topologies.label(c) for c in valid[:len(ranked)]],
+          "the probed set is the top-ranked prefix of the valid set")
+
+    r = FakeRunner()
+    runs, finalists, _ = run(scenario(budget=64), r)
+    labels = {f["label"] for f in finalists}
+    n_variants = sum(1 for f in finalists if f.get("variant"))
+    check(n_variants > 0, "the fixture produced refinement variants")
+    check(len(labels) < len(finalists),
+          f"finalists ({len(finalists)}) exceed distinct topologies ({len(labels)}), so a count of "
+          f"finalists is NOT a count of topologies")
+
+
 def test_pin_mismatch_is_refused():
     """A declared pin that disagrees with the checkout must stop the search.
 
@@ -810,6 +840,7 @@ if __name__ == "__main__":
     test_curve_itl_shares_the_per_user_basis()
     test_tighter_explicit_itl_cap_is_still_enforced()
     test_no_drafting_sweep_without_a_speculator()
+    test_coverage_is_recorded_and_not_overstated()
     test_pin_mismatch_is_refused()
     test_censored_c_star_is_flagged()
     test_provenance_split_is_detected()

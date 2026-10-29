@@ -131,6 +131,45 @@ _load_basis = (f"the highest servable measured load; 80% of {_ceiling_phrase} me
 # What the runs actually say about expert parallelism, for the "what to run" line. Asserting
 # "every non-EP control ran out of memory" unconditionally contradicted the artifacts: B200 drops
 # ZERO shapes and its own EP section says the controls run (namasl review).
+# How much of the valid layout space was probed, and how the finalist rows break down.
+#
+# "Every expert-parallel and tensor-parallel layout that fills N GPUs" overstated it:
+# candidate_topologies ranks best-first and truncates to MAX_CANDIDATES, so on 32 GPUs the sweep is
+# 12 of 19 valid layouts. And the finalist count mixes base topologies with knob variants -- b200's
+# 36 finalists are 12 shapes plus 24 variants on three of them (namasl review).
+_cov = sc.get("topology_coverage") or {}
+_n_base = len({f["label"] for f in fin if not f.get("variant")}
+              | {d["label"] for d in (pa.get("dropped") or [])})
+_n_variants = sum(1 for f in fin if f.get("variant"))
+if _cov.get("valid_layouts") and _cov.get("probed") and _cov["probed"] < _cov["valid_layouts"]:
+    _coverage_phrase = (f"The {_cov['probed']} highest-ranked of {_cov['valid_layouts']} valid "
+                        f"expert-parallel and tensor-parallel layouts")
+elif _cov.get("valid_layouts"):
+    _coverage_phrase = "Every expert-parallel and tensor-parallel layout"
+else:
+    # An older run dir records no coverage: describe what the rows show, claim nothing more.
+    _coverage_phrase = f"{_n_base} expert-parallel and tensor-parallel layouts"
+
+
+# Whether every EP candidate actually has its non-EP control in the sweep. Truncation can drop a
+# control (b200: 2 of 7 EP shapes have none), so "Every expert-parallel candidate is run beside its
+# non-EP control" was not always true (namasl review).
+def _ep_pairing():
+    base = {f["label"] for f in fin if not f.get("variant")} | {
+        d["label"] for d in (pa.get("dropped") or [])}
+    eps = sorted(l for l in base if "+ EP" in l)
+    paired = [l for l in eps if l.replace(" + EP", "") in base]
+    return len(eps), len(paired)
+
+
+_n_ep, _n_paired = _ep_pairing()
+_ep_pairing_phrase = (
+    "Every expert-parallel candidate is run beside its non-EP control"
+    if _n_ep and _n_ep == _n_paired else
+    f"{_n_paired} of the {_n_ep} expert-parallel candidates have their non-EP control in the "
+    f"sweep, and each such pair is run together")
+
+
 def _ep_verdict():
     dropped = pa.get("dropped") or []
     n_drop = len(dropped)
@@ -361,9 +400,10 @@ def _ep_section():
       "figure": "scale_bars",
       "caption_note": "Both arms of each topology are shown where both were servable.",
       "prose": [
-        (f"Every expert-parallel candidate is run beside its non-EP control, so the direction is "
-         f"measured rather than assumed. On {hw} the controls <b>do</b> run. Compared at a load "
-         f"both arms served, expert parallelism is worth between {lo:+.1f}% and {hi:+.1f}% — "
+        (f"{_ep_pairing_phrase}, so the direction is "
+         f"measured rather than assumed. On {hw} the controls <b>do</b> run. Compared at the "
+         f"highest load both arms <i>served</i>, expert parallelism is worth between "
+         f"{lo:+.1f}% and {hi:+.1f}% — "
          f"modest. Where it earns its place is <i>capacity</i>: it raises the servable ceiling, "
          f"which is a different claim from being faster per token:"),
         rows,
@@ -624,9 +664,10 @@ rep = {
            f"{gpus}× {hw} · {nodes} nodes"],
   "hero": [
     {"h": "What was tested",
-     "html": (f"Every expert-parallel and tensor-parallel layout that fills {gpus} GPUs, probed up a "
+     "html": (f"{_coverage_phrase} that fill {gpus} GPUs, probed up a "
               f"session-lane ladder and refined one engine knob at a time — "
-              f"{len(rows)} runs, {len(fin)} servable finalists, {len(pa['dropped'])} shapes the "
+              f"{len(rows)} runs, {_n_base} candidate topologies, {_n_variants} refinement arms, "
+              f"{len(fin)} servable finalists, {len(pa['dropped'])} shapes the "
               f"simulator refused or that missed the floor.")},
     {"h": "What was found",
      "html": (f"This is a <b>prefill-dominated</b> workload: {n(in_per,0)} input tokens per request "

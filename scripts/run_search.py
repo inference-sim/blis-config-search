@@ -608,12 +608,24 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
     # GiB per rank at tp=8 on a 141 GiB H200 and only fits from tp=32 up), so widen the per-instance
     # footprint a node at a time rather than reporting "no servable configuration" for a model BLIS
     # can actually run. Escalation only ever ADDS shapes, so a model that fits is unaffected.
+    # How much of the valid space was actually probed. candidate_topologies ranks best-first and
+    # truncates to MAX_CANDIDATES, so the sweep is a RANKED SUBSET, not every valid layout -- on
+    # 32 GPUs it is 12 of 19. The report used to call it "every ... layout that fills N GPUs",
+    # which overstated the coverage (namasl review). Recorded so the narrative can say what it is.
+    coverage = None
     for cap in footprint_tiers(budget):
         seen = {tuple(sorted(c.items())) for c in (f["config"] for f in finalists)} | \
                {tuple(sorted(c.items())) for c in (d["config"] for d in dropped)}
-        probe_batch(topo for topo in topologies.candidate_topologies(
-            budget, model_entry, MAX_CANDIDATES, cap)
-            if tuple(sorted(topo.items())) not in seen)
+        ranked = topologies.candidate_topologies(budget, model_entry, MAX_CANDIDATES, cap)
+        if coverage is None:
+            every = topologies.candidate_topologies(budget, model_entry, 10 ** 6, cap)
+            coverage = {"valid_layouts": len(every), "probed": len(ranked),
+                        "omitted": [topologies.label(c) for c in every
+                                    if topologies.label(c)
+                                    not in {topologies.label(x) for x in ranked}],
+                        "max_candidates": MAX_CANDIDATES}
+        probe_batch(topo for topo in ranked
+                    if tuple(sorted(topo.items())) not in seen)
         if finalists:
             break
 
@@ -787,14 +799,23 @@ def main(argv=None):
                     # Which simulator priced these runs. pins.env is the single source of truth
                     # (build_catalog.read_pins); without this the report footer printed "?" for
                     # every component of the stack.
-                    "pinned_stack": pinned}
+                    "pinned_stack": pinned,
+                    # What fraction of the valid layout space the sweep covered (see `coverage`).
+                    "topology_coverage": coverage}
     # The move trail must say what was actually explored: the previous wording ("single-node
     # topologies") described a tp-only sweep and gave no hint that EP was never tried.
     ep_runs = sum(1 for r in runs if ((r.get("deployment") or {}).get("parallel") or {})
                   .get("enable_expert_parallel"))
-    trail = [f"enumerated {len(finalists) + len(dropped)} topologies within budget"
+    # Count DISTINCT topologies, not finalists+dropped. Knob refinement adds a finalist per
+    # variant on the same shape, so the old sum read "36 topologies" where 12 shapes were tried and
+    # the other 24 rows were variants of three of them (namasl review).
+    n_topos = len({f["label"] for f in finalists} | {d["label"] for d in dropped})
+    n_variants = sum(1 for f in finalists if f.get("variant"))
+    trail = [f"enumerated {n_topos} candidate topologies within budget"
              + (f" ({arch}: tp x dp footprints x expert-parallel arms)" if arch == "MoE"
-                else f" ({arch}: tp tiers)"),
+                else f" ({arch}: tp tiers)")
+             + (f", then {n_variants} one-knob refinement arms on the best of them"
+                if n_variants else ""),
              (f"probed a session-lane ramp per topology with real BLIS replay runs"
               f" (ladder to {max(concurrency_ramp(int(scenario['gpu_budget']), _replay_of(scenario)))} lanes)"
               if _replay_of(scenario) else

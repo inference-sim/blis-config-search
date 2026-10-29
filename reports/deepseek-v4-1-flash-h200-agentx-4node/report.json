@@ -62,7 +62,7 @@
       "figure": "operating_curve",
       "num": 2,
       "prose": [
-        "Throughput climbs almost linearly with lanes and then falls off a cliff. 4x TP8 + EP holds 122.0 tok/s per user at 64 lanes, and at 128 lanes per-user rate collapses to 3.2 tok/s while ITL p99 jumps from 8.2 ms to 166 ms.",
+        "Throughput climbs almost linearly with lanes and then falls off a cliff. 4x TP8 + EP holds 122.0 tok/s per user at 64 lanes, and at 128 lanes per-user rate collapses to 3.2 tok/s while ITL p99 jumps from 8.2 ms to 310 ms.",
         "The cliff is why the recommendation is 51 lanes and not the ceiling: at the ceiling there is no headroom for a burst, and this workload's bursts are whole agent trajectories waking up at once."
       ],
       "title": "The operating curve, and where it stops"

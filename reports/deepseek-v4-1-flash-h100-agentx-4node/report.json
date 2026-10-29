@@ -52,7 +52,7 @@
   ],
   "recommendation_num": 9,
   "recommendation_prose": [
-    "<b>4x TP8 + EP</b> at 51 concurrent agent sessions, on the h100 deployment flags in the table below. That is 717.6 output tok/s across 32 GPUs (22.4 per GPU) at 101.0 tok/s per user and ITL p99 9.6 ms.",
+    "<b>4x TP8 + EP</b> at 51 concurrent agent sessions, on the h100 deployment flags in the table below. That is 717.6 output tok/s across 32 GPUs (22.4 per GPU) at 101.0 tok/s per user and ITL p99 9.9 ms.",
     "Leave the engine knobs at their defaults. None of the refinements helped, and the routing profiles in particular cost capacity on this traffic.",
     "These are simulator predictions over a recorded corpus, not a live cluster measurement. The corpus is pinned by sha256, so the traffic is reproducible; the pricing is the blis-latency-kernel cost model and should be spot-checked against real serving data before anyone sizes a cluster from it."
   ],
@@ -62,7 +62,7 @@
       "figure": "operating_curve",
       "num": 2,
       "prose": [
-        "Throughput climbs almost linearly with lanes and then falls off a cliff. 4x TP8 + EP holds 98.6 tok/s per user at 64 lanes, and at 128 lanes per-user rate collapses to 2.3 tok/s while ITL p99 jumps from 9.9 ms to 417 ms.",
+        "Throughput climbs almost linearly with lanes and then falls off a cliff. 4x TP8 + EP holds 98.6 tok/s per user at 64 lanes, and at 128 lanes per-user rate collapses to 2.3 tok/s while ITL p99 jumps from 10.1 ms to 429 ms.",
         "The cliff is why the recommendation is 51 lanes and not the ceiling: at the ceiling there is no headroom for a burst, and this workload's bursts are whole agent trajectories waking up at once."
       ],
       "title": "The operating curve, and where it stops"
@@ -103,8 +103,8 @@
     {
       "num": 6,
       "prose": [
-        "The same search at 32 and 64 GPUs on H100 makes the scaling explicit. Going from 32 to 64 GPUs multiplies fleet throughput by <b>1.52x</b> (717.6 to 1,092.7 output tok/s) and the servable ceiling by 2.00x (64 to 128 lanes).",
-        "Per-GPU efficiency therefore <b>falls</b> from 22.4 to 17.1 tok/s/GPU (0.76x). Capacity scales but efficiency does not: the second half of the cluster is doing real work \u2014 the ceiling genuinely doubles \u2014 while each GPU does less of it. For a fixed interactivity target that is the honest trade, and it means the larger cluster is the right buy only if you need the extra 64 lanes of capacity, not if you are chasing tokens per GPU."
+        "The same search at 32 and 64 GPUs on H100 makes the scaling explicit. Going from 32 to 64 GPUs multiplies fleet throughput by <b>1.04x</b> (717.6 to 747.6 output tok/s) and the servable ceiling by 1.00x (64 to 64 lanes).",
+        "Per-GPU efficiency therefore <b>falls</b> from 22.4 to 11.7 tok/s/GPU (0.52x). Capacity scales but efficiency does not: the second half of the cluster is doing real work \u2014 the ceiling genuinely doubles \u2014 while each GPU does less of it. For a fixed interactivity target that is the honest trade, and it means the larger cluster is the right buy only if you need the extra 0 lanes of capacity, not if you are chasing tokens per GPU."
       ],
       "title": "What doubling the cluster buys"
     }

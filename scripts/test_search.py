@@ -176,7 +176,7 @@ class TooBigForOneNode(FakeRunner):
 def test_escalates_to_multinode_when_nothing_fits_one_node():
     print("escalates to multi-node footprints")
     r = TooBigForOneNode(fail_small_footprint=False)
-    runs, finalists, extra = run(scenario(budget=64), r)
+    runs, finalists, extra, coverage = run(scenario(budget=64), r, want_coverage=True)
     fps = {c.get("tp", 1) * c.get("dp", 1) for c in r.calls}
     check(any(f > 8 for f in fps), f"tried a multi-node footprint (saw {sorted(fps)})")
     check(32 in fps, "reached the 32-GPU footprint the model needs")
@@ -184,6 +184,30 @@ def test_escalates_to_multinode_when_nothing_fits_one_node():
     if finalists:
         check(all(f["config"]["tp"] * f["config"].get("dp", 1) >= 32 for f in finalists),
               "finalists are the shapes that actually fit")
+
+    # COVERAGE MUST FOLLOW THE ESCALATION. It was assigned only while still None, so it always
+    # described the first max_footprint=8 tier: here it claimed "12 of 19 valid layouts" while 28
+    # distinct topologies had been probed out of 35 valid at the winning cap, which would make the
+    # hero contradict its own move trail (namasl review).
+    labels = {f["label"] for f in finalists} | {d["label"] for d in extra[3]}
+    check(coverage is not None, "escalation still records coverage")
+    if coverage:
+        check(coverage["probed"] == len(labels),
+              f"probed ({coverage['probed']}) == distinct topologies actually tried ({len(labels)})")
+        check(coverage["probed"] > MAX_SINGLE_NODE_PROBED,
+              f"and it exceeds the first tier's {MAX_SINGLE_NODE_PROBED} (got {coverage['probed']})")
+        check(coverage["valid_layouts"] >= coverage["probed"],
+              f"the universe is at least what was probed ({coverage})")
+        check(len(coverage["omitted"]) == coverage["valid_layouts"] - coverage["probed"],
+              "the omitted list accounts for every unprobed layout at the widest cap reached")
+        caps = coverage.get("footprint_caps_attempted") or []
+        check(caps and max(caps) > 8,
+              f"the attempted footprint caps show the escalation (got {caps})")
+        check(all(c in run_search.footprint_tiers(64) for c in caps),
+              "the recorded caps are real tiers")
+
+
+MAX_SINGLE_NODE_PROBED = 12          # what a non-escalating 64-GPU search probes (= MAX_CANDIDATES)
 
 
 def test_does_not_escalate_when_one_node_works():

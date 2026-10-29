@@ -612,22 +612,36 @@ def search(scenario, blis, catalog, registry, scenarios_dir, num_requests=80, se
     # truncates to MAX_CANDIDATES, so the sweep is a RANKED SUBSET, not every valid layout -- on
     # 32 GPUs it is 12 of 19. The report used to call it "every ... layout that fills N GPUs",
     # which overstated the coverage (namasl review). Recorded so the narrative can say what it is.
-    coverage = None
+    # Coverage ACCUMULATES across every footprint tier actually attempted. Recording only the
+    # first tier described a universe the search had already left: on the escalation path (nothing
+    # fits one node, so the search widens to 16/32/64-GPU instances) it claimed "12 of 19" while
+    # 28 distinct topologies had been probed out of 35 valid at the winning cap -- a hero
+    # contradicting its own move trail (namasl review). The AgentX reports never escalate, so
+    # their 12/19 was correct; this is the documented Kimi-style case.
+    probed_labels, cap_reached = set(), None
     for cap in footprint_tiers(budget):
         seen = {tuple(sorted(c.items())) for c in (f["config"] for f in finalists)} | \
                {tuple(sorted(c.items())) for c in (d["config"] for d in dropped)}
         ranked = topologies.candidate_topologies(budget, model_entry, MAX_CANDIDATES, cap)
-        if coverage is None:
-            every = topologies.candidate_topologies(budget, model_entry, 10 ** 6, cap)
-            coverage = {"valid_layouts": len(every), "probed": len(ranked),
-                        "omitted": [topologies.label(c) for c in every
-                                    if topologies.label(c)
-                                    not in {topologies.label(x) for x in ranked}],
-                        "max_candidates": MAX_CANDIDATES}
+        probed_labels |= {topologies.label(c) for c in ranked}
+        cap_reached = cap
         probe_batch(topo for topo in ranked
                     if tuple(sorted(topo.items())) not in seen)
         if finalists:
             break
+    # The universe is every valid layout at the WIDEST cap the search reached: that is the space
+    # the recommendation was chosen from.
+    every = topologies.candidate_topologies(budget, model_entry, 10 ** 6, cap_reached) \
+        if cap_reached else []
+    every_labels = [topologies.label(c) for c in every]
+    coverage = {"valid_layouts": len(every_labels),
+                "probed": len(probed_labels),
+                "omitted": [l for l in every_labels if l not in probed_labels],
+                "max_candidates": MAX_CANDIDATES,
+                # Which per-instance footprint caps were attempted, so a reader can see that the
+                # search escalated rather than inferring it from the shapes.
+                "footprint_caps_attempted": [c for c in footprint_tiers(budget)
+                                             if c <= (cap_reached or 0)]}
 
     # Knob refinement, coordinate-wise on the BEST topologies only. Routing and the batch/KV
     # limits are real levers — on kimi-k2.5 routing swung throughput 2.3x and max_num_seqs=64 cost

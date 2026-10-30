@@ -1,17 +1,29 @@
 name: pages
 
-# Build the config-search webpage (Vite + React SPA) and deploy it to GitHub Pages via the
-# Actions artifact path (Pages source = "GitHub Actions"; no gh-pages branch, no built assets
-# in git). The build stages the committed reports/ into the SPA, so the live site is plain
-# static files served by GitHub — NO Python/Node server runs at view time.
+# Build the config-search webpage (Vite + React SPA) and publish it to GitHub Pages from the
+# `gh-pages` branch. The build stages the committed reports/ into the SPA, so the live site is
+# plain static files served by GitHub — NO Python/Node server runs at view time.
 #
-# On a pull request: build + validate only; nothing is published, job is read-only.
-# On push to main (i.e. after a maintainer merges): build + publish.
+#   push to main  -> build + publish to the ROOT of gh-pages (the live site)
+#   pull request  -> build + publish a PREVIEW to gh-pages/pr-preview/pr-<N>/, and post a sticky
+#                    comment with its link; the preview is removed when the PR closes
 #
-# ONE-TIME repo setting: Settings -> Pages -> Build and deployment -> Source = "GitHub Actions".
+# Why a branch rather than the Actions artifact path: Pages-from-Actions holds exactly ONE
+# deployment, so a PR build would replace the live site. A branch can hold the live site and
+# every open PR's preview side by side.
+#
+# The live root and the previews never clobber each other: the main deploy keeps
+# pr-preview/ (clean-exclude), and each PR writes only its own subfolder.
+#
+# A FORK PR gets a build-only check and no preview: its GITHUB_TOKEN is read-only, and
+# publishing a stranger's build on this repo's domain is not something to do unreviewed.
+#
+# ONE-TIME repo setting: Settings -> Pages -> Build and deployment -> Source = "Deploy from a
+# branch", branch `gh-pages`, folder `/ (root)`. (The first main push creates the branch.)
 
 on:
   pull_request:
+    types: [opened, reopened, synchronize, closed]
   push:
     branches: [main]
     paths:
@@ -26,11 +38,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: pages-${{ github.ref }}
+  # Every deploy commits to the one gh-pages branch, so they queue rather than race on it.
+  group: pages-deploy
   cancel-in-progress: false
 
 jobs:
   build:
+    # A closed PR has nothing to build -- the preview job below just removes its folder.
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,22 +75,53 @@ jobs:
               sys.exit("missing reports: " + ", ".join(missing))
           print(f"ok: {len(scen)} scenarios, every report present")
           PY
-      - name: Upload Pages artifact
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        uses: actions/upload-pages-artifact@v3
+      - name: Upload the built site for the deploy jobs
+        uses: actions/upload-artifact@v4
         with:
+          name: site
           path: web/dist
+          retention-days: 1
 
   deploy:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      contents: write          # commit the built site to gh-pages
     steps:
-      - id: deploy
-        uses: actions/deploy-pages@v4
+      - uses: actions/download-artifact@v4
+        with: { name: site, path: dist }
+      - uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445  # v4.9.0
+        with:
+          branch: gh-pages
+          folder: dist
+          # Keep the open PRs' previews when the live root is replaced.
+          clean-exclude: pr-preview/
+          commit-message: "Deploy main @ ${{ github.sha }}"
+
+  preview:
+    # Same-repo PRs only: a fork's token cannot write gh-pages (see the header).
+    # always(): on `closed` the build job is skipped, and a skipped `needs` would skip this too.
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.action == 'closed' || needs.build.result == 'success')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # commit the preview folder to gh-pages
+      pull-requests: write     # post / update the sticky preview comment
+    steps:
+      # The preview action reads the checkout for git config, and on `closed` it only removes.
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        if: github.event.action != 'closed'
+        with: { name: site, path: dist }
+      - uses: rossjrw/pr-preview-action@873417d2df72380da1f3978378fb58560bcde976  # v1.8.2
+        with:
+          source-dir: dist
+          preview-branch: gh-pages
+          umbrella-dir: pr-preview
+          action: auto           # deploy on open/sync, remove on close
+          qr-code: "false"

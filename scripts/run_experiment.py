@@ -1072,7 +1072,9 @@ def main(argv=None):
     spec, err = validator.load(args.spec)
     if err:
         raise SystemExit(f"{args.spec}: {err}")
-    errs = validator.validate(spec, args.routing)
+    # Pass the catalog through: it is what lets the validator check that scenario.model/hardware/
+    # workload actually EXIST. Without it a typo'd identifier reaches BLIS and fails every run.
+    errs = validator.validate(spec, args.routing, None, args.catalog)
     if errs:
         raise SystemExit(f"invalid spec {args.spec}:\n  - " + "\n  - ".join(errs))
     if not args.dry_run and not (args.blis and args.registry):

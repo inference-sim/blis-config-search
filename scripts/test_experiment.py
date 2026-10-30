@@ -6,6 +6,7 @@
 Hermetic: no BLIS, no network. Everything here is a pure function of a spec, which is exactly
 the property that lets CI run the sweeper unattended -- so these tests are the guard on it.
 """
+import glob
 import json
 import os
 import sys
@@ -1181,6 +1182,97 @@ class ExtendedValueSets(unittest.TestCase):
     def test_catalog_entry_is_optional(self):
         """CI validates specs with no catalog checkout, so the model-aware rules must skip."""
         self.assertIsNone(V.catalog_entry("qwen3-14b", catalog="/nonexistent-catalog"))
+
+
+class ScenarioIdentityExists(unittest.TestCase):
+    """model / hardware / workload must NAME SOMETHING REAL, when a catalog is there to ask.
+
+    Existence is provable and cheap; feasibility is BLIS's call and stays that way. Before this,
+    `hardware: h200x` validated clean, dry-ran clean, planned 154 runs and failed every one of
+    them with `opening .../hardware/h200x.yaml: no such file or directory` -- after a Go build,
+    which is exactly the wasted CI job the GPU-arithmetic check exists to prevent (susiejojo
+    review).
+    """
+
+    CATALOG = os.path.join(ROOT, os.pardir, "blis-catalog")
+
+    def errs(self, **scenario):
+        sc = dict(spec()["scenario"])
+        sc.update(scenario)
+        return V.scenario_identity_errors(sc, self.CATALOG)
+
+    def real(self):
+        if not V._catalog(self.CATALOG)["present"]:
+            self.skipTest("no blis-catalog checkout")
+
+    def test_a_real_scenario_is_accepted(self):
+        self.real()
+        self.assertEqual([], self.errs())
+
+    def test_an_unknown_hardware_is_refused_with_a_suggestion(self):
+        self.real()
+        errs = self.errs(hardware="h200x")
+        self.assertEqual(1, len(errs), errs)
+        self.assertIn("scenario.hardware", errs[0])
+        self.assertIn("did you mean 'h200'", errs[0])
+
+    def test_an_unknown_model_is_refused_with_a_suggestion(self):
+        self.real()
+        errs = self.errs(model="qwen3-14bb")
+        self.assertEqual(1, len(errs), errs)
+        self.assertIn("did you mean 'qwen3-14b'", errs[0])
+
+    def test_an_unknown_workload_is_refused_with_a_suggestion(self):
+        self.real()
+        errs = self.errs(workload="chatbott")
+        self.assertIn("did you mean 'chatbot'", errs[0])
+
+    def test_the_error_lists_the_valid_names(self):
+        """A suggestion can miss (`gb200` is closest to `b200`, not `gb200-nvl72`), so the error
+        always carries the vocabulary too."""
+        self.real()
+        errs = self.errs(hardware="totally-not-a-gpu")
+        self.assertIn("known:", errs[0])
+        self.assertIn("h100", errs[0])
+
+    def test_all_three_are_reported_at_once(self):
+        """One pass, not one typo per CI round-trip."""
+        self.real()
+        errs = self.errs(model="nope-x", hardware="nope-y", workload="nope-z")
+        self.assertEqual(3, len(errs), errs)
+
+    def test_no_catalog_checkout_skips_the_check_entirely(self):
+        """Fork CI validates with no catalog and no secrets; it must not fail there."""
+        self.assertEqual([], V.scenario_identity_errors(
+            {"model": "nope", "hardware": "nope", "workload": "nope"},
+            catalog="/nonexistent-catalog"))
+
+    def test_an_empty_catalog_directory_is_not_an_authority(self):
+        """A present-but-broken checkout must skip, not reject every real name."""
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual([], V.scenario_identity_errors(
+                {"model": "qwen3-14b", "hardware": "h100", "workload": "chatbot"}, catalog=d))
+
+    def test_a_missing_identifier_is_left_to_the_required_check(self):
+        """`required` already reports an absent key; this must not add a second error for it."""
+        self.assertEqual([], V.scenario_identity_errors({}, self.CATALOG))
+
+    def test_validate_refuses_a_typod_identifier_end_to_end(self):
+        self.real()
+        doc = spec()
+        doc["scenario"]["hardware"] = "h200x"
+        errs = V.validate(doc, ROUTING, None, self.CATALOG)
+        self.assertTrue(any("scenario.hardware" in e for e in errs), errs)
+
+    def test_every_shipped_spec_names_real_catalog_entries(self):
+        """The guard that would have caught this in review, applied to what we ship."""
+        self.real()
+        for path in sorted(glob.glob(os.path.join(ROOT, "experiments", "*.yaml"))):
+            doc, err = V.load(path)
+            self.assertIsNone(err, f"{path}: {err}")
+            self.assertEqual([], V.scenario_identity_errors(doc.get("scenario") or {},
+                                                            self.CATALOG),
+                             f"{os.path.basename(path)} names something the catalog lacks")
 
 
 class Ranking(unittest.TestCase):

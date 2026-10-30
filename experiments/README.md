@@ -129,6 +129,28 @@ So the validator applies them pre-flight:
 The model-aware rules read `../blis-catalog` when present and are skipped without it, so the
 check stays safe on a fork PR with no catalog checkout.
 
+### `model` / `hardware` / `workload` must name something real
+
+With a catalog available the validator also checks that those three **exist**, and suggests the
+nearest name when one doesn't:
+
+```
+scenario.hardware: 'h200x' is not in the catalog (did you mean 'h200'?)
+  -- known: a100-80, a100-sxm, b200, b300, gb200-nvl72, gb300, h100, h200, l40s
+```
+
+This is existence, not feasibility. A name the catalog has no row for provably cannot run — BLIS
+exits `rc=1` with `opening .../hardware/h200x.yaml: no such file or directory` on *every* run —
+so it belongs with the GPU arithmetic, caught before a clone and build rather than after. Whether
+a KV cache actually **fits** stays BLIS's call; the validator adds no physics.
+
+Point it at a catalog with `--catalog`, or let it find `../blis-catalog`. Without one the check is
+skipped like the model-aware rules, and the summary line says so rather than implying it passed:
+
+```
+7/7 valid (knob names checked against ...; model/hardware/workload NOT checked -- no blis-catalog checkout)
+```
+
 ### What the pinned stack can actually carry
 
 vLLM v0.32.0 defines ~51 engine fields, but the **pinned** BLIS (v0.12.0, which bundles

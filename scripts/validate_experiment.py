@@ -754,19 +754,65 @@ def catalog_entry(model, catalog=None):
     The built catalog is cached per root: building it walks every model directory (~0.4s), and
     validating a directory of specs would otherwise pay that once per spec.
     """
+    return _catalog(catalog)["models"].get(model)
+
+
+def _catalog(catalog=None):
+    """The built catalog's three vocabularies, keyed `models` (name -> row), `hardware`,
+    `workloads` (name -> True), plus `present`. All empty with `present` False when there is no
+    catalog checkout.
+
+    One build serves both the model-aware rules and the existence check, and `present` is what
+    lets the caller tell "not in the catalog" apart from "no catalog to ask".
+    """
     root = catalog or os.path.join(SIBLINGS, "blis-catalog")
     if root not in _CATALOG_CACHE:
-        models = {}
+        got = {"models": {}, "hardware": {}, "workloads": {}, "present": False}
         if os.path.isdir(root):
             try:
                 sys.path.insert(0, os.path.join(ROOT, "scripts"))
                 import build_catalog
                 cat = build_catalog.build(os.path.join(root, os.pardir))
-                models = {m.get("name"): m for m in cat.get("models", [])}
+                got["models"] = {m.get("name"): m for m in cat.get("models", [])}
+                for key, src in (("hardware", "hardware"), ("workloads", "workloads")):
+                    got[key] = {(e.get("name") if isinstance(e, dict) else e): True
+                                for e in (cat.get(src) or [])}
+                    got[key].pop(None, None)
+                # A build that yielded no models is a broken or empty checkout, not an authority
+                # to reject names against.
+                got["present"] = bool(got["models"])
             except Exception:
-                models = {}
-        _CATALOG_CACHE[root] = models
-    return _CATALOG_CACHE[root].get(model)
+                got = {"models": {}, "hardware": {}, "workloads": {}, "present": False}
+        _CATALOG_CACHE[root] = got
+    return _CATALOG_CACHE[root]
+
+
+def scenario_identity_errors(sc, catalog=None):
+    """`model` / `hardware` / `workload` that the catalog does not define, with a suggestion.
+
+    EXISTENCE, not feasibility. A name the catalog has no row for provably cannot run -- BLIS
+    exits rc=1 with `opening .../hardware/h200x.yaml: no such file or directory` on every run of
+    the sweep -- so catching it is the same job as the GPU arithmetic check: refuse what cannot
+    run before a clone-and-build, rather than after (susiejojo review). Verified: a spec with
+    `hardware: h200x` validated clean, dry-ran clean, planned 154 runs, and failed all of them.
+
+    Whether a KV cache FITS on that hardware stays BLIS's call -- this adds no physics.
+
+    Skipped entirely when no catalog is checked out, exactly as the model-aware rules are, so
+    fork CI (which validates with no catalog and no secrets) keeps working.
+    """
+    cat = _catalog(catalog)
+    if not cat["present"]:
+        return []
+    errs = []
+    for key, bucket in (("model", "models"), ("hardware", "hardware"), ("workload", "workloads")):
+        name = sc.get(key)
+        if not name or name in cat[bucket]:
+            continue
+        known = sorted(cat[bucket])
+        errs.append(f"scenario.{key}: {name!r} is not in the catalog{_suggest(name, known)} "
+                    f"-- known: {', '.join(known)}")
+    return errs
 
 
 def header_comment_lines(path):
@@ -873,6 +919,9 @@ def validate(spec, routing_dir=ROUTING_DIR, vocabulary=None, catalog=None):
         for key in ("model", "hardware", "workload"):
             if not sc.get(key):
                 errs.append(f"scenario.{key}: required")
+        # Present AND real: a name the catalog does not define cannot run anywhere. No-op without
+        # a catalog checkout.
+        errs.extend(scenario_identity_errors(sc, catalog))
         gpus = sc.get("gpus")
         if not isinstance(gpus, int) or isinstance(gpus, bool) or gpus < 1:
             errs.append("scenario.gpus: required positive integer -- the budget EVERY run uses")
@@ -1103,6 +1152,9 @@ def main(argv=None):
                     help="machine-readable {file: [errors]} instead of text")
     ap.add_argument("--routing", default=ROUTING_DIR,
                     help="directory holding the EndpointPickerConfig files (default: routing/)")
+    ap.add_argument("--catalog",
+                    help="blis-catalog checkout, for checking that scenario.model/hardware/"
+                         "workload exist (default: ../blis-catalog; skipped when absent)")
     args = ap.parse_args(argv)
 
     paths = spec_paths(args.target)
@@ -1118,7 +1170,7 @@ def main(argv=None):
         if rel.startswith(os.pardir):
             rel = path
         spec, err = load(path)
-        errs = [err] if err else validate(spec, args.routing, vocab)
+        errs = [err] if err else validate(spec, args.routing, vocab, args.catalog)
         report[rel] = errs
         notes[rel] = [] if err else advisories(spec, path)
         if errs:
@@ -1135,8 +1187,15 @@ def main(argv=None):
                 print(f"ok   {rel}")
             for n in notes.get(rel) or ():
                 print(f"  note: {n}")
+        # Say whether model/hardware/workload were CHECKED or skipped: "valid" means something
+        # weaker without a catalog, and a silent skip is how a typo'd identifier reaches a build.
+        cat = _catalog(args.catalog)
+        ident = (f"model/hardware/workload checked against the catalog "
+                 f"({len(cat['models'])} models, {len(cat['hardware'])} hardware, "
+                 f"{len(cat['workloads'])} workloads)") if cat["present"] else (
+                 "model/hardware/workload NOT checked -- no blis-catalog checkout")
         print(f"\n{len(paths) - failed}/{len(paths)} valid "
-              f"(knob names checked against {vocab[2]})")
+              f"(knob names checked against {vocab[2]}; {ident})")
         all_notes = [n for v in notes.values() for n in v]
         if all_notes:
             print(f"\n{len(all_notes)} style note(s), not failures.")

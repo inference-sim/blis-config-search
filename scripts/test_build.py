@@ -300,6 +300,18 @@ def test_pins_are_the_single_source_of_the_sim_version():
     check("$BLIS_SHA" in exp_wf, "run-experiment.yml should verify BLIS_SHA from pins.env")
     check(sha not in exp_wf, "run-experiment.yml hard-codes the sha; read it from pins.env")
 
+    # The catalog must be cloned BEFORE the validate step, or the existence check on
+    # scenario.model/hardware/workload silently no-ops and a typo'd identifier still reaches the
+    # Go build before failing every run (susiejojo review on #22). Ordering is the whole point,
+    # so assert the positions, not just the presence.
+    clone_at = exp_wf.find("blis-catalog.git")
+    validate_at = exp_wf.find("validate_experiment.py")
+    check(clone_at != -1 and validate_at != -1 and clone_at < validate_at,
+          "run-experiment.yml must clone blis-catalog BEFORE validating, so the "
+          "model/hardware/workload existence check can run")
+    check('validate_experiment.py "$spec" --catalog' in exp_wf,
+          "run-experiment.yml should validate WITH --catalog, or the existence check no-ops")
+
     # GUIDANCE must not restate a superseded version. A doc that tells a contributor to clone a
     # ref the stack no longer uses is worse than one saying nothing: SETUP.md was correct at
     # v0.12.0 while the skill's README and SKILL.md still read "build v0.10.0 ... catalog 0.2.1",

@@ -92,14 +92,27 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Clone the catalog the specs are validated against
+        if: steps.pick.outputs.specs != ''
+        run: |
+          set -euo pipefail
+          # Cloned BEFORE validation rather than with the rest of the stack, so the existence
+          # check on scenario.model/hardware/workload runs while it can still save the expensive
+          # step. A typo'd identifier validates clean and dry-runs clean with no catalog, then
+          # fails EVERY run after the Go build -- the wasted CI job the validator exists to
+          # prevent (susiejojo review). A shallow catalog clone costs seconds, the build minutes.
+          set -a; . ./pins.env; set +a
+          git clone --branch "$CATALOG_REF" --depth 1 https://github.com/inference-sim/blis-catalog.git
+          echo "BLIS_CATALOG=$PWD/blis-catalog" >> "$GITHUB_ENV"
+
       - name: Validate before building anything
         if: steps.pick.outputs.specs != ''
         run: |
           set -euo pipefail
           while IFS= read -r spec; do
             [ -n "$spec" ] || continue
-            python3 -I scripts/validate_experiment.py "$spec"
-            python3 -I scripts/run_experiment.py "$spec" --dry-run
+            python3 -I scripts/validate_experiment.py "$spec" --catalog "$BLIS_CATALOG"
+            python3 -I scripts/run_experiment.py "$spec" --dry-run --catalog "$BLIS_CATALOG"
           done <<< "${{ steps.pick.outputs.specs }}"
 
       - name: Build the pinned BLIS stack
@@ -114,9 +127,7 @@ jobs:
           test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
             echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
           ( cd upstream && go build -o blis main.go )
-          git clone --branch "$CATALOG_REF" --depth 1 https://github.com/inference-sim/blis-catalog.git
           git clone --branch "$REGISTRY_REF" --depth 1 https://github.com/inference-sim/blis-registry.git
-          echo "BLIS_CATALOG=$PWD/blis-catalog"   >> "$GITHUB_ENV"
           echo "BLIS_REGISTRY=$PWD/blis-registry" >> "$GITHUB_ENV"
           echo "BLIS_BIN=$PWD/upstream/blis"      >> "$GITHUB_ENV"
 

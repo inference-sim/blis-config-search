@@ -1,0 +1,149 @@
+# Maximizing throughput for DeepSeek-V4.1-Flash on 4 nodes of B200 (32 GPUs at 8/node),
+# on the AgentX agentic-coding replay.
+#
+# One of six companion specs: {h100, h200, b200} x {4 nodes = 32 GPUs, 8 nodes = 64 GPUs}.
+# An experiment is scoped to ONE hardware type and ONE workload, so the hardware and budget
+# comparisons are read ACROSS these six reports, never inside one.
+#
+# Catalog facts that picked these axes (read, never inferred from the model's name):
+#   arch MoE, 128 experts, top_k 3  -> dp + enable_expert_parallel are real axes, and they
+#                                      gate all2all_backend (33% spread, but ONLY with EP on)
+#   attn_kind sparse_mla, sliding_window 128
+#   graph speculator: dspark, num_spec_tokens 5  -> drafting legal, depth K <= 5
+#   graph prices nvfp4_ds_mla (288 B/entry vs 528) ONLY under capability_family 10 --
+#     confirmed against the pinned binary: refused on h100/h200 (SM90), accepted on b200
+#   FOOTPRINT FLOOR, measured on the pinned binary (the catalog states no param count):
+#     Every tp x dp in the grid fits on B200's 178 GiB at both EP settings (measured), so
+#     topology-ep stays a single sweep over the full dp 1/2/4 ladder.
+#     Every tp x dp in the grid fits on B200's 178 GiB at both EP settings (measured), so
+#     topology-ep keeps the full dp 1/2/4 ladder.
+#                                      -> a B200-only KV-precision axis
+#
+# NOT swept, each for a stated reason rather than by omission:
+#   * block_size -- run_blis fills it per model AND per hardware (V4.1 wants 64 on Hopper, 128
+#     on Blackwell); pinning or sweeping it is what made every earlier V4.1 B200 run fail.
+#   * scheduling_policy, disable_cascade_attn, moe_backend, async_scheduling -- measured inert
+#     on the pinned stack, so they would return a column of identical numbers.
+#   * swa_bounded_replay -- its precondition does hold (this model is sliding-window), but it
+#     has no measured leverage, so it loses to cudagraph_mode for the same runs.
+#   * all2all_backend + eplb -- a real 33% lever with EP on, and expert balance is tempting on
+#     a top_k 3/128 model, but both were cut to hold the agreed ~900-run budget. They are the
+#     first thing to add back if the campaign budget grows.
+#   * the batching / KV-capacity coordinates (max_num_seqs, max_num_batched_tokens,
+#     gpu_memory_utilization) -- same reason; they bind DOWNWARD, so the defaults are already
+#     near the knee and a sweep mostly maps headroom rather than beating the default.
+#   * a P/D split -- this replay is decode-heavy with a warm shared prefix, so a dedicated
+#     prefill pool would idle.
+name: deepseek-v4-1-flash-b200-agentx-throughput-4node
+
+scenario:
+  model: deepseek-v4.1-flash
+  hardware: b200
+  workload: agentx-mvp
+  gpus: 32                     # 4 nodes x 8 GPUs; EVERY run uses exactly 32
+  slo: {itl_p99: 20ms}          # defaulted per the skill: 20ms == 50 tok/s/user
+  engine:                       # every run carries these; single values, NOT swept
+    # REQUIRED, not a preference: this model's packed attention serves ONLY fp8 caches, so
+    # an unset dtype or `auto` is refused outright ("serves only fp8 caches, as fp8_ds_mla
+    # or nvfp4_ds_mla") and would fail every run in this spec. Verified against the pinned
+    # binary on h100/h200/b200. The B200 kv-precision sweep overrides it per-arm.
+    cache_dtype: fp8_ds_mla
+    # REQUIRED for this replay: every trace whose peak prompt + output exceeds
+    # max_model_len is DROPPED, and the AgentX corpus caps requests at 256k. At vLLM's
+    # default 32768 the whole corpus goes ("no trace fits max_context_length 32768,
+    # 393 rows scanned") and every run fails. 262144 is what the committed
+    # reports/deepseek-v4-1-flash-*-agentx-* campaign used; the model's context is 1M.
+    max_model_len: 262144
+  concurrency: [8, 16, 32, 64]        # replay load axis is session LANES, so a short ladder
+
+  replay:
+    # A replay workload is fully described by its CATALOG descriptor: the sweeper reads the
+    # harness scenario, the corpus digest, the 900s window, the context filter and the
+    # acceptance selectors from <catalog>/workloads/agentx-mvp.yaml. Restating them here is
+    # refused as a copy that can drift, so a spec states only what the catalog cannot know.
+    #
+    # Where the corpus sits on THIS machine. The catalog says it is deliberately not vendored
+    # and names the HF dataset + pinned revision; the digest is still enforced from the catalog.
+    corpus: .corpus/traces.jsonl
+    # Optional local parsed-corpus snapshot dir. MEASURED 10.8s -> 5.9s per run cold-vs-warm.
+    corpus_cache: /tmp/agx-cache
+    # The one run-shape override the sweep needs: the descriptor's 30s default makes saturated
+    # loads report "injected != completed", which the ranking then discards as capacity points.
+    grace_period: inf
+sweeps:
+  - name: topology-ep
+    # Where the GPU budget is best spent: few wide instances or many narrow ones, and whether
+    # expert parallelism pays at top_k 3 of 128. This is also the control every sweep below is
+    # measured against -- each one's topology appears in this grid at the same loads.
+    narrative: EP on should win at tp 8 (sharding 128 experts frees KV room) while the all-to-all starts eating the gain at tp 4.
+    num-instances: [2, 4, 8]
+    parallel: {tp: [4, 8], dp: [1, 2, 4], enable_expert_parallel: [false, true]}
+
+  - name: engine-cudagraph
+    # The biggest engine lever on the pinned stack. Measured elsewhere: PIECEWISE 1983 -> FULL 2086
+    # (+5%), NONE 606 vs 1083 (-44%). Single topology is enough -- cudagraph_mode does NOT interact
+    # with topology (FULL beat PIECEWISE by +3.6% at 1xTP8 and +2.4% at 4xTP2). Paired with
+    # max_cudagraph_capture_size, which matters most under drafting (a step verifies K+1 tokens).
+    narrative: FULL and FULL_AND_PIECEWISE should edge out the PIECEWISE default by a few percent, and NONE should collapse.
+    num-instances: [4]
+    parallel: {tp: [8], dp: [1], enable_expert_parallel: [true]}
+    engine:
+      cudagraph_mode: [NONE, PIECEWISE, FULL, FULL_DECODE_ONLY, FULL_AND_PIECEWISE]
+      max_cudagraph_capture_size: [256, 512]
+
+  - name: kv-precision
+    # B200-ONLY: the graph prices nvfp4_ds_mla at 288 B/entry against 528, but only under
+    # capability_family 10, so the dtype is refused on h100/h200 (SM90) and the Hopper specs omit
+    # this sweep. Baseline is fp8_ds_mla, not `auto`, which every part refuses. Two topologies
+    # because KV precision interacts with topology.
+    narrative: Halving KV bytes per entry should cache far more tokens per GPU, which on a prefix-heavy replay converts straight into throughput.
+    num-instances: [4, 8]
+    parallel: {tp: [8, 4], dp: [1], enable_expert_parallel: [true]}
+    engine:
+      cache_dtype: [fp8_ds_mla, nvfp4_ds_mla]
+
+  - name: admission-batched-tokens
+    # Measured on this scenario (b200, 4x TP8+EP, AgentX, c=32): 2048 -> 595 tok/s, 8192 -> 668,
+    # 32768 -> 687, a 15% spread. Inert on a short-prompt shape at low load (chatbot c=8 identical
+    # at all three), so the precondition is AgentX's large agentic prompts. Two topologies: the same
+    # cap bites hard when sessions concentrate and barely binds when they spread (max_num_seqs
+    # 8->256 gained 320% at 1xTP8 vs 6.9% at 8xTP1, 46x apart).
+    narrative: Throughput should rise with the cap and flatten above 16384, leaving the 8192 default short of optimal on this traffic.
+    num-instances: [4, 8]
+    parallel: {tp: [8, 4], dp: [1], enable_expert_parallel: [true]}
+    engine:
+      max_num_batched_tokens: [2048, 4096, 8192, 16384, 32768]
+
+  - name: admission-prefill-chunking
+    # Caps one prefill's tokens per step so a long prompt cannot stall the decodes beside it --
+    # the tension an agentic replay creates. Measured at c=32: 512 costs 12% (586 vs 668) and 4096
+    # costs 2% (654). Two topologies, since the cost depends on how many decodes share the instance.
+    narrative: Chunking should HURT throughput here, so the uncapped default wins and this sweep prices the interactivity it would buy.
+    num-instances: [4, 8]
+    parallel: {tp: [8, 4], dp: [1], enable_expert_parallel: [true]}
+    engine:
+      long_prefill_token_threshold: [512, 1024, 2048, 4096]
+
+  - name: drafting
+    # Every row has an exact K=0 twin in topology-ep at the same topology and load -- without that
+    # control a tok/s number means nothing. The direction is NOT monotonic at small K (measured
+    # K=1 -25%, K=3 +3%, K=5 +13%), so depth is swept rather than assumed. Acceptance comes from
+    # the registry by (model, method, K, thinking, category), which the catalog workload supplies.
+    narrative: dspark drafting should pay on this decode-bound replay, with the gain growing toward the graph's declared num_spec_tokens of 5.
+    num-instances: [2, 4]
+    parallel: {tp: [8], dp: [1, 2], enable_expert_parallel: [true]}
+    engine:
+      speculative: {method: [dspark], num_spec_tokens: [1, 3, 5]}
+
+  - name: routing-and-prefix-cache
+    # enable_prefix_caching is INERT on every synthetic shape (generated prompts share no prefix)
+    # and becomes a lever only on a replay that re-sends a growing shared context -- this is where
+    # that precondition holds. Two topologies, since routing and prefix reuse both interact with
+    # instance count.
+    narrative: prefix-affinity with caching on should win and random with caching off should be the floor; the gap is the value of prefix reuse.
+    num-instances: [4, 8]
+    parallel: {tp: [8, 4], dp: [1], enable_expert_parallel: [true]}
+    engine:
+      enable_prefix_caching: [true, false]
+    router:
+      endpoint_picker_config: [random.yaml, queue.yaml, load-aware.yaml, queue-kv.yaml, prefix-affinity.yaml]

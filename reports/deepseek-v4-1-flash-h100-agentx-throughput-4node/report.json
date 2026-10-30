@@ -1,0 +1,98 @@
+{
+  "explore_prose": [
+    "Every run in this experiment is in the explorer below: filter by outcome to see which settings held the SLOs, or by setting to compare one sweep against another.",
+    "Each sweep's hypothesis was written before the runs, and is quoted beside that sweep's measured result below."
+  ],
+  "hero": [
+    {
+      "h": "What was tested",
+      "html": "62 configurations over 7 sweeps (topology-ep, topology-ep-wide, engine-cudagraph, admission-batched-tokens, admission-prefill-chunking, drafting, routing-and-prefix-cache), each at 4 load levels, every run on exactly 32 GPUs."
+    },
+    {
+      "h": "What was found",
+      "html": "<strong>4x TP4xDP2 + EP (batch tokens 16,384)</strong>, from the <em>admission-batched-tokens</em> sweep, reached 19.84 tok/s/GPU (634.9 tok/s across the fleet) at concurrency 64 while holding the scenario's SLOs."
+    },
+    {
+      "h": "What to run",
+      "html": "4x TP4xDP2 + EP (batch tokens 16,384) at concurrency 64. 102 of 248 runs held the SLOs.",
+      "run": true
+    }
+  ],
+  "meta": [
+    "BLIS discrete-event simulation",
+    "Experiment Spec (RFC #21)",
+    "deterministic sweep \u2014 no LLM in the measurement path",
+    "seed 42"
+  ],
+  "recommendation_num": 9,
+  "recommendation_prose": [
+    "The table below ranks the measured operating points by output tok/s per GPU, the objective this experiment selects on, among runs that held the scenario's SLOs."
+  ],
+  "sections": [
+    {
+      "caption_note": "4 configurations, 16 runs.",
+      "num": 2,
+      "prose": [
+        "EP on should win at tp 8 (sharding 128 experts frees KV room) while the all-to-all starts eating the gain at tp 4.",
+        "Measured: best was <strong>2x TP4xDP4 + EP</strong> at 4.83 tok/s/GPU (concurrency 16)."
+      ],
+      "title": "Sweep: topology-ep"
+    },
+    {
+      "caption_note": "4 configurations, 16 runs.",
+      "num": 3,
+      "prose": [
+        "Same hypothesis as topology-ep; together the two halves are the control.",
+        "Measured: best was <strong>2x TP8xDP2 + EP</strong> at 5.41 tok/s/GPU (concurrency 16)."
+      ],
+      "title": "Sweep: topology-ep-wide"
+    },
+    {
+      "caption_note": "10 configurations, 40 runs.",
+      "num": 4,
+      "prose": [
+        "FULL and FULL_AND_PIECEWISE should edge out the PIECEWISE default by a few percent, and NONE should collapse.",
+        "Measured: best was <strong>2x TP8xDP2 + EP (graph capture full \u00b7 max captured step 512)</strong> at 5.64 tok/s/GPU (concurrency 16)."
+      ],
+      "title": "Sweep: engine-cudagraph"
+    },
+    {
+      "caption_note": "10 configurations, 40 runs.",
+      "num": 5,
+      "prose": [
+        "Throughput should rise with the cap and flatten above 16384, leaving the 8192 default short of optimal on this traffic.",
+        "Measured: best was <strong>4x TP4xDP2 + EP (batch tokens 16,384)</strong> at 19.84 tok/s/GPU (concurrency 64)."
+      ],
+      "title": "Sweep: admission-batched-tokens"
+    },
+    {
+      "caption_note": "8 configurations, 32 runs.",
+      "num": 6,
+      "prose": [
+        "Chunking should HURT throughput here, so the uncapped default wins and this sweep prices the interactivity it would buy.",
+        "Measured: best was <strong>4x TP4xDP2 + EP (prefill chunk 2,048)</strong> at 5.53 tok/s/GPU (concurrency 16)."
+      ],
+      "title": "Sweep: admission-prefill-chunking"
+    },
+    {
+      "caption_note": "6 configurations, 24 runs.",
+      "num": 7,
+      "prose": [
+        "dspark drafting should pay on this decode-bound replay, with the gain growing toward the graph's declared num_spec_tokens of 5.",
+        "Measured: best was <strong>2x TP8xDP2 + EP</strong> at 5.26 tok/s/GPU (concurrency 16)."
+      ],
+      "title": "Sweep: drafting"
+    },
+    {
+      "caption_note": "20 configurations, 80 runs.",
+      "num": 8,
+      "prose": [
+        "prefix-affinity with caching on should win and random with caching off should be the floor; the gap is the value of prefix reuse.",
+        "Measured: best was <strong>4x TP4xDP2 + EP (prefix-affinity routing)</strong> at 14.88 tok/s/GPU (concurrency 32)."
+      ],
+      "title": "Sweep: routing-and-prefix-cache"
+    }
+  ],
+  "standfirst": "A deterministic sweep over inferencex-agentx-mvp traffic, comparing 7 designs on one GPU budget.",
+  "title": "deepseek-v4.1-flash on 32x h100: deepseek-v4-1-flash-h100-agentx-throughput-4node"
+}

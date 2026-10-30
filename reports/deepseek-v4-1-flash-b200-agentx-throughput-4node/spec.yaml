@@ -1,0 +1,167 @@
+name: deepseek-v4-1-flash-b200-agentx-throughput-4node
+scenario:
+  model: deepseek-v4.1-flash
+  hardware: b200
+  workload: agentx-mvp
+  gpus: 32
+  slo:
+    itl_p99: 20ms
+  engine:
+    cache_dtype: fp8_ds_mla
+    max_model_len: 262144
+  concurrency:
+  - 8
+  - 16
+  - 32
+  - 64
+  replay:
+    corpus: /corpus/traces.jsonl
+    corpus_cache: /tmp/agx-cache
+    grace_period: inf
+sweeps:
+- name: topology-ep
+  narrative: EP on should win at tp 8 (sharding 128 experts frees KV room) while the
+    all-to-all starts eating the gain at tp 4.
+  num-instances:
+  - 2
+  - 4
+  - 8
+  parallel:
+    tp:
+    - 4
+    - 8
+    dp:
+    - 1
+    - 2
+    - 4
+    enable_expert_parallel:
+    - false
+    - true
+- name: engine-cudagraph
+  narrative: FULL and FULL_AND_PIECEWISE should edge out the PIECEWISE default by
+    a few percent, and NONE should collapse.
+  num-instances:
+  - 4
+  parallel:
+    tp:
+    - 8
+    dp:
+    - 1
+    enable_expert_parallel:
+    - true
+  engine:
+    cudagraph_mode:
+    - NONE
+    - PIECEWISE
+    - FULL
+    - FULL_DECODE_ONLY
+    - FULL_AND_PIECEWISE
+    max_cudagraph_capture_size:
+    - 256
+    - 512
+- name: kv-precision
+  narrative: Halving KV bytes per entry should cache far more tokens per GPU, which
+    on a prefix-heavy replay converts straight into throughput.
+  num-instances:
+  - 4
+  - 8
+  parallel:
+    tp:
+    - 8
+    - 4
+    dp:
+    - 1
+    enable_expert_parallel:
+    - true
+  engine:
+    cache_dtype:
+    - fp8_ds_mla
+    - nvfp4_ds_mla
+- name: admission-batched-tokens
+  narrative: Throughput should rise with the cap and flatten above 16384, leaving
+    the 8192 default short of optimal on this traffic.
+  num-instances:
+  - 4
+  - 8
+  parallel:
+    tp:
+    - 8
+    - 4
+    dp:
+    - 1
+    enable_expert_parallel:
+    - true
+  engine:
+    max_num_batched_tokens:
+    - 2048
+    - 4096
+    - 8192
+    - 16384
+    - 32768
+- name: admission-prefill-chunking
+  narrative: Chunking should HURT throughput here, so the uncapped default wins and
+    this sweep prices the interactivity it would buy.
+  num-instances:
+  - 4
+  - 8
+  parallel:
+    tp:
+    - 8
+    - 4
+    dp:
+    - 1
+    enable_expert_parallel:
+    - true
+  engine:
+    long_prefill_token_threshold:
+    - 512
+    - 1024
+    - 2048
+    - 4096
+- name: drafting
+  narrative: dspark drafting should pay on this decode-bound replay, with the gain
+    growing toward the graph's declared num_spec_tokens of 5.
+  num-instances:
+  - 2
+  - 4
+  parallel:
+    tp:
+    - 8
+    dp:
+    - 1
+    - 2
+    enable_expert_parallel:
+    - true
+  engine:
+    speculative:
+      method:
+      - dspark
+      num_spec_tokens:
+      - 1
+      - 3
+      - 5
+- name: routing-and-prefix-cache
+  narrative: prefix-affinity with caching on should win and random with caching off
+    should be the floor; the gap is the value of prefix reuse.
+  num-instances:
+  - 4
+  - 8
+  parallel:
+    tp:
+    - 8
+    - 4
+    dp:
+    - 1
+    enable_expert_parallel:
+    - true
+  engine:
+    enable_prefix_caching:
+    - true
+    - false
+  router:
+    endpoint_picker_config:
+    - random.yaml
+    - queue.yaml
+    - load-aware.yaml
+    - queue-kv.yaml
+    - prefix-affinity.yaml

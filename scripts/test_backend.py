@@ -230,6 +230,8 @@ def test_workflows_sane():
     check("head.repo.full_name == github.repository" in preview_if,
           "PR previews are same-repo only (no fork build published)")
     check("umbrella-dir: pr-preview" in ptxt, "PR previews live under pr-preview/, apart from the root")
+    check("wait-for-pages-deployment: true" in ptxt and "pages: read" in ptxt,
+          "the preview comment waits for the Pages build (and may read its status)")
 
     # The deterministic sweeper. Unlike generate-report.yml it needs no approval gate (no LLM in
     # the path), but it must still never write to main or publish: its only output is a bot PR.

@@ -1,0 +1,18 @@
+# CI smoke test: the smallest spec that still exercises the whole pipeline end to end --
+# validate on the PR, sweep on merge (run-experiment.yml), bot PR with reports/<name>/, publish.
+#
+# Kept deliberately tiny so the sweep finishes in a few minutes: a 2-GPU budget, one sweep,
+# two shapes (tp1 x 2 replicas vs. tp2 x 1), two loads -> 4 BLIS runs. qwen3-14b is dense, so
+# no dp / expert knobs. Not a finding worth keeping; delete the spec and report once the
+# pipeline is confirmed.
+name: qwen3-14b-h100-chatbot-ci-smoke
+
+scenario: {model: qwen3-14b, hardware: h100, workload: chatbot, gpus: 2,
+           slo: {itl_p99: 20ms}, concurrency: [8, 32]}
+
+sweeps:
+  - name: shape
+    narrative: Two tp1 replicas should beat one tp2 instance per GPU on a model this small.
+    num-instances: [1, 2]
+    parallel: {tp: [1, 2]}
+    engine: {max_model_len: [40960]}

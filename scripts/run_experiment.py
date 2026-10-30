@@ -463,8 +463,12 @@ def servable(rec, slo_ms):
         cap = (slo_ms or {}).get(key)
         if not cap:
             continue
-        value = m.get(field)
-        if value is None:
+        # Worst instance, like the ITL cap above and like report.py's _feasible -- NOT the cluster
+        # aggregate, which can sit under the cap while one instance is over it. TTFT is the sharpest
+        # case: it is a prefill-pool property, so on a disaggregated run one slow prefill instance
+        # is exactly what an aggregate hides (susiejojo review).
+        value, missing = run_blis.worst_metric(rec, field)
+        if missing or value is None:
             return False, f"{key} SLO declared but not measured"
         if value > cap:
             return False, f"{key} {value:.1f} ms > {cap:g} ms"
@@ -477,6 +481,9 @@ def run_row(rec, cand, label, variant, sweep_name, concurrency, gpus):
     tps = m.get("tokens_per_sec")
     pu, _basis, _itl = run_blis.per_user_rate(rec)
     worst, missing = run_blis.worst_itl_p99(rec)
+    # Recorded on the basis `servable` JUDGES on, with the aggregate kept beside it as for ITL: a
+    # row showing a passing aggregate next to an infeasible verdict is unreadable.
+    worst_ttft, ttft_missing = run_blis.worst_metric(rec, "ttft_p99_ms")
     return {
         "sweep": sweep_name, "label": label, "variant": variant,
         "concurrency": concurrency, "gpus": gpus,
@@ -485,7 +492,8 @@ def run_row(rec, cand, label, variant, sweep_name, concurrency, gpus):
         "tok_per_s_per_user": round(pu, 1) if pu is not None else None,
         "itl_p99_ms": None if missing else (round(worst, 3) if worst is not None else None),
         "itl_p99_ms_aggregate": m.get("itl_p99_ms"),
-        "ttft_p99_ms": m.get("ttft_p99_ms"),
+        "ttft_p99_ms": None if ttft_missing else (round(worst_ttft, 1) if worst_ttft is not None else None),
+        "ttft_p99_ms_aggregate": m.get("ttft_p99_ms"),
         "preemption_count": m.get("preemption_count", 0),
     }
 

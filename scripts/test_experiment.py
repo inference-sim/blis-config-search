@@ -1277,6 +1277,74 @@ class SloHandling(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("ttft_p99", why)
 
+    # --- every SLO on ONE basis: the worst instance (susiejojo review) -------------------------
+    #
+    # ITL went through worst_itl_p99 while TTFT/E2E read the cluster aggregate, so a run could be
+    # marked servable with an instance over the cap. report.py's _feasible already judged EVERY
+    # declared SLO on the worst instance, so the two surfaces disagreed -- the exact split the
+    # sweeper's docstring promises cannot happen. Each test below fails on the aggregate basis.
+
+    def test_ttft_passing_in_the_aggregate_fails_on_the_worst_instance(self):
+        """The committed multidoc-prefill shape: aggregate under a 10s cap, one instance over."""
+        rec = self.rec(metrics={"tokens_per_sec": 100.0, "itl_p99_ms": 10.0,
+                                "ttft_p99_ms": 9981.2},
+                       metrics_all_instances=[
+                           {"instance_id": "i0", "itl_p99_ms": 10.0, "ttft_p99_ms": 9000.0},
+                           {"instance_id": "i1", "itl_p99_ms": 10.0, "ttft_p99_ms": 10010.1}])
+        ok, why = E.servable(rec, {"ttft_p99": 10000.0})
+        self.assertFalse(ok, "an instance at 10010 ms breaches a 10000 ms TTFT cap")
+        self.assertIn("10010", why)
+
+    def test_e2e_passing_in_the_aggregate_fails_on_the_worst_instance(self):
+        rec = self.rec(metrics={"tokens_per_sec": 100.0, "itl_p99_ms": 10.0, "e2e_p99_ms": 900.0},
+                       metrics_all_instances=[
+                           {"instance_id": "i0", "itl_p99_ms": 10.0, "e2e_p99_ms": 900.0},
+                           {"instance_id": "i1", "itl_p99_ms": 10.0, "e2e_p99_ms": 1500.0}])
+        ok, why = E.servable(rec, {"e2e_p99": 1000.0})
+        self.assertFalse(ok)
+        self.assertIn("1500", why)
+
+    def test_an_idle_instance_reporting_zero_cannot_make_a_run_servable(self):
+        """BLIS reports 0, not null, for an instance that served nothing. 0 is the floor, not a
+        measurement, so it must never pull the worst case down below a real breach."""
+        rec = self.rec(metrics={"tokens_per_sec": 100.0, "itl_p99_ms": 10.0,
+                                "ttft_p99_ms": 400.0},
+                       metrics_all_instances=[
+                           {"instance_id": "i0", "itl_p99_ms": 10.0, "ttft_p99_ms": 0},
+                           {"instance_id": "i1", "itl_p99_ms": 10.0, "ttft_p99_ms": 900.0}])
+        ok, why = E.servable(rec, {"ttft_p99": 500.0})
+        self.assertFalse(ok)
+        self.assertIn("900", why)
+
+    def test_the_sweeper_and_the_report_agree_on_every_declared_slo(self):
+        """The guarantee itself: no run may be servable here and infeasible in the report."""
+        import importlib.util
+        spec_ = importlib.util.spec_from_file_location(
+            "_rep", os.path.join(ROOT, ".claude", "skills", "config-search", "scripts",
+                                 "report.py"))
+        rep = importlib.util.module_from_spec(spec_)
+        spec_.loader.exec_module(rep)
+        slos = {"ttft_p99_ms": 10000.0, "e2e_p99_ms": 20000.0}
+        rec = self.rec(metrics={"tokens_per_sec": 100.0, "itl_p99_ms": 10.0,
+                                "ttft_p99_ms": 9981.2, "e2e_p99_ms": 15000.0},
+                       metrics_all_instances=[
+                           {"instance_id": "i0", "itl_p99_ms": 10.0, "ttft_p99_ms": 10010.1,
+                            "e2e_p99_ms": 15000.0}])
+        ok, _ = E.servable(rec, {"ttft_p99": 10000.0, "e2e_p99": 20000.0})
+        feasible, viol = rep._feasible(rec, {}, slos)
+        self.assertEqual(ok, feasible, f"sweeper={ok} report={feasible} ({viol})")
+        self.assertFalse(ok)
+
+    def test_ttft_is_recorded_on_the_basis_it_is_judged_on(self):
+        """A ledger row showing a passing aggregate beside an infeasible verdict is unreadable."""
+        rec = self.rec(metrics={"tokens_per_sec": 100.0, "itl_p99_ms": 10.0,
+                                "ttft_p99_ms": 9981.2},
+                       metrics_all_instances=[
+                           {"instance_id": "i0", "itl_p99_ms": 10.0, "ttft_p99_ms": 10010.1}])
+        row = E.run_row(rec, {}, "label", "", "sweep", 8, 8)
+        self.assertEqual(10010.1, row["ttft_p99_ms"], "the row must carry the worst instance")
+        self.assertEqual(9981.2, row["ttft_p99_ms_aggregate"], "the aggregate stays, beside it")
+
 
 # --- P/D support in the runner ----------------------------------------------------------------
 

@@ -617,24 +617,41 @@ def run_acceptance(run):
     return al if al > 0 else None
 
 
-def worst_itl_p99(run):
-    """The WORST (max) p99 ITL across the cluster aggregate AND every per-instance metric.
+def worst_metric(run, key):
+    """The WORST (max) value of `key` across the cluster aggregate AND every per-instance metric.
 
-    A latency floor can be met in the aggregate yet violated on one instance, so feasibility is
-    judged on the worst instance. Returns (worst, missing_everywhere)."""
+    An SLO can be met in the aggregate yet violated on one instance, so feasibility is judged on
+    the worst instance -- for EVERY latency SLO, not just ITL. Judging ITL on the worst instance
+    while judging TTFT/E2E on the aggregate is the same displayed-servable-while-an-instance-is-
+    over split the ITL basis was reworked to remove (#19): in the committed multidoc-prefill
+    ledger three rows sit under the 10s TTFT cap in the aggregate while an instance is over it
+    (susiejojo review).
+
+    The aggregate is included rather than trusted, because it is NOT always the max over the
+    instances -- measured across the committed ledgers, an instance exceeds it on most rows for
+    every one of the three p99 metrics. Neither side alone is the worst case.
+
+    An idle instance reports 0, not null. For a latency metric `max` discards that naturally, and
+    taking the max (never the mean) is also what stops an idle 0 from dragging the worst case
+    down. Returns (worst, missing_everywhere).
+    """
     vals = []
     try:
-        agg = float((run.get("metrics") or {}).get("itl_p99_ms"))
-        vals.append(agg)
+        vals.append(float((run.get("metrics") or {}).get(key)))
     except (TypeError, ValueError):
         pass
     for inst in (run.get("metrics_all_instances") or []):
         if isinstance(inst, dict):
             try:
-                vals.append(float(inst.get("itl_p99_ms")))
+                vals.append(float(inst.get(key)))
             except (TypeError, ValueError):
                 pass
     return (max(vals), False) if vals else (None, True)
+
+
+def worst_itl_p99(run):
+    """The worst-instance p99 ITL -- `worst_metric` at the key the per-user rate is built on."""
+    return worst_metric(run, "itl_p99_ms")
 
 
 def per_user_rate(run):

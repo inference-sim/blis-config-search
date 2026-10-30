@@ -23,12 +23,16 @@ COEFFICIENTS = ["cost-model-primitives", "cost-model-collectives", "cost-model-h
 
 # --- candidate-key classification (allowlist; anything else is rejected, never silently ignored) ---
 SCENARIO_PARALLEL = ("tp", "pp", "dp", "enable_expert_parallel")       # -> scenario Deployment.parallel
-# Engine fields the generated scenario may carry. The authority is NOT blis-vllm's v0.32.0 field
-# list (~51 names) but the `Engine` struct of the blis-schemas the PINNED BLIS was built against
-# (v0.5.0 at BLIS v0.12.0, 31 fields): the scenario decodes strictly, so a key outside that
-# struct is a hard failure -- "field max_num_active_seqs not found in type deployment.Engine" --
-# and every run of a sweep that names one dies the same way. Verified against
-# ~/go/pkg/mod/github.com/inference-sim/blis-schemas@v0.5.0.
+# Engine fields the generated scenario may carry. The authority IS blis-vllm v0.32.0's
+# rules/engineconfig.Engine (51 top-level yaml tags), because BLIS v0.14.0 / blis-schemas v0.8.0
+# make a pool's `engine:` an opaque block (deployment.EngineBlock) opened by the engine model that
+# the scenario's `engine_version` names. Before v0.14.0 the authority was blis-schemas' own
+# 31-field struct, and the 20 names below this comment's old cut-off were hard decode failures
+# ("field max_num_active_seqs not found in type deployment.Engine"); they decode now.
+#
+# The scenario still decodes STRICTLY, so a key outside those 51 fails every run of a sweep. The
+# seven that decode but are not priced (or are priced only in one shape) are refused by name in
+# UNSUPPORTED below, with the measured reason, rather than being omitted from this list.
 #
 # Valid VALUES for the enumerated ones come from blis-vllm's rules pack
 # (rules/v0_32/pack.go Pack(): CUDAGraphModes, CacheDTypes, All2AllBackends, MoEBackends,
@@ -68,20 +72,69 @@ SCENARIO_ENGINE = (
     # skewed routing distribution, which is an MoE-only lever with a real memory cost.
     # `dbo` is dual-batch overlap; `engram_config` places Engram's host-side tables.
     "eplb", "dbo", "engram_config",
+    # --- opened up by the v0.12.0 -> v0.14.0 pin bump ---
+    # These were hard decode failures under blis-schemas v0.5.0's fixed Engine struct and were
+    # listed in UNSUPPORTED for that reason. v0.14.0 reads `engine:` as an opaque block against
+    # blis-vllm v0.32.0's engineconfig.Engine, which carries all 21 of them.
+    #
+    # Only the three below are PRICED, and that was established by running each against the
+    # pinned binary with two contrasting values, not by reading the struct. `max_num_active_seqs`
+    # is a large lever where it binds (deepseek-v4-pro/h200 tp2 dp4 chatbot: 2405.3 tok/s at
+    # c=256 falls to 808.4 at 8 active seqs, 1684.0 at 32) and inert at c=8, which is the usual
+    # admission-cap shape. The other eleven decode and run but are byte-identical on every
+    # scenario measured -- see ENGINE_DECODED_BUT_INERT below for what that means for a sweep.
+    "max_num_active_seqs", "max_num_scheduled_tokens", "frontend",
 )
-# Nested engine blocks and the fields each accepts, from blis-schemas v0.5.0's structs. A spec
-# states these as a mapping, e.g. `eplb: {enable_eplb: [true], num_redundant_experts: [0, 32]}`;
-# the runner renders them as sub-blocks and the validator checks their inner field names.
+# Carried by the pinned engine model, accepted at run time, and measured BYTE-IDENTICAL: sweeping
+# one burns runs to produce a column of equal numbers that reads as "this knob does nothing".
+#
+# Measured on deepseek-v4-pro/h200 (tp2 dp4, chatbot, c=8 and c=256), qwen3-14b/h100 (tp4) and
+# deepseek-v4.1-flash/h200 (tp2 dp4), two contrasting values each, against a `max_num_seqs`
+# control that moved as expected on every one. The kernel cost model has no term for them; the
+# engine carries them as launch provenance.
+#
+# `frontend` is deliberately NOT here: it is inert on v4-pro and qwen3-14b but DOES move
+# deepseek-v4.1-flash (4656.6 -> 4563.5 python->rust), so it is a real if narrow host-overhead
+# lever and belongs in SCENARIO_ENGINE above.
+#
+# These are refused rather than silently carried, for the reason experiments/README.md gives under
+# "Not every accepted knob is a lever": the sweep that teaches nothing is the expensive failure,
+# because it looks like a result. A spec that genuinely wants one recorded can state it as a
+# fixed engine default rather than a swept knob.
+ENGINE_DECODED_BUT_INERT = {
+    "watermark": "the KV-watermark fraction",
+    "stream_interval": "how often decoded tokens are flushed to the client",
+    "kv_cache_memory_bytes": "an explicit KV pool size (gpu_memory_utilization is the live knob)",
+    "max_loras": "the LoRA slot count",
+    "custom_ops": "the custom-op enable/disable list",
+    "use_trtllm_attention": "the TRT-LLM attention path",
+    "mla_prefill_backend": "the MLA prefill kernel choice",
+    "indexer_kv_dtype": "the DSA indexer's KV dtype",
+    "linear_backend": "the linear-layer kernel choice",
+    "long_prefill_token_threshold_adaptive": "adaptive chunked-prefill sizing",
+    "decoder_replay_cudagraph_capture_sizes": "the decode-replay capture plan",
+}
+# Nested engine blocks and the fields each accepts, from the pinned engine model's structs
+# (blis-vllm v0.32.0 rules/engineconfig). A spec states these as a mapping, e.g.
+# `eplb: {enable_eplb: [true], num_redundant_experts: [0, 32]}`; the runner renders them as
+# sub-blocks and the validator checks their inner field names.
+#
+# `speculative` gained five fields at the v0.14.0 pin (it was method + num_spec_tokens under
+# blis-schemas v0.5.0). Only method and num_spec_tokens select an acceptance profile and so move
+# a number; the rest are recorded provenance -- validate_experiment.SPECULATIVE_RECORDED_ONLY
+# refuses a sweep over them, with that reason.
 NESTED_ENGINE_FIELDS = {
     "eplb": ("enable_eplb", "num_redundant_experts", "window_size", "step_interval"),
     "dbo": ("enable_dbo", "dbo_decode_token_threshold", "dbo_prefill_token_threshold"),
     "engram_config": ("cpu_offload", "dp_shared_memory", "use_thp"),
-    "speculative": ("method", "num_spec_tokens"),
+    "speculative": ("method", "num_spec_tokens", "draft_model", "kv_cache_dtype",
+                    "draft_sample_method", "rejection_sample_method",
+                    "enable_adaptive_verification"),
 }
-# Speculative decoding IS priced by the kernel (v0.12.0 + registry v0.2.0) -- the earlier runner
+# Speculative decoding IS priced by the kernel (v0.14.0 + registry v0.2.0) -- the earlier runner
 # refused it as "not yet validated on the kernel backend", which was true of v0.10.0 and is stale.
 # It is a nested `speculative: {method, num_spec_tokens}` block on the pool's engine
-# (blis-schemas v0.5.0 Deployment.Pool.Engine.Speculative), so the two candidate keys below are
+# (the pinned engine model's engineconfig.Engine.Speculative), so the two candidate keys below are
 # folded into that block rather than emitted as flat engine fields.
 #
 # The ACCEPTANCE (how many drafted tokens land) is not a deployment property: it depends on the
@@ -100,7 +153,7 @@ SPECULATIVE_CLI = {"speculative_category": "--speculative-category",
 CLI_FLAGS = {"num_instances": "--num-instances", "concurrency": "--concurrency",
              "scheduler": "--scheduler", "preemption_policy": "--preemption-policy"}
 # The llm-d EndpointPickerConfig this deployment routes with, as a path. Named by the scenario's
-# DEPLOYMENT-level `router:` block (blis-schemas v0.5.0 spec/deployment/deployment.go:49) -- see
+# DEPLOYMENT-level `router:` block (blis-schemas v0.8.0 spec/deployment/deployment.go) -- see
 # ROUTING_MOVED below for why this replaced the former --routing-policy flag.
 SCENARIO_ROUTER = ("router_config",)
 PARALLEL_DEFAULTS = {"tp": 1, "pp": 1, "dp": 1, "enable_expert_parallel": False}
@@ -111,6 +164,13 @@ DEFAULT_FABRIC = "ib-400g"   # InfiniBand NDR 400 Gb/s; the standard H100 multi-
 # empty precision lets the checkpoint format govern (e.g. qwen3-14b stays BF16), so forcing FP8 here
 # would silently mis-price every non-FP8 model. `block_size` is also absent here because its right
 # value depends on the MODEL -- see default_block_size(), which fills it in per run.
+#
+# `max_model_len` is not merely a convenience here: blis-vllm v0.32.0's rules make it MANDATORY
+# ("must be stated; an unstated or auto window is the model's or the memory's"), so the pinned
+# stack refuses a scenario without it. Because this default always emits one, the five shipped
+# specs that never mention max_model_len still run at the v0.14.0 pin -- the requirement is met
+# by the runner, not by the spec. Do not "fix" those specs by adding it; stating it there would
+# pin a context window the spec does not actually care about.
 ENGINE_DEFAULTS = {"max_num_batched_tokens": 8192, "max_num_seqs": 256,
                    "max_model_len": 32768, "cudagraph_mode": "PIECEWISE", "gpu_memory_utilization": 0.9}
 # A DSA sparse-MLA model's indexer runs on 64-token kernel blocks, so a stated block_size must be a
@@ -188,7 +248,12 @@ DEFAULT_PD_CONNECTOR = "NixlConnector"
 # is NOT here: it is one configuration per run rather than a per-pool knob, so a per-role
 # drafting key is refused outright (PD_SPECULATIVE) and the folded `speculative` block is
 # compared separately.
-PD_MUST_MATCH = ("dp", "block_size", "cache_dtype", "quantization")
+# Transcribed from blis-vllm v0.32.0 compat/build/pools.go, not guessed: block_size (:172) and
+# dp (:188) are each checked on their own, and requireSameKVCacheFormat (:329) compares exactly
+# four cache-format fields. `quantization` was listed here and is NOT compared by any of them --
+# it is the weights' format, which a handoff never moves -- so a P/D sweep over it is legitimate.
+PD_MUST_MATCH = ("dp", "block_size", "cache_dtype", "mamba_cache_dtype",
+                 "mamba_ssm_cache_dtype", "mamba_cache_mode")
 
 # Deliberately unsupported in this runner -> fail loudly with the reason (do not silently drop).
 UNSUPPORTED = {
@@ -203,20 +268,45 @@ UNSUPPORTED = {
     "encode_instances":
         "--encode-instances is not supported: there is no encode role in a blis-schemas "
         "deployment",
-    # Engine fields that blis-vllm v0.32.0 defines but the PINNED stack's blis-schemas (v0.5.0)
-    # does not, so the scenario's strict decode refuses them. Named here with that reason rather
-    # than reported as typos: they are real vLLM knobs, just not sweepable until the pin moves.
-    **{k: (f"{k} is a vLLM v0.32.0 engine field, but the pinned BLIS (v0.12.0, blis-schemas "
-           f"v0.5.0) has no such field on its Engine struct, so the scenario would fail to "
-           f"decode ('field {k} not found in type deployment.Engine'). Sweepable only after the "
-           f"pins move.")
-       for k in ("max_num_active_seqs", "max_num_scheduled_tokens", "watermark",
-                 "prefill_schedule_interval", "stream_interval", "prefix_match_unit",
-                 "prefix_cache_retention_interval", "disable_hybrid_kv_cache_manager",
-                 "kv_cache_memory_bytes", "kv_events", "max_loras", "max_cpu_loras",
-                 "custom_ops", "decoder_replay_cudagraph_capture_sizes",
-                 "use_trtllm_attention", "mla_prefill_backend", "indexer_kv_dtype",
-                 "linear_backend", "long_prefill_token_threshold_adaptive", "env", "frontend")},
+    # Engine fields the pinned stack DECODES but its engine model does not price, and ones it
+    # prices only in a particular shape. Under BLIS v0.12.0 this covered 21 names and was about
+    # decoding (blis-schemas v0.5.0's Engine was a fixed 31-field struct); v0.14.0 makes `engine:`
+    # an opaque block opened by blis-vllm v0.32.0's engineconfig.Engine, so all 21 decode and 3
+    # are swept normally. These seven are refused because a sweep over them reports noise; the
+    # other eleven are refused as ENGINE_DECODED_BUT_INERT, for measuring identical.
+    #
+    # Kept in sync with validate_experiment.ENGINE_NOT_WIRED by test_experiment.py.
+    "prefix_match_unit":
+        "prefix_match_unit decodes under the pinned engine model but is not priced by it: prefix "
+        "matching is modelled at block granularity, so sweeping the unit reports noise "
+        "(upstream blis-vllm#7)",
+    "max_cpu_loras":
+        "max_cpu_loras decodes under the pinned engine model but is not priced by it: there is no "
+        "CPU-side LoRA swap term in the cost model (upstream blis-vllm#5)",
+    "prefix_cache_retention_interval":
+        "prefix_cache_retention_interval decodes under the pinned engine model but is not priced "
+        "by it: the prefix cache is modelled without eviction over time, so retention has no "
+        "effect on any run",
+    "prefill_schedule_interval":
+        "prefill_schedule_interval is priced only when the pool has dp > 1: with a single "
+        "data-parallel rank there is no cross-rank prefill schedule to interval",
+    "disable_hybrid_kv_cache_manager":
+        "disable_hybrid_kv_cache_manager is refused on a sliding-window MLA model (the "
+        "DeepSeek-V4 family): the hybrid manager is what models the sliding window, so disabling "
+        "it has no priced alternative",
+    "env":
+        "the pinned engine model reads exactly one variable, VLLM_USE_V2_MODEL_RUNNER; any other "
+        "key is carried but never read, so a sweep over it reports noise",
+    "kv_events":
+        "kv_events is a struct under the pinned engine model (publisher/topic/buffer), not a "
+        "bool: sweep its inner fields, not the block itself",
+    # Decoded and accepted, but measured byte-identical on every scenario tried.
+    **{k: (f"{k} ({what}) is carried by the pinned engine model but the kernel cost model has no "
+           f"term for it: measured byte-identical on deepseek-v4-pro/h200, qwen3-14b/h100 and "
+           f"deepseek-v4.1-flash/h200 with two contrasting values each, so a sweep over it "
+           f"returns a column of equal numbers. State it as a fixed engine default if the run "
+           f"should record it.")
+       for k, what in ENGINE_DECODED_BUT_INERT.items()},
 }
 
 

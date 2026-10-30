@@ -153,13 +153,33 @@ skipped like the model-aware rules, and the summary line says so rather than imp
 
 ### What the pinned stack can actually carry
 
-vLLM v0.32.0 defines ~51 engine fields, but the **pinned** BLIS (v0.12.0, which bundles
-blis-schemas v0.5.0) has only 31, and the scenario decodes strictly. Naming one of the other 20 —
-`max_num_active_seqs`, `watermark`, `prefix_match_unit`, `stream_interval`, `linear_backend`, … —
-would fail **every** run with `field … not found in type deployment.Engine`, so the validator
-rejects them up front with that reason. They become sweepable when `pins.env` moves.
+vLLM v0.32.0 defines ~51 engine fields, and at the **pinned** BLIS (v0.14.0, blis-schemas v0.8.0)
+**all of them decode**: a pool's `engine:` is an opaque block opened by the engine model that
+`engine_version` names, which is blis-vllm v0.32.0's own `engineconfig.Engine`. Before v0.14.0
+the decode surface was blis-schemas' narrower 31-field struct, and naming one of the other 20
+failed **every** run with `field … not found in type deployment.Engine`.
 
-The 31 that do work, grouped: batching/admission (`max_num_seqs`, `max_num_batched_tokens`,
+**Decoding is no longer the interesting question, though — leverage is.** Of the 20 keys the bump
+opened up, only **three** change a number: `max_num_active_seqs`, `max_num_scheduled_tokens` and
+`frontend`. The remaining eleven decode, run to completion, and measure *byte-identical* — the
+kernel cost model has no term for them, so they are carried as launch provenance. That was
+established by running each against the pinned binary with two contrasting values on
+`deepseek-v4-pro`/h200, `qwen3-14b`/h100 and `deepseek-v4.1-flash`/h200, beside a `max_num_seqs`
+control that moved every time.
+
+So the validator refuses **eighteen** knobs, in three groups, each with its measured reason:
+
+| Why refused | Knobs |
+|---|---|
+| Decodes and runs, but measures identical | `watermark`, `stream_interval`, `kv_cache_memory_bytes`, `max_loras`, `custom_ops`, `use_trtllm_attention`, `mla_prefill_backend`, `indexer_kv_dtype`, `linear_backend`, `long_prefill_token_threshold_adaptive`, `decoder_replay_cudagraph_capture_sizes` |
+| No cost term at all | `prefix_match_unit`, `max_cpu_loras`, `prefix_cache_retention_interval` |
+| Priced only in one shape | `prefill_schedule_interval` (needs dp>1), `disable_hybrid_kv_cache_manager` (refused on sliding-window MLA), `env` (one variable is read), `kv_events` (a struct, not a bool) |
+
+A sweep over any of them runs to completion and reports a column of equal numbers, which looks
+like a finding. That is the expensive failure, so it is refused up front rather than left to burn
+the runs — the same reasoning as "Not every accepted knob is a lever" below.
+
+The 33 that do work, grouped: batching/admission (`max_num_seqs`, `max_num_batched_tokens`,
 `long_prefill_token_threshold`, `scheduling_policy`, `async_scheduling`), graph capture
 (`cudagraph_mode`, `max_cudagraph_capture_size`, `cudagraph_capture_sizes`), memory/precision
 (`cache_dtype`, `quantization`, `block_size`, `gpu_memory_utilization`, `max_model_len`),
@@ -167,7 +187,13 @@ attention (`enable_prefix_caching`, `disable_cascade_attn`, `swa_bounded_replay`
 collectives (`all2all_backend`, `moe_backend`, `allreduce_backend`,
 `disable_custom_all_reduce`), context parallelism (`dcp_comm_backend`, `dcp_q_replicate`,
 `cp_kv_cache_interleave_size`), recurrent caches (`mamba_cache_dtype`, `mamba_ssm_cache_dtype`,
-`mamba_cache_mode`), and the nested blocks below.
+`mamba_cache_mode`), the three the v0.14.0 pin opened up (`max_num_active_seqs`,
+`max_num_scheduled_tokens`, `frontend`), and the nested blocks below.
+
+`max_num_active_seqs` is the one worth knowing about: it is a large lever where it binds and inert
+where it does not. On `deepseek-v4-pro`/h200 tp2 dp4 chatbot it did nothing at c=8, and took
+2405.3 tok/s down to 808.4 (8 active seqs) and 1684.0 (32) at c=256 — an admission cap only bites
+once there is a queue to cap.
 
 ### Nested blocks
 
@@ -182,7 +208,11 @@ engine:
 ```
 
 `speculative` is also nested and needs **both** `method` and `num_spec_tokens`; acceptance comes
-from the registry, not a knob.
+from the registry, not a knob. It carries seven fields at this pin (it held two before v0.14.0),
+but only `method`, `num_spec_tokens` and `draft_model` change a run: the sampling fields
+(`draft_sample_method`, `rejection_sample_method`, `enable_adaptive_verification`,
+`kv_cache_dtype`) are recorded as the launch gave them and never re-price acceptance, so the
+validator refuses a sweep over them with that reason.
 
 ### Not every accepted knob is a lever
 

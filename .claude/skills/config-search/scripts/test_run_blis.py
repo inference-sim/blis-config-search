@@ -150,13 +150,57 @@ class ClassifyConfig(unittest.TestCase):
             {"tp": 8, "long_prefill_token_threshold": 4096})
         self.assertEqual(4096, engine["long_prefill_token_threshold"])
 
-    def test_rejects_knobs_the_pinned_schema_has_no_field_for(self):
-        """vLLM v0.32.0 defines ~51 engine fields; the pinned blis-schemas v0.5.0 has 31. A key
-        outside those fails the scenario's strict decode, so it is refused here with that reason
-        rather than written into a scenario that cannot load."""
-        with self.assertRaises(run_blis.ConfigError) as e:
-            run_blis.classify_config({"tp": 8, "max_num_active_seqs": 128})
-        self.assertIn("pinned BLIS", str(e.exception))
+    def test_carries_the_priced_knobs_the_v0_14_0_pin_opened_up(self):
+        """Three of the 14 the bump opened up are priced, and those are swept.
+
+        Under blis-schemas v0.5.0 a pool's `engine:` was a fixed 31-field struct, so each of these
+        failed every run of a sweep ("field max_num_active_seqs not found in type
+        deployment.Engine"). BLIS v0.14.0 reads `engine:` as an opaque block against blis-vllm
+        v0.32.0's engineconfig.Engine, which carries all 14 -- but only these three change a
+        number, measured against the pinned binary with contrasting values.
+        """
+        cfg = {"tp": 8, "num_instances": 1, "max_num_active_seqs": 128,
+               "max_num_scheduled_tokens": 2048, "frontend": "rust"}
+        _par, engine, _cli, _router = run_blis.classify_config(cfg)
+        for key, want in cfg.items():
+            if key in ("tp", "num_instances"):
+                continue
+            self.assertEqual(want, engine[key], key)
+
+    def test_refuses_the_knobs_that_decode_but_measure_identical(self):
+        """The other eleven decode and RUN -- which is why they must be refused here.
+
+        A knob that fails loudly costs one run; a knob that completes and reports the baseline
+        number costs the whole sweep AND reads as a finding. Each of these was measured
+        byte-identical on three model/hardware pairs with two contrasting values, beside a
+        max_num_seqs control that moved every time.
+        """
+        for knob in run_blis.ENGINE_DECODED_BUT_INERT:
+            with self.assertRaises(run_blis.ConfigError, msg=knob) as e:
+                run_blis.classify_config({"tp": 8, "num_instances": 1, knob: 1})
+            self.assertIn("no term for it", str(e.exception), knob)
+
+    def test_rejects_knobs_the_pinned_engine_decodes_but_does_not_price(self):
+        """The refusal did not disappear at the bump, it NARROWED -- and must say which reason.
+
+        A field that decodes but has no cost term is worse than one that fails loudly: the sweep
+        runs, every arm completes, and the report shows differences that are noise. So these are
+        still refused here, with the measured reason rather than "no such field".
+        """
+        for knob, value in (("prefix_match_unit", 16), ("max_cpu_loras", 8),
+                            ("prefix_cache_retention_interval", 60)):
+            with self.assertRaises(run_blis.ConfigError, msg=knob) as e:
+                run_blis.classify_config({"tp": 8, knob: value})
+            self.assertIn("not priced by it", str(e.exception), knob)
+
+    def test_rejects_knobs_the_pinned_engine_prices_only_in_one_shape(self):
+        """Conditionally-priced knobs name the condition, so the reader can satisfy it."""
+        for knob, value, want in (("prefill_schedule_interval", 2, "dp > 1"),
+                                  ("env", {"FOO": "1"}, "VLLM_USE_V2_MODEL_RUNNER"),
+                                  ("kv_events", True, "struct")):
+            with self.assertRaises(run_blis.ConfigError, msg=knob) as e:
+                run_blis.classify_config({"tp": 8, knob: value})
+            self.assertIn(want, str(e.exception), knob)
 
     def test_rejects_pp_gt_1(self):
         with self.assertRaises(run_blis.ConfigError):

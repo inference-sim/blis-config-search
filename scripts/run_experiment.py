@@ -352,7 +352,13 @@ VARIANT_KEYS = ("num_speculative_tokens", "speculative_method", "router_config",
                 # recurrent state caches
                 "mamba_cache_dtype", "mamba_ssm_cache_dtype", "mamba_cache_mode",
                 # nested blocks (dict-valued; described by _nested_phrase)
-                "eplb", "dbo", "engram_config")
+                "eplb", "dbo", "engram_config",
+                # opened up by the v0.14.0 pin: the engine surface is blis-vllm's
+                # engineconfig.Engine now, which carries these (the old blis-schemas
+                # 31-field struct did not, so a spec naming one failed every run).
+                # Only the priced ones are here -- the eleven that decode but measure
+                # byte-identical are refused up front, so no sweep can label them.
+                "max_num_active_seqs", "max_num_scheduled_tokens", "frontend")
 
 
 def variant_of(cand, router_desc, baseline):

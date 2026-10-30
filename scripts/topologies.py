@@ -256,7 +256,17 @@ KNOB_NAMES = {"num_speculative_tokens": "draft tokens", "speculative_method": "d
               "dbo_decode_token_threshold": "DBO decode threshold",
               "dbo_prefill_token_threshold": "DBO prefill threshold",
               "cpu_offload": "CPU offload", "dp_shared_memory": "DP shared memory",
-              "use_thp": "huge pages"}
+              "use_thp": "huge pages",
+              # Opened up by the v0.14.0 pin (the engine surface moved to blis-vllm's
+              # engineconfig.Engine, which carries these; blis-schemas' old 31-field struct
+              # did not). Only the three the cost model actually prices are sweepable, so
+              # only those need a label. Named for what they do, as above.
+              "max_num_active_seqs": "active seqs cap",
+              "max_num_scheduled_tokens": "scheduled tokens cap",
+              "frontend": "API frontend",
+              # speculative's one swept extra field; the other four are recorded, not priced
+              # (validate_experiment.SPECULATIVE_RECORDED_ONLY refuses a sweep over them)
+              "draft_model": "drafter checkpoint"}
 
 # Knobs whose value is a BOOLEAN, phrased as a state rather than "name True". "prefix caching
 # False" reads as a value dump; "prefix caching off" reads as a deployment.

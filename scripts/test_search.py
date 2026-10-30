@@ -905,46 +905,50 @@ def test_blis_pin_is_checked_by_source_commit():
     different bytes per toolchain/platform. Measured on v0.12.0: the committed reports carry
     02b5b033… and 1feaa390…, and rebuilding it locally gave two more digests again. A digest in
     pins.env would therefore be wrong for everyone but whoever wrote it.
+
+    The fixtures below pin v0.14.0 and treat a leftover v0.12.0 build as the drift, which is the
+    direction a contributor actually hits after a pin bump: the stale binary is the one already
+    on their disk.
     """
     print("an off-pin simulator is reported by source commit, not by binary digest")
-    pins = {"BLIS_SHA": "f199223d701d96dddeb1c314509bed003515b599"}
-    on_pin = {"blis": "v0.12.0", "resolved": {"blis": {
+    pins = {"BLIS_SHA": "f2ba6bb1c189ed5a56933cfa3d0927eae3836ee9"}
+    on_pin = {"blis": "v0.14.0", "resolved": {"blis": {
         "sha256": "e439fa29b1f8" + "0" * 52,
-        "commit": "f199223d701d96dddeb1c314509bed003515b599", "describe": "v0.12.0"}}}
+        "commit": "f2ba6bb1c189ed5a56933cfa3d0927eae3836ee9", "describe": "v0.14.0"}}}
     check(run_search.blis_pin_warning(on_pin, pins) == "", "an on-pin binary is silent")
 
-    off_pin = {"blis": "v0.12.0", "resolved": {"blis": {
+    off_pin = {"blis": "v0.14.0", "resolved": {"blis": {
         "sha256": "80d59b897739" + "0" * 52,
-        "commit": "f2ba6bb1c189ed5a56933cfa3d0927eae3836ee9", "describe": "v0.14.0"}}}
+        "commit": "f199223d701d96dddeb1c314509bed003515b599", "describe": "v0.12.0"}}}
     w = run_search.blis_pin_warning(off_pin, pins)
     check(bool(w), "an off-pin binary is reported")
-    check("f199223d701d" in w and "f2ba6bb1c189" in w,
+    check("f2ba6bb1c189" in w and "f199223d701d" in w,
           f"the warning names both the pinned and the actual commit (got {w!r})")
-    check("v0.14.0" in w, f"the warning names what the binary actually is (got {w!r})")
+    check("v0.12.0" in w, f"the warning names what the binary actually is (got {w!r})")
 
     # A DIGEST difference alone must never fire: two machines building the pinned tag disagree on
     # bytes and agree on provenance. This is the false-alarm case a digest pin would have created.
-    same_commit_other_build = {"blis": "v0.12.0", "resolved": {"blis": {
+    same_commit_other_build = {"blis": "v0.14.0", "resolved": {"blis": {
         "sha256": "1feaa390a486" + "0" * 52,
-        "commit": "f199223d701d96dddeb1c314509bed003515b599", "describe": "v0.12.0"}}}
+        "commit": "f2ba6bb1c189ed5a56933cfa3d0927eae3836ee9", "describe": "v0.14.0"}}}
     check(run_search.blis_pin_warning(same_commit_other_build, pins) == "",
           "a different BUILD of the pinned commit is not drift")
 
     # A DIRTY checkout at the pinned commit is drift too: the binary is the pinned commit PLUS
     # uncommitted edits, so the commit alone no longer says what priced the runs. This is the
     # likeliest way to get off-pin numbers unnoticed -- someone editing the simulator locally.
-    dirty = {"blis": "v0.12.0", "resolved": {"blis": {
-        "sha256": "ab" * 32, "commit": pins["BLIS_SHA"], "describe": "v0.12.0-dirty"}}}
+    dirty = {"blis": "v0.14.0", "resolved": {"blis": {
+        "sha256": "ab" * 32, "commit": pins["BLIS_SHA"], "describe": "v0.14.0-dirty"}}}
     w = run_search.blis_pin_warning(dirty, pins)
     check(bool(w) and "UNCOMMITTED" in w,
           f"a dirty checkout at the pinned commit is reported (got {w!r})")
 
     # Nothing to conclude -> say nothing. A binary built outside its source tree (or found on
     # PATH) resolves to no commit, and crying wolf there would train the reader to ignore it.
-    for label, stack in (("no commit", {"blis": "v0.12.0",
+    for label, stack in (("no commit", {"blis": "v0.14.0",
                                         "resolved": {"blis": {"sha256": "ab" * 32}}}),
-                         ("no resolved block", {"blis": "v0.12.0"}),
-                         ("no digest at all", {"blis": "v0.12.0", "resolved": {}})):
+                         ("no resolved block", {"blis": "v0.14.0"}),
+                         ("no digest at all", {"blis": "v0.14.0", "resolved": {}})):
         check(run_search.blis_pin_warning(stack, pins) == "",
               f"{label}: an unverifiable binary is not reported as drift")
     # No BLIS_SHA to compare against is also not a mismatch.

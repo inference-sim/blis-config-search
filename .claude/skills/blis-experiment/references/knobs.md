@@ -1,20 +1,32 @@
 # The knob space: what a spec may sweep, with what values, and why
 
-Four separate questions. Confusing them is how a campaign gets spent on nothing.
+Five separate questions. Confusing them is how a campaign gets spent on nothing.
 
 1. **Is the name real?** `engine:` keys are blis-vllm's engine-block keys (== vLLM's own config
    field names). ~51 exist at v0.32.0.
-2. **Can the pinned stack carry it?** Only **31**. BLIS v0.12.0 bundles blis-schemas **v0.5.0**,
-   whose `Engine` struct is narrower than blis-vllm v0.32.0's, and the scenario decodes
-   *strictly*: a key outside those 31 fails every run with
-   `field <name> not found in type deployment.Engine`.
-3. **Is the value legal?** Most of these knobs are closed enums. The engine refuses an unknown
+2. **Can the pinned stack carry it?** **All 51 now decode.** BLIS v0.14.0 bundles blis-schemas
+   **v0.8.0**, where a pool's `engine:` is an *opaque block* opened by the engine model that
+   `engine_version` names — blis-vllm v0.32.0's `rules/engineconfig.Engine` — so the decode
+   surface IS blis-vllm's field list. (Until v0.12.0 it was blis-schemas' own 31-field struct, and
+   the other 20 keys failed every run with `field <name> not found in type deployment.Engine`.)
+3. **Will the cost model *price* it?** A different and now more important question, because the
+   bump turned loud failures into silent ones. **Eighteen** knobs decode and are still refused:
+   eleven run to completion and measure byte-identical (`ENGINE_INERT`), three have no cost term
+   (`ENGINE_NOT_MODELLED`), four are priced only in one shape (`ENGINE_CONDITIONAL`). All three
+   lists were measured against the pinned binary, not read off the struct. Of the 20 keys the
+   bump opened up, only `max_num_active_seqs`, `max_num_scheduled_tokens` and `frontend` move a
+   number — and the first only once concurrency gives it a queue to cap (v4-pro/h200 tp2 dp4:
+   inert at c=8; 2405.3 → 808.4 tok/s at c=256 with 8 active seqs).
+4. **Is the value legal?** Most of these knobs are closed enums. The engine refuses an unknown
    member at startup, and so does BLIS (measured: `cudagraph_mode: BOGUS`, `cache_dtype: fp16`
-   and `max_num_seqs: 0` are all refused).
-4. **Will it move anything on *this* model and workload?** The hard question, and the one that
+   and `max_num_seqs: 0` are all refused). Note the gap the bump opened here: the keys that moved
+   to the opaque engine block are NOT all enum-checked — `mla_prefill_backend: flashattn` and
+   `linear_backend: cutlass` are both invented values and both ran rc=0. That is another reason
+   those two are refused outright.
+5. **Will it move anything on *this* model and workload?** The hard question, and the one that
    decides whether a sweep is worth its runs.
 
-The validator answers 1–3 for you, and the model-aware half of 4. **Run it.** This file is for
+The validator answers 1–4 for you, and the model-aware half of 5. **Run it.** This file is for
 the judgement it cannot make.
 
 > ### Where the constraints come from
@@ -28,9 +40,10 @@ the judgement it cannot make.
 > number would be meaningless. `scripts/validate_experiment.py` now applies the cross-knob rules
 > pre-flight for exactly this reason. Don't rely on BLIS to catch them.
 
-> Measurements below are from the **pinned stack** (BLIS v0.12.0, catalog 0.4.0, registry
-> v0.2.0), `deepseek-v2-lite` on `h100`, `chatbot`, seed 42, 2025-10-29. They establish
-> *direction and rough magnitude*, not a number to quote — re-measure on your own scenario.
+> Measurements below were taken on **BLIS v0.12.0** (catalog 0.4.0, registry v0.2.0),
+> `deepseek-v2-lite` on `h100`, `chatbot`, seed 42, 2025-10-29 — the pin at the time. They have
+> NOT been re-measured since the pin moved to v0.14.0, so treat them as *direction and rough
+> magnitude* only, which is all they were ever meant to be. Re-measure on your own scenario.
 
 ---
 

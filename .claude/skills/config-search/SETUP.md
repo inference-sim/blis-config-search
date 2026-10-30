@@ -5,12 +5,12 @@ What `config-search` needs on the machine before a run.
 ## 1. Build the pinned BLIS binary (kernel backend)
 
 ```bash
-git clone --branch v0.12.0 --depth 1 https://github.com/inference-sim/inference-sim.git
+git clone --branch v0.14.0 --depth 1 https://github.com/inference-sim/inference-sim.git
 cd inference-sim
-# The v0.12.0 tag is NOT configured immutable upstream, so verify it still resolves
+# The v0.14.0 tag is NOT configured immutable upstream, so verify it still resolves
 # to the pinned commit before building; fail loudly if the tag has been moved.
-EXPECT=f199223d701d96dddeb1c314509bed003515b599   # release v0.12.0, "all routing through the embedded llm-d router" (kernel v0.3.0, schemas v0.5.0 in go.mod)
-test "$(git rev-parse HEAD)" = "$EXPECT" || { echo "v0.12.0 no longer resolves to $EXPECT -- aborting" >&2; exit 1; }
+EXPECT=f2ba6bb1c189ed5a56933cfa3d0927eae3836ee9   # release v0.14.0, "engine config behind an engine model" (kernel v0.4.0, schemas v0.8.0 in go.mod)
+test "$(git rev-parse HEAD)" = "$EXPECT" || { echo "v0.14.0 no longer resolves to $EXPECT -- aborting" >&2; exit 1; }
 go build -o blis main.go
 ```
 
@@ -48,7 +48,7 @@ workload. The runner generates kernel scenario files into a `--scenarios` dir yo
 
 The catalog pin and the binary pin move **together**: catalog `0.4.0`'s model graphs use schema
 fields that v0.10.0 cannot decode (it fails with hundreds of `field ... not found in type
-model.Node` errors), and v0.12.0 needs `0.3.0` for the entries above.
+model.Node` errors), and the pinned v0.14.0 needs `0.4.0` for the entries above.
 
 ## 2b. The AgentX replay corpus (only for a replay workload)
 

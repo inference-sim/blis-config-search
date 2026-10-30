@@ -107,24 +107,71 @@ ENGINE_KNOBS = frozenset({
     "use_trtllm_attention", "mla_prefill_backend", "indexer_kv_dtype", "linear_backend", "env",
 })
 
-# Engine knobs blis-vllm v0.32.0 defines that the PINNED stack cannot carry. The scenario is
-# decoded strictly against the `Engine` struct of the blis-schemas the pinned BLIS was built
-# against (v0.5.0 at BLIS v0.12.0), so a key outside it fails EVERY run of the sweep with
-# "field <name> not found in type deployment.Engine". Reported with that reason rather than as a
-# typo: these are real vLLM knobs, just not sweepable until the pins move.
+# Engine knobs the PINNED stack decodes but its engine model REFUSES to price.
+#
+# This list used to be much longer, and was about DECODING: under BLIS v0.12.0 a pool's `engine:`
+# was a fixed 31-field struct in blis-schemas v0.5.0, so 21 real vLLM knobs failed every run with
+# "field <name> not found in type deployment.Engine". BLIS v0.14.0 (blis-schemas v0.8.0) makes
+# `engine:` an OPAQUE block opened by the engine model that `engine_version` selects -- blis-vllm
+# v0.32.0's rules/engineconfig.Engine -- so all 21 now decode. Only 3 of them (max_num_active_seqs,
+# max_num_scheduled_tokens, frontend) actually move a number and are swept like any other knob.
+#
+# What remains is a different refusal, and a narrower one: the field decodes, but the engine model
+# has no cost term for it, so a sweep over it would report differences that are noise. Each entry
+# below was measured by running the knob against the pinned binary, not inferred from the struct.
 #
 # Kept in sync with run_blis.UNSUPPORTED by test_experiment.py, which fails if the two drift.
-ENGINE_NOT_WIRED = {
-    k: ("a vLLM v0.32.0 engine field the pinned BLIS (v0.12.0, blis-schemas v0.5.0) has no "
-        "field for, so the scenario would fail to decode; sweepable only after the pins move")
-    for k in ("max_num_active_seqs", "max_num_scheduled_tokens", "watermark",
-              "prefill_schedule_interval", "stream_interval", "prefix_match_unit",
-              "prefix_cache_retention_interval", "disable_hybrid_kv_cache_manager",
-              "kv_cache_memory_bytes", "kv_events", "max_loras", "max_cpu_loras", "custom_ops",
-              "decoder_replay_cudagraph_capture_sizes", "use_trtllm_attention",
-              "mla_prefill_backend", "indexer_kv_dtype", "linear_backend",
-              "long_prefill_token_threshold_adaptive", "env", "frontend")
+ENGINE_NOT_MODELLED = {
+    "prefix_match_unit": ("decodes under the pinned engine model but is not priced by it -- "
+                          "prefix matching is modelled at block granularity, so sweeping the unit "
+                          "reports noise (upstream blis-vllm#7)"),
+    "max_cpu_loras": ("decodes under the pinned engine model but is not priced by it -- there is "
+                      "no CPU-side LoRA swap term in the cost model (upstream blis-vllm#5)"),
+    "prefix_cache_retention_interval": ("decodes under the pinned engine model but is not priced "
+                                        "by it -- the prefix cache is modelled without eviction "
+                                        "over time, so retention has no effect on any run"),
 }
+
+# Engine knobs the pinned stack prices only in the right SHAPE. Sweeping one outside its condition
+# is refused with the condition named, because the alternative is a sweep where every arm fails
+# identically. Measured against the pinned binary.
+ENGINE_CONDITIONAL = {
+    "prefill_schedule_interval": ("priced only when the pool has dp > 1 -- with a single data-"
+                                  "parallel rank there is no cross-rank prefill schedule to "
+                                  "interval"),
+    "disable_hybrid_kv_cache_manager": ("refused on a sliding-window MLA model (the DeepSeek-V4 "
+                                        "family): the hybrid manager is what models the sliding "
+                                        "window, so disabling it has no priced alternative"),
+    "env": ("the pinned engine model reads exactly one variable, VLLM_USE_V2_MODEL_RUNNER; any "
+            "other key is carried but never read, so a sweep over it reports noise"),
+    "kv_events": ("a struct under the pinned engine model (publisher/topic/buffer), not a bool -- "
+                  "sweep its inner fields, not the block itself"),
+}
+
+# Engine knobs the pinned stack decodes, accepts, and prices IDENTICALLY whatever you set them to.
+#
+# Measured, not inferred: each was run against the pinned binary with two contrasting values on
+# deepseek-v4-pro/h200 (tp2 dp4, chatbot, c=8 and c=256), qwen3-14b/h100 (tp4) and
+# deepseek-v4.1-flash/h200 (tp2 dp4), beside a `max_num_seqs` control that moved every time. None
+# of them shifted the throughput by a single digit.
+#
+# Refusing these is the point of the check, per experiments/README.md's "Not every accepted knob
+# is a lever": a sweep that runs to completion and reports equal numbers looks like a finding and
+# is worse than one that fails loudly. Kept in sync with run_blis.ENGINE_DECODED_BUT_INERT.
+ENGINE_INERT = {
+    k: (f"decodes and runs under the pinned engine model, but the kernel cost model has no term "
+        f"for it: measured byte-identical across three model/hardware pairs with two contrasting "
+        f"values each, so every arm of the sweep would report the same number. State it as a "
+        f"fixed engine value if a run should record it, rather than sweeping it.")
+    for k in ("watermark", "stream_interval", "kv_cache_memory_bytes", "max_loras", "custom_ops",
+              "use_trtllm_attention", "mla_prefill_backend", "indexer_kv_dtype", "linear_backend",
+              "long_prefill_token_threshold_adaptive",
+              "decoder_replay_cudagraph_capture_sizes")
+}
+
+# One lookup for the three refusals above: all report "the pins carry it, sweeping it is not
+# worth a run" rather than "no such field", which is what a typo gets.
+ENGINE_NOT_WIRED = {**ENGINE_NOT_MODELLED, **ENGINE_CONDITIONAL, **ENGINE_INERT}
 
 # Valid VALUES for the enumerated engine knobs, transcribed from blis-vllm's rules pack
 # (rules/v0_32/pack.go, `Pack()`), which models vLLM v0.32.0. Read from the sibling checkout when
@@ -194,10 +241,20 @@ ENGINE_BOOLS = ("enable_prefix_caching", "disable_cascade_attn", "swa_bounded_re
 # `cudagraph_capture_sizes: [[1,2,4], [1,2,4,8]]` sweeps two capture plans.
 ENGINE_INT_LISTS = ("cudagraph_capture_sizes",)
 
+# Speculative's fields under the pinned engine model (blis-vllm v0.32.0 rules/engineconfig).
+# All seven DECODE. Only the first two select an acceptance profile from the registry and so
+# change a run; the rest are recorded provenance -- see SPECULATIVE_RECORDED_ONLY.
+SPECULATIVE_FIELDS = ("method", "num_spec_tokens", "draft_model", "kv_cache_dtype",
+                      "draft_sample_method", "rejection_sample_method",
+                      "enable_adaptive_verification")
+SPECULATIVE_RECORDED_ONLY = ("draft_sample_method", "rejection_sample_method",
+                             "enable_adaptive_verification", "kv_cache_dtype")
+
 # NESTED engine blocks: a mapping whose own fields are lists, like `speculative`. Field names are
-# blis-schemas v0.5.0's; the engine decodes strictly, so an invented inner field fails every run.
+# the pinned engine model's (blis-vllm v0.32.0 rules/engineconfig); the engine decodes strictly,
+# so an invented inner field fails every run.
 NESTED_ENGINE_FIELDS = {
-    "speculative": ("method", "num_spec_tokens"),
+    "speculative": SPECULATIVE_FIELDS,
     "eplb": ("enable_eplb", "num_redundant_experts", "window_size", "step_interval"),
     "dbo": ("enable_dbo", "dbo_decode_token_threshold", "dbo_prefill_token_threshold"),
     "engram_config": ("cpu_offload", "dp_shared_memory", "use_thp"),
@@ -466,7 +523,7 @@ def _check_engine_values(engine, where, errs, enums=None):
 def _check_cross_knob(sweep, scenario, where, errs, model_entry=None):
     """Constraints that span TWO knobs, or a knob and the model -- the ones BLIS does not catch.
 
-    Measured against the pinned binary: BLIS v0.12.0 validates enum membership and simple ranges
+    Measured against the pinned binary: BLIS v0.14.0 validates enum membership and simple ranges
     (`cudagraph_mode: BOGUS`, `cache_dtype: fp16` and `max_num_seqs: 0` are all refused at
     startup), but it does NOT check cross-knob agreement -- a
     `long_prefill_token_threshold` of 999,999 against a 32k context ran happily. It cannot: the
@@ -1101,13 +1158,19 @@ def _check_engine(engine, where, vocabulary, source, errs, enums=None):
         errs.append(f"{where}.speculative: must be a mapping with method and num_spec_tokens")
         return
     for key in spec:
-        if key not in ("method", "num_spec_tokens"):
-            # blis-vllm v0.32.0's Speculative carries seven fields (draft_model, kv_cache_dtype,
-            # draft_sample_method, rejection_sample_method, enable_adaptive_verification), but
-            # the PINNED blis-schemas v0.5.0 holds only these two, so the rest cannot be swept.
-            errs.append(f"{where}.speculative.{key}: not a field the pinned stack carries (only "
-                        f"method and num_spec_tokens; blis-schemas v0.5.0's Speculative has no "
-                        f"other field, and acceptance comes from the registry, not a knob)")
+        if key in SPECULATIVE_RECORDED_ONLY:
+            # These four DECODE under the pinned engine model (blis-vllm v0.32.0's Speculative
+            # carries all seven fields; the old blis-schemas v0.5.0 struct held only two), but the
+            # struct's own doc is explicit that acceptance is calibration input: they "are carried
+            # as the launch gave them and recorded, but they do not change which drafts a
+            # simulator accepts". So a sweep over one reports noise.
+            errs.append(f"{where}.speculative.{key}: carried and recorded by the pinned stack but "
+                        f"not priced by it -- acceptance comes from the registry's measured "
+                        f"profiles, selected by method and num_spec_tokens, so sweeping this "
+                        f"reports noise")
+        elif key not in SPECULATIVE_FIELDS:
+            errs.append(f"{where}.speculative.{key}: not a field the pinned stack carries "
+                        f"{_suggest(key, SPECULATIVE_FIELDS)}")
     methods = (enums or {}).get("speculative_method")
     if methods and _is_list(spec.get("method")):
         for m in spec["method"]:

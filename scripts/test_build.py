@@ -269,12 +269,61 @@ def test_pins_are_the_single_source_of_the_sim_version():
     check(bool(ref) and bool(sha), "pins.env must define BLIS_REF and BLIS_SHA")
     check(len(sha or "") == 40, "BLIS_SHA should be a full 40-char commit sha")
 
-    # the pill is the pin, and never a description of some sibling checkout
+    # The pill names what PRICED the committed reports, and is never a description of some
+    # sibling checkout. While no report predates the pin those are the same string; a pin bump
+    # makes them diverge, and then publishing BLIS_REF would claim the new simulator priced runs
+    # it never saw. So the reports are asked first, via their recorded pinned_stack.blis.
     cat = bc.build("/nonexistent-siblings-xyz")
-    check(cat["versions"]["inference-sim"] == ref,
-          f"version pill should be the pinned {ref}, got {cat['versions']['inference-sim']!r}")
-    check("absent" not in cat["versions"]["inference-sim"],
+    pill = cat["versions"]["inference-sim"]
+    check("absent" not in pill,
           "the sim version must not depend on a sibling checkout being present")
+    recorded = []
+    rdir = os.path.join(ROOT, "reports")
+    if os.path.isdir(rdir):
+        for name in sorted(os.listdir(rdir)):
+            p = os.path.join(rdir, name, "scenario.json")
+            if not os.path.isfile(p):
+                continue
+            with open(p) as f:
+                got = ((json.load(f).get("pinned_stack") or {}).get("blis"))
+            if got and got not in recorded:
+                recorded.append(got)
+    expect = ref if not recorded else (
+        ref if recorded == [ref]
+        else ", ".join(([ref] if ref in recorded else []) + [v for v in recorded if v != ref]))
+    check(pill == expect,
+          f"the pill should name what priced the committed reports ({expect!r}), got {pill!r}")
+    for v in recorded:
+        check(v in pill, f"a report priced by {v} must be represented in the pill, got {pill!r}")
+
+    # ...and the three branches of that rule, on synthetic report dirs rather than the real
+    # gallery, so the test keeps meaning after the next pin bump.
+    tmp = tempfile.mkdtemp()
+    try:
+        def _report(name, blis):
+            d = os.path.join(tmp, name)
+            os.makedirs(d)
+            with open(os.path.join(d, "scenario.json"), "w") as f:
+                json.dump({"pinned_stack": {"blis": blis}}, f)
+
+        pin = {"BLIS_REF": "v9.9.9"}
+        empty = os.path.join(tmp, "no-reports-here")
+        os.makedirs(empty)
+        check(bc._priced_by(pin, empty) == "v9.9.9",
+              "with no committed report to go on, the pill falls back to the pin")
+        check("unpinned" in bc._priced_by({}, empty),
+              "with neither a pin nor a report, the pill says so instead of guessing")
+        _report("a", "v9.9.9")
+        _report("b", "v9.9.9")
+        check(bc._priced_by(pin, tmp) == "v9.9.9",
+              "reports that all agree with the pin publish as that one version")
+        _report("c", "v9.9.8")
+        check(bc._priced_by(pin, tmp) == "v9.9.9, v9.9.8",
+              "a gallery spanning two simulators must name both, pin first, not read as one")
+        check(bc._priced_by({"BLIS_REF": "v9.9.7"}, tmp) == "v9.9.9, v9.9.8",
+              "a pin nothing was priced by is not published as having priced anything")
+    finally:
+        shutil.rmtree(tmp)
 
     # SETUP.md documents the same pin a human would clone
     with open(os.path.join(ROOT, ".claude", "skills", "config-search", "SETUP.md")) as f:

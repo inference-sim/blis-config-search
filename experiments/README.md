@@ -375,9 +375,18 @@ A sweep is colocated **or** disaggregated, never both.
 | [`qwen3-14b-h100-chatbot-execution.yaml`](qwen3-14b-h100-chatbot-execution.yaml) | The same question on a **dense** model, where the catalog rules out every expert knob and GQA makes KV precision a strong lever |
 | [`qwen3-14b-h100-chatbot-kv-precision.yaml`](qwen3-14b-h100-chatbot-kv-precision.yaml) | Does an fp8 KV cache buy throughput on a dense model? |
 
-[`schema.json`](schema.json) is the structural contract (JSON Schema 2020-12).
-`scripts/validate_experiment.py` enforces it plus everything a schema can't reach: knob names,
-GPU arithmetic, SLO units, and router files.
+[`schema.json`](schema.json) (JSON Schema 2020-12) describes the spec's **structure**, so an
+editor can flag a malformed spec as you type. It is an aid, not the authority:
+**`scripts/validate_experiment.py` is what CI runs**, it does not load the schema, and it checks
+everything a schema can't reach — knob names, enum values, GPU arithmetic, SLO units, router
+files, and whether the model/hardware/workload exist. A spec your editor likes can still be
+rejected; run the validator before opening a PR.
+
+The two are kept honest by `SchemaAgreesWithValidator` in `scripts/test_experiment.py`: every
+shipped spec must satisfy both, and a corpus of structurally-broken specs must be rejected by
+both. So the schema can be looser than the validator only in the three classes it documents as
+out of reach — it can never be *stricter*, which is the case that would have your editor
+red-underline a spec CI accepts.
 
 ## What the sweeper writes
 

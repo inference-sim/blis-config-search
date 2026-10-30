@@ -8,9 +8,11 @@
 Exit 0 when every spec is valid, 1 otherwise, with one `file: path: message` line per error.
 Safe for an untrusted PR: it reads YAML with safe_load, touches no network, and runs no BLIS.
 
-WHY THIS EXISTS SEPARATELY FROM THE SCHEMA. experiments/schema.json checks STRUCTURE (every
-value is a list, a sweep is colocated or disaggregated but not both). Three classes of error
-survive that and are exactly the ones that waste a whole sweep:
+WHY THIS EXISTS SEPARATELY FROM THE SCHEMA. experiments/schema.json describes STRUCTURE (every
+value is a list, a sweep is colocated or disaggregated but not both) for a contributor's EDITOR.
+This script never loads it -- the structural rules below are the ENFORCED copy, and
+test_experiment.py's SchemaAgreesWithValidator is what stops the two definitions drifting apart.
+Three classes of error no schema can reach are exactly the ones that waste a whole sweep:
 
   1. a knob name that no engine accepts. The names are not ours to invent -- an `engine:` key
      is a key of blis-vllm's engine block (which models vLLM v0.32.0), a `parallel:` key is a
@@ -42,7 +44,6 @@ except ImportError:
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 SIBLINGS = os.path.abspath(os.path.join(ROOT, os.pardir))
 ROUTING_DIR = os.path.join(ROOT, "routing")
-SCHEMA_PATH = os.path.join(ROOT, "experiments", "schema.json")
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 # A sweep's `narrative` is the ONE line the report prints above that sweep's measured result, so

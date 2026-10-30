@@ -312,6 +312,24 @@ def test_pins_are_the_single_source_of_the_sim_version():
     check('validate_experiment.py "$spec" --catalog' in exp_wf,
           "run-experiment.yml should validate WITH --catalog, or the existence check no-ops")
 
+    # The schema/validator agreement tests SKIP when jsonschema is absent, so the job that runs
+    # them has to install it -- otherwise the drift guard quietly becomes a no-op and the
+    # published schema can fall behind with CI still green (susiejojo review on #22).
+    # Match the pip INVOCATION, not the word: a comment mentioning jsonschema would satisfy a
+    # bare substring check while the package went uninstalled.
+    with open(os.path.join(ROOT, ".github", "workflows", "checks.yml")) as f:
+        checks_wf = f.read()
+    installs = [ln.strip() for ln in checks_wf.splitlines() if "pip install" in ln]
+    # The `python` job is the one that runs test_experiment.py, so that is the install line that
+    # has to carry it -- and the fork-safe `experiments` job must NOT need a new dependency.
+    py_job = checks_wf.split("experiments:")[0]
+    py_installs = [ln.strip() for ln in py_job.splitlines() if "pip install" in ln]
+    check(any("jsonschema" in ln for ln in py_installs),
+          "checks.yml's `python` job must `pip install jsonschema`, or "
+          "SchemaAgreesWithValidator skips in CI and the schema/validator drift guard never runs")
+    check(all("pyyaml" in ln for ln in installs),
+          "every checks.yml job still needs pyyaml")
+
     # GUIDANCE must not restate a superseded version. A doc that tells a contributor to clone a
     # ref the stack no longer uses is worse than one saying nothing: SETUP.md was correct at
     # v0.12.0 while the skill's README and SKILL.md still read "build v0.10.0 ... catalog 0.2.1",

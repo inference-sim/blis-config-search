@@ -6,6 +6,7 @@
 Hermetic: no BLIS, no network. Everything here is a pure function of a spec, which is exactly
 the property that lets CI run the sweeper unattended -- so these tests are the guard on it.
 """
+import copy
 import glob
 import json
 import os
@@ -82,6 +83,199 @@ class CommittedSpecsValidate(unittest.TestCase):
             for sweep in doc["sweeps"]:
                 self.assertTrue((sweep.get("narrative") or "").strip(),
                                 f"{path}: sweep {sweep['name']} has no narrative")
+
+
+# --- schema / validator agreement -------------------------------------------------------------
+
+
+def _structurally_bad():
+    """Specs broken in ways a JSON Schema CAN see, each one mutation off a real shipped spec.
+
+    Structural only: no typo'd knob name, no illegal enum, no impossible GPU arithmetic. Those
+    are the three classes schema.json's own description says it cannot reach, so requiring the
+    schema to catch them would be asserting a contract nobody signed.
+    """
+    base, _ = V.load(os.path.join(EXPERIMENTS, "glm-5-3-flash-h100-chatbot-engine.yaml"))
+
+    def mutate(fn):
+        doc = copy.deepcopy(base)
+        fn(doc)
+        return doc
+
+    def sweep0(doc):
+        return doc["sweeps"][0]
+
+    cases = {
+        "no name": lambda d: d.pop("name"),
+        "no scenario": lambda d: d.pop("scenario"),
+        "no sweeps": lambda d: d.pop("sweeps"),
+        "empty sweeps": lambda d: d.__setitem__("sweeps", []),
+        "sweeps not a list": lambda d: d.__setitem__("sweeps", {"name": "s"}),
+        "illegal name chars": lambda d: d.__setitem__("name", "Not A Valid Name!"),
+        "unknown top-level key": lambda d: d.__setitem__("bogus", 1),
+        "unknown scenario key": lambda d: d["scenario"].__setitem__("bogus", 1),
+        "unknown sweep key": lambda d: sweep0(d).__setitem__("bogus", 1),
+        "sweep without a name": lambda d: sweep0(d).pop("name", None),
+        "gpus as a string": lambda d: d["scenario"].__setitem__("gpus", "32"),
+        "gpus = 0": lambda d: d["scenario"].__setitem__("gpus", 0),
+        "slo value not a number": lambda d: d["scenario"].__setitem__("slo_ms", {"ttft_p99": "fast"}),
+        "scalar parallel knob": lambda d: sweep0(d).setdefault("parallel", {}).__setitem__("tp", 8),
+        "scalar engine knob": lambda d: sweep0(d).setdefault("engine", {}).__setitem__(
+            "max_num_seqs", 256),
+        "empty knob list": lambda d: sweep0(d).setdefault("parallel", {}).__setitem__("tp", []),
+        "colocated AND disaggregated": lambda d: sweep0(d).update(
+            {"prefill-instances": [2], "decode-instances": [2]}),
+    }
+    return {name: mutate(fn) for name, fn in cases.items()}
+
+
+class SchemaAgreesWithValidator(unittest.TestCase):
+    """experiments/schema.json is published to contributors as the structural contract, and an
+    editor red-underlines a spec against it -- but NOTHING enforces it: the validator does all
+    its structural checking in hand-written Python and never loads the file. Two independent
+    definitions of the same structure, only one of them executed, is a drift generator
+    (susiejojo review).
+
+    The harmful direction is the schema REJECTING a spec the validator accepts: a contributor's
+    editor calls a valid spec broken, and the authority that says otherwise is a script they may
+    not run. These tests pin both directions so drift cannot land silently.
+
+    Needs `jsonschema`, which is not a repo dependency (pyyaml is the only one) -- skipped when
+    absent rather than added to all six workflows, and installed in the one CI job that runs
+    these tests.
+    """
+
+    def setUp(self):
+        try:
+            import jsonschema
+        except ImportError:
+            self.skipTest("needs `pip install jsonschema`")
+        self.jsonschema = jsonschema
+        with open(os.path.join(EXPERIMENTS, "schema.json"), encoding="utf-8") as f:
+            self.schema = json.load(f)
+        self.validator = jsonschema.Draft202012Validator(self.schema)
+
+    def errors(self, doc):
+        return sorted(self.validator.iter_errors(doc), key=lambda e: list(e.path))
+
+    def test_the_schema_itself_is_a_valid_2020_12_schema(self):
+        self.jsonschema.Draft202012Validator.check_schema(self.schema)
+
+    def test_no_keyword_is_silently_misspelled(self):
+        """`check_schema` does NOT catch a typo'd keyword: per 2020-12 an unrecognised keyword is
+        an ANNOTATION, not an error, so `maxLenght: 12` validates fine and constrains nothing.
+        Verified -- the committed schema with that one edit passes check_schema and every other
+        test in this class, because a rule that quietly stopped existing rejects nothing.
+
+        So the keywords are checked against the dialect's own vocabulary. Anything not a known
+        keyword must be a schema-defined name: a `$defs` entry, or a property name (the keys
+        under a `properties` object are spec fields, not keywords).
+        """
+        known = set(self.jsonschema.Draft202012Validator.VALIDATORS) | {
+            "$schema", "$id", "$defs", "$ref", "$comment", "title", "description", "default",
+            "examples", "deprecated", "readOnly", "writeOnly", "definitions",
+        }
+        # Keywords whose KEYS are spec field names rather than keywords. Their values differ:
+        # a subschema per key for `properties`, but a plain list of names for `dependentRequired`.
+        NAME_KEYED_SUBSCHEMAS = {"properties", "$defs", "definitions", "patternProperties",
+                                 "dependentSchemas"}
+        NAME_KEYED_PLAIN = {"dependentRequired"}
+
+        def walk(node, path):
+            if isinstance(node, list):
+                for i, item in enumerate(node):
+                    walk(item, f"{path}[{i}]")
+                return
+            if not isinstance(node, dict):
+                return
+            for key, value in node.items():
+                self.assertTrue(
+                    key in known,
+                    f"schema.json: {path}.{key} is not a JSON Schema 2020-12 keyword -- a "
+                    f"misspelled keyword is an annotation that silently constrains nothing")
+                if key in NAME_KEYED_PLAIN:
+                    continue                         # values are name lists, not subschemas
+                if key in NAME_KEYED_SUBSCHEMAS:
+                    for name, sub in (value or {}).items():
+                        walk(sub, f"{path}.{key}.{name}")
+                    continue
+                walk(value, f"{path}.{key}")
+
+        walk(self.schema, "<root>")
+
+    def test_every_shipped_spec_passes_the_published_schema(self):
+        """The harmful direction. Each of these validates, so each must also satisfy the schema
+        a contributor's editor reads -- otherwise the editor contradicts the authority."""
+        for path in V.spec_paths(EXPERIMENTS):
+            doc, err = V.load(path)
+            self.assertIsNone(err, f"{path}: {err}")
+            self.assertEqual([], V.validate(doc, ROUTING), f"{path} should validate")
+            errs = self.errors(doc)
+            self.assertEqual(
+                [], errs,
+                f"{os.path.basename(path)} passes the validator but the published schema "
+                f"rejects it: " + "; ".join(
+                    f"{'/'.join(map(str, e.path)) or '<root>'}: {e.message}" for e in errs[:3]))
+
+    def test_both_reject_every_structurally_bad_spec(self):
+        """The drift direction: a structural rule the validator enforces and the schema has lost
+        (or never had). Asserted per case so a failure names the rule that drifted."""
+        for name, doc in _structurally_bad().items():
+            with self.subTest(case=name):
+                self.assertTrue(self.errors(doc),
+                                f"schema.json accepts a structurally-bad spec ({name}) that the "
+                                f"validator rejects -- the schema has drifted behind")
+                self.assertTrue(V.validate(copy.deepcopy(doc), ROUTING),
+                                f"the validator accepts a structurally-bad spec ({name})")
+
+    def test_the_corpus_is_one_mutation_off_a_spec_that_really_passes(self):
+        """Guards the corpus, not the schema: if the base spec stopped validating, every case
+        above would 'pass' for the wrong reason and the suite would go quietly blind."""
+        base, err = V.load(os.path.join(EXPERIMENTS, "glm-5-3-flash-h100-chatbot-engine.yaml"))
+        self.assertIsNone(err)
+        self.assertEqual([], V.validate(copy.deepcopy(base), ROUTING))
+        self.assertEqual([], self.errors(base))
+
+    def test_the_schema_stays_looser_only_where_it_says_it_is(self):
+        """The three classes schema.json documents as out of reach really are out of reach, and
+        the validator really does cover them. Pins the division of labour in both directions: if
+        the schema ever grew a knob-name enum, this says so instead of leaving two places to
+        maintain the vocabulary; if the validator ever stopped checking, it says that too."""
+        base, _ = V.load(os.path.join(EXPERIMENTS, "glm-5-3-flash-h100-chatbot-engine.yaml"))
+
+        def typo(d):
+            d["sweeps"][0].setdefault("engine", {})["max_num_seq"] = [256]
+
+        def bad_enum(d):
+            d["sweeps"][0].setdefault("engine", {})["cudagraph_mode"] = ["full"]
+
+        def bad_gpus(d):
+            d["scenario"]["gpus"] = 8
+            for sweep in d["sweeps"]:
+                sweep["num-instances"] = [3]
+                sweep.setdefault("parallel", {})["tp"] = [3]
+
+        for name, fn in (("knob name", typo), ("enum value", bad_enum),
+                         ("GPU arithmetic", bad_gpus)):
+            with self.subTest(case=name):
+                doc = copy.deepcopy(base)
+                fn(doc)
+                self.assertEqual(
+                    [], self.errors(doc),
+                    f"schema.json now catches {name}, which its description says it cannot "
+                    f"reach -- either the description or the schema is wrong")
+                self.assertTrue(V.validate(copy.deepcopy(doc), ROUTING),
+                                f"the validator must be the one catching {name}")
+
+    def test_the_schema_says_it_is_not_the_authority(self):
+        """The README calls schema.json the structural contract, so the file itself has to point
+        at what checks the rest -- a contributor reading only the schema should not think a
+        green editor means a runnable spec."""
+        desc = (self.schema.get("description") or "").lower()
+        self.assertIn("validate_experiment.py", desc,
+                      "schema.json's description should name the script that is the authority")
+        self.assertIn("structure", desc,
+                      "schema.json's description should say it checks STRUCTURE only")
 
 
 # --- validator --------------------------------------------------------------------------------

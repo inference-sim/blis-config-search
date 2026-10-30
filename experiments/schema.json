@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/inference-sim/blis-config-search/experiments/schema.json",
+  "title": "Experiment Spec",
+  "description": "One scenario plus a few sweeps that tell one story (RFC #21). The LLM designs this file; everything after it is deterministic. Structure only -- knob NAMES and GPU arithmetic are checked by scripts/validate_experiment.py against blis-vllm, blis-schemas and llm-d-router, which this schema cannot reach.",
+  "type": "object",
+  "required": ["name", "scenario", "sweeps"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "description": "The experiment's identity; also the reports/<name>/ directory it writes.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+    },
+    "description": {
+      "description": "Optional one-line summary of the question the whole experiment answers.",
+      "type": "string"
+    },
+    "scenario": { "$ref": "#/$defs/scenario" },
+    "sweeps": {
+      "description": "The sweeps, in the order a reader should meet them. Each is one arm of the story.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/sweep" }
+    }
+  },
+  "$defs": {
+    "scenario": {
+      "description": "Shared by EVERY sweep: one model, one hardware type, one workload, one GPU budget, one load ladder. Comparing two hardware types or two workloads takes separate experiments.",
+      "type": "object",
+      "required": ["model", "hardware", "workload", "gpus", "concurrency"],
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "description": "blis-catalog short-name, e.g. deepseek-v4.1-flash. A model runs iff the catalog carries it.",
+          "type": "string",
+          "minLength": 1
+        },
+        "hardware": {
+          "description": "Scenario hardware key, e.g. h100. One per experiment.",
+          "type": "string",
+          "minLength": 1
+        },
+        "workload": {
+          "description": "A catalog workload: a shape preset (chatbot, multidoc, ...) or a replay scenario (agentx-mvp). One per experiment.",
+          "type": "string",
+          "minLength": 1
+        },
+        "gpus": {
+          "description": "The GPU budget EVERY run must use exactly. Combos that do not total this are dropped, so every comparison is like-for-like.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "slo": { "$ref": "#/$defs/slo" },
+        "concurrency": {
+          "description": "The load ladder, set once here so every sweep is measured at the same levels. Closed-loop concurrency (sessions); for a replay these are session-tree lanes.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "seed": {
+          "description": "The one seed every run of this experiment uses. Fixed so a re-run reproduces.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 42
+        },
+        "engine": {
+          "description": "Engine settings every run carries regardless of sweep (precision, context window). Single values, NOT lists -- these are not swept.",
+          "type": "object",
+          "minProperties": 1
+        },
+        "replay": {
+          "description": "Replay knobs when `workload` names a trace corpus: corpus_sha256, benchmark_duration, grace_period, max_context_length, category, thinking.",
+          "type": "object",
+          "minProperties": 1
+        }
+      }
+    },
+    "slo": {
+      "description": "The caps a config must hold to count as servable. A config that misses any of them at a load is not servable at that load.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "itl_p99": { "$ref": "#/$defs/duration", "description": "p99 inter-token latency cap, e.g. 20ms. The interactivity floor: 20ms == 50 tok/s/user." },
+        "ttft_p99": { "$ref": "#/$defs/duration", "description": "p99 time-to-first-token cap, e.g. 5s." },
+        "e2e_p99": { "$ref": "#/$defs/duration", "description": "p99 end-to-end request latency cap." }
+      }
+    },
+    "duration": {
+      "description": "A duration with an explicit unit: 20ms, 1.5s, 250us. A bare number is refused, because the unit is the whole meaning.",
+      "type": "string",
+      "pattern": "^[0-9]+(\\.[0-9]+)?(us|ms|s)$"
+    },
+    "sweep": {
+      "description": "One arm of the experiment: a name, the question it answers, and knobs whose values are all LISTS. An omitted knob takes the vLLM default.",
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "narrative": {
+          "description": "The hypothesis: what this sweep is expected to show and why. Carried into the report beside the measured result, so a reader sees the prediction next to the outcome.",
+          "type": "string"
+        },
+        "num-instances": {
+          "description": "Replica counts for a COLOCATED sweep (a `blis run` flag, not an engine key). Mutually exclusive with the prefill/decode form.",
+          "$ref": "#/$defs/intList"
+        },
+        "parallel": {
+          "description": "Pool layout knobs for a colocated sweep: tp, pp, dp, pcp, dcp, enable_expert_parallel. blis-schemas names.",
+          "$ref": "#/$defs/knobLists"
+        },
+        "engine": {
+          "description": "Engine knobs, which are blis-vllm's engine-block keys (== vLLM's own config field names). `speculative` is the one nested block.",
+          "$ref": "#/$defs/engineKnobs"
+        },
+        "router": { "$ref": "#/$defs/router" },
+        "prefill-instances": {
+          "description": "Prefill replica counts for a DISAGGREGATED sweep. Requires decode-instances; BLIS refuses a prefill pool with no decode pool.",
+          "$ref": "#/$defs/intList"
+        },
+        "decode-instances": {
+          "description": "Decode replica counts for a disaggregated sweep. Requires prefill-instances.",
+          "$ref": "#/$defs/intList"
+        },
+        "prefill": { "$ref": "#/$defs/rolePool", "description": "The prefill pool's own layout and engine knobs." },
+        "decode": { "$ref": "#/$defs/rolePool", "description": "The decode pool's own layout and engine knobs." }
+      },
+      "allOf": [
+        {
+          "description": "A sweep is colocated or disaggregated, never both.",
+          "not": {
+            "anyOf": [
+              { "required": ["num-instances", "prefill-instances"] },
+              { "required": ["num-instances", "decode-instances"] },
+              { "required": ["parallel", "prefill"] },
+              { "required": ["parallel", "decode"] }
+            ]
+          }
+        },
+        {
+          "description": "The two disaggregated instance counts come as a pair.",
+          "dependentRequired": {
+            "prefill-instances": ["decode-instances"],
+            "decode-instances": ["prefill-instances"],
+            "prefill": ["decode"],
+            "decode": ["prefill"]
+          }
+        }
+      ]
+    },
+    "rolePool": {
+      "description": "One role's pool in a disaggregated sweep. BLIS requires the two pools to agree on block_size, KV cache format, dp and speculative config.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "parallel": { "$ref": "#/$defs/knobLists" },
+        "engine": { "$ref": "#/$defs/engineKnobs" }
+      }
+    },
+    "router": {
+      "description": "The llm-d router's own inputs. `endpoint_picker_config` names EndpointPickerConfig files BLIS runs unchanged; the override trees sweep fields INSIDE the named base file. Omitted means the llm-d default.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "endpoint_picker_config": {
+          "description": "EndpointPickerConfig files, relative to routing/. A new routing policy is a new file, never an invented knob.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "schedulingProfiles": {
+          "description": "profile -> pluginRef -> field -> list of values. Overrides fields the base file already has.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": { "$ref": "#/$defs/knobLists" }
+          }
+        },
+        "plugins": {
+          "description": "plugin name -> parameters -> field -> list of values. Field names are llm-d-router's own; it rejects unknown parameters.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": { "$ref": "#/$defs/knobLists" }
+          }
+        }
+      }
+    },
+    "engineKnobs": {
+      "description": "Engine knobs. Every value is a list, except `speculative`, which is a nested block whose own fields are lists.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/valueList" },
+      "properties": {
+        "speculative": {
+          "description": "Drafting. Needs BOTH method and num_spec_tokens -- acceptance comes from the registry, not a knob.",
+          "type": "object",
+          "required": ["method", "num_spec_tokens"],
+          "additionalProperties": false,
+          "properties": {
+            "method": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "num_spec_tokens": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "knobLists": {
+      "description": "A mapping of knob name -> list of values to probe.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/valueList" }
+    },
+    "valueList": {
+      "description": "EVERY knob value is a list, even a single value: `tp: [8]`, not `tp: 8`. One rule, so a grid is always readable as a product.",
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": ["string", "number", "boolean"] }
+    },
+    "intList": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "integer", "minimum": 1 }
+    }
+  }
+}

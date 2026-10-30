@@ -1,0 +1,26 @@
+# KV precision on a DENSE model -- RFC #21's dense example, verbatim.
+#
+# qwen3-14b is dense, so the grid carries neither dp nor expert parallelism: BLIS refuses
+# `dp: 2` on a dense model outright ("DP placement is modelled for MoE models"), and
+# expert parallelism shards nothing when there are no experts. Scaling out is num-instances.
+name: qwen3-14b-h100-chatbot-kv-precision
+
+scenario: {model: qwen3-14b, hardware: h100, workload: chatbot, gpus: 16,
+           slo: {itl_p99: 20ms}, concurrency: [1, 2, 4, 8, 16, 32, 64, 128, 256]}
+
+sweeps:
+  - name: bf16-kv
+    narrative: >
+      The checkpoint's own precision. qwen3-14b is a BF16 part, so `auto` leaves the cache
+      BF16 -- the control for the fp8 arm.
+    num-instances: [2, 4, 8, 16]
+    parallel: {tp: [1, 2, 4, 8]}
+    engine: {cache_dtype: [auto]}
+
+  - name: fp8-kv
+    narrative: >
+      An fp8 KV cache holds roughly twice the tokens in the same memory. On a small dense
+      model the question is whether that headroom converts into throughput or sits unused.
+    num-instances: [2, 4, 8, 16]
+    parallel: {tp: [1, 2, 4, 8]}
+    engine: {cache_dtype: [fp8]}

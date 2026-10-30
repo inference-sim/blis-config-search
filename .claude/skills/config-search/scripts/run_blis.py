@@ -13,8 +13,9 @@
 # REJECTED (recorded as an error row), never silently dropped -- else two candidates could differ in
 # the ledger yet run the identical command.
 #
-# Pinned stack: BLIS v0.10.0 @ 0d092d4 (kernel v0.1.0 in go.mod), blis-catalog 0.2.1,
-# blis-registry v0.1.1 (holds the 6 coefficient sets below, incl cost-model-memory).
+# Pinned stack: see pins.env, the single source of truth for the BLIS/catalog/registry refs that
+# price every run (scripts/test_build.py checks the docs and workflows against it). The registry
+# must carry the 6 coefficient sets named below, incl cost-model-memory.
 import argparse, hashlib, json, os, subprocess, sys, tempfile, time
 
 COEFFICIENTS = ["cost-model-primitives", "cost-model-collectives", "cost-model-host-overheads",
@@ -22,8 +23,61 @@ COEFFICIENTS = ["cost-model-primitives", "cost-model-collectives", "cost-model-h
 
 # --- candidate-key classification (allowlist; anything else is rejected, never silently ignored) ---
 SCENARIO_PARALLEL = ("tp", "pp", "dp", "enable_expert_parallel")       # -> scenario Deployment.parallel
-SCENARIO_ENGINE = ("quantization", "cache_dtype", "block_size", "max_num_batched_tokens",
-                   "max_num_seqs", "max_model_len", "cudagraph_mode", "gpu_memory_utilization")
+# Engine fields the generated scenario may carry. The authority is NOT blis-vllm's v0.32.0 field
+# list (~51 names) but the `Engine` struct of the blis-schemas the PINNED BLIS was built against
+# (v0.5.0 at BLIS v0.12.0, 31 fields): the scenario decodes strictly, so a key outside that
+# struct is a hard failure -- "field max_num_active_seqs not found in type deployment.Engine" --
+# and every run of a sweep that names one dies the same way. Verified against
+# ~/go/pkg/mod/github.com/inference-sim/blis-schemas@v0.5.0.
+#
+# Valid VALUES for the enumerated ones come from blis-vllm's rules pack
+# (rules/v0_32/pack.go Pack(): CUDAGraphModes, CacheDTypes, All2AllBackends, MoEBackends,
+# SchedulerPolicies, MambaDTypes, DCPCommBackends) -- see scripts/validate_experiment.py, which
+# checks a swept value against them so a typo fails before the sweep rather than per run.
+SCENARIO_ENGINE = (
+    # --- the original eight (every committed report was produced with these) ---
+    "quantization", "cache_dtype", "block_size", "max_num_batched_tokens",
+    "max_num_seqs", "max_model_len", "cudagraph_mode", "gpu_memory_utilization",
+    # --- scheduling / admission ---
+    # `long_prefill_token_threshold` was previously listed as UNSUPPORTED ("not a kernel
+    # scenario field"). That is stale: it IS a field of the v0.5.0 Engine struct, and a run
+    # naming it completes and moves the number (measured: 1983.2 -> 1973.9 tok/s at 256 on
+    # chatbot tp8 c=8). It is the chunked-prefill cap a prefill-bound deployment is forced onto.
+    "long_prefill_token_threshold",
+    "scheduling_policy",                  # fcfs (default) | priority
+    "async_scheduling",                   # tri-state bool
+    # --- CUDA graph capture: the biggest engine lever measured on the pinned stack ---
+    # chatbot tp8 c=8: PIECEWISE 1983.2, FULL 2086.1 (+5%), FULL_AND_PIECEWISE 2085.1,
+    # FULL_DECODE_ONLY 2074.2; NONE costs 44% (605.9 vs 1083.2 at c=4).
+    "max_cudagraph_capture_size", "cudagraph_capture_sizes",
+    # --- attention / prefix reuse ---
+    "enable_prefix_caching",              # tri-state bool; see the INERT note in the skill
+    "disable_cascade_attn", "swa_bounded_replay",
+    # --- MoE dispatch. all2all_backend is a real lever, but ONLY with expert parallelism on
+    # (measured tp4/dp2/EP: 928.2 -> 619.5 with deepep_low_latency, a 33% drop; with EP off it
+    # is byte-identical). The skill gates it on EP for that reason.
+    "all2all_backend", "moe_backend",
+    # --- collectives ---
+    "allreduce_backend", "disable_custom_all_reduce",
+    # --- context parallelism ---
+    "dcp_comm_backend", "dcp_q_replicate", "cp_kv_cache_interleave_size",
+    # --- recurrent (Mamba-family) state caches ---
+    "mamba_cache_dtype", "mamba_ssm_cache_dtype", "mamba_cache_mode",
+    # --- NESTED blocks (rendered as sub-blocks, like `speculative`) ---
+    # `eplb` is the interesting one: expert-load balancing adds redundant experts to even out a
+    # skewed routing distribution, which is an MoE-only lever with a real memory cost.
+    # `dbo` is dual-batch overlap; `engram_config` places Engram's host-side tables.
+    "eplb", "dbo", "engram_config",
+)
+# Nested engine blocks and the fields each accepts, from blis-schemas v0.5.0's structs. A spec
+# states these as a mapping, e.g. `eplb: {enable_eplb: [true], num_redundant_experts: [0, 32]}`;
+# the runner renders them as sub-blocks and the validator checks their inner field names.
+NESTED_ENGINE_FIELDS = {
+    "eplb": ("enable_eplb", "num_redundant_experts", "window_size", "step_interval"),
+    "dbo": ("enable_dbo", "dbo_decode_token_threshold", "dbo_prefill_token_threshold"),
+    "engram_config": ("cpu_offload", "dp_shared_memory", "use_thp"),
+    "speculative": ("method", "num_spec_tokens"),
+}
 # Speculative decoding IS priced by the kernel (v0.12.0 + registry v0.2.0) -- the earlier runner
 # refused it as "not yet validated on the kernel backend", which was true of v0.10.0 and is stale.
 # It is a nested `speculative: {method, num_spec_tokens}` block on the pool's engine
@@ -92,6 +146,50 @@ ROUTING_MOVED = (
     "docs/guide/routing.md 'From BLIS's former routing features' for the per-flag mapping; "
     "round-robin/least-loaded/always-busiest are dropped upstream (nearest: a queue-scorer or "
     "load-aware-scorer profile with max-score-picker, or random-picker)")
+# --- P/D disaggregation ------------------------------------------------------------------------
+#
+# A disaggregated run states TWO pools -- one `role: prefill`, one `role: decode` -- and BLIS
+# routes each request's prefill and decode to the matching pool. The constraints below are
+# BLIS's own, read from blis-vllm compat/build/pools.go (openPools) and blis-schemas
+# spec/deployment/validate.go, not inferred:
+#
+#   * `--prefill-instances` + `--decode-instances` must equal `--num-instances`: "in a
+#     disaggregated run every instance is a prefill or a decode instance, so the counts must
+#     add up" (pools.go:155). An instance with no role would run the first pool's engine.
+#   * A prefill pool REQUIRES `pd_transfer.connector`, and BLIS models only NIXL's handoff:
+#     NixlConnector / NixlPullConnector / NixlPushConnector, or a MultiConnector over one
+#     (RequireNIXLHandoff, pools.go:218).
+#   * The two pools must AGREE on `block_size` (a handoff moves whole blocks), on KV cache
+#     format, on `dp` (one replica factor applies to both pools) and on the speculative config
+#     (one draft width per run). Each disagreement is a hard refusal upstream, so they are
+#     checked here -- a refusal costs a whole sweep of identical errors otherwise.
+#   * blis-schemas refuses a prefill pool with no decode pool, a decode pool with no prefill
+#     pool, and a colocated pool alongside either (validate.go:499-506).
+#   * Pools never share a node, so a P/D run always spans >= 2 nodes and needs `cluster.fabric`.
+PD_ROLES = ("prefill", "decode")
+# Per-role layout/engine knobs, as `<role>_<knob>` candidate keys (prefill_tp, decode_block_size).
+# Flat rather than nested so a candidate dict stays one level deep, like every other config.
+PD_PARALLEL = tuple(f"{r}_{k}" for r in PD_ROLES for k in SCENARIO_PARALLEL)
+PD_ENGINE = tuple(f"{r}_{k}" for r in PD_ROLES for k in SCENARIO_ENGINE)
+# Per-role DRAFTING keys exist only to be refused with the real reason. BLIS applies one
+# speculative configuration to the whole run ("one speculative configuration applies to the run,
+# so the pools must agree"), so `prefill_num_speculative_tokens` is not a narrower knob than
+# `num_speculative_tokens` -- it is a misunderstanding of where drafting is configured. Accepting
+# the key here and rejecting it in resolve_pd gives that message instead of "unknown key".
+PD_SPECULATIVE = tuple(f"{r}_{k}" for r in PD_ROLES for k in SCENARIO_SPECULATIVE)
+PD_CLI = {"prefill_instances": "--prefill-instances", "decode_instances": "--decode-instances"}
+# The handoff connector is a DEPLOYMENT field (`pd_transfer.connector`), not a flag, so it is
+# accepted as a candidate key and consumed by resolve_pd rather than emitted on the CLI.
+PD_DEPLOYMENT = ("pd_connector",)
+# BLIS prices only NIXL handoffs; the default is the plain connector llm-d deploys.
+NIXL_CONNECTORS = ("NixlConnector", "NixlPullConnector", "NixlPushConnector", "MultiConnector")
+DEFAULT_PD_CONNECTOR = "NixlConnector"
+# Knobs a P/D run must hold IDENTICAL across its two pools (see the module note above). Drafting
+# is NOT here: it is one configuration per run rather than a per-pool knob, so a per-role
+# drafting key is refused outright (PD_SPECULATIVE) and the folded `speculative` block is
+# compared separately.
+PD_MUST_MATCH = ("dp", "block_size", "cache_dtype", "quantization")
+
 # Deliberately unsupported in this runner -> fail loudly with the reason (do not silently drop).
 UNSUPPORTED = {
     "routing_policy": ROUTING_MOVED,
@@ -99,11 +197,26 @@ UNSUPPORTED = {
     "admission_policy": ROUTING_MOVED,
     "prefill_routing_scorers": ROUTING_MOVED,
     "decode_routing_scorers": ROUTING_MOVED,
-    "prefill_instances": "PD disaggregation is not supported yet (single colocated pool only)",
-    "decode_instances": "PD disaggregation is not supported yet (single colocated pool only)",
-    "prefill_tp": "per-role PD TP is not supported yet (single colocated pool only)",
-    "decode_tp": "per-role PD TP is not supported yet (single colocated pool only)",
-    "long_prefill_token_threshold": "not a kernel scenario field (chunked-prefill threshold is engine-internal)",
+    "prefill_decode_instances":
+        "--prefill-decode-instances is not supported: a blis-schemas deployment's roles are "
+        "colocated, prefill and decode, so no scenario describes a shared instance's engine",
+    "encode_instances":
+        "--encode-instances is not supported: there is no encode role in a blis-schemas "
+        "deployment",
+    # Engine fields that blis-vllm v0.32.0 defines but the PINNED stack's blis-schemas (v0.5.0)
+    # does not, so the scenario's strict decode refuses them. Named here with that reason rather
+    # than reported as typos: they are real vLLM knobs, just not sweepable until the pin moves.
+    **{k: (f"{k} is a vLLM v0.32.0 engine field, but the pinned BLIS (v0.12.0, blis-schemas "
+           f"v0.5.0) has no such field on its Engine struct, so the scenario would fail to "
+           f"decode ('field {k} not found in type deployment.Engine'). Sweepable only after the "
+           f"pins move.")
+       for k in ("max_num_active_seqs", "max_num_scheduled_tokens", "watermark",
+                 "prefill_schedule_interval", "stream_interval", "prefix_match_unit",
+                 "prefix_cache_retention_interval", "disable_hybrid_kv_cache_manager",
+                 "kv_cache_memory_bytes", "kv_events", "max_loras", "max_cpu_loras",
+                 "custom_ops", "decoder_replay_cudagraph_capture_sizes",
+                 "use_trtllm_attention", "mla_prefill_backend", "indexer_kv_dtype",
+                 "linear_backend", "long_prefill_token_threshold_adaptive", "env", "frontend")},
 }
 
 
@@ -116,9 +229,16 @@ def classify_config(config):
 
     The speculative keys are folded into engine["speculative"], the nested block the schema wants,
     and the acceptance selectors go to the CLI.
+
+    A DISAGGREGATED candidate (one carrying `prefill_instances`/`decode_instances` or any
+    `prefill_*`/`decode_*` layout key) additionally gets a `pd` block on the returned parallel
+    dict, holding each role's resolved layout and engine. See the P/D note at the top of this
+    module for the constraints BLIS enforces on it.
     """
     parallel, engine, cli, router = dict(PARALLEL_DEFAULTS), dict(ENGINE_DEFAULTS), {}, {}
     spec = {}
+    pd_parallel = {r: {} for r in PD_ROLES}
+    pd_engine = {r: {} for r in PD_ROLES}
     for k, v in config.items():
         if k in SCENARIO_PARALLEL:
             parallel[k] = v
@@ -130,6 +250,14 @@ def classify_config(config):
             cli[k] = v
         elif k in SCENARIO_ROUTER:
             router[k] = v
+        elif k in PD_CLI or k in PD_DEPLOYMENT:
+            cli[k] = v
+        elif k in PD_PARALLEL:
+            role, knob = k.split("_", 1)
+            pd_parallel[role][knob] = v
+        elif k in PD_ENGINE or k in PD_SPECULATIVE:
+            role, knob = k.split("_", 1)
+            pd_engine[role][knob] = v
         elif k in CLI_FLAGS:
             cli[k] = v
         elif k in UNSUPPORTED:
@@ -137,7 +265,9 @@ def classify_config(config):
         else:
             supported = (sorted(SCENARIO_PARALLEL) + sorted(SCENARIO_ENGINE)
                          + sorted(SCENARIO_SPECULATIVE) + sorted(SPECULATIVE_CLI)
-                         + sorted(SCENARIO_ROUTER) + sorted(CLI_FLAGS))
+                         + sorted(SCENARIO_ROUTER) + sorted(CLI_FLAGS)
+                         + sorted(PD_CLI) + sorted(PD_DEPLOYMENT) + sorted(PD_PARALLEL)
+                         + sorted(PD_ENGINE))
             raise ConfigError(f"{k!r}: unknown key; supported = {supported}")
     if spec:
         k = int(spec.get("num_speculative_tokens") or 0)
@@ -170,7 +300,116 @@ def classify_config(config):
             f"per-instance footprint tp*pp*dp={fp} spans {fp / GPUS_PER_NODE:.2g} nodes: a "
             f"multi-node instance must fill whole {GPUS_PER_NODE}-GPU nodes (use a footprint that "
             f"is a multiple of {GPUS_PER_NODE}, or scale out with num_instances instead)")
+    pd = resolve_pd(cli, pd_parallel, pd_engine, parallel, engine)
+    if pd:
+        parallel = {**parallel, "pd": pd}
     return parallel, engine, cli, router
+
+
+def _pd_requested(cli, pd_parallel, pd_engine):
+    """True when a candidate describes a disaggregated run at all.
+
+    `pd_connector` counts: naming a handoff connector on a colocated run means the candidate
+    was written as a P/D one and lost its pools, which should fail loudly rather than run as a
+    single pool with the connector quietly dropped.
+    """
+    return bool(cli.get("prefill_instances") is not None
+                or cli.get("decode_instances") is not None
+                or cli.get("pd_connector") is not None
+                or any(pd_parallel.values()) or any(pd_engine.values()))
+
+
+def resolve_pd(cli, pd_parallel, pd_engine, base_parallel, base_engine):
+    """Resolve a disaggregated candidate into {role: {parallel, engine, instances}}, or {}.
+
+    Each role's layout is the shared `parallel`/`engine` overridden by that role's own
+    `prefill_*`/`decode_*` keys, so a sweep states only what differs between the pools. Every
+    constraint BLIS would refuse later is checked here instead -- a per-run refusal costs the
+    whole sweep the same error (see the P/D note at the top of this module).
+    """
+    if not _pd_requested(cli, pd_parallel, pd_engine):
+        return {}
+    pi, di = cli.get("prefill_instances"), cli.get("decode_instances")
+    if pi is None or di is None:
+        missing = "decode_instances" if pi is not None else "prefill_instances"
+        raise ConfigError(
+            f"a disaggregated candidate states no {missing}: BLIS refuses a pool with no "
+            f"counterpart pool (a prefill pool has nowhere to send KV, a decode pool no source)")
+    # Checked BEFORE the pools are built: a per-role drafting key must not reach a pool's engine
+    # block, where it would be written into the scenario as a field no engine accepts.
+    for role in PD_ROLES:
+        bad = sorted(k for k in pd_engine[role] if k in SCENARIO_SPECULATIVE)
+        if bad:
+            raise ConfigError(
+                f"{role}_{bad[0]}: drafting is one configuration per run, not per pool -- BLIS "
+                f"applies one speculative configuration to the whole run, so state "
+                f"{bad[0]} once for the candidate instead")
+    pi, di = int(pi), int(di)
+    if pi < 1 or di < 1:
+        raise ConfigError(f"prefill_instances={pi}, decode_instances={di}: each role needs at "
+                          f"least one instance in a disaggregated run")
+    # BLIS checks this itself and refuses, but the message there names only the three numbers;
+    # raising it here lets the sweeper drop the combo with the reason recorded.
+    ni = cli.get("num_instances")
+    if ni is None:
+        cli["num_instances"] = ni = pi + di
+    elif int(ni) != pi + di:
+        raise ConfigError(
+            f"num_instances={ni}, but prefill_instances={pi} + decode_instances={di}={pi + di}: "
+            f"in a disaggregated run every instance is a prefill or a decode instance, so the "
+            f"counts must add up")
+    out = {}
+    for role, instances in (("prefill", pi), ("decode", di)):
+        par = {**{k: v for k, v in base_parallel.items() if k != "pd"}, **pd_parallel[role]}
+        eng = dict(base_engine)
+        # The shared `speculative` block is already folded into base_engine; a per-role override
+        # of it is refused below (one draft width per run), so only flat keys merge here.
+        eng.update(pd_engine[role])
+        if int(par.get("pp", 1)) != 1:
+            raise ConfigError(f"{role}_pp>1: the pinned kernel does not price pipeline parallelism")
+        fp = footprint_gpus(par)
+        if fp > GPUS_PER_NODE and fp % GPUS_PER_NODE:
+            raise ConfigError(
+                f"{role} pool footprint tp*pp*dp={fp} straddles a node boundary: a multi-node "
+                f"pool must fill whole {GPUS_PER_NODE}-GPU nodes")
+        out[role] = {"parallel": par, "engine": eng, "instances": instances,
+                     "footprint_gpus_per_instance": fp}
+    # The pools must agree on everything a handoff depends on. Each of these is a hard refusal
+    # upstream; checking them together means one clear message instead of a sweep of them.
+    for knob in PD_MUST_MATCH:
+        a = out["prefill"]["parallel"].get(knob, out["prefill"]["engine"].get(knob))
+        b = out["decode"]["parallel"].get(knob, out["decode"]["engine"].get(knob))
+        if a != b:
+            raise ConfigError(_pd_mismatch_reason(knob, a, b))
+    if out["prefill"]["engine"].get("speculative") != out["decode"]["engine"].get("speculative"):
+        raise ConfigError(
+            "the prefill and decode pools state different speculative configurations: one "
+            "speculative configuration applies to the whole run, so the pools must agree")
+    connector = cli.pop("pd_connector", DEFAULT_PD_CONNECTOR)
+    if connector not in NIXL_CONNECTORS:
+        raise ConfigError(
+            f"pd_connector {connector!r}: BLIS models NIXL's handoff (one of "
+            f"{', '.join(NIXL_CONNECTORS)})")
+    out["connector"] = connector
+    return out
+
+
+def _pd_mismatch_reason(knob, a, b):
+    """Why BLIS refuses two pools that disagree on `knob` -- its own reason, not a generic one."""
+    why = {
+        "dp": "one replica factor applies to both pools, so their dp must match",
+        "block_size": "a P/D handoff moves whole KV blocks, so the pools must page identically",
+        "cache_dtype": "the handoff moves the prefill pool's KV representation into the decode "
+                       "pool's blocks with no conversion modelled, so the cache formats must agree",
+        "quantization": "the pools' KV cache formats must agree for the handoff to move pages "
+                        "the decode engine holds",
+    }.get(knob, "BLIS requires the two pools to agree on this")
+    return (f"the prefill pool states {knob}={a!r} and the decode pool {knob}={b!r}: {why}")
+
+
+def pd_total_gpus(pd):
+    """GPUs a disaggregated deployment occupies: both pools' instances x their footprints."""
+    return sum(pd[r]["footprint_gpus_per_instance"] * pd[r]["instances"] for r in PD_ROLES)
 
 
 def footprint_gpus(parallel):
@@ -378,24 +617,41 @@ def run_acceptance(run):
     return al if al > 0 else None
 
 
-def worst_itl_p99(run):
-    """The WORST (max) p99 ITL across the cluster aggregate AND every per-instance metric.
+def worst_metric(run, key):
+    """The WORST (max) value of `key` across the cluster aggregate AND every per-instance metric.
 
-    A latency floor can be met in the aggregate yet violated on one instance, so feasibility is
-    judged on the worst instance. Returns (worst, missing_everywhere)."""
+    An SLO can be met in the aggregate yet violated on one instance, so feasibility is judged on
+    the worst instance -- for EVERY latency SLO, not just ITL. Judging ITL on the worst instance
+    while judging TTFT/E2E on the aggregate is the same displayed-servable-while-an-instance-is-
+    over split the ITL basis was reworked to remove (#19): in the committed multidoc-prefill
+    ledger three rows sit under the 10s TTFT cap in the aggregate while an instance is over it
+    (susiejojo review).
+
+    The aggregate is included rather than trusted, because it is NOT always the max over the
+    instances -- measured across the committed ledgers, an instance exceeds it on most rows for
+    every one of the three p99 metrics. Neither side alone is the worst case.
+
+    An idle instance reports 0, not null. For a latency metric `max` discards that naturally, and
+    taking the max (never the mean) is also what stops an idle 0 from dragging the worst case
+    down. Returns (worst, missing_everywhere).
+    """
     vals = []
     try:
-        agg = float((run.get("metrics") or {}).get("itl_p99_ms"))
-        vals.append(agg)
+        vals.append(float((run.get("metrics") or {}).get(key)))
     except (TypeError, ValueError):
         pass
     for inst in (run.get("metrics_all_instances") or []):
         if isinstance(inst, dict):
             try:
-                vals.append(float(inst.get("itl_p99_ms")))
+                vals.append(float(inst.get(key)))
             except (TypeError, ValueError):
                 pass
     return (max(vals), False) if vals else (None, True)
+
+
+def worst_itl_p99(run):
+    """The worst-instance p99 ITL -- `worst_metric` at the key the per-user rate is built on."""
+    return worst_metric(run, "itl_p99_ms")
 
 
 def per_user_rate(run):
@@ -625,10 +881,55 @@ def pool_nodes(parallel, num_instances=1):
     return max(1, -(-total // GPUS_PER_NODE))           # ceil(total / 8)
 
 
+def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router):
+    """Render a DISAGGREGATED Scenario+Deployment: one pool per role plus `pd_transfer`.
+
+    Pools never share a node (blis-vllm places each role on its own nodes and asserts they do
+    not overlap), so each pool is sized in WHOLE nodes and the cluster is their sum -- which is
+    also why a P/D cluster always names a fabric: every handoff crosses nodes.
+    """
+    pools, total_nodes = [], 0
+    for role in PD_ROLES:
+        spec = pd[role]
+        nodes = pool_nodes(spec["parallel"], spec["instances"])
+        total_nodes += nodes
+        pools.append(
+            f"  - role: {role}\n"
+            f"    nodes: {nodes}\n"
+            f"    parallel:\n{block(spec['parallel'], 6)}\n"
+            f"    engine:\n{block(spec['engine'], 6)}")
+    rc = (router or {}).get("router_config")
+    router_block = ""
+    if rc:
+        router_block = f"\nrouter:\n  endpoint_picker_config: {json.dumps(os.path.abspath(rc))}"
+    return f"""kind: Scenario
+name: {name}
+engine_version: "{engine_version}"
+model: {model}
+coefficients: [{", ".join(COEFFICIENTS)}]
+cluster:
+  hardware: {hardware}
+  fabric: {fabric}
+  nodes: {total_nodes}
+  gpus_per_node: {GPUS_PER_NODE}
+---
+kind: Deployment
+name: {name}
+pools:
+{chr(10).join(pools)}
+pd_transfer:
+  connector: {pd.get("connector", DEFAULT_PD_CONNECTOR)}{router_block}
+"""
+
+
 def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances=1,
                   fabric=DEFAULT_FABRIC, router=None):
     """Render a two-doc Scenario+Deployment YAML (no external yaml dep). Omitted engine keys (e.g.
-    quantization when unset) let the checkpoint/engine govern."""
+    quantization when unset) let the checkpoint/engine govern.
+
+    A `pd` block on `parallel` (written by resolve_pd) renders a DISAGGREGATED deployment: two
+    role pools plus the `pd_transfer` connector, instead of one colocated pool.
+    """
     def block(d, indent):
         """Render a flat mapping, plus the one NESTED value the engine takes (`speculative`).
 
@@ -638,12 +939,17 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
         pad = " " * indent
         out = []
         for k, v in d.items():
+            if k == "pd":
+                continue                  # not a schema field; it SELECTS the pool layout below
             if isinstance(v, dict):
                 out.append(f"{pad}{k}:")
                 out.extend(f"{pad}  {kk}: {json.dumps(vv)}" for kk, vv in v.items())
             else:
                 out.append(f"{pad}{k}: {json.dumps(v)}")
         return "\n".join(out)
+    pd = (parallel or {}).get("pd")
+    if pd:
+        return _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router)
     nodes = pool_nodes(parallel, num_instances)
     # A multi-node cluster MUST name a fabric: BLIS resolves cross-node cost from the fabric,
     # not the chip, and refuses the scenario otherwise ("scenario.cluster.fabric: required for
@@ -715,11 +1021,12 @@ def resolve_defaults(blis, defaults):
 
 
 def _cli_flag(key):
-    """The CLI flag for a cli-slot candidate key: a deployment knob or an acceptance selector."""
-    try:
-        return CLI_FLAGS[key]
-    except KeyError:
-        return SPECULATIVE_CLI[key]
+    """The CLI flag for a cli-slot candidate key: a deployment knob, a P/D instance count, or an
+    acceptance selector."""
+    for table in (CLI_FLAGS, PD_CLI, SPECULATIVE_CLI):
+        if key in table:
+            return table[key]
+    raise KeyError(key)
 
 
 def build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed, defaults, cli,
@@ -868,10 +1175,16 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                     "stdout_tail": "", "stderr_tail": ""})
         return rec
     num_instances = cli.get("num_instances", 1)
+    pd = (parallel or {}).get("pd")
     fp = footprint_gpus(parallel)
     # Fill block_size per MODEL when the candidate did not pin one (see default_block_size): the
     # adapter requires a value, and DSA models require it to be a multiple of 64.
     engine.setdefault("block_size", default_block_size(catalog, model, hardware))
+    if pd:
+        # Both pools page identically or BLIS refuses the handoff, so ONE resolved value is
+        # filled into both rather than each pool defaulting independently.
+        for role in PD_ROLES:
+            pd[role]["engine"].setdefault("block_size", engine["block_size"])
     # Fill the drafter from the MODEL's graph when a candidate asked for drafting without naming
     # one (the engine requires a method; see graph_speculator). A model with no speculator is
     # refused here rather than by BLIS, so the error names the model instead of an empty string.
@@ -928,8 +1241,12 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
         # `router` and `workload` are recorded so a ledger row states the WHOLE deployment and the
         # traffic it was priced on. Without the workload field a replay row and a generated-shape
         # row were indistinguishable after the fact.
+        # A disaggregated row's GPU count is BOTH pools together; `fp * num_instances` would be
+        # the shared layout's footprint, which no pool necessarily runs.
         "deployment": {"parallel": parallel, "engine": engine, "num_instances": num_instances,
-                       "footprint_gpus_per_instance": fp, "gpus": fp * num_instances,
+                       "footprint_gpus_per_instance": fp,
+                       "gpus": pd_total_gpus(pd) if pd else fp * num_instances,
+                       "disaggregated": bool(pd),
                        "scenario": scenario_name, "router": router or None,
                        # The acceptance the drafting run was priced with, so the report can
                        # derive a correct per-token rate instead of a per-STEP one.

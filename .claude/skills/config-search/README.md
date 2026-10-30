@@ -24,9 +24,11 @@ headroom, or ask for a different headline -- just say so when you invoke it.
 
 ## Prerequisites
 
-See `SETUP.md`. In short: build BLIS release `v0.10.0` (@ `0d092d4`) as `./blis` (runs on the accurate
-`blis-latency-kernel` backend), and point `BLIS_CATALOG` at blis-catalog `0.2.1` and `BLIS_REGISTRY`
-at blis-registry `v0.1.1`. All example models (`glm-5.3-flash`, `qwen3-14b`) already ship in `0.2.1`.
+See `SETUP.md`, which clones the refs `pins.env` pins — the single source of truth for the stack
+that prices every run (`scripts/test_build.py` checks this doc against it). In short: build the
+pinned BLIS release as `./blis` (it runs on the accurate `blis-latency-kernel` backend), then point
+`BLIS_CATALOG` and `BLIS_REGISTRY` at the pinned blis-catalog and blis-registry. The example models
+(`glm-5.3-flash`, `qwen3-14b`) ship in the pinned catalog.
 
 ## Use it
 

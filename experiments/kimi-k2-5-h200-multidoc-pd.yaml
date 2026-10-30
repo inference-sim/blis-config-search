@@ -1,0 +1,42 @@
+# Colocated vs. disaggregated serving, and where the P/D split should trigger.
+# RFC #21's colocated-vs-disaggregated example, verbatim.
+#
+# In BLIS the P/D split is a ROUTER decision, so the disaggregated sweeps vary the P/D
+# decider rather than a deployment flag. The GPU budget counts both pools together:
+# prefill-instances x prefill footprint + decode-instances x decode footprint == gpus.
+name: kimi-k2-5-h200-multidoc-pd
+
+scenario: {model: kimi-k2.5, hardware: h200, workload: multidoc, gpus: 64,
+           slo: {itl_p99: 20ms, ttft_p99: 5s}, concurrency: [8, 16, 32, 64, 128, 256, 512]}
+
+sweeps:
+  - name: aggregated
+    narrative: >
+      One pool that both prefills and decodes. The control the disaggregated arms must beat
+      -- colocation wastes nothing on a KV handoff, so disaggregation has to earn its cost.
+    num-instances: [8, 16]
+    parallel: {tp: [4, 8], dp: [1, 2], enable_expert_parallel: [false, true]}
+    router: {endpoint_picker_config: [queue.yaml, prefix-affinity.yaml]}
+
+  - name: disaggregated
+    narrative: >
+      Dedicated prefill and decode pools, swept over the prefill:decode ratio. Multidoc has
+      long prompts and short outputs, so prefill is the half under pressure.
+    prefill-instances: [2, 3, 4]
+    decode-instances: [4, 5, 6]
+    prefill: {parallel: {tp: [8], enable_expert_parallel: [true]}}
+    decode:  {parallel: {tp: [8], enable_expert_parallel: [true]}}
+    router: {endpoint_picker_config: [pd-always.yaml, pd-prefix.yaml]}
+
+  - name: pd-threshold                    # split only when this many prompt tokens are uncached
+    narrative: >
+      Holding the best ratio fixed, how much uncached prompt should it take before a request
+      is worth disaggregating? Below the threshold the request decodes where it prefilled.
+    prefill-instances: [3]
+    decode-instances: [5]
+    prefill: {parallel: {tp: [8], enable_expert_parallel: [true]}}
+    decode:  {parallel: {tp: [8], enable_expert_parallel: [true]}}
+    router:
+      endpoint_picker_config: [pd-prefix.yaml]
+      plugins:
+        prefix-based-pd-decider: {parameters: {nonCachedTokens: [16, 256, 1024, 4096]}}

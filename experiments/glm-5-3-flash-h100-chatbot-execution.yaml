@@ -1,0 +1,66 @@
+# Where does the execution layer bind on an MoE part, and does the answer move with the shape?
+#
+# From `knob_profile.py --model glm-5.3-flash --hardware h100 --workload chatbot`:
+#   MoE, 288 experts, sparse_mla, fp8 checkpoint, speculator glm5_next_mtp (K<=1)
+#   -> dp/EP and all2all_backend are real axes; KV precision is WEAK (sparse MLA already keeps
+#      KV small); `quantization` is already fixed by the fp8 checkpoint.
+# Left out: prefix caching (chatbot prompts are unique -- needs a replay), scheduling_policy
+# (no per-request priorities), drafting (K<=1, and the K=1 arm measured -25% elsewhere).
+name: glm-5-3-flash-h100-chatbot-execution
+
+scenario: {model: glm-5.3-flash, hardware: h100, workload: chatbot, gpus: 16,
+           slo: {itl_p99: 20ms}, concurrency: [8, 32, 128, 256]}
+
+sweeps:
+  # One sweep per contended resource, with the knobs that fight over it crossed inside it.
+  # The interacting ones carry two shapes (2x TP8xDP1 and 8x TP2xDP1); the GPU filter drops
+  # the mismatched pairs.
+  - name: shape-and-expert-parallelism
+    # The baseline the rest are measured against. EP width is tp x dp, so EP over width 1
+    # shards nothing -- the dp axis is what makes the EP arm meaningful on 288 experts.
+    narrative: Expert parallelism should pay at the wider shapes, where tp x dp is large enough
+      to shard 288 experts without the all-to-all eating the gain.
+    num-instances: [2, 4, 8]
+    parallel: {tp: [2, 4, 8], dp: [1, 2], enable_expert_parallel: [false, true]}
+
+  - name: moe-dispatch-vs-shape
+    # all2all_backend's cost IS a function of tp x dp (33% spread measured), so it cannot be
+    # answered at one width -- the two shapes are the point of the sweep.
+    narrative: The dispatch backend should separate more at the narrow-tp, wide-dp shape, where
+      the all-to-all moves more data per step.
+    num-instances: [2, 8]
+    parallel: {tp: [8, 2], enable_expert_parallel: [true]}
+    engine:
+      all2all_backend: [allgather_reducescatter, deepep_high_throughput, deepep_low_latency]
+
+  - name: batch-vs-shape
+    # Two caps on the SAME batch, crossed rather than swept apart; and the per-instance session
+    # share scales with the fleet (measured 46x difference in what the seq cap is worth).
+    narrative: Whichever batch cap binds first should set the ceiling, and both should bind
+      harder on two wide instances than on eight narrow ones.
+    num-instances: [2, 8]
+    parallel: {tp: [8, 2], enable_expert_parallel: [true]}
+    engine:
+      max_num_seqs: [16, 64, 256]
+      max_num_batched_tokens: [2048, 8192, 32768]
+
+  - name: per-step-overhead
+    # cudagraph_mode does not interact with topology (+3.6% vs +2.4% at two widths), so one
+    # shape is enough. The fp8 checkpoint fixes `quantization`, so capture is the only axis.
+    narrative: Graph capture should be worth more than any amount of the batch tuning above,
+      since it changes the per-step host cost rather than the batch.
+    num-instances: [2]
+    parallel: {tp: [8], enable_expert_parallel: [true]}
+    engine:
+      cudagraph_mode: [NONE, PIECEWISE, FULL, FULL_DECODE_ONLY, FULL_AND_PIECEWISE]
+
+  - name: kv-and-admission
+    # Sparse MLA keeps KV small, so KV precision is a WEAK lever here -- it shares a sweep with
+    # the prefill cap rather than getting one of its own.
+    narrative: With sparse MLA already keeping KV small, the prefill chunk cap should matter
+      more than the cache precision.
+    num-instances: [2]
+    parallel: {tp: [8], enable_expert_parallel: [true]}
+    engine:
+      cache_dtype: [auto, fp8]
+      long_prefill_token_threshold: [512, 2048, 8192]

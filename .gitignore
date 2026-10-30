@@ -13,6 +13,11 @@ __pycache__/
 # JSON (scenario.json / pareto.json / runs.jsonl / report.json / gallery.json), not the HTML.
 reports/*/index.html
 
+# Generated BLIS scenario YAMLs written by a sweep. A reproducible intermediate — run_experiment
+# regenerates them byte-identically from the spec — so the committed report carries the results,
+# not the inputs BLIS was handed.
+reports/*/scenarios/
+
 # Pinned BLIS binary + extracted source (built locally; not committed)
 /.build/
 
@@ -20,3 +25,7 @@ reports/*/index.html
 # brainstorm/plan workflow, not part of what the repo ships.
 /docs/superpowers/
 /design/
+
+# Replay corpora: fetched by scripts/fetch_corpus.py and digest-checked against the catalog.
+# 568 MB and deliberately not vendored (blis-catalog/workloads/agentx-mvp.yaml says so).
+/.corpus/

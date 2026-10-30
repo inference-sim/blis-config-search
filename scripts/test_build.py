@@ -291,6 +291,67 @@ def test_pins_are_the_single_source_of_the_sim_version():
     check(f"--branch {ref} " not in wf,
           "generate-report.yml hard-codes the sim ref; source it from pins.env instead")
 
+    # The workflow that sweeps merged experiment specs clones the same three pins.
+    with open(os.path.join(ROOT, ".github", "workflows", "run-experiment.yml")) as f:
+        exp_wf = f.read()
+    check(". ./pins.env" in exp_wf, "run-experiment.yml should source pins.env")
+    # It must CHECK the sha, by reading it from pins.env -- a literal sha here would be a second
+    # copy of the pin, which is the drift pins.env exists to prevent.
+    check("$BLIS_SHA" in exp_wf, "run-experiment.yml should verify BLIS_SHA from pins.env")
+    check(sha not in exp_wf, "run-experiment.yml hard-codes the sha; read it from pins.env")
+
+    # The catalog must be cloned BEFORE the validate step, or the existence check on
+    # scenario.model/hardware/workload silently no-ops and a typo'd identifier still reaches the
+    # Go build before failing every run (susiejojo review on #22). Ordering is the whole point,
+    # so assert the positions, not just the presence.
+    clone_at = exp_wf.find("blis-catalog.git")
+    validate_at = exp_wf.find("validate_experiment.py")
+    check(clone_at != -1 and validate_at != -1 and clone_at < validate_at,
+          "run-experiment.yml must clone blis-catalog BEFORE validating, so the "
+          "model/hardware/workload existence check can run")
+    check('validate_experiment.py "$spec" --catalog' in exp_wf,
+          "run-experiment.yml should validate WITH --catalog, or the existence check no-ops")
+
+    # The schema/validator agreement tests SKIP when jsonschema is absent, so the job that runs
+    # them has to install it -- otherwise the drift guard quietly becomes a no-op and the
+    # published schema can fall behind with CI still green (susiejojo review on #22).
+    # Match the pip INVOCATION, not the word: a comment mentioning jsonschema would satisfy a
+    # bare substring check while the package went uninstalled.
+    with open(os.path.join(ROOT, ".github", "workflows", "checks.yml")) as f:
+        checks_wf = f.read()
+    installs = [ln.strip() for ln in checks_wf.splitlines() if "pip install" in ln]
+    # The `python` job is the one that runs test_experiment.py, so that is the install line that
+    # has to carry it -- and the fork-safe `experiments` job must NOT need a new dependency.
+    py_job = checks_wf.split("experiments:")[0]
+    py_installs = [ln.strip() for ln in py_job.splitlines() if "pip install" in ln]
+    check(any("jsonschema" in ln for ln in py_installs),
+          "checks.yml's `python` job must `pip install jsonschema`, or "
+          "SchemaAgreesWithValidator skips in CI and the schema/validator drift guard never runs")
+    check(all("pyyaml" in ln for ln in installs),
+          "every checks.yml job still needs pyyaml")
+
+    # GUIDANCE must not restate a superseded version. A doc that tells a contributor to clone a
+    # ref the stack no longer uses is worse than one saying nothing: SETUP.md was correct at
+    # v0.12.0 while the skill's README and SKILL.md still read "build v0.10.0 ... catalog 0.2.1",
+    # and nothing failed, because only SETUP.md was checked (qa-review on #22, F2/F3).
+    #
+    # Historical statements are legitimate and stay: a dated measurement, a "removed in vX" note,
+    # a recorded pinned_stack. So this reads only the *instructional* surfaces and asks that any
+    # version they name is one pins.env actually pins.
+    pinned_refs = {pins.get(k) for k in ("BLIS_REF", "CATALOG_REF", "REGISTRY_REF", "KERNEL_REF")}
+    superseded = {"v0.10.0", "0.2.1", "v0.1.1"} - pinned_refs
+    for rel in (os.path.join(".claude", "skills", "config-search", "README.md"),
+                os.path.join("experiments", "README.md"),
+                os.path.join(".claude", "skills", "blis-experiment", "SKILL.md")):
+        path = os.path.join(ROOT, rel)
+        if not os.path.exists(path):
+            continue
+        with open(path) as f:
+            text = f.read()
+        for stale in sorted(superseded):
+            check(stale not in text,
+                  f"{rel} names superseded ref {stale}; cite pins.env instead of a version")
+
 
 def test_lexicon_mirror_is_in_sync():
     """The shared report vocabulary (issue #13) lives in the skill at

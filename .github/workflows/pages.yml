@@ -115,6 +115,7 @@ jobs:
     permissions:
       contents: write          # commit the preview folder to gh-pages
       pull-requests: write     # post / update the sticky preview comment
+      pages: read              # poll the Pages build so the comment waits for a live preview
     steps:
       # The preview action reads the checkout for git config, and on `closed` it only removes.
       - uses: actions/checkout@v4
@@ -128,3 +129,7 @@ jobs:
           umbrella-dir: pr-preview
           action: auto           # deploy on open/sync, remove on close
           qr-code: "false"
+          # Comment only once GitHub's Pages build of the preview commit reports `built`, so the
+          # link is never posted while it still 404s. A failed or timed-out Pages build fails
+          # this job and posts no comment.
+          wait-for-pages-deployment: true

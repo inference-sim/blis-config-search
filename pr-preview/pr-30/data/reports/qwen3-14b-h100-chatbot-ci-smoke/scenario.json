@@ -1,0 +1,47 @@
+{
+  "experiment": {
+    "description": "",
+    "name": "qwen3-14b-h100-chatbot-ci-smoke",
+    "sweeps": [
+      {
+        "name": "shape",
+        "narrative": "Two tp1 replicas should beat one tp2 instance per GPU on a model this small."
+      }
+    ]
+  },
+  "gpu_budget": 2,
+  "hardware": "h100",
+  "headroom": 1.0,
+  "interactivity_floor": {
+    "tok_per_s_per_user": 50.0
+  },
+  "model": "qwen3-14b",
+  "objective": "max output tok/s per GPU subject to the scenario's SLOs",
+  "pinned_stack": {
+    "blis": "v0.12.0",
+    "catalog": "0.4.0",
+    "kernel": "v0.3.0",
+    "registry": "v0.2.0",
+    "resolved": {
+      "blis": {
+        "sha256": "e07a9182357be55c333b778c12fadcd2b73a893f75ce3ec6667760f0cca4e222"
+      },
+      "catalog": {
+        "commit": "ba542f0986c9f39fc1f18619b94f655a654d9940",
+        "describe": "0.4.0"
+      },
+      "registry": {
+        "commit": "7f6662d7188dc3dc873a37623e1f7bbfe1d6081b",
+        "describe": "v0.2.0"
+      }
+    }
+  },
+  "run_id": "qwen3-14b-h100-chatbot-ci-smoke",
+  "seed": 42,
+  "slos": {
+    "itl_p99": "20ms"
+  },
+  "workload": {
+    "preset": "chatbot"
+  }
+}

@@ -21,6 +21,19 @@ kimi-k2.5), and it has **no exact equivalent** on this stack. A pre-v0.12.0 repo
 routing policies therefore cannot be reproduced arm-for-arm; the nearest comparison is
 `queue.yaml` / `load-aware.yaml` against the router's default.
 
+## P/D arms
+
+Two arms exist only for **disaggregated** sweeps (prefill and decode pools), where the router is
+what decides whether a request is split at all:
+
+| file | behaviour |
+|---|---|
+| `pd-always.yaml` | `always-disagg-pd-decider` — **every** request is disaggregated. The upper bound on what the KV handoff costs. Copied from inference-sim/blis-vllm's own P/D test scenario, so the simulated router runs the same file the upstream tests do. |
+| `pd-prefix.yaml` | `prefix-based-pd-decider` — split only when at least `nonCachedTokens` of the prompt is uncached, so a request whose prefix is already cached decodes where it prefilled. `nonCachedTokens` is the knob worth sweeping. |
+
+Both use `prefill-filter` / `decode-filter`, which need role-labelled pods: on a **colocated**
+deployment there are none, so these arms belong only to a sweep that states two pools.
+
 Omitting `router_config` entirely runs the router's built-in standalone configuration over every
 pod, which is the baseline every arm here is measured against. Measured on
 deepseek-v4.1-flash / 4x TP8xDP4 / 64 sessions: the default and `queue.yaml` are byte-identical

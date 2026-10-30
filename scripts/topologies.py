@@ -222,7 +222,52 @@ KNOB_NAMES = {"num_speculative_tokens": "draft tokens", "speculative_method": "d
               "routing_scorers": "scorers",
               "max_num_batched_tokens": "batch tokens", "max_num_seqs": "max seqs",
               "block_size": "block size", "gpu_memory_utilization": "gpu mem util",
-              "scheduler": "scheduler", "admission_policy": "admission"}
+              "scheduler": "scheduler", "admission_policy": "admission",
+              # The wider engine surface an Experiment Spec can sweep. Each is the name a
+              # reader would use for the setting, not the engine's field name: a variant
+              # reading "cudagraph_mode FULL_AND_PIECEWISE" is a field dump, where "graph
+              # capture full+piecewise" is a description.
+              "cudagraph_mode": "graph capture",
+              "max_cudagraph_capture_size": "max captured step",
+              "cudagraph_capture_sizes": "captured steps",
+              "long_prefill_token_threshold": "prefill chunk",
+              "scheduling_policy": "scheduling", "async_scheduling": "async scheduling",
+              "enable_prefix_caching": "prefix caching",
+              "disable_cascade_attn": "cascade attention disabled",
+              "swa_bounded_replay": "bounded SWA replay",
+              "all2all_backend": "all-to-all", "moe_backend": "MoE kernel",
+              "allreduce_backend": "all-reduce",
+              "disable_custom_all_reduce": "custom all-reduce disabled",
+              "cache_dtype": "KV dtype", "quantization": "weights",
+              "max_model_len": "context window",
+              "dcp_comm_backend": "decode-CP transport",
+              "dcp_q_replicate": "decode-CP query replication",
+              "cp_kv_cache_interleave_size": "CP interleave",
+              "mamba_cache_dtype": "mamba cache dtype",
+              "mamba_ssm_cache_dtype": "mamba SSM cache dtype",
+              "mamba_cache_mode": "mamba cache mode",
+              # nested engine blocks and their inner fields
+              "eplb": "expert balancing", "dbo": "dual-batch overlap",
+              "engram_config": "engram",
+              "enable_eplb": "expert balancing",
+              "num_redundant_experts": "redundant experts",
+              "window_size": "window", "step_interval": "step interval",
+              "enable_dbo": "dual-batch overlap",
+              "dbo_decode_token_threshold": "DBO decode threshold",
+              "dbo_prefill_token_threshold": "DBO prefill threshold",
+              "cpu_offload": "CPU offload", "dp_shared_memory": "DP shared memory",
+              "use_thp": "huge pages"}
+
+# Knobs whose value is a BOOLEAN, phrased as a state rather than "name True". "prefix caching
+# False" reads as a value dump; "prefix caching off" reads as a deployment.
+_BOOL_KNOB_WORDS = {
+    "enable_prefix_caching": ("prefix caching on", "prefix caching off"),
+    "async_scheduling": ("async scheduling on", "async scheduling off"),
+    "disable_cascade_attn": ("cascade attention off", "cascade attention on"),
+    "disable_custom_all_reduce": ("custom all-reduce off", "custom all-reduce on"),
+    "swa_bounded_replay": ("bounded SWA replay on", "bounded SWA replay off"),
+    "dcp_q_replicate": ("decode-CP query replication on", "decode-CP query replication off"),
+}
 
 
 def routing_arm_name(path):
@@ -243,7 +288,18 @@ def knob_phrase(key, value):
         return f"{routing_arm_name(value)} routing"
     if key == "routing_policy":
         return f"{value} routing"
+    if key in _BOOL_KNOB_WORDS and isinstance(value, bool):
+        on, off = _BOOL_KNOB_WORDS[key]
+        return on if value else off
     name = KNOB_NAMES.get(key, key)
-    if key in ("max_num_batched_tokens", "max_num_seqs", "block_size"):
+    if key == "cudagraph_mode":
+        # The enum is SHOUTED (FULL_AND_PIECEWISE); spell it as words.
+        return f"{name} {str(value).lower().replace('_and_', '+').replace('_', ' ')}"
+    if key == "cudagraph_capture_sizes" and isinstance(value, (list, tuple)):
+        return f"{name} {', '.join(str(v) for v in value)}"
+    if isinstance(value, int) and not isinstance(value, bool) and key in (
+            "max_num_batched_tokens", "max_num_seqs", "block_size", "max_model_len",
+            "long_prefill_token_threshold", "max_cudagraph_capture_size",
+            "cp_kv_cache_interleave_size"):
         return f"{name} {value:,}"
     return f"{name} {value}"

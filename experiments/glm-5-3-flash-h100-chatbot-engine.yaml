@@ -1,0 +1,30 @@
+# Engine tuning on a fixed topology -- RFC #21's engine-tuning example, verbatim.
+#
+# The topology is pinned at 2 x TP8 in both sweeps, so every difference is attributable to
+# the engine knob being swept. These knobs mostly bind DOWNWARD: raising them past the
+# default has measured as a no-op, so the grids probe the constrained side too.
+name: glm-5-3-flash-h100-chatbot-engine
+
+scenario: {model: glm-5.3-flash, hardware: h100, workload: chatbot, gpus: 16,
+           slo: {itl_p99: 20ms}, concurrency: [1, 2, 4, 8, 16, 32, 64, 128, 256]}
+
+sweeps:
+  - name: batching
+    narrative: >
+      How wide a batch does this deployment need? max_num_seqs caps concurrent sequences and
+      max_num_batched_tokens caps one scheduler step; whichever binds first sets the ceiling.
+    num-instances: [2]
+    parallel: {tp: [8], enable_expert_parallel: [true]}
+    engine:
+      max_num_seqs: [32, 64, 128, 256, 512, 1024]
+      max_num_batched_tokens: [2048, 4096, 8192, 16384, 32768]
+
+  - name: kv-memory
+    narrative: >
+      KV capacity against KV precision. fp8 halves the per-token cost of the cache, which
+      should buy the same headroom as a higher memory fraction -- at some accuracy cost.
+    num-instances: [2]
+    parallel: {tp: [8], enable_expert_parallel: [true]}
+    engine:
+      cache_dtype: [auto, fp8]
+      gpu_memory_utilization: [0.70, 0.75, 0.80, 0.85, 0.90, 0.95]

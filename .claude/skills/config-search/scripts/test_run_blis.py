@@ -135,17 +135,61 @@ class ClassifyConfig(unittest.TestCase):
         with self.assertRaises(run_blis.ConfigError):
             run_blis.classify_config({"tp": 8, "totally_made_up": 1})
 
-    def test_rejects_pd_keys(self):
+    def test_pd_keys_need_both_instance_counts(self):
+        """P/D is supported now, but a candidate naming per-role layout without the instance
+        counts describes no deployment -- BLIS refuses a pool with no counterpart."""
         with self.assertRaises(run_blis.ConfigError):
-            run_blis.classify_config({"tp": 8, "prefill_tp": 4, "decode_tp": 8})
+            run_blis.classify_config({"prefill_tp": 4, "decode_tp": 8})
 
-    def test_rejects_long_prefill(self):
-        with self.assertRaises(run_blis.ConfigError):
-            run_blis.classify_config({"tp": 8, "long_prefill_token_threshold": 4096})
+    def test_accepts_long_prefill(self):
+        """`long_prefill_token_threshold` IS a field of the pinned blis-schemas (v0.5.0) Engine
+        struct, and a run naming it completes and moves the number (measured 1983.2 -> 1973.9
+        tok/s at 256 on chatbot tp8 c=8). It was listed unsupported on the strength of a stale
+        note about the kernel, which cost the search a real prefill-admission knob."""
+        _par, engine, _cli, _router = run_blis.classify_config(
+            {"tp": 8, "long_prefill_token_threshold": 4096})
+        self.assertEqual(4096, engine["long_prefill_token_threshold"])
+
+    def test_rejects_knobs_the_pinned_schema_has_no_field_for(self):
+        """vLLM v0.32.0 defines ~51 engine fields; the pinned blis-schemas v0.5.0 has 31. A key
+        outside those fails the scenario's strict decode, so it is refused here with that reason
+        rather than written into a scenario that cannot load."""
+        with self.assertRaises(run_blis.ConfigError) as e:
+            run_blis.classify_config({"tp": 8, "max_num_active_seqs": 128})
+        self.assertIn("pinned BLIS", str(e.exception))
 
     def test_rejects_pp_gt_1(self):
         with self.assertRaises(run_blis.ConfigError):
             run_blis.classify_config({"tp": 8, "pp": 2})
+
+    def test_carries_the_wider_engine_surface(self):
+        """Every knob in SCENARIO_ENGINE must reach the scenario's engine block.
+
+        Verified against the pinned binary: a scenario carrying all of these loads and runs.
+        """
+        cfg = {"tp": 8, "num_instances": 1, "cudagraph_mode": "FULL",
+               "max_cudagraph_capture_size": 256, "enable_prefix_caching": False,
+               "scheduling_policy": "priority", "async_scheduling": True,
+               "allreduce_backend": "nccl", "disable_cascade_attn": True,
+               "all2all_backend": "deepep_low_latency", "moe_backend": "triton",
+               "long_prefill_token_threshold": 2048}
+        _par, engine, _cli, _router = run_blis.classify_config(cfg)
+        for key, want in cfg.items():
+            if key in ("tp", "num_instances"):
+                continue
+            self.assertEqual(want, engine[key], key)
+
+    def test_booleans_and_int_lists_render_as_valid_yaml(self):
+        """json.dumps gives YAML-valid `true`/`false` and `[1, 2, 4]`; a Python repr would not."""
+        par, engine, _cli, _r = run_blis.classify_config(
+            {"tp": 8, "enable_prefix_caching": False, "async_scheduling": True,
+             "cudagraph_capture_sizes": [1, 2, 4]})
+        doc = run_blis.scenario_yaml("qwen3-14b", "h100", "0.29.0", par, engine, "x", 1)
+        self.assertIn("enable_prefix_caching: false", doc)
+        self.assertIn("async_scheduling: true", doc)
+        self.assertIn("cudagraph_capture_sizes: [1, 2, 4]", doc)
+        self.assertNotIn("False", doc)
+        self.assertNotIn("True", doc)
 
 
 class Footprint(unittest.TestCase):

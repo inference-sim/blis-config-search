@@ -221,6 +221,24 @@ def test_workflows_sane():
     check(_yaml.safe_load(ptxt) is not None, "pages.yml parses")
     check("pages: write" in ptxt and "refs/heads/main" in ptxt, "pages publish gated to main")
 
+    # The deterministic sweeper. Unlike generate-report.yml it needs no approval gate (no LLM in
+    # the path), but it must still never write to main or publish: its only output is a bot PR.
+    rx = os.path.join(ROOT, ".github", "workflows", "run-experiment.yml")
+    rtxt = open(rx).read()
+    check(_yaml.safe_load(rtxt) is not None, "run-experiment.yml parses")
+    check("pull-requests: write" in rtxt, "run-experiment opens a PR rather than pushing to main")
+    check("--base main --head" in rtxt, "run-experiment targets main through a PR")
+    check("pages: write" not in rtxt, "run-experiment never publishes directly")
+    check("validate_experiment.py" in rtxt, "run-experiment validates before building BLIS")
+    check("pins.env" in rtxt, "run-experiment builds the pinned stack from pins.env")
+
+    ck = os.path.join(ROOT, ".github", "workflows", "checks.yml")
+    ctxt = open(ck).read()
+    check(_yaml.safe_load(ctxt) is not None, "checks.yml parses")
+    check("validate_experiment.py experiments/" in ctxt,
+          "checks.yml validates every committed experiment spec")
+    check("test_experiment.py" in ctxt, "checks.yml runs the experiment pipeline tests")
+
 
 if __name__ == "__main__":
     test_serve_local()

@@ -1,0 +1,184 @@
+name: run-experiment
+
+# The deterministic sweeper, in CI. A contributor opens a PR adding experiments/<name>.yaml;
+# checks.yml validates it (no secrets, safe for forks). After the spec is MERGED, this workflow
+# runs the sweep and opens a FOLLOW-UP PR adding reports/<name>/ plus the gallery entry. Merging
+# that PR publishes through pages.yml.
+#
+#   spec PR  --validate-->  merge  --sweep-->  bot PR (adds the report)  --merge-->  published
+#
+# Why this is safe, and why it needs no LLM approval gate:
+#   * The sweeper has NO LLM. It expands the spec's grids, filters on GPU arithmetic, runs BLIS
+#     at the pinned refs with a fixed seed, and ranks by an executable rule. Given the same spec
+#     and the same pins it produces the same report, so there is nothing non-hermetic to gate --
+#     unlike generate-report.yml, whose search brain is a model and which therefore keeps its
+#     maintainer-approved environment.
+#   * No secrets are used. Nothing is published: the report lands on a bot branch for review,
+#     and publishing is still gated on a human merging that PR.
+#   * It never writes to main. The bot PR is the only output.
+#
+# A maintainer can also dispatch this manually for a spec that is already on main (e.g. to
+# re-run after a pins bump), which is the `workflow_dispatch` path below.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "experiments/**.yaml"
+  workflow_dispatch:
+    inputs:
+      spec:
+        description: "experiments/<name>.yaml to run (blank = every spec changed on main)"
+        required: false
+      timeout:
+        description: "per-BLIS-run timeout in seconds"
+        required: false
+        default: "600"
+
+permissions:
+  contents: read
+
+concurrency:
+  # One sweep at a time: a campaign is long, and two concurrent runs would race on the bot branch.
+  group: run-experiment
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    permissions:
+      contents: write          # push the bot branch
+      pull-requests: write     # open the follow-up PR
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2       # need the previous commit to diff which specs changed
+
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24" }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyyaml
+
+      - name: Decide which specs to run
+        id: pick
+        run: |
+          set -euo pipefail
+          requested="${{ github.event.inputs.spec }}"
+          if [ -n "$requested" ]; then
+            case "$requested" in
+              experiments/*.yaml) ;;
+              *) echo "spec must be experiments/<name>.yaml" >&2; exit 1 ;;
+            esac
+            case "$requested" in *..*|/*) echo "unsafe path" >&2; exit 1 ;; esac
+            test -f "$requested" || { echo "no such spec: $requested" >&2; exit 1; }
+            specs="$requested"
+          else
+            # Only the specs this push actually touched -- a pins bump or a README edit should
+            # not silently re-run every campaign in the repo.
+            specs="$(git diff --name-only --diff-filter=d HEAD^ HEAD -- 'experiments/*.yaml' || true)"
+          fi
+          if [ -z "$specs" ]; then
+            echo "no experiment specs to run"
+            echo "specs=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "will run:"; echo "$specs"
+          # Newline-delimited through the output file so a multi-spec push works.
+          {
+            echo "specs<<EOF"
+            echo "$specs"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Validate before building anything
+        if: steps.pick.outputs.specs != ''
+        run: |
+          set -euo pipefail
+          while IFS= read -r spec; do
+            [ -n "$spec" ] || continue
+            python3 -I scripts/validate_experiment.py "$spec"
+            python3 -I scripts/run_experiment.py "$spec" --dry-run
+          done <<< "${{ steps.pick.outputs.specs }}"
+
+      - name: Build the pinned BLIS stack
+        if: steps.pick.outputs.specs != ''
+        run: |
+          set -euo pipefail
+          # pins.env is the single source of truth for which simulator priced these runs; never
+          # hard-code a ref here (scripts/test_build.py enforces the agreement).
+          set -a; . ./pins.env; set +a
+          git clone --branch "$BLIS_REF" --depth 1 https://github.com/inference-sim/inference-sim.git upstream
+          # The tag is not immutable upstream; refuse to build a moved tag (same check as SETUP.md).
+          test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
+            echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
+          ( cd upstream && go build -o blis main.go )
+          git clone --branch "$CATALOG_REF" --depth 1 https://github.com/inference-sim/blis-catalog.git
+          git clone --branch "$REGISTRY_REF" --depth 1 https://github.com/inference-sim/blis-registry.git
+          echo "BLIS_CATALOG=$PWD/blis-catalog"   >> "$GITHUB_ENV"
+          echo "BLIS_REGISTRY=$PWD/blis-registry" >> "$GITHUB_ENV"
+          echo "BLIS_BIN=$PWD/upstream/blis"      >> "$GITHUB_ENV"
+
+      - name: Run the sweeper
+        if: steps.pick.outputs.specs != ''
+        id: run
+        run: |
+          set -euo pipefail
+          names=""
+          while IFS= read -r spec; do
+            [ -n "$spec" ] || continue
+            echo "::group::$spec"
+            python3 -I scripts/run_experiment.py "$spec" \
+              --blis "$BLIS_BIN" --catalog "$BLIS_CATALOG" --registry "$BLIS_REGISTRY" \
+              --out reports/ --timeout "${{ github.event.inputs.timeout || '600' }}"
+            echo "::endgroup::"
+            names="$names $(basename "$spec" .yaml)"
+          done <<< "${{ steps.pick.outputs.specs }}"
+          echo "names=$(echo $names | xargs)" >> "$GITHUB_OUTPUT"
+
+      - name: Build the site to validate the new reports
+        if: steps.pick.outputs.specs != ''
+        run: python3 -I scripts/build_gallery.py --no-mock --out /tmp/site-check
+
+      - name: Open the follow-up PR
+        if: steps.pick.outputs.specs != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          names="${{ steps.run.outputs.names }}"
+          branch="experiment-report/${GITHUB_SHA::10}"
+          git config user.name  "blis-config-search-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git checkout -b "$branch"
+          # The generated BLIS scenario YAMLs are reproducible intermediates, not results: they
+          # are regenerated byte-identically from the spec, so they stay out of the committed
+          # report (.gitignore also covers them).
+          rm -rf reports/*/scenarios
+          git add reports/
+          if git diff --cached --quiet; then
+            echo "the sweeper produced no changes -- nothing to open a PR for"
+            exit 0
+          fi
+          git commit -m "ci: add experiment report(s) for $names
+
+          Produced by scripts/run_experiment.py from the merged spec(s) at ${GITHUB_SHA::10},
+          against the stack pinned in pins.env. No LLM in this path: the grids, the GPU filter,
+          the runs and the winner are all deterministic, so re-running the same spec on the same
+          pins reproduces this report."
+          git push origin "$branch"
+          gh pr create \
+            --title "Experiment report(s): $names" \
+            --body "Generated by \`run-experiment.yml\` from the spec(s) merged in ${GITHUB_SHA::10}.
+
+          **This is machine-generated measurement data.** The sweeper has no LLM: it expanded each
+          sweep's grid, dropped combos that did not use exactly the scenario's GPU budget, ran BLIS
+          at the pinned refs with the spec's fixed seed, and picked the winner by an executable
+          rule (most output tok/s per GPU among runs holding the SLOs). The same spec and pins
+          reproduce it.
+
+          Review the numbers, then merge to publish through \`pages.yml\`.
+
+          🤖 Generated with [Claude Code](https://claude.com/claude-code)" \
+            --base main --head "$branch"

@@ -28,6 +28,30 @@ jobs:
         run: |
           python3 -I .claude/skills/config-search/scripts/test_report.py
           python3 -I .claude/skills/config-search/scripts/test_run_blis.py
+      - name: Experiment spec pipeline tests (validator, grids, overrides, ranking)
+        run: python3 -I scripts/test_experiment.py
+
+  # Validate every committed Experiment Spec. Separate from the test job because this is the
+  # check a CONTRIBUTOR's PR is judged on: it reads only YAML from the repo, needs no secrets and
+  # runs no BLIS, so it is safe on a fork PR and gives a spec author a fast, specific answer.
+  experiments:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyyaml
+      - name: Validate experiments/
+        run: python3 -I scripts/validate_experiment.py experiments/
+      - name: Knob profile smoke test (no catalog checkout -> must degrade, not crash)
+        run: |
+          python3 -I -c "import sys; sys.path.insert(0,'scripts'); import knob_profile; print('ok')"
+      - name: Expand every spec's grids (catches a spec that would run nothing)
+        run: |
+          set -euo pipefail
+          for spec in experiments/*.yaml; do
+            python3 -I scripts/run_experiment.py "$spec" --dry-run
+          done
 
   web:
     runs-on: ubuntu-latest

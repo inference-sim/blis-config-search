@@ -1,0 +1,71 @@
+# Where does the execution layer bind on a small DENSE model, and does the answer move with
+# the fleet shape?
+#
+# From `knob_profile.py --model qwen3-14b --hardware h100 --workload chatbot`:
+#   dense, gqa, bfloat16, context 40,960, no declared speculator
+#   -> no expert knobs at all; KV precision IS a lever (gqa keeps a real cache);
+#      `quantization` is a free choice (BF16 checkpoint); no drafting arm is possible.
+# Left out: prefix caching (chatbot prompts are unique -- needs a replay), scheduling_policy
+# (no per-request priorities), P/D (short prompts and outputs would idle a prefill pool).
+name: qwen3-14b-h100-chatbot-execution
+
+scenario: {model: qwen3-14b, hardware: h100, workload: chatbot, gpus: 16,
+           slo: {itl_p99: 20ms}, concurrency: [8, 32, 128, 256]}
+
+sweeps:
+  # Each sweep is built around ONE contended resource, with the knobs that fight over it
+  # crossed inside it. The interacting ones carry two topologies (widest and narrowest the
+  # 16-GPU budget allows); the GPU filter drops the mismatched pairs.
+  - name: shape
+    # The baseline every sweep below is measured against, and the whole topology question for a
+    # dense model: replicas are the only way it scales.
+    narrative: Wider TP cuts per-instance latency but pays more on collectives, so the per-GPU
+      peak should sit at a middle width rather than at either end.
+    num-instances: [2, 4, 8, 16]
+    parallel: {tp: [1, 2, 4, 8]}
+
+  - name: batch-vs-shape
+    # max_num_seqs and max_num_batched_tokens are two caps on the SAME batch, so they are
+    # crossed rather than swept apart; and the per-instance session share scales with the fleet,
+    # so both topologies are needed (measured 46x difference in what the cap is worth).
+    narrative: Whichever batch cap binds first should set the ceiling, and both should bind far
+      harder on two wide instances than on sixteen narrow ones.
+    num-instances: [2, 16]
+    parallel: {tp: [8, 1]}
+    engine:
+      max_num_seqs: [16, 64, 256]
+      max_num_batched_tokens: [2048, 8192, 32768]
+
+  - name: kv-capacity-vs-shape
+    # Cheaper cache entries and a bigger memory fraction both buy KV headroom, so the question
+    # is whether they add or substitute -- only visible crossed. KV bytes per GPU scale with tp,
+    # hence the two widths.
+    narrative: fp8 KV and a higher memory fraction should substitute rather than add, and
+      starving the cache should show up as preemptions rather than a gentle slope.
+    num-instances: [2, 16]
+    parallel: {tp: [8, 1]}
+    engine:
+      cache_dtype: [auto, fp8]
+      gpu_memory_utilization: [0.7, 0.9]
+
+  - name: per-step-overhead
+    # cudagraph_mode and quantization are the two knobs the profile and references/knobs.md
+    # agree do NOT interact with topology (+3.6% vs +2.4% at two widths), so one shape is
+    # enough and they are crossed only against each other.
+    narrative: Graph capture should matter more on a small dense model, and fp4 weights should
+      win independently of it, since one is a host cost and the other a memory cost.
+    num-instances: [2]
+    parallel: {tp: [8]}
+    engine:
+      cudagraph_mode: [NONE, PIECEWISE, FULL]
+      quantization: [fp8, modelopt_fp4]
+
+  - name: prefill-admission
+    # Coordinate: the chunk cap competes with decode for a per-instance token budget, but the
+    # budget here is spent on the crosses above. Stays under the 40,960-token context window.
+    narrative: Lowering the prefill chunk cap should protect decode latency at the cost of
+      prefill throughput, with the SLO picking the knee.
+    num-instances: [2]
+    parallel: {tp: [8]}
+    engine:
+      long_prefill_token_threshold: [512, 2048, 8192]

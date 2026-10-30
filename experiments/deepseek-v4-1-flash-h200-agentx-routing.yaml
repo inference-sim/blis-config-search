@@ -1,0 +1,29 @@
+# Does the routing policy matter more on few big instances or many small ones?
+# RFC #21's routing example, verbatim.
+#
+# Any run with more than one instance is already a routing experiment, because the llm-d
+# router decides where every request goes. Both sweeps hold 64 GPUs and sweep the same five
+# EndpointPickerConfig files, so the arms are comparable across the two topologies.
+name: deepseek-v4-1-flash-h200-agentx-routing
+
+scenario: {model: deepseek-v4.1-flash, hardware: h200, workload: agentx-mvp, gpus: 64,
+           slo: {itl_p99: 20ms}, concurrency: [8, 16, 32, 64, 128, 256]}
+
+sweeps:
+  - name: few-big-instances               # 2 x TP8xDP4
+    narrative: >
+      Two wide instances. With only two endpoints there is little for a scorer to choose
+      between, so the routing arms should separate less here than on the many-small grid.
+    num-instances: [2]
+    parallel: {tp: [8], dp: [4], enable_expert_parallel: [true]}
+    router:
+      endpoint_picker_config: [random.yaml, queue.yaml, load-aware.yaml, queue-kv.yaml, prefix-affinity.yaml]
+
+  - name: many-small-instances            # 8 x TP4xDP2
+    narrative: >
+      Eight narrow instances. More endpoints give a scorer more to exploit -- and an
+      agentic replay re-sends a growing shared prefix, which is what prefix-affinity is for.
+    num-instances: [8]
+    parallel: {tp: [4], dp: [2], enable_expert_parallel: [true]}
+    router:
+      endpoint_picker_config: [random.yaml, queue.yaml, load-aware.yaml, queue-kv.yaml, prefix-affinity.yaml]

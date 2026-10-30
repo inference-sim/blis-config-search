@@ -238,6 +238,9 @@ def test_workflows_sane():
     check("pages: write" not in rtxt, "run-experiment never publishes directly")
     check("validate_experiment.py" in rtxt, "run-experiment validates before building BLIS")
     check("pins.env" in rtxt, "run-experiment builds the pinned stack from pins.env")
+    # The bot PR is deterministic sweeper output, not LLM output, so it carries no
+    # LLM-attribution footer.
+    check("Generated with [Claude Code]" not in rtxt, "run-experiment's bot PR claims no LLM authorship")
 
     ck = os.path.join(ROOT, ".github", "workflows", "checks.yml")
     ctxt = open(ck).read()

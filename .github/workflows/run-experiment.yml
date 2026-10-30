@@ -203,7 +203,5 @@ jobs:
           rule (most output tok/s per GPU among runs holding the SLOs). The same spec and pins
           reproduce it.
 
-          Review the numbers, then merge to publish through \`pages.yml\`.
-
-          🤖 Generated with [Claude Code](https://claude.com/claude-code)" \
+          Review the numbers, then merge to publish through \`pages.yml\`." \
             --base main --head "$branch"

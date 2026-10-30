@@ -1,0 +1,44 @@
+{
+  "explore_prose": [
+    "Every run in this experiment is in the explorer below: filter by outcome to see which settings held the SLOs, or by setting to compare one sweep against another.",
+    "Each sweep's hypothesis was written before the runs, and is quoted beside that sweep's measured result below."
+  ],
+  "hero": [
+    {
+      "h": "What was tested",
+      "html": "2 configurations over 1 sweep (shape), each at 2 load levels, every run on exactly 2 GPUs."
+    },
+    {
+      "h": "What was found",
+      "html": "<strong>1x TP2</strong>, from the <em>shape</em> sweep, reached 1045.23 tok/s/GPU (2090.5 tok/s across the fleet) at concurrency 32 while holding the scenario's SLOs."
+    },
+    {
+      "h": "What to run",
+      "html": "1x TP2 at concurrency 32. 2 of 4 runs held the SLOs.",
+      "run": true
+    }
+  ],
+  "meta": [
+    "BLIS discrete-event simulation",
+    "Experiment Spec (RFC #21)",
+    "deterministic sweep \u2014 no LLM in the measurement path",
+    "seed 42"
+  ],
+  "recommendation_num": 3,
+  "recommendation_prose": [
+    "The table below ranks the measured operating points by output tok/s per GPU, the objective this experiment selects on, among runs that held the scenario's SLOs."
+  ],
+  "sections": [
+    {
+      "caption_note": "2 configurations, 4 runs.",
+      "num": 2,
+      "prose": [
+        "Two tp1 replicas should beat one tp2 instance per GPU on a model this small.",
+        "Measured: best was <strong>1x TP2</strong> at 1045.23 tok/s/GPU (concurrency 32)."
+      ],
+      "title": "Sweep: shape"
+    }
+  ],
+  "standfirst": "A deterministic sweep over chatbot traffic, comparing 1 designs on one GPU budget.",
+  "title": "qwen3-14b on 2x h100: qwen3-14b-h100-chatbot-ci-smoke"
+}

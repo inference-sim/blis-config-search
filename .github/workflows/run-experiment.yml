@@ -120,6 +120,20 @@ jobs:
           echo "BLIS_REGISTRY=$PWD/blis-registry" >> "$GITHUB_ENV"
           echo "BLIS_BIN=$PWD/upstream/blis"      >> "$GITHUB_ENV"
 
+      - name: Fetch the replay corpus
+        if: steps.pick.outputs.specs != ''
+        run: |
+          set -euo pipefail
+          # A REPLAY workload's corpus is the one input neither the spec nor a clone can carry:
+          # blis-catalog says it is not vendored (568 MB), so a consumer fetches it and checks it
+          # against the descriptor's sha256. The script reads the dataset, the PINNED revision and
+          # the digest out of the catalog we just cloned, so there is no second copy of that pin to
+          # drift. A generated-shape spec needs nothing and the step is a no-op.
+          while IFS= read -r spec; do
+            [ -n "$spec" ] || continue
+            python3 -I scripts/fetch_corpus.py "$spec" --catalog "$BLIS_CATALOG"
+          done <<< "${{ steps.pick.outputs.specs }}"
+
       - name: Run the sweeper
         if: steps.pick.outputs.specs != ''
         id: run

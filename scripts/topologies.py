@@ -8,7 +8,7 @@ was documented as a searched axis but never enumerated, so every MoE report reco
 shape (deepseek-v4-pro on 256x H200: TP8+EP measured 1923.7 tok/s against the reported TP8's
 1556.3, and 21 of 28 runs failed for a reason EP/dp fixes).
 
-The rules below are BLIS's, verified against the pinned v0.10.0 binary, not guesses:
+The rules below are BLIS's, verified against the pinned binary (pins.env), not guesses:
 
 - **Dense models take neither dp nor EP.** `dp=2` on qwen3-14b is refused outright ("states dp 2
   for a dense model; DP placement is modelled for MoE models"), and expert parallelism shards

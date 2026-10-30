@@ -25,3 +25,7 @@ reports/*/scenarios/
 # brainstorm/plan workflow, not part of what the repo ships.
 /docs/superpowers/
 /design/
+
+# Replay corpora: fetched by scripts/fetch_corpus.py and digest-checked against the catalog.
+# 568 MB and deliberately not vendored (blis-catalog/workloads/agentx-mvp.yaml says so).
+/.corpus/

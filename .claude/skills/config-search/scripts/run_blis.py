@@ -13,8 +13,9 @@
 # REJECTED (recorded as an error row), never silently dropped -- else two candidates could differ in
 # the ledger yet run the identical command.
 #
-# Pinned stack: BLIS v0.10.0 @ 0d092d4 (kernel v0.1.0 in go.mod), blis-catalog 0.2.1,
-# blis-registry v0.1.1 (holds the 6 coefficient sets below, incl cost-model-memory).
+# Pinned stack: see pins.env, the single source of truth for the BLIS/catalog/registry refs that
+# price every run (scripts/test_build.py checks the docs and workflows against it). The registry
+# must carry the 6 coefficient sets named below, incl cost-model-memory.
 import argparse, hashlib, json, os, subprocess, sys, tempfile, time
 
 COEFFICIENTS = ["cost-model-primitives", "cost-model-collectives", "cost-model-host-overheads",

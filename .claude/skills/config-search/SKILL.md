@@ -32,19 +32,24 @@ knobs searched, the budget. That flexibility is the point of this skill.
 The search is priced by the **`blis-latency-kernel`** backend -- the accurate per-operator model, the
 reason to run BLIS at all here. It reads the deployment from a **scenario** + a **registry**, so:
 
-- **BLIS** release **`v0.10.0`** (commit `0d092d4`; kernel `v0.1.0`, pinned in its `go.mod`), built
-  as `./blis`. The kernel backend is selected by the scenario's `coefficients:` list, **not** a
-  `--latency-model` flag (v0.10.0 removed that flag; passing it errors "unknown flag").
-- **blis-catalog @ `0.2.1`** (`--catalog`/`BLIS_CATALOG`); a model runs **iff** it is in the catalog
-  (NS-6).
-- **blis-registry @ `v0.1.1`** (`--registry`) -- holds the 6 coefficient sets a scenario names,
-  including `cost-model-memory` (older clones lack it; use the `v0.1.1` tag).
+**`pins.env` is the single source of truth** for every ref below — `scripts/test_build.py` checks
+this file, `SETUP.md` and the workflows against it, so never restate a version here.
+
+- **BLIS**, at `BLIS_REF`/`BLIS_SHA`, built as `./blis`. The kernel backend is selected by the
+  scenario's `coefficients:` list, **not** a `--latency-model` flag (removed upstream; passing it
+  errors "unknown flag").
+- **blis-catalog**, at `CATALOG_REF` (`--catalog`/`BLIS_CATALOG`); a model runs **iff** it is in
+  the catalog (NS-6). The catalog pin and the binary pin move **together** — a newer catalog's
+  model graphs use schema fields an older binary cannot decode.
+- **blis-registry**, at `REGISTRY_REF` (`--registry`) -- holds the coefficient sets a scenario
+  names, including `cost-model-memory`, **and** the acceptance profiles that price speculative
+  decoding. Older tags lack one or the other.
 - A **scenario file** states model, hardware, tp/pp/dp/ep and engine knobs. The kernel **refuses**
   `--model/--hardware/--tp/--dp/--enable-expert-parallel` on the CLI; the runner writes them into a
   generated scenario instead (see "Running BLIS").
 
-See `SETUP.md` for the exact build + pins. The example models (`glm-5.3-flash`, `qwen3-14b`) ship in
-catalog `0.2.1`.
+See `SETUP.md` for the exact build, including the SHA check that refuses a moved tag. The example
+models (`glm-5.3-flash`, `qwen3-14b`) ship in the pinned catalog.
 
 ## Invocation
 

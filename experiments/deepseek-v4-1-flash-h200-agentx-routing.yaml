@@ -6,8 +6,19 @@
 # EndpointPickerConfig files, so the arms are comparable across the two topologies.
 name: deepseek-v4-1-flash-h200-agentx-routing
 
-scenario: {model: deepseek-v4.1-flash, hardware: h200, workload: agentx-mvp, gpus: 64,
-           slo: {itl_p99: 20ms}, concurrency: [8, 16, 32, 64, 128, 256]}
+scenario:
+  model: deepseek-v4.1-flash
+  hardware: h200
+  workload: agentx-mvp
+  gpus: 64
+  slo: {itl_p99: 20ms}
+  concurrency: [8, 16, 32, 64, 128, 256]
+  # V4.1's packed attention serves only fp8 caches, and the replay's traces run to 256k tokens --
+  # at the 32k default every trace is filtered out ("no trace fits max_context_length").
+  engine: {cache_dtype: fp8_ds_mla, max_model_len: 262144}
+  replay:
+    corpus: .corpus/traces.jsonl  # not vendored; CI fetches + digest-checks it (experiments/README.md)
+    corpus_cache: .corpus/cache   # parsed-snapshot cache; measured -46% per run
 
 sweeps:
   - name: few-big-instances               # 2 x TP8xDP4

@@ -19,8 +19,8 @@ unattended on merge.
 
 ## Submitting one
 
-1. Write `experiments/<name>.yaml` (copy a committed example — all five below are from
-   [discussion #21](https://github.com/inference-sim/blis-config-search/discussions/21)).
+1. Write `experiments/<name>.yaml` (copy a committed example — of the seven below, five are
+   [discussion #21](https://github.com/inference-sim/blis-config-search/discussions/21)'s own).
 2. Validate it:
    ```
    python3 -I scripts/validate_experiment.py experiments/<name>.yaml
@@ -198,8 +198,17 @@ style note for each. Keep the corpus path **relative**: an absolute one pins the
 machine. A field that genuinely differs from the descriptor is recorded as an override, so the
 report can say the run departed from the catalog.
 
-To fetch the corpus: the descriptor names the HF dataset and revision; download `traces.jsonl`
-to `.corpus/` (gitignored) and BLIS will check it against the catalog's digest.
+**To fetch the corpus**, let the descriptor drive it — it already names the dataset, the pinned
+revision and the digest:
+
+```
+python3 -I scripts/fetch_corpus.py experiments/<name>.yaml --catalog ../blis-catalog
+```
+
+It downloads to the path the spec states, verifies the sha256 before moving the file into place,
+and is a no-op once the corpus is there — so `run-experiment.yml` runs it on every sweep. A spec
+whose workload is a generated shape needs nothing and the script says so. `.corpus/` is
+gitignored; the corpus is 568 MB and deliberately not vendored.
 
 ## Which knobs apply to your model × hardware × workload
 

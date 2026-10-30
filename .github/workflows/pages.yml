@@ -89,6 +89,9 @@ jobs:
     permissions:
       contents: write          # commit the built site to gh-pages
     steps:
+      # The deploy action pushes from a git working tree; without a checkout it fails with
+      # "fatal: not in a git directory".
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { name: site, path: dist }
       - uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445  # v4.9.0

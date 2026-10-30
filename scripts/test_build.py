@@ -300,6 +300,35 @@ def test_pins_are_the_single_source_of_the_sim_version():
     check("$BLIS_SHA" in exp_wf, "run-experiment.yml should verify BLIS_SHA from pins.env")
     check(sha not in exp_wf, "run-experiment.yml hard-codes the sha; read it from pins.env")
 
+    # ...and the SWEEPER must check it too, not just CI. The gap this closes (#23): only the
+    # workflows verified BLIS_SHA, so `grep BLIS_SHA scripts/run_experiment.py` came back empty
+    # and a contributor sweeping locally against an off-pin binary got real-looking numbers with
+    # nothing in the output to say so. CI still refuses outright (it verifies on clone, above);
+    # the runner WARNS, because testing against an unreleased simulator is a legitimate thing to
+    # do locally and is how a pin bump gets evaluated at all.
+    import run_search
+    for fn in ("blis_pin_warning", "_blis_source_commit"):
+        check(hasattr(run_search, fn), f"run_search should define {fn} (the runner-side pin check)")
+    # The check compares a COMMIT to BLIS_SHA. It must not compare the binary digest: the same
+    # tag builds to different bytes per toolchain, so a digest pin would fire on honest builds
+    # (v0.12.0 is recorded with two different digests across the committed reports alone).
+    with open(os.path.join(ROOT, "pins.env")) as f:
+        pins_txt = f.read()
+    check("BLIS_DIGEST" not in pins_txt and "BLIS_SHA256" not in pins_txt,
+          "pins.env must not pin a binary DIGEST: it is build-dependent, so it would be wrong "
+          "for every contributor but the one who wrote it (see test_search's pin tests)")
+    on_pin = {"blis": ref, "resolved": {"blis": {"sha256": "ab" * 32, "commit": sha}}}
+    check(run_search.blis_pin_warning(on_pin, pins) == "",
+          "a binary built from the pinned commit must not warn")
+    off = {"blis": ref, "resolved": {"blis": {"sha256": "ab" * 32, "commit": "c" * 40}}}
+    check(bool(run_search.blis_pin_warning(off, pins)),
+          "a binary built from another commit must warn")
+    # Both runners must apply it; the sweeper is the one that was missing it.
+    with open(os.path.join(ROOT, "scripts", "run_experiment.py")) as f:
+        exp_py = f.read()
+    check("_blis_pin_warning" in exp_py,
+          "run_experiment.py should warn when an off-pin simulator prices a sweep (#23)")
+
     # The catalog must be cloned BEFORE the validate step, or the existence check on
     # scenario.model/hardware/workload silently no-ops and a typo'd identifier still reaches the
     # Go build before failing every run (susiejojo review on #22). Ordering is the whole point,

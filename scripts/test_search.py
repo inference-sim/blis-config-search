@@ -894,6 +894,101 @@ def test_pin_mismatch_is_refused():
           "an unresolvable stack is not reported as a mismatch")
 
 
+def test_blis_pin_is_checked_by_source_commit():
+    """The sweeper must say so when an OFF-PIN simulator priced the runs (#23).
+
+    Only the CI workflows verified BLIS_SHA; `grep BLIS_SHA scripts/run_experiment.py` was empty,
+    so a local sweep against whatever binary was on hand produced real-looking numbers with no
+    warning anywhere in the output.
+
+    The comparison is SOURCE COMMIT vs BLIS_SHA, never the binary digest: the same tag builds to
+    different bytes per toolchain/platform. Measured on v0.12.0: the committed reports carry
+    02b5b033… and 1feaa390…, and rebuilding it locally gave two more digests again. A digest in
+    pins.env would therefore be wrong for everyone but whoever wrote it.
+    """
+    print("an off-pin simulator is reported by source commit, not by binary digest")
+    pins = {"BLIS_SHA": "f199223d701d96dddeb1c314509bed003515b599"}
+    on_pin = {"blis": "v0.12.0", "resolved": {"blis": {
+        "sha256": "e439fa29b1f8" + "0" * 52,
+        "commit": "f199223d701d96dddeb1c314509bed003515b599", "describe": "v0.12.0"}}}
+    check(run_search.blis_pin_warning(on_pin, pins) == "", "an on-pin binary is silent")
+
+    off_pin = {"blis": "v0.12.0", "resolved": {"blis": {
+        "sha256": "80d59b897739" + "0" * 52,
+        "commit": "f2ba6bb1c189ed5a56933cfa3d0927eae3836ee9", "describe": "v0.14.0"}}}
+    w = run_search.blis_pin_warning(off_pin, pins)
+    check(bool(w), "an off-pin binary is reported")
+    check("f199223d701d" in w and "f2ba6bb1c189" in w,
+          f"the warning names both the pinned and the actual commit (got {w!r})")
+    check("v0.14.0" in w, f"the warning names what the binary actually is (got {w!r})")
+
+    # A DIGEST difference alone must never fire: two machines building the pinned tag disagree on
+    # bytes and agree on provenance. This is the false-alarm case a digest pin would have created.
+    same_commit_other_build = {"blis": "v0.12.0", "resolved": {"blis": {
+        "sha256": "1feaa390a486" + "0" * 52,
+        "commit": "f199223d701d96dddeb1c314509bed003515b599", "describe": "v0.12.0"}}}
+    check(run_search.blis_pin_warning(same_commit_other_build, pins) == "",
+          "a different BUILD of the pinned commit is not drift")
+
+    # A DIRTY checkout at the pinned commit is drift too: the binary is the pinned commit PLUS
+    # uncommitted edits, so the commit alone no longer says what priced the runs. This is the
+    # likeliest way to get off-pin numbers unnoticed -- someone editing the simulator locally.
+    dirty = {"blis": "v0.12.0", "resolved": {"blis": {
+        "sha256": "ab" * 32, "commit": pins["BLIS_SHA"], "describe": "v0.12.0-dirty"}}}
+    w = run_search.blis_pin_warning(dirty, pins)
+    check(bool(w) and "UNCOMMITTED" in w,
+          f"a dirty checkout at the pinned commit is reported (got {w!r})")
+
+    # Nothing to conclude -> say nothing. A binary built outside its source tree (or found on
+    # PATH) resolves to no commit, and crying wolf there would train the reader to ignore it.
+    for label, stack in (("no commit", {"blis": "v0.12.0",
+                                        "resolved": {"blis": {"sha256": "ab" * 32}}}),
+                         ("no resolved block", {"blis": "v0.12.0"}),
+                         ("no digest at all", {"blis": "v0.12.0", "resolved": {}})):
+        check(run_search.blis_pin_warning(stack, pins) == "",
+              f"{label}: an unverifiable binary is not reported as drift")
+    # No BLIS_SHA to compare against is also not a mismatch.
+    check(run_search.blis_pin_warning(off_pin, {}) == "",
+          "with no BLIS_SHA pinned there is nothing to contradict")
+
+
+def test_blis_source_commit_requires_the_simulators_own_tree():
+    """The commit must come from the SIMULATOR's checkout, not from whatever repo it sits in.
+
+    SETUP.md and both workflows build with `go build -o blis main.go` inside the upstream clone,
+    so the binary's own directory is its source tree. A binary copied somewhere else must resolve
+    to NOTHING rather than borrow the surrounding repo's commit and be checked against it -- that
+    would report drift for a build that is perfectly on-pin.
+    """
+    print("the source commit is only read from the simulator's own checkout")
+    import subprocess, tempfile, shutil
+    d = tempfile.mkdtemp(prefix="cs-pin-")
+    try:
+        # A git repo that is NOT the simulator: no main.go beside the binary.
+        subprocess.run(["git", "init", "-q"], cwd=d, check=True)
+        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                        "commit", "-q", "--allow-empty", "-m", "x"], cwd=d, check=True)
+        fake = os.path.join(d, "blis")
+        with open(fake, "wb") as f:
+            f.write(b"not the simulator")
+        desc, commit = run_search._blis_source_commit(fake)
+        check(commit is None,
+              f"a binary in an unrelated git repo resolves to no commit (got {commit!r})")
+        # With main.go beside it, the directory IS a simulator checkout and the commit is read.
+        with open(os.path.join(d, "main.go"), "w") as f:
+            f.write("package main\n")
+        desc, commit = run_search._blis_source_commit(fake)
+        check(commit is not None and len(commit) == 40,
+              f"a simulator checkout resolves to its commit (got {commit!r})")
+        # And the recorded stack carries it beside the digest, so a reader sees both.
+        st = run_search._pinned_stack(fake, None, None)
+        blis = (st.get("resolved") or {}).get("blis") or {}
+        check(blis.get("sha256") and blis.get("commit"),
+              f"the resolved block records the build AND the source (got {blis})")
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def test_censored_c_star_is_flagged():
     """When the ramp ends with a shape still servable, C* is a lower bound, not a ceiling.
 
@@ -1000,6 +1095,8 @@ if __name__ == "__main__":
     test_main_writes_topology_coverage_end_to_end()
     test_backfill_reproduces_a_real_search_exactly()
     test_pin_mismatch_is_refused()
+    test_blis_pin_is_checked_by_source_commit()
+    test_blis_source_commit_requires_the_simulators_own_tree()
     test_censored_c_star_is_flagged()
     test_provenance_split_is_detected()
     test_pinned_stack_records_resolved_identity()

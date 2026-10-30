@@ -537,6 +537,16 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     if not dry_run:
         os.makedirs(scenarios_dir, exist_ok=True)
 
+    # Which simulator is about to price this sweep. Only the CI workflows verified BLIS_SHA, so a
+    # contributor sweeping locally against an off-pin binary got real-looking numbers with no
+    # warning anywhere in the output (#23). Warned, not refused: see run_search.blis_pin_warning.
+    # Skipped on a dry run, which prices nothing.
+    if not dry_run:
+        warn = _blis_pin_warning(blis, catalog, registry)
+        if warn and verbose:
+            print(f"WARNING: {warn}\n         Every number in this report is priced by that "
+                  f"binary, and scenario.json records its digest.", file=sys.stderr, flush=True)
+
     entry = _model_entry(model, catalog) if catalog else None
     # A REPLAY workload is fully described by its catalog descriptor -- the harness scenario, the
     # corpus digest, the sending window, the grace period and the context filter are all stated
@@ -873,6 +883,20 @@ def _pinned_stack(blis, catalog, registry):
         return {"blis": pins.get("BLIS_REF", "unpinned"),
                 "catalog": pins.get("CATALOG_REF", "unpinned"),
                 "registry": pins.get("REGISTRY_REF", "unpinned")}
+
+
+def _blis_pin_warning(blis, catalog, registry):
+    """How the simulator about to run differs from BLIS_SHA, or "" when it agrees/cannot be told.
+
+    Delegates to run_search so the two runners apply ONE rule; an import failure is silent for
+    the same reason _pinned_stack's is -- a provenance note must never be what breaks a sweep.
+    """
+    try:
+        import run_search
+        return run_search.blis_pin_warning(
+            run_search._pinned_stack(blis, catalog, registry))
+    except Exception:
+        return ""
 
 
 def _write_run_dir(out_dir, spec, report, runs):

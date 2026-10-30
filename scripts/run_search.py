@@ -100,6 +100,10 @@ def _pinned_stack(blis=None, catalog=None, registry=None):
     ledger was priced by one cost model. Without that, a report whose baseline ran before a
     registry bump and whose drafting arms ran after carried a single `registry: v0.1.1` label and
     nothing contradicted it (namasl review #3).
+
+    The simulator resolves to BOTH a digest and (when recoverable) the commit it was built from.
+    The digest identifies the BUILD and the commit identifies the SOURCE; only the latter is
+    comparable to BLIS_SHA -- see _blis_source_commit and pin_mismatches.
     """
     pins = build_catalog.read_pins()
     out = {"blis": pins.get("BLIS_REF", "unpinned"),
@@ -114,9 +118,40 @@ def _pinned_stack(blis=None, catalog=None, registry=None):
     digest = _file_digest(blis)
     if digest:
         resolved["blis"] = {"sha256": digest}
+        desc, commit = _blis_source_commit(blis)
+        if commit:
+            resolved["blis"]["commit"] = commit
+        if desc:
+            resolved["blis"]["describe"] = desc
     if resolved:
         out["resolved"] = resolved
     return out
+
+
+def _blis_source_commit(blis):
+    """(describe, commit) of the checkout the simulator binary was BUILT from, or (None, None).
+
+    BLIS_SHA is a git commit; `resolved.blis.sha256` is a binary digest, and the two are not
+    comparable -- the same tag builds to different bytes on different toolchains and platforms.
+    Measured: v0.12.0 produced 02b5b033… and 1feaa390… across the committed reports, and a third
+    digest again when rebuilt locally. So an expected digest in pins.env would be wrong for
+    everyone but whoever wrote it; the comparable value is the SOURCE commit, recovered here.
+
+    Both SETUP.md and the CI workflows build with `go build -o blis main.go` from inside the
+    upstream clone, so the binary sits in its own source tree and the commit is its directory's.
+    A binary moved out of that tree (or onto PATH) resolves to nothing, which is reported as
+    "unverifiable" rather than as a mismatch: absence of proof is not proof of drift.
+    """
+    if not (blis and os.path.isfile(blis)):
+        return None, None
+    desc, commit = _git_identity(os.path.dirname(os.path.abspath(blis)))
+    if not commit:
+        return None, None
+    # The directory is a git tree, but is it the SIMULATOR's? A binary dropped into any
+    # unrelated repo would otherwise borrow that repo's commit and be checked against it.
+    if not os.path.isfile(os.path.join(os.path.dirname(os.path.abspath(blis)), "main.go")):
+        return None, None
+    return desc, commit
 
 
 def pin_mismatches(stack):
@@ -126,6 +161,11 @@ def pin_mismatches(stack):
     caught was real: pins.env said catalog 0.3.0 while every run used 0.4.0 (ba542f0). That made
     the "one pinned stack" label false even though the only difference was an unused workload file
     (namasl review). A search now refuses to start on a mismatch instead of recording it quietly.
+
+    The simulator is NOT checked here: it is checked by blis_pin_warning, which the runners call
+    separately because it warns rather than refuses (see that docstring for why). Keeping it out
+    of this function keeps --allow-pin-mismatch meaning exactly what it says -- the catalog and
+    registry checkouts -- rather than also silencing the simulator's provenance.
     """
     res = (stack or {}).get("resolved") or {}
     bad = []
@@ -137,6 +177,40 @@ def pin_mismatches(stack):
         if want and got and got != want:
             bad.append(f"{name}: pins.env says {want}, checkout is {got}")
     return bad
+
+
+def blis_pin_warning(stack, pins=None):
+    """A line describing how the simulator that ran differs from BLIS_SHA, or "" when it agrees.
+
+    Separate from pin_mismatches, and a WARNING rather than a refusal, because the two callers
+    want different strictness. Testing a sweep against an unreleased simulator is a legitimate
+    thing to do locally -- it is how a pin bump gets evaluated at all -- and a hard refusal there
+    would block the very work that moves the pin. CI keeps failing hard: the workflows verify
+    BLIS_SHA on clone, before this code runs, so a published report cannot carry a false label.
+
+    Returns "" when nothing can be concluded: a binary outside its source tree resolves to no
+    commit, and reporting that as drift would cry wolf on every contributor who builds elsewhere.
+    """
+    res = (stack or {}).get("resolved") or {}
+    blis = res.get("blis") or {}
+    want = (pins if pins is not None else build_catalog.read_pins()).get("BLIS_SHA")
+    got = blis.get("commit")
+    if not want or not got:
+        return ""
+    desc = blis.get("describe") or ""
+    ref = (stack or {}).get("blis") or "the pinned ref"
+    # A DIRTY tree is drift even when HEAD is the pinned commit: the binary was built from the
+    # pinned commit PLUS uncommitted edits, so the commit alone no longer describes what priced
+    # the runs. Silently trusting HEAD here would miss exactly the case where someone is editing
+    # the simulator locally -- the likeliest way to get off-pin numbers without noticing.
+    if got == want:
+        if desc.endswith("-dirty"):
+            return (f"blis: the binary was built from the pinned {ref} ({want[:12]}) with "
+                    f"UNCOMMITTED changes in its checkout, so it is not the pinned simulator")
+        return ""
+    at = f" ({desc})" if desc and desc != got else ""
+    return (f"blis: pins.env pins {ref} at {want[:12]}, but the binary was built from "
+            f"{got[:12]}{at}")
 
 
 def _corpus_traffic_note(runs):
@@ -782,6 +856,14 @@ def main(argv=None):
               "would publish a false provenance label. Either check out the pinned refs or update "
               "pins.env to the version you mean to run (and say so in the commit). "
               "--allow-pin-mismatch overrides this for a deliberate experiment.")
+
+    # The simulator is warned about rather than refused: see blis_pin_warning. Printed before the
+    # first run so it is at the TOP of the log, not buried after an afternoon of measurements.
+    warn = blis_pin_warning(pinned)
+    if warn:
+        print(f"WARNING: {warn}\n         Every number below is priced by that binary, and the "
+              f"report will record its digest. Build from {pinned.get('blis')} to match the pin.",
+              file=sys.stderr, flush=True)
 
     entry = model_entry(scenario["model"], os.path.abspath(args.catalog))
     arch = (entry or {}).get("arch", "unknown")

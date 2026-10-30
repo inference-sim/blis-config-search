@@ -39,7 +39,7 @@ scripts/
   test_build.py              hermetic tests (validation, determinism, --no-mock, catalog)
 site/                        build output = Pages publish root (gitignored; CI rebuilds)
 .github/workflows/
-  pages.yml                  PR: build+validate (no publish); main: build+publish to Pages
+  pages.yml                  PR: build + preview at /pr-preview/pr-<N>/; main: publish to Pages
   generate-report.yml        PR scenario -> maintainer-approved search -> report -> PR branch
 ```
 
@@ -76,7 +76,8 @@ own Claude session against your own LLM. Nothing is sent to a hosted service.
 ## Adding a scenario (the PR → CI → publish path)
 
 1. Build the Scenario on the Submit tab (or write `submissions/<name>.yaml`) and open a PR.
-2. `pages.yml` builds the site on the PR to catch breakage — it publishes nothing.
+2. `pages.yml` builds the site on the PR to catch breakage and publishes a preview to
+   `/pr-preview/pr-<N>/`, linked in a PR comment (same-repo PRs only; removed on close).
 3. A maintainer reviews the submission and approves the protected `report-generation`
    environment; `generate-report.yml` builds the pinned BLIS stack, runs the search, and
    commits the generated `reports/<run_id>/` back to the PR branch.

@@ -219,7 +219,14 @@ def test_workflows_sane():
     pg = os.path.join(ROOT, ".github", "workflows", "pages.yml")
     ptxt = open(pg).read()
     check(_yaml.safe_load(ptxt) is not None, "pages.yml parses")
-    check("pages: write" in ptxt and "refs/heads/main" in ptxt, "pages publish gated to main")
+    pdoc = _yaml.safe_load(ptxt)
+    deploy_if = pdoc["jobs"]["deploy"]["if"]
+    check("refs/heads/main" in deploy_if and "push" in deploy_if, "live publish gated to main pushes")
+    check("clean-exclude: pr-preview/" in ptxt, "live publish keeps the PR previews")
+    preview_if = pdoc["jobs"]["preview"]["if"]
+    check("head.repo.full_name == github.repository" in preview_if,
+          "PR previews are same-repo only (no fork build published)")
+    check("umbrella-dir: pr-preview" in ptxt, "PR previews live under pr-preview/, apart from the root")
 
     # The deterministic sweeper. Unlike generate-report.yml it needs no approval gate (no LLM in
     # the path), but it must still never write to main or publish: its only output is a bot PR.

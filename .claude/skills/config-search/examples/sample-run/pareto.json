@@ -1,5 +1,5 @@
 {
-  "_source": "REAL kernel run (blis-latency-kernel); numbers are simulator predictions -- validate against curvebender real measurements before acting",
+  "_source": "REAL kernel run (blis-latency-kernel); numbers are simulator predictions -- validate against real llm-d measurements before acting",
   "objective": "dual-pareto",
   "interactivity_floor": {
     "tok_per_s_per_user": 50,

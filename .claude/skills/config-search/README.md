@@ -55,7 +55,7 @@ For a repeatable run, hand it a scenario file instead:
 BLIS workload presets are `chatbot`, `summarization`, `contentgen`, `multidoc`, `distribution`
 (a ShareGPT-style chatbot maps to `chatbot`). Example cluster sizes and ISL/OSL (synthetic ISL 8000 /
 OSL 512, concurrency ladders, H100/H200) are drawn from the real llm-d campaigns in
-`project-cb-lab/curvebender-tools/reports`.
+the internal calibration reports.
 
 ## Output
 
@@ -113,6 +113,6 @@ implemented** (`scripts/report.py` + `scripts/figures.py` + `report/template.htm
 committed `report.json` narrative; `scripts/test_report.py` covers the records/FACTS mapping, each
 figure, report.json tolerance, and the seam-consistency checks.
 Caveat: outputs are simulator **predictions** (the kernel prices MLA/KDA from fitted coefficients) --
-spot-check against the real llm-d measurements in `curvebender-tools/reports` before acting. Still to
+spot-check against the real llm-d measurements in the internal calibration reports before acting. Still to
 do: tune the steering rules against that real data, and wrap the capacity-probe/finalist driver as one
 command (which would also assemble `curve[]` in code rather than by the brain).

@@ -125,30 +125,34 @@ ENGINE_KNOBS = frozenset({
 #
 # Kept in sync with run_blis.UNSUPPORTED by test_experiment.py, which fails if the two drift.
 ENGINE_NOT_MODELLED = {
-    "prefix_match_unit": ("decodes under the pinned engine model but is not priced by it -- "
+    "prefix_match_unit": ("decodes under the pinned engine model but is not priced by it: "
                           "prefix matching is modelled at block granularity, so sweeping the unit "
                           "reports noise (upstream blis-vllm#7)"),
-    "max_cpu_loras": ("decodes under the pinned engine model but is not priced by it -- there is "
+    "max_cpu_loras": ("decodes under the pinned engine model but is not priced by it: there is "
                       "no CPU-side LoRA swap term in the cost model (upstream blis-vllm#5)"),
     "prefix_cache_retention_interval": ("decodes under the pinned engine model but is not priced "
-                                        "by it -- the prefix cache is modelled without eviction "
+                                        "by it: the prefix cache is modelled without eviction "
                                         "over time, so retention has no effect on any run"),
 }
 
-# Engine knobs the pinned stack prices only in the right SHAPE. Sweeping one outside its condition
-# is refused with the condition named, because the alternative is a sweep where every arm fails
-# identically. Measured against the pinned binary.
+# Engine knobs priced only in some SHAPE, but refused in every shape, so no reason may read as
+# "meet the condition and it runs". Each must be the tail of run_blis.UNSUPPORTED's (tested).
 ENGINE_CONDITIONAL = {
-    "prefill_schedule_interval": ("priced only when the pool has dp > 1 -- with a single data-"
-                                  "parallel rank there is no cross-rank prefill schedule to "
-                                  "interval"),
-    "disable_hybrid_kv_cache_manager": ("refused on a sliding-window MLA model (the DeepSeek-V4 "
-                                        "family): the hybrid manager is what models the sliding "
-                                        "window, so disabling it has no priced alternative"),
-    "env": ("the pinned engine model reads exactly one variable, VLLM_USE_V2_MODEL_RUNNER; any "
-            "other key is carried but never read, so a sweep over it reports noise"),
-    "kv_events": ("a struct under the pinned engine model (publisher/topic/buffer), not a bool -- "
-                  "sweep its inner fields, not the block itself"),
+    "prefill_schedule_interval": ("refused: it is priced only when the pool has dp > 1 (with a "
+                                  "single data-parallel rank there is no cross-rank prefill "
+                                  "schedule to interval), and the runner does not gate on dp -- "
+                                  "it refuses the knob in every shape"),
+    "disable_hybrid_kv_cache_manager": ("refused: the binary rejects it on a sliding-window MLA "
+                                        "model (the DeepSeek-V4 family), where the hybrid manager "
+                                        "is what models the sliding window, and the runner "
+                                        "refuses it on every model rather than gating on the "
+                                        "family"),
+    "env": ("refused: the pinned engine model reads exactly one variable, "
+            "VLLM_USE_V2_MODEL_RUNNER, and any other key is carried but never read, so a sweep "
+            "over it reports noise -- the runner refuses the block rather than gating on the key"),
+    "kv_events": ("a struct under the pinned engine model (publisher/topic/buffer), not a bool, "
+                  "and none of its inner fields is sweepable at this pin either (no spec can "
+                  "express them) -- so it is not sweepable at all here, in any form"),
 }
 
 # Engine knobs the pinned stack decodes, accepts, and prices IDENTICALLY whatever you set them to.

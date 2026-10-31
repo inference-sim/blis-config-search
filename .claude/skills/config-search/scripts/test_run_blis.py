@@ -141,7 +141,8 @@ class ResultDocument(unittest.TestCase):
         }}}
         m = run_blis.parse_metrics(json.dumps(doc))
         self.assertNotIn("itl_p99_ms", m)
-        self.assertNotEqual(m.get("itl_p99_ms"), 294.03)
+        # {} is what makes run_one report "no cluster metrics parsed" rather than a later symptom
+        self.assertEqual({}, m)
 
 
 class CompletionIssue(unittest.TestCase):

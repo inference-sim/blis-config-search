@@ -662,6 +662,14 @@ class KnobSurfaceStaysInSync(unittest.TestCase):
             with self.assertRaises(run_blis.ConfigError, msg=knob):
                 run_blis.classify_config({"tp": 8, "num_instances": 1, knob: 1})
 
+    def test_not_wired_reasons_match_the_runners(self):
+        """The validator runs first, so its reason is the one a spec author sees: keep it the
+        runner's reason, not a stale copy of it."""
+        for knob, why in {**V.ENGINE_NOT_MODELLED, **V.ENGINE_CONDITIONAL}.items():
+            self.assertTrue(run_blis.UNSUPPORTED[knob].endswith(why),
+                            f"{knob}: validator says {why!r}, runner says "
+                            f"{run_blis.UNSUPPORTED[knob]!r}")
+
     def test_enum_values_are_read_from_the_rules_pack_when_present(self):
         enums, source = V.engine_enums()
         self.assertIn("cudagraph_mode", enums)

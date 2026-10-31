@@ -36,8 +36,8 @@ COEFFICIENTS = ["cost-model-primitives", "cost-model-collectives", "cost-model-h
 # --- candidate-key classification (allowlist; anything else is rejected, never silently ignored) ---
 SCENARIO_PARALLEL = ("tp", "pp", "dp", "enable_expert_parallel")       # -> scenario Deployment.parallel
 # Engine fields the generated scenario may carry. The authority IS blis-vllm v0.32.0's
-# rules/engineconfig.Engine (51 top-level yaml tags), because BLIS v0.14.0 / blis-schemas v0.8.0
-# make a pool's `engine:` an opaque block (deployment.EngineBlock) opened by the engine model that
+# rules/engineconfig.Engine (51 top-level yaml tags), because the pinned BLIS (pins.env) makes a
+# pool's `engine:` an opaque block (deployment.EngineBlock) opened by the engine model that
 # the scenario's `engine_version` names. Before v0.14.0 the authority was blis-schemas' own
 # 31-field struct, and the 20 names below this comment's old cut-off were hard decode failures
 # ("field max_num_active_seqs not found in type deployment.Engine"); they decode now.
@@ -143,7 +143,7 @@ NESTED_ENGINE_FIELDS = {
                     "draft_sample_method", "rejection_sample_method",
                     "enable_adaptive_verification"),
 }
-# Speculative decoding IS priced by the kernel (v0.14.0 + registry v0.2.0) -- the earlier runner
+# Speculative decoding IS priced by the kernel (since BLIS v0.14.0; see pins.env) -- the earlier runner
 # refused it as "not yet validated on the kernel backend", which was true of v0.10.0 and is stale.
 # It is a nested `speculative: {method, num_spec_tokens}` block on the pool's engine
 # (the pinned engine model's engineconfig.Engine.Speculative), so the two candidate keys below are
@@ -165,8 +165,8 @@ SPECULATIVE_CLI = {"speculative_category": "--speculative-category",
 CLI_FLAGS = {"num_instances": "--num-instances", "concurrency": "--concurrency",
              "scheduler": "--scheduler", "preemption_policy": "--preemption-policy"}
 # The llm-d EndpointPickerConfig this deployment routes with, as a path. Named by the scenario's
-# DEPLOYMENT-level `router:` block (blis-schemas v0.8.0 spec/deployment/deployment.go) -- see
-# ROUTING_MOVED below for why this replaced the former --routing-policy flag.
+# DEPLOYMENT-level `router:` block (blis-schemas spec/deployment/deployment.go, pinned in
+# pins.env) -- see ROUTING_MOVED below for why this replaced the former --routing-policy flag.
 SCENARIO_ROUTER = ("router_config",)
 PARALLEL_DEFAULTS = {"tp": 1, "pp": 1, "dp": 1, "enable_expert_parallel": False}
 GPUS_PER_NODE = 8   # single-node H100; a per-instance footprint beyond this spans nodes (needs a fabric)
@@ -1036,6 +1036,8 @@ def _flatten_result(doc):
     """
     cluster = ((doc.get("engine") or {}).get("cluster")) or {}
     whole = cluster.get("whole_run") or {}
+    if not whole:
+        return {}   # no whole-run aggregate: fail as "no cluster metrics parsed", not later
     out = {"instance_id": "cluster"}
     for k in _WHOLE_RUN_KEYS:
         if k in whole:
@@ -1047,8 +1049,7 @@ def _flatten_result(doc):
         # `whole.ITL*Ms`. Those are the two populations this mapping exists to keep apart, so
         # reaching for the cluster copy when whole_run is missing would silently re-baseline every
         # latency in the repo -- the exact failure the rename caused. Upstream sets whole_run
-        # unconditionally; if that ever changes, let parse_metrics return {} and fail loudly
-        # instead ("no cluster metrics parsed").
+        # unconditionally; if that ever changes, parse_metrics returns {} (guard above).
         if new in whole:
             out[legacy] = whole[new]
     for k in _CLUSTER_KEYS:

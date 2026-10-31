@@ -250,6 +250,64 @@ def test_catalog_workload_kinds():
         shutil.rmtree(tmp)
 
 
+def test_derived_pins_match_gomod():
+    """The derived block in pins.env must equal what inference-sim's go.mod says at BLIS_REF.
+
+    This is the guard for the drift that motivated sync_pins.py: KERNEL_REF was a hand-typed line
+    reading v0.3.0 while inference-sim v0.15.0's go.mod requires blis-latency-kernel v0.5.0. A
+    stale cost-model version misreports what priced a latency number, so it has to be mechanical.
+
+    SKIPS when ../inference-sim is absent -- a contributor without the sibling checkout cannot
+    derive anything, and blocking them would be worse than trusting the committed block. CI clones
+    the pin, so the check still runs where it matters. That asymmetry is deliberate.
+    """
+    print("test_derived_pins_match_gomod")
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import sync_pins
+
+    repo = os.path.join(ROOT, os.pardir, "inference-sim")
+    if not os.path.isdir(os.path.join(repo, ".git")):
+        print("  (skipped: no ../inference-sim checkout to derive from)")
+        return
+
+    pins = bc.read_pins()
+    ref = pins.get("BLIS_REF")
+    try:
+        derived = sync_pins.derive(ref, repo)
+    except LookupError:
+        print(f"  (skipped: {ref} not readable in ../inference-sim)")
+        return
+
+    for key, want in sorted(derived.items()):
+        check(pins.get(key) == want,
+              f"pins.env {key}={pins.get(key)!r} but go.mod at {ref} says {want!r} "
+              f"-- run: python3 -I scripts/sync_pins.py")
+    # A key pins.env states that go.mod no longer does would publish a dependency the pinned
+    # binary does not have.
+    for key in sync_pins.DERIVED.values():
+        if key in pins:
+            check(key in derived,
+                  f"pins.env states {key} but go.mod at {ref} has no such dependency")
+
+    # The block must be machine-generated, so the markers have to survive edits to the file.
+    with open(os.path.join(ROOT, "pins.env"), encoding="utf-8") as f:
+        text = f.read()
+    check(sync_pins.BEGIN in text and sync_pins.END in text,
+          "pins.env lost the generated derived-pins block markers")
+    # ...and the hand-pinned refs must NOT be inside it, or a regeneration would clobber them.
+    _, _, rest = text.partition(sync_pins.BEGIN)
+    block, _, _ = rest.partition(sync_pins.END)
+    assigned = {ln.partition("=")[0].strip() for ln in block.splitlines()
+                if ln.strip() and not ln.strip().startswith("#") and "=" in ln}
+    for key in ("CATALOG_REF", "REGISTRY_REF", "BLIS_REF", "BLIS_SHA"):
+        check(key not in assigned,
+              f"{key} is hand-pinned and must live outside the generated block")
+    # Conversely every assignment inside the block must be a derived key, or sync_pins would
+    # silently drop a hand-pin on the next regeneration.
+    check(assigned <= set(sync_pins.DERIVED.values()),
+          f"generated block assigns non-derived keys: {sorted(assigned - set(sync_pins.DERIVED.values()))}")
+
+
 def test_displayed_stack_survives_a_fresh_clone():
     """Every row of the footer's dependency stack must come from pins.env.
 
@@ -274,14 +332,20 @@ def test_displayed_stack_survives_a_fresh_clone():
     want = {
         "inference-sim": pins.get("BLIS_REF"),
         "blis-latency-kernel": pins.get("KERNEL_REF"),
+        "blis-schemas": pins.get("SCHEMAS_REF"),
+        "blis-vllm": pins.get("VLLM_REF"),
         "blis-catalog": pins.get("CATALOG_REF"),
         "blis-registry": pins.get("REGISTRY_REF"),
     }
     rows = [stack["root"]] + list(stack["deps"])
-    check(len(rows) == 4, f"the stack should show 4 dependencies, got {len(rows)}")
+    # Not a fixed count: a derived dep legally absent from go.mod at the pinned ref (blis-vllm
+    # before BLIS v0.14.0) yields no row at all. So assert against what pins.env actually states.
+    expected = {k for k, v in want.items() if v}
+    check({r["name"] for r in rows} == expected,
+          f"stack rows {sorted(r['name'] for r in rows)} != pinned {sorted(expected)}")
     for row in rows:
         exp = want.get(row["name"])
-        check(exp is not None, f"unexpected stack row {row['name']!r}")
+        check(exp, f"unexpected stack row {row['name']!r} (no pins.env key states it)")
         check(row["version"] == exp,
               f"{row['name']} should show the pinned {exp!r}, got {row['version']!r}")
         check("absent" not in row["version"],
@@ -485,6 +549,7 @@ if __name__ == "__main__":
     test_build_determinism_and_nomock()
     test_catalog_workload_kinds()
     test_pins_are_the_single_source_of_the_sim_version()
+    test_derived_pins_match_gomod()
     test_displayed_stack_survives_a_fresh_clone()
     test_lexicon_mirror_is_in_sync()
     test_catalog()

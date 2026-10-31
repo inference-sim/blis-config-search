@@ -293,21 +293,40 @@ def _stack(pins, versions):
     footer's job is provenance for the committed reports and the pin is the authority on that --
     a developer's sibling checkout sitting ahead of the pin (0.5.0 vs a pinned 0.4.0) must not be
     published as having priced reports it never saw.
+
+    The rows come from two kinds of pin, which is why some are conditional:
+
+      * DERIVED (kernel, schemas, vllm) -- Go dependencies compiled into the binary, written to
+        pins.env from inference-sim's go.mod by scripts/sync_pins.py. A derived key can be legally
+        ABSENT: blis-vllm is not a dependency before BLIS v0.14.0, so at an older pin there is no
+        row for it rather than a row reading "absent". Omitting beats inventing.
+      * HAND-PINNED (catalog, registry) -- data directories passed to the binary, not Go modules,
+        so BLIS_REF can never determine them. Always shown.
     """
     def dep(name, version, note):
         return {"name": name, "version": version or "absent", "note": note}
 
+    deps = [dep("blis-latency-kernel", pins.get("KERNEL_REF"),
+                "cost model, derived from inference-sim's go.mod at the pinned ref")]
+    # Present only from BLIS v0.14.0, where the engine surface moved into blis-vllm and it became
+    # a real dependency; before that it is a reference consulted at authoring time, not something
+    # that priced a run, so it earns no provenance row.
+    if pins.get("VLLM_REF"):
+        deps.append(dep("blis-vllm", pins["VLLM_REF"],
+                        "engine config surface (vLLM's startup rules), derived from go.mod"))
+    if pins.get("SCHEMAS_REF"):
+        deps.append(dep("blis-schemas", pins["SCHEMAS_REF"],
+                        "deployment/engine structs the scenario decodes against, derived from go.mod"))
+    deps += [
+        dep("blis-catalog", pins.get("CATALOG_REF") or versions.get("blis-catalog"),
+            "models, hardware, workloads the binary is run against"),
+        dep("blis-registry", pins.get("REGISTRY_REF") or versions.get("blis-registry"),
+            "cost-model coefficients and speculative-decoding profiles"),
+    ]
     return {
         "root": dep("inference-sim", versions.get("inference-sim"),
                     "the BLIS simulator whose binary prices every run"),
-        "deps": [
-            dep("blis-latency-kernel", pins.get("KERNEL_REF"),
-                "cost model, pinned in inference-sim's go.mod at this ref"),
-            dep("blis-catalog", pins.get("CATALOG_REF") or versions.get("blis-catalog"),
-                "models, hardware, workloads the binary is run against"),
-            dep("blis-registry", pins.get("REGISTRY_REF") or versions.get("blis-registry"),
-                "cost-model coefficients and speculative-decoding profiles"),
-        ],
+        "deps": deps,
     }
 
 

@@ -954,6 +954,7 @@ describe('footer pinned-stack disclosure', () => {
     root: { name: 'inference-sim', version: 'v0.12.0', note: 'prices every run' },
     deps: [
       { name: 'blis-latency-kernel', version: 'v0.3.0', note: 'cost model' },
+      { name: 'blis-schemas', version: 'v0.5.0', note: 'structs the scenario decodes against' },
       { name: 'blis-catalog', version: '0.4.0', note: 'models, hardware, workloads' },
       { name: 'blis-registry', version: 'v0.2.0', note: 'coefficients' },
     ],
@@ -970,7 +971,7 @@ describe('footer pinned-stack disclosure', () => {
     expect(root.textContent).toContain('inference-sim')
     expect(root.textContent).toContain('v0.12.0')
     // the count tells you there is more without spending the space
-    expect(root.textContent).toContain('+3')
+    expect(root.textContent).toContain('+4')
     // ...and the transitives are genuinely not rendered, not merely hidden
     expect(document.querySelector('.footdeps')).toBeNull()
     expect(document.querySelector('.footmeta')?.textContent).not.toContain('blis-catalog')
@@ -980,7 +981,10 @@ describe('footer pinned-stack disclosure', () => {
     render(<Footer catalog={cat()} mode="local" hasMock={false} />)
     fireEvent.click(screen.getByRole('button', { expanded: false }))
     const deps = [...document.querySelectorAll('.footdeps .pill')].map((p) => p.textContent?.trim())
-    expect(deps).toEqual(['blis-latency-kernel v0.3.0', 'blis-catalog 0.4.0', 'blis-registry v0.2.0'])
+    expect(deps).toEqual([
+      'blis-latency-kernel v0.3.0', 'blis-schemas v0.5.0',
+      'blis-catalog 0.4.0', 'blis-registry v0.2.0',
+    ])
     // collapsing puts it back
     fireEvent.click(screen.getByRole('button', { expanded: true }))
     expect(document.querySelector('.footdeps')).toBeNull()
@@ -991,6 +995,34 @@ describe('footer pinned-stack disclosure', () => {
     render(<Footer catalog={cat()} mode="local" hasMock={false} />)
     fireEvent.click(screen.getByRole('button', { expanded: false }))
     expect(document.querySelector('.footdeps')?.textContent).toContain('blis-latency-kernel')
+  })
+
+  it('renders however many deps the pin states, not a fixed four', () => {
+    // blis-vllm is a dependency only from BLIS v0.14.0, where the engine surface moved into it.
+    // At an older pin build_catalog omits the row entirely rather than showing it as "absent",
+    // so the footer must be driven by the array and not a hardcoded count.
+    const withVllm: Catalog['stack'] = {
+      root: { name: 'inference-sim', version: 'v0.15.0', note: 'prices every run' },
+      deps: [
+        ...stack!.deps.slice(0, 1),
+        { name: 'blis-vllm', version: 'v0.32.0-blis.1', note: 'engine config surface' },
+        ...stack!.deps.slice(1),
+      ],
+    }
+    render(<Footer catalog={cat({ stack: withVllm })} mode="local" hasMock={false} />)
+    const root = screen.getByRole('button', { expanded: false })
+    expect(root.textContent).toContain('+5')
+    fireEvent.click(root)
+    const names = [...document.querySelectorAll('.footdeps .pill .pk')].map((p) => p.textContent)
+    expect(names).toEqual([
+      'blis-latency-kernel', 'blis-vllm', 'blis-schemas', 'blis-catalog', 'blis-registry',
+    ])
+  })
+
+  it('shows no dep count when the stack somehow has none', () => {
+    // defensive: a stack with an empty deps array should read as a plain pill, not "+0"
+    render(<Footer catalog={cat({ stack: { root: stack!.root, deps: [] } })} mode="local" hasMock={false} />)
+    expect(screen.getByRole('button').textContent).not.toContain('+0')
   })
 
   it('falls back to flat pills for a catalog.js generated before `stack` existed', () => {

@@ -72,9 +72,7 @@ class ResultDocument(unittest.TestCase):
         self.assertEqual(run_blis.parse_metrics(RESULT_DOC)["tokens_per_sec"], 96.80435952382842)
 
     def test_itl_is_the_renamed_step_interval_not_the_measured_window(self):
-        # result_inputs.go fills whole_run's step_interval_* from the very fields MetricsOutput's
-        # itl_* held. The measured window's itl_p99 (33.87) is FormulaTPOTExclFirst -- a different
-        # population, and reading it here would rebase every committed report's SLO verdict.
+        # Not the measured window's itl_p99 (33.87); see run_blis._ITL_FROM_STEP_INTERVAL.
         m = run_blis.parse_metrics(RESULT_DOC)
         self.assertEqual(m["itl_p99_ms"], 294.031)
         self.assertEqual(m["itl_mean_ms"], 27.831343253968253)
@@ -128,12 +126,8 @@ class ResultDocument(unittest.TestCase):
         self.assertEqual((m["tokens_per_sec"], m["itl_p99_ms"]), (11.0, 5.47))
 
     def test_itl_never_falls_back_to_the_clusters_measured_window_copy(self):
-        """`cluster` carries its OWN step_interval_* beside whole_run's, and they are different
-        populations: result_inputs.go fills the cluster copy from `sum` (MeasuredSummary, the
-        measured window) and whole_run's from `whole.ITL*Ms`. Taking the cluster copy when
-        whole_run is absent would re-baseline every latency in the repo against the 12 committed
-        reports -- silently, which is what made the rename expensive in the first place. So a
-        document without whole_run must yield NO itl_*, and fail loudly downstream."""
+        """`cluster`'s own step_interval_* is the measured window (see
+        run_blis._ITL_FROM_STEP_INTERVAL), so a document without whole_run yields nothing."""
         doc = {"kind": "Result", "engine": {"cluster": {
             "tokens_per_sec": 11.0,
             # the measured-window copy, one level up from whole_run -- must not be read
@@ -304,7 +298,7 @@ class ClassifyConfig(unittest.TestCase):
             self.assertIn("not priced by it", str(e.exception), knob)
 
     def test_rejects_knobs_the_pinned_engine_prices_only_in_one_shape(self):
-        """Conditionally-priced knobs name the condition, so the reader can satisfy it."""
+        """Conditionally-priced knobs name the condition, but are refused in every shape."""
         for knob, value, want in (("prefill_schedule_interval", 2, "dp > 1"),
                                   ("env", {"FOO": "1"}, "VLLM_USE_V2_MODEL_RUNNER"),
                                   ("kv_events", True, "struct")):
@@ -628,6 +622,19 @@ class WorkloadShapeIsPassedExplicitly(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--prompt-tokens") + 1], "10240")
 
 
+    def test_a_yaml_result_document_parses_like_the_json_one(self):
+        """An infinite grace has no JSON form, so those runs print YAML (run_blis.INF_NEEDS_YAML)."""
+        try:
+            import yaml
+        except ImportError:
+            self.skipTest("PyYAML not installed")
+        doc = json.loads(RESULT_DOC)
+        doc["input"] = {"run": {"workload": {"replay": {"grace_period_s": float("inf")}}}}
+        s = yaml.safe_dump(doc, sort_keys=False)
+        self.assertTrue(s.startswith("kind: Result") and ".inf" in s)
+        self.assertEqual(run_blis.parse_metrics(RESULT_DOC), run_blis.parse_metrics(s))
+
+
 class ReplayCommand(unittest.TestCase):
     REPLAY = {"scenario": "inferencex-agentx-mvp", "corpus": "/c/traces.jsonl",
               "corpus_sha256": "abc123", "max_context_length": "max_model_len",
@@ -642,6 +649,17 @@ class ReplayCommand(unittest.TestCase):
         # the file's bytes tie a run to its corpus.
         self.assertEqual(cmd[cmd.index("--corpus-sha256") + 1], "abc123")
         self.assertEqual(cmd[cmd.index("--concurrency") + 1], "16")
+
+    def test_an_infinite_grace_asks_for_yaml(self):
+        for grace, yaml_out in (("inf", True), (".inf", True), ("30s", False)):
+            cmd = run_blis.build_replay_cmd("/b", "/cat", "/reg", "/sc", "s.yaml", 42, None, {},
+                                            dict(self.REPLAY, grace_period=grace))
+            self.assertEqual(cmd[cmd.index("--grace-period") + 1], grace)
+            self.assertEqual(yaml_out, "--format" in cmd and cmd[cmd.index("--format") + 1] == "yaml",
+                             grace)
+        cmd = run_blis.build_replay_cmd("/b", "/cat", "/reg", "/sc", "s.yaml", 42, None, {},
+                                        self.REPLAY)
+        self.assertNotIn("--format", cmd)
 
     def test_passes_no_num_requests(self):
         """A replay is bounded by its sending window, not a request count; --num-requests is not
@@ -700,8 +718,7 @@ class RouterBlockInScenario(unittest.TestCase):
 
 
 class SpeculativeDecoding(unittest.TestCase):
-    """Drafting is priced by v0.12.0 + registry v0.2.0; the runner used to refuse it outright as
-    "not yet validated on the kernel backend", which was true of v0.10.0 only."""
+    """Drafting is priced by the kernel; see run_blis's speculative comment."""
 
     def test_depth_becomes_a_nested_engine_block(self):
         _, eng, _, _ = run_blis.classify_config({"tp": 4, "num_speculative_tokens": 5})

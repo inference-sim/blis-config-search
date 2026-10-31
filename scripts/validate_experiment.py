@@ -81,8 +81,7 @@ GPUS_PER_NODE = 8          # a per-instance footprint past this spans nodes (run
 # Knob names. Each set below has an authoritative upstream source, read when the checkout is
 # present so a spec is validated against the stack that will actually run it. The fallbacks are
 # the names verified against the stack pins.env pins, and are what CI uses, where only this repo
-# is checked out. No version literal here on purpose: it read v0.8.0 while the pin had moved to
-# v0.10.0, and the fallback's whole job is to match whatever pins.env currently names.
+# is checked out. No version literal here: the fallback must match whatever pins.env names.
 
 # blis-schemas spec/deployment/deployment.go, Parallelism's yaml tags.
 PARALLEL_KNOBS = frozenset({
@@ -114,9 +113,7 @@ ENGINE_KNOBS = frozenset({
 # was a fixed 31-field struct in blis-schemas v0.5.0, so 21 real vLLM knobs failed every run with
 # "field <name> not found in type deployment.Engine". The v0.14.0 bump made `engine:` an OPAQUE
 # block opened by the engine model that `engine_version` selects -- blis-vllm's
-# rules/engineconfig.Engine -- so all 21 now decode. (Versions deliberately unpinned in this
-# comment; pins.env states the current stack, and the pin has moved twice since.)
-# Only 3 of them (max_num_active_seqs,
+# rules/engineconfig.Engine -- so all 21 now decode. Only 3 of them (max_num_active_seqs,
 # max_num_scheduled_tokens, frontend) actually move a number and are swept like any other knob.
 #
 # What remains is a different refusal, and a narrower one: the field decodes, but the engine model
@@ -250,7 +247,8 @@ ENGINE_INT_LISTS = ("cudagraph_capture_sizes",)
 
 # Speculative's fields under the pinned engine model (blis-vllm v0.32.0 rules/engineconfig).
 # All seven DECODE. Only the first two select an acceptance profile from the registry and so
-# change a run; the rest are recorded provenance -- see SPECULATIVE_RECORDED_ONLY.
+# change a run; draft_model cannot run, and the rest are recorded provenance -- see
+# SPECULATIVE_RECORDED_ONLY.
 SPECULATIVE_FIELDS = ("method", "num_spec_tokens", "draft_model", "kv_cache_dtype",
                       "draft_sample_method", "rejection_sample_method",
                       "enable_adaptive_verification")
@@ -397,9 +395,7 @@ def knob_vocabulary():
         return PARALLEL_KNOBS, eng, "../blis-vllm checkout + pinned parallel names"
     if par:
         return par, ENGINE_KNOBS, "../blis-schemas checkout + pinned engine names"
-    # No version literal here: this string is printed on every CI validation run, and a hardcoded
-    # schemas/vllm version silently goes stale on the next pin bump (it read v0.8.0 while the pin
-    # had moved to v0.10.0). pins.env is the source of truth for which stack that is.
+    # No version literal: this is printed on every CI run and would go stale on the next bump.
     return PARALLEL_KNOBS, ENGINE_KNOBS, "pinned names (see pins.env for the stack)"
 
 
@@ -539,13 +535,11 @@ def _check_engine_values(engine, where, errs, enums=None):
 def _check_cross_knob(sweep, scenario, where, errs, model_entry=None):
     """Constraints that span TWO knobs, or a knob and the model -- the ones BLIS does not catch.
 
-    Measured against the pinned binary: BLIS v0.14.0 validates enum membership and simple ranges
-    (`cudagraph_mode: BOGUS`, `cache_dtype: fp16` and `max_num_seqs: 0` are all refused at
-    startup), but it does NOT check cross-knob agreement -- a
-    `long_prefill_token_threshold` of 999,999 against a 32k context ran happily. It cannot: the
-    pinned simulator depends on blis-latency-kernel and blis-schemas only, never on blis-vllm,
-    so the 32 rules in blis-vllm's v0_32 pack are not evaluated at run time at all.
-    They are real vLLM behaviour even so -- the pack transcribes the engine's own startup
+    Measured against the pinned binary (pins.env): BLIS validates enum membership and simple
+    ranges (`cudagraph_mode: BOGUS`, `cache_dtype: fp16` and `max_num_seqs: 0` are all refused
+    at startup), but it does NOT check cross-knob agreement -- a `long_prefill_token_threshold`
+    of 999,999 against a 32k context runs rc=0. So the 32 rules in blis-vllm's v0_32 pack are
+    not all evaluated at run time. They are real vLLM behaviour even so -- the pack transcribes the engine's own startup
     assertions with file and line -- so a spec that violates one describes a deployment that
     could not be launched for real, and the simulated number would be meaningless.
     Each check below names the rule it comes from.

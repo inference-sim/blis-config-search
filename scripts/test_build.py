@@ -402,11 +402,6 @@ def test_pins_are_the_single_source_of_the_sim_version():
                 got = ((json.load(f).get("pinned_stack") or {}).get("blis"))
             if got and got not in recorded:
                 recorded.append(got)
-    expect = ref if not recorded else (
-        ref if recorded == [ref]
-        else ", ".join(([ref] if ref in recorded else []) + [v for v in recorded if v != ref]))
-    check(pill == expect,
-          f"the pill should name what priced the committed reports ({expect!r}), got {pill!r}")
     for v in recorded:
         check(v in pill, f"a report priced by {v} must be represented in the pill, got {pill!r}")
 

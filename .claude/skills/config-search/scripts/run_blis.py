@@ -143,11 +143,10 @@ NESTED_ENGINE_FIELDS = {
                     "draft_sample_method", "rejection_sample_method",
                     "enable_adaptive_verification"),
 }
-# Speculative decoding IS priced by the kernel (since BLIS v0.14.0; see pins.env) -- the earlier runner
-# refused it as "not yet validated on the kernel backend", which was true of v0.10.0 and is stale.
-# It is a nested `speculative: {method, num_spec_tokens}` block on the pool's engine
-# (the pinned engine model's engineconfig.Engine.Speculative), so the two candidate keys below are
-# folded into that block rather than emitted as flat engine fields.
+# Speculative decoding IS priced by the kernel (since BLIS v0.12.0 + registry v0.2.0; v0.14.0 added
+# only the five extra fields above). It is a nested `speculative: {method, num_spec_tokens}` block
+# on the pool's engine (the pinned engine model's engineconfig.Engine.Speculative), so the two
+# candidate keys below are folded into that block rather than emitted as flat engine fields.
 #
 # The ACCEPTANCE (how many drafted tokens land) is not a deployment property: it depends on the
 # model, drafter and traffic. BLIS resolves it from the registry's acceptance/ profiles, selected
@@ -180,7 +179,7 @@ DEFAULT_FABRIC = "ib-400g"   # InfiniBand NDR 400 Gb/s; the standard H100 multi-
 # `max_model_len` is not merely a convenience here: blis-vllm v0.32.0's rules make it MANDATORY
 # ("must be stated; an unstated or auto window is the model's or the memory's"), so the pinned
 # stack refuses a scenario without it. Because this default always emits one, the five shipped
-# specs that never mention max_model_len still run at the v0.14.0 pin -- the requirement is met
+# specs that never mention max_model_len still run at the pin -- the requirement is met
 # by the runner, not by the spec. Do not "fix" those specs by adding it; stating it there would
 # pin a context window the spec does not actually care about.
 ENGINE_DEFAULTS = {"max_num_batched_tokens": 8192, "max_num_seqs": 256,
@@ -984,6 +983,10 @@ def _result_doc(stdout):
     MetricsOutput dict every earlier pin printed. Recognised by `kind` plus the sections this
     module reads, never by `schema_version` alone -- a replay document is the same shape.
     """
+    if stdout.lstrip().startswith("kind: Result"):    # see INF_NEEDS_YAML
+        import yaml
+        o = yaml.load(stdout, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
+        return o if isinstance(o.get("engine"), dict) else None
     for o in _iter_json_objects(stdout):
         if o.get("kind") == "Result" and isinstance(o.get("engine"), dict):
             return o
@@ -997,9 +1000,9 @@ def _result_doc(stdout):
 # different population (result_build.go standardMetrics). Mixing the two would make this bump a
 # silent re-baselining of every latency in the repo, so the whole-run block is the source and the
 # measured window is left to the Result document's own readers.
-_WHOLE_RUN_KEYS = ("tokens_per_sec", "responses_per_sec",
-                   "ttft_mean_ms", "ttft_p90_ms", "ttft_p95_ms", "ttft_p99_ms",
-                   "e2e_mean_ms", "e2e_p90_ms", "e2e_p95_ms", "e2e_p99_ms")
+_WHOLE_RUN_KEYS = {k: k for k in ("tokens_per_sec", "responses_per_sec",
+                                   "ttft_mean_ms", "ttft_p90_ms", "ttft_p95_ms", "ttft_p99_ms",
+                                   "e2e_mean_ms", "e2e_p90_ms", "e2e_p95_ms", "e2e_p99_ms")}
 
 # itl_* was RENAMED to step_interval_*, not dropped: result_inputs.go fills whole_run's
 # step_interval_* from whole.ITL*Ms, the very fields MetricsOutput's itl_* keys held ("the
@@ -1008,7 +1011,9 @@ _WHOLE_RUN_KEYS = ("tokens_per_sec", "responses_per_sec",
 # window, a genuinely different measurement. Measured on one Muse run: whole-run
 # step_interval_p99 294.03 ms against measured-window itl_p99 33.87 ms, ~9x apart because a step
 # serves the whole batch. Reading the per-request figure into itl_p99_ms would silently rebase
-# every SLO verdict and every per-user rate in the repo against 12 committed reports.
+# every SLO verdict and every per-user rate in the repo against 12 committed reports. The same
+# holds for the step_interval_* on `cluster` itself: result_inputs.go fills that copy from `sum`
+# (the measured window), so it is not a fallback for whole_run's either.
 _ITL_FROM_STEP_INTERVAL = {"itl_mean_ms": "step_interval_mean_ms", "itl_p90_ms": "step_interval_p90_ms",
                            "itl_p95_ms": "step_interval_p95_ms", "itl_p99_ms": "step_interval_p99_ms"}
 
@@ -1021,8 +1026,10 @@ _REQUEST_COUNTS = {"injected_requests": "injected", "completed_requests": "compl
                    "length_capped_requests": "length_capped"}
 
 # Counters that stayed on the cluster aggregate but outside whole_run.
-_CLUSTER_KEYS = ("total_input_tokens", "total_output_tokens", "scheduling_delay_p99_ms",
-                 "kv_allocation_failures", "preemptions")
+_CLUSTER_KEYS = {**{k: k for k in ("total_input_tokens", "total_output_tokens",
+                                    "scheduling_delay_p99_ms", "kv_allocation_failures")},
+                 "preemption_count": "preemptions",
+                 "vllm_estimated_duration_s": "simulated_duration_s"}
 
 
 def _flatten_result(doc):
@@ -1039,29 +1046,13 @@ def _flatten_result(doc):
     if not whole:
         return {}   # no whole-run aggregate: fail as "no cluster metrics parsed", not later
     out = {"instance_id": "cluster"}
-    for k in _WHOLE_RUN_KEYS:
-        if k in whole:
-            out[k] = whole[k]
-    for legacy, new in _ITL_FROM_STEP_INTERVAL.items():
-        # ONLY from whole_run. There is an identically-named step_interval_* one level up, on
-        # `cluster` itself, and it is NOT a fallback for this: result_inputs.go fills the cluster
-        # copy from `sum` (MeasuredSummary -- the measured window) and whole_run's from
-        # `whole.ITL*Ms`. Those are the two populations this mapping exists to keep apart, so
-        # reaching for the cluster copy when whole_run is missing would silently re-baseline every
-        # latency in the repo -- the exact failure the rename caused. Upstream sets whole_run
-        # unconditionally; if that ever changes, parse_metrics returns {} (guard above).
-        if new in whole:
-            out[legacy] = whole[new]
-    for k in _CLUSTER_KEYS:
-        if k in cluster:
-            out["preemption_count" if k == "preemptions" else k] = cluster[k]
-    reqs = doc.get("requests") or {}
-    for legacy, new in _REQUEST_COUNTS.items():
-        if new in reqs:
-            out[legacy] = reqs[new]
-    dur = cluster.get("simulated_duration_s")
-    if dur is not None:
-        out["vllm_estimated_duration_s"] = dur
+    # itl_* ONLY from whole_run, never the cluster's own step_interval_* (see
+    # _ITL_FROM_STEP_INTERVAL); hence the guard above rather than a fallback.
+    for src, mapping in ((whole, _WHOLE_RUN_KEYS), (whole, _ITL_FROM_STEP_INTERVAL),
+                         (cluster, _CLUSTER_KEYS), (doc.get("requests") or {}, _REQUEST_COUNTS)):
+        for legacy, new in mapping.items():
+            if new in src:
+                out[legacy] = src[new]
     return out
 
 
@@ -1257,6 +1248,13 @@ def _cli_flag(key):
     raise KeyError(key)
 
 
+# The Result document echoes its input, and JSON has no infinity: an infinite grace makes BLIS exit
+# fatally AFTER simulating ("result: .inf has no JSON form"). A large finite grace is no stand-in --
+# the measured window then runs to the grace end, so its rates shrink by orders of magnitude.
+# YAML encodes `.inf`, so those runs ask for YAML; the document is otherwise the same.
+INF_NEEDS_YAML = ("inf", ".inf")
+
+
 def build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed, defaults, cli,
                      replay):
     """The `blis replay --agentic-scenario` command for a trace-REPLAY workload.
@@ -1291,6 +1289,8 @@ def build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed
         cmd += ["--benchmark-duration", str(replay["benchmark_duration"])]
     if replay.get("grace_period"):
         cmd += ["--grace-period", str(replay["grace_period"])]
+        if str(replay["grace_period"]) in INF_NEEDS_YAML:
+            cmd += ["--format", "yaml"]
     if replay.get("corpus_cache"):
         cmd += ["--corpus-cache", replay["corpus_cache"]]
     if seed is not None:

@@ -218,10 +218,11 @@ engine:
 
 `speculative` is also nested and needs **both** `method` and `num_spec_tokens`; acceptance comes
 from the registry, not a knob. It carries seven fields at this pin (it held two before v0.14.0),
-but only `method`, `num_spec_tokens` and `draft_model` change a run: the sampling fields
+but only `method` and `num_spec_tokens` change a run. The sampling fields
 (`draft_sample_method`, `rejection_sample_method`, `enable_adaptive_verification`,
-`kv_cache_dtype`) are recorded as the launch gave them and never re-price acceptance, so the
-validator refuses a sweep over them with that reason.
+`kv_cache_dtype`) are recorded as the launch gave them and never re-price acceptance, and
+`draft_model` cannot run on any catalog model (the drafter comes from the model's graph), so the
+validator refuses a sweep over any of them.
 
 ### Not every accepted knob is a lever
 

@@ -144,14 +144,13 @@ def _blis_source_commit(blis):
     """
     if not (blis and os.path.isfile(blis)):
         return None, None
-    desc, commit = _git_identity(os.path.dirname(os.path.abspath(blis)))
-    if not commit:
+    src = os.path.dirname(os.path.abspath(blis))
+    # Is the directory the SIMULATOR's tree? A binary dropped into any unrelated repo would
+    # otherwise borrow that repo's commit and be checked against it.
+    if not os.path.isfile(os.path.join(src, "main.go")):
         return None, None
-    # The directory is a git tree, but is it the SIMULATOR's? A binary dropped into any
-    # unrelated repo would otherwise borrow that repo's commit and be checked against it.
-    if not os.path.isfile(os.path.join(os.path.dirname(os.path.abspath(blis)), "main.go")):
-        return None, None
-    return desc, commit
+    desc, commit = _git_identity(src)
+    return (desc, commit) if commit else (None, None)
 
 
 def pin_mismatches(stack):

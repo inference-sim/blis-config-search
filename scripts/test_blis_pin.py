@@ -380,6 +380,14 @@ def test_drift():
               "a newer rules pack upstream means the reader is reading a stale vLLM")
         check(len(B.drift(os.path.join(root, "nothing-here"))) >= 3,
               "missing upstream files fail loudly, never read as 'no drift'")
+        nothing = os.path.join(root, "nothing-here")
+        check(B.drift(nothing, {"blis-latency-kernel": "v0.3.0"}) == [],
+              "a module the release does not require (v0.12.0 has no blis-vllm) is not drift")
+        req = B.drift(nothing, {"blis-vllm": "v0.32.0", "blis-schemas": "v0.8.0"})
+        check(len(req) >= 3, "a REQUIRED module whose files cannot be read still fails loudly")
+        only_schemas = B.drift(nothing, {"blis-schemas": "v0.5.0"})
+        check(len(only_schemas) == 1 and "parallel" in only_schemas[0],
+              f"only the required module's checks run: {only_schemas}")
     finally:
         shutil.rmtree(root)
 
@@ -408,8 +416,16 @@ def test_workflow_wiring():
     check("scripts/test_blis_pin.py" in open(os.path.join(wf, "checks.yml")).read(),
           "checks.yml must run these tests")
     compat = open(os.path.join(wf, "pin-compat.yml")).read()
-    check('paths: ["pins.env"]' in compat and "pull_request" in compat,
-          "the compatibility gate runs on every PR that moves a pin")
+    check("pull_request:" in compat and "paths:" not in compat.split("\njobs:")[0].replace(
+              "without a `paths:` filter", ""),
+          "the gate triggers on EVERY PR: a path-filtered required check stays pending forever")
+    check("blis_pin.py changed" in compat and "needs.changed.outputs.moved == 'true'" in compat,
+          "the heavy jobs run only when a pin's VALUE moved against the base branch")
+    gate = compat.split("\n  gate:", 1)[-1]
+    check("if: always()" in gate and "needs: [changed, build, smoke]" in gate,
+          "`gate` always reports, so it is the one check that can be marked required")
+    check("--go-mod upstream/go.mod" in compat and "--go-mod upstream/go.mod" in regen,
+          "drift is told which modules the release requires")
     check(sha not in compat and ". ./pins.env" in compat and "$BLIS_SHA" in compat,
           "pin-compat.yml reads the pin from pins.env and refuses a moved tag")
     for step in ("blis_pin.py drift", "blis_pin.py smoke", "blis_pin.py modules"):

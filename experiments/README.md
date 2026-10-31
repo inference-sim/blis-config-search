@@ -424,7 +424,9 @@ inference-sim release --bump-blis-pin.yml-->  DRAFT pin PR  <--fix commits--  pi
   tag's commit and that the release builds, and opens a **draft** PR with a checklist. It does not
   require this repo's tests to pass: a release that needs code changes still needs its PR. It
   never guesses `CATALOG_REF` / `REGISTRY_REF`.
-* **`pin-compat.yml`** runs on every PR that changes `pins.env`; make it a required check. Against
+* **`pin-compat.yml`** runs on every PR, and does its work only when a pin's *value* moves against
+  the base branch. Mark its **`gate`** job as the required check: it always reports, and passes when
+  no pin moved. Against
   the new binary it runs:
   * `blis_pin.py drift`: the validator's pinned knob tables against the `blis-vllm` /
     `blis-schemas` versions the release's go.mod names;

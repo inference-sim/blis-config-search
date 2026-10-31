@@ -135,7 +135,7 @@ jobs:
               git clone --branch "$ver" --depth 1 "https://github.com/inference-sim/$mod.git" "$RUNNER_TEMP/stack/$mod" ;;
             esac
           done
-          python3 -I scripts/blis_pin.py drift --siblings "$RUNNER_TEMP/stack"
+          python3 -I scripts/blis_pin.py drift --siblings "$RUNNER_TEMP/stack" --go-mod upstream/go.mod
       - uses: actions/upload-artifact@v4
         with:
           name: blis

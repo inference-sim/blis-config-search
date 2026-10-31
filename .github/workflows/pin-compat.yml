@@ -1,6 +1,7 @@
 name: pin-compat
 
-# The compatibility gate for a PR that moves the pinned stack. Make it a REQUIRED check on main.
+# The compatibility gate for a PR that moves the pinned stack. Make its `gate` job a REQUIRED
+# check on main (not the others: they are skipped on ordinary PRs, see the trigger note below).
 #
 # A new inference-sim can need code changes in THIS repo -- v0.14.0 needed 14 files (PR #25):
 # knob tables in validate_experiment.py, run_blis.py's UNSUPPORTED / PD_MUST_MATCH, a newly
@@ -24,12 +25,16 @@ name: pin-compat
 #          a row that ran before and fails now (LOUD), or a knob that moved the numbers before
 #          and now measures identically to its baseline (SILENT -- the v0.14.0 failure mode).
 #
-# Runs only when pins.env changes, so an ordinary PR pays nothing. The smoke job needs the
-# 568 MB replay corpus for the AgentX reports; it is cached per catalog pin, as in regen-reports.
+# Trigger: EVERY pull request, deliberately without a `paths:` filter. A workflow skipped by a
+# path filter never reports, so a required check on it would sit "pending" forever on every PR
+# that does not touch pins.env. Instead `changed` compares pin VALUES against the base branch --
+# a comment-only pins.env edit moves nothing -- and the heavy jobs run only when one moved.
+# `gate` always reports: success when nothing moved or everything passed, failure otherwise.
+# The smoke job needs the 568 MB replay corpus for the AgentX reports; it is cached per catalog
+# pin, as in regen-reports.
 
 on:
   pull_request:
-    paths: ["pins.env"]
   workflow_dispatch:
 
 permissions:
@@ -40,7 +45,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changed:
+    runs-on: ubuntu-latest
+    outputs:
+      moved: ${{ steps.diff.outputs.moved }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyyaml
+      - name: Did this PR move a pin's value?
+        id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE:-}" ]; then          # workflow_dispatch: check the pins as they stand
+            echo "moved=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git show "$BASE:pins.env" > /tmp/base-pins.env
+          moved="$(python3 -I scripts/blis_pin.py changed /tmp/base-pins.env)"
+          echo "pins moved against the base branch: $moved"
+          echo "moved=$([ "$moved" = "{}" ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: changed
+    if: needs.changed.outputs.moved == 'true'
     runs-on: ubuntu-latest
     outputs:
       reports: ${{ steps.ids.outputs.reports }}
@@ -68,7 +99,7 @@ jobs:
         with: { go-version-file: upstream/go.mod }
       - run: cd upstream && go build -o blis main.go && ./blis --help >/dev/null
       - name: Knob tables vs the new stack
-        run: python3 -I scripts/blis_pin.py drift --siblings "$RUNNER_TEMP/stack"
+        run: python3 -I scripts/blis_pin.py drift --siblings "$RUNNER_TEMP/stack" --go-mod upstream/go.mod
       - name: Hermetic suite
         run: |
           set -euo pipefail
@@ -174,3 +205,22 @@ jobs:
           } > /tmp/comment.md
           gh pr comment "$PR" --edit-last --body-file /tmp/comment.md 2>/dev/null \
             || gh pr comment "$PR" --body-file /tmp/comment.md
+
+  # The ONE check to mark required. It always runs, so it always reports.
+  gate:
+    needs: [changed, build, smoke]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pass when no pin moved, or every compatibility check passed
+        env:
+          MOVED: ${{ needs.changed.outputs.moved }}
+          CHANGED: ${{ needs.changed.result }}
+          BUILD: ${{ needs.build.result }}
+          SMOKE: ${{ needs.smoke.result }}
+        run: |
+          echo "changed=$CHANGED moved=$MOVED build=$BUILD smoke=$SMOKE"
+          [ "$CHANGED" = success ] || { echo "could not tell whether a pin moved"; exit 1; }
+          if [ "$MOVED" != true ]; then echo "no pin value moved -- nothing to check"; exit 0; fi
+          [ "$BUILD" = success ] && [ "$SMOKE" = success ] || {
+            echo "the code does not fit the new stack yet -- see the failed jobs above"; exit 1; }

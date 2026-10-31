@@ -658,13 +658,19 @@ def _cfg_phrase(cfg):
         + "}"
 
 
-def drift(siblings):
+def drift(siblings, modules=None):
     """Differences between the validator's PINNED knob tables and the upstream checkouts in
     `siblings` (blis-vllm/, blis-schemas/ at the versions the release's go.mod names).
 
     CI validates every spec against the pinned tables (it has no sibling checkouts), so a table
     that lags the stack either refuses a knob the new engine accepts or passes one it refuses.
-    Returns a list of human-readable problems; empty means the tables match the stack."""
+    Returns a list of human-readable problems; empty means the tables match the stack.
+
+    `modules` is the release's go.mod requirements ({"blis-vllm": "v0.32.0-blis.1", ...}). A
+    module the release does not require has nothing to drift FROM -- v0.12.0 builds without
+    blis-vllm -- so its checks are skipped rather than reported as an unreadable upstream. A
+    module it DOES require whose file cannot be read is still a failure: that is the reader
+    going stale. None (no go.mod given) checks everything."""
     import validate_experiment as V
     saved = V.SIBLINGS
     V.SIBLINGS = os.path.abspath(siblings)
@@ -673,9 +679,14 @@ def drift(siblings):
         enums = V._enums_from_blis_vllm()
     finally:
         V.SIBLINGS = saved
+    def required(mod):
+        return modules is None or mod in modules
     out = []
-    for what, live, pinned, table in (("parallel", par, V.PARALLEL_KNOBS, "PARALLEL_KNOBS"),
-                                      ("engine", eng, V.ENGINE_KNOBS, "ENGINE_KNOBS")):
+    for what, live, pinned, table, mod in (
+            ("parallel", par, V.PARALLEL_KNOBS, "PARALLEL_KNOBS", "blis-schemas"),
+            ("engine", eng, V.ENGINE_KNOBS, "ENGINE_KNOBS", "blis-vllm")):
+        if not required(mod):
+            continue
         if live is None:
             out.append(f"the {what} knob reader found nothing upstream -- the upstream file moved "
                        f"or changed shape; fix its reader in validate_experiment.py")
@@ -687,6 +698,8 @@ def drift(siblings):
         if pinned - live:
             out.append(f"{table} still lists {sorted(pinned - live)}, which the new stack no "
                        f"longer defines: a spec using them validates and then fails every run")
+    if not required("blis-vllm"):
+        return out
     if enums is None:
         out.append(f"the engine value reader found no rules/{V.RULES_PACK}/pack.go upstream; the "
                    f"release may model a newer vLLM -- move RULES_PACK and re-read the value sets")
@@ -754,6 +767,7 @@ def main(argv=None):
     d = sub.add_parser("drift", help="pinned knob tables vs upstream checkouts; exit 1 on drift")
     d.add_argument("--siblings", required=True,
                    help="dir holding blis-vllm/ and blis-schemas/ at the release's go.mod versions")
+    d.add_argument("--go-mod", help="the release's go.mod: a module it does not require is skipped")
     k = sub.add_parser("smoke", help="re-run a few ledger rows per report on a new binary")
     k.add_argument("ids", nargs="*", help="report ids (default: every committed report)")
     k.add_argument("--blis", required=True)
@@ -795,7 +809,14 @@ def main(argv=None):
             for mod, ver in sorted(go_mod_versions(f.read()).items()):
                 print(mod, ver)
     elif a.cmd == "drift":
-        problems = drift(a.siblings)
+        mods = None
+        if a.go_mod:
+            with open(a.go_mod) as f:
+                mods = go_mod_versions(f.read())
+            for mod in ("blis-schemas", "blis-vllm"):
+                print(f"{mod}: " + (mods[mod] if mod in mods else
+                                    "not required by this release -- its checks do not apply"))
+        problems = drift(a.siblings, mods)
         for p_ in problems:
             print(f"DRIFT: {p_}")
         print("knob tables match the stack" if not problems else

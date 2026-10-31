@@ -10,6 +10,7 @@ import { Coverage } from './components/Coverage'
 import { Models } from './components/Models'
 import { Workloads } from './components/Workloads'
 import { Gpus } from './components/Gpus'
+import { Footer } from './components/Footer'
 
 const w = { label: '1x TP8', tp: 8, ni: 1, gpus: 8, c_use: 1, tps: 1, tps_per_gpu: 1, per_user: 1, itl_p99: 1 }
 const mk = (id: string, model: string, hw: string, wl: string, gpu: number, synthetic: boolean, records: RunRecord[] = []): Scenario => ({
@@ -943,5 +944,59 @@ describe('ScenarioDetail', () => {
     expect(line).toMatch(/axes searched/i)
     expect(line).toContain('data-parallel')
     expect(line).not.toContain('tensor-parallel')
+  })
+})
+
+describe('footer pinned-stack disclosure', () => {
+  // The footer used to list blis-catalog / blis-registry / inference-sim as three flat pills,
+  // which reads as three dependencies of equal standing. There is one: the BLIS simulator.
+  const stack: Catalog['stack'] = {
+    root: { name: 'inference-sim', version: 'v0.12.0', note: 'prices every run' },
+    deps: [
+      { name: 'blis-latency-kernel', version: 'v0.3.0', note: 'cost model' },
+      { name: 'blis-catalog', version: '0.4.0', note: 'models, hardware, workloads' },
+      { name: 'blis-registry', version: 'v0.2.0', note: 'coefficients' },
+    ],
+  }
+  const cat = (over: Partial<Catalog> = {}): Catalog => ({
+    models: [], hardware: [], workloads: [], fabrics: [], storage: [], registry: [],
+    versions: { 'blis-catalog': '0.4.0', 'blis-registry': 'v0.2.0', 'inference-sim': 'v0.12.0' },
+    stack, ...over,
+  })
+
+  it('shows BLIS alone at rest, with the transitives collapsed behind it', () => {
+    render(<Footer catalog={cat()} mode="local" hasMock={false} />)
+    const root = screen.getByRole('button', { expanded: false })
+    expect(root.textContent).toContain('inference-sim')
+    expect(root.textContent).toContain('v0.12.0')
+    // the count tells you there is more without spending the space
+    expect(root.textContent).toContain('+3')
+    // ...and the transitives are genuinely not rendered, not merely hidden
+    expect(document.querySelector('.footdeps')).toBeNull()
+    expect(document.querySelector('.footmeta')?.textContent).not.toContain('blis-catalog')
+  })
+
+  it('reveals the kernel, catalog and registry when expanded, and hides them again', () => {
+    render(<Footer catalog={cat()} mode="local" hasMock={false} />)
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    const deps = [...document.querySelectorAll('.footdeps .pill')].map((p) => p.textContent?.trim())
+    expect(deps).toEqual(['blis-latency-kernel v0.3.0', 'blis-catalog 0.4.0', 'blis-registry v0.2.0'])
+    // collapsing puts it back
+    fireEvent.click(screen.getByRole('button', { expanded: true }))
+    expect(document.querySelector('.footdeps')).toBeNull()
+  })
+
+  it('surfaces the latency kernel, which the old flat version pills dropped entirely', () => {
+    // KERNEL_REF prices every run but was never in `versions`, so it was invisible.
+    render(<Footer catalog={cat()} mode="local" hasMock={false} />)
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    expect(document.querySelector('.footdeps')?.textContent).toContain('blis-latency-kernel')
+  })
+
+  it('falls back to flat pills for a catalog.js generated before `stack` existed', () => {
+    render(<Footer catalog={cat({ stack: undefined })} mode="local" hasMock={false} />)
+    expect(screen.queryByRole('button')).toBeNull()
+    const pills = [...document.querySelectorAll('.footvers .pill')].map((p) => p.textContent?.trim())
+    expect(pills).toEqual(['blis-catalog 0.4.0', 'blis-registry v0.2.0', 'inference-sim v0.12.0'])
   })
 })

@@ -11,7 +11,9 @@ Reads (read-only, never mutated):
   blis-catalog/networks/*.yaml, devices/storage.yaml              -> fabrics, storage
   blis-registry/coefficients/*.yaml                              -> registry sets
 
-Emits window.CATALOG = {models, hardware, workloads, fabrics, storage, registry, versions}.
+Emits window.CATALOG = {models, hardware, workloads, fabrics, storage, registry, versions,
+stack}, where `stack` is the pinned BLIS stack as one root dependency plus the transitives
+it resolves to (see _stack); `versions` stays a flat map for anything already reading it.
 Pure + deterministic: entries sorted by name, JSON serialized with sort_keys. Never runs
 BLIS. If a sibling repo is absent, its section is empty and `versions` records "absent" so
 the webpage can show "catalog built without <repo>" instead of failing.
@@ -265,6 +267,36 @@ def _workload_entry(path, name):
     }
 
 
+def _stack(pins, versions):
+    """The pinned stack as ONE dependency with its transitives, not a flat row of peers.
+
+    The footer used to list blis-catalog / blis-registry / inference-sim as three flat pills,
+    which reads as "this site has three dependencies of equal standing". It has one: the BLIS
+    simulator binary. The catalog and registry are data that binary is run against, and the
+    latency kernel is pinned inside inference-sim's own go.mod -- recorded here, never cloned
+    by this repo. So `root` is BLIS and `deps` is what it resolves to, and the webpage can show
+    the root alone until asked to expand.
+
+    KERNEL_REF is carried through even though `versions` never had it: it prices every run (it
+    is the cost model), so omitting it from the displayed stack understated what pins a number.
+    """
+    def dep(name, version, note):
+        return {"name": name, "version": version or "absent", "note": note}
+
+    return {
+        "root": dep("inference-sim", versions.get("inference-sim"),
+                    "the BLIS simulator whose binary prices every run"),
+        "deps": [
+            dep("blis-latency-kernel", pins.get("KERNEL_REF"),
+                "cost model, pinned in inference-sim's go.mod at this ref"),
+            dep("blis-catalog", versions.get("blis-catalog"),
+                "models, hardware, workloads the binary is run against"),
+            dep("blis-registry", versions.get("blis-registry"),
+                "cost-model coefficients and speculative-decoding profiles"),
+        ],
+    }
+
+
 def build(siblings):
     catalog = os.path.join(siblings, "blis-catalog")
     registry = os.path.join(siblings, "blis-registry")
@@ -327,7 +359,8 @@ def build(siblings):
         "inference-sim": pins.get("BLIS_REF") or "unpinned (no BLIS_REF in pins.env)",
     }
     return {"models": models, "hardware": hardware, "workloads": workloads,
-            "fabrics": fabrics, "storage": storage, "registry": reg_sets, "versions": versions}
+            "fabrics": fabrics, "storage": storage, "registry": reg_sets, "versions": versions,
+            "stack": _stack(pins, versions)}
 
 
 def main(argv=None):

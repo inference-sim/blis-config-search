@@ -3,6 +3,7 @@
 
     python3 scripts/test_run_blis.py          # or: python3 -m unittest -v  (from this dir)
 """
+import json
 import os
 import sys
 import tempfile
@@ -34,6 +35,97 @@ class ParseMetrics(unittest.TestCase):
         s = ('{"instance_id":"i0","tokens_per_sec":1.0}\n{"instance_id":"i1","tokens_per_sec":2.0}\n'
              '{"instance_id":"cluster","tokens_per_sec":3.0}')
         self.assertEqual([o["instance_id"] for o in run_blis.parse_all_instances(s)], ["i0", "i1"])
+
+
+# The v0.15.0 Result document, trimmed to the sections parse_metrics reads. Values are a real
+# single-instance Muse run's, so the numbers below are the pinned simulator's own.
+RESULT_DOC = json.dumps({
+    "kind": "Result", "schema_version": "1",
+    "window": {"start": "first_arrival_after_warmup", "duration_s": 4.792675, "requests": 8},
+    "requests": {"generated": 8, "injected": 8, "completed": 8, "still_queued": 0,
+                 "still_running": 0, "dropped_unservable": 0, "timed_out": 0, "length_capped": 0},
+    # The MEASURED WINDOW: per-request TPOT, deliberately NOT the source of itl_*.
+    "metrics": {"itl_p99_ms": 33.87192666666667, "itl_mean_ms": 27.831343253968253,
+                "output_tok_s": 106.82969322977252, "request_throughput": 1.6692139567151956},
+    "engine": {"cluster": {
+        "preemptions": 2, "kv_allocation_failures": 0, "scheduling_delay_p99_ms": 1.5,
+        "total_input_tokens": 32768, "total_output_tokens": 512, "simulated_duration_s": 5.29,
+        "step_interval_p99_ms": 294.031,
+        "whole_run": {"tokens_per_sec": 96.80435952382842, "responses_per_sec": 1.5125681175598191,
+                      "ttft_p99_ms": 349.06543, "ttft_mean_ms": 342.987,
+                      "e2e_p99_ms": 2479.9476, "e2e_mean_ms": 2097.138625,
+                      "step_interval_mean_ms": 27.831343253968253, "step_interval_p90_ms": 16.729,
+                      "step_interval_p95_ms": 16.729, "step_interval_p99_ms": 294.031}}}})
+
+
+class ResultDocument(unittest.TestCase):
+    """v0.15.0 made stdout one Result document; these pin the legacy field names to it.
+
+    The bump restructured the cluster aggregate but left `engine.instances` emitting a verbatim
+    MetricsOutput, so before the remapping a SINGLE-instance run had no itl_* anywhere (every ITL
+    SLO failing as "declared but not measured", a whole sweep reporting 0 servable) while a
+    multi-instance run still resolved off its per-instance rows. A test per field, because that
+    asymmetry reads as a finding rather than failing loudly.
+    """
+
+    def test_throughput_comes_from_whole_run(self):
+        self.assertEqual(run_blis.parse_metrics(RESULT_DOC)["tokens_per_sec"], 96.80435952382842)
+
+    def test_itl_is_the_renamed_step_interval_not_the_measured_window(self):
+        # result_inputs.go fills whole_run's step_interval_* from the very fields MetricsOutput's
+        # itl_* held. The measured window's itl_p99 (33.87) is FormulaTPOTExclFirst -- a different
+        # population, and reading it here would rebase every committed report's SLO verdict.
+        m = run_blis.parse_metrics(RESULT_DOC)
+        self.assertEqual(m["itl_p99_ms"], 294.031)
+        self.assertEqual(m["itl_mean_ms"], 27.831343253968253)
+        self.assertEqual(m["itl_p90_ms"], 16.729)
+
+    def test_an_itl_slo_can_be_judged_at_all(self):
+        rec = {"metrics": run_blis.parse_metrics(RESULT_DOC), "metrics_all_instances": []}
+        worst, missing = run_blis.worst_itl_p99(rec)
+        self.assertFalse(missing, "a single-instance v0.15.0 run must still measure ITL")
+        self.assertEqual(worst, 294.031)
+
+    def test_completion_counters_follow_the_requests_block(self):
+        # They moved out of the metrics dict under shorter names; unmapped, _completion_issue can
+        # never fire and an overloaded run ranks as a clean capacity point.
+        m = run_blis.parse_metrics(RESULT_DOC)
+        self.assertEqual((m["injected_requests"], m["completed_requests"]), (8, 8))
+        self.assertIsNone(run_blis._completion_issue(m))
+
+    def test_an_overloaded_result_is_still_caught(self):
+        doc = json.loads(RESULT_DOC)
+        doc["requests"].update({"completed": 6, "still_queued": 2})
+        issue = run_blis._completion_issue(run_blis.parse_metrics(json.dumps(doc)))
+        self.assertIsNotNone(issue)
+        self.assertIn("injected=8", issue)
+
+    def test_cluster_counters_survive(self):
+        m = run_blis.parse_metrics(RESULT_DOC)
+        self.assertEqual(m["preemption_count"], 2)
+        self.assertEqual(m["total_output_tokens"], 512)
+        self.assertEqual(m["vllm_estimated_duration_s"], 5.29)
+
+    def test_instances_are_read_from_the_engine_block(self):
+        doc = json.loads(RESULT_DOC)
+        doc["engine"]["instances"] = {
+            "instance_1": {"instance_id": "instance_1", "tokens_per_sec": 2.0, "itl_p99_ms": 40.0},
+            "instance_0": {"instance_id": "instance_0", "tokens_per_sec": 1.0, "itl_p99_ms": 30.0}}
+        s = json.dumps(doc)
+        self.assertEqual([o["instance_id"] for o in run_blis.parse_all_instances(s)],
+                         ["instance_0", "instance_1"])
+        # The worst instance is over the aggregate's 294.031? No -- so the aggregate still wins,
+        # which is the point of including it rather than trusting the per-instance rows.
+        rec = {"metrics": run_blis.parse_metrics(s),
+               "metrics_all_instances": run_blis.parse_all_instances(s)}
+        self.assertEqual(run_blis.worst_itl_p99(rec), (294.031, False))
+
+    def test_a_pre_v0150_flat_output_still_parses(self):
+        # The fallback must stay: a contributor testing an older binary, and every committed
+        # report's recorded stdout, are the flat MetricsOutput shape.
+        s = '{"instance_id":"cluster","tokens_per_sec":11.0,"itl_p99_ms":5.47}'
+        m = run_blis.parse_metrics(s)
+        self.assertEqual((m["tokens_per_sec"], m["itl_p99_ms"]), (11.0, 5.47))
 
 
 class CompletionIssue(unittest.TestCase):
@@ -202,9 +294,40 @@ class ClassifyConfig(unittest.TestCase):
                 run_blis.classify_config({"tp": 8, knob: value})
             self.assertIn(want, str(e.exception), knob)
 
-    def test_rejects_pp_gt_1(self):
-        with self.assertRaises(run_blis.ConfigError):
-            run_blis.classify_config({"tp": 8, "pp": 2})
+    def test_accepts_pp_gt_1(self):
+        """pp>1 was refused through kernel v0.4.0 and is PRICED from v0.5.0, so it must pass.
+
+        The refusal is gone rather than narrowed: there is no shape of pp this layer still turns
+        away. Verified against the pinned binary on the Muse armB layout -- tp8 x pp2 = 96.80
+        tok/s against tp16 x pp1 = 99.47 at the same 16-GPU footprint with EP held on -- so the
+        two layouts price apart and pp is a lever rather than a no-op.
+        """
+        par, _, _, _ = run_blis.classify_config({"tp": 8, "pp": 2})
+        self.assertEqual((par["tp"], par["pp"]), (8, 2))
+        self.assertEqual(run_blis.footprint_gpus(par), 16)
+
+    def test_pp_reaches_the_scenario_yaml(self):
+        """A swept pp must land in the pool's `parallel:` block, not be dropped on the floor.
+
+        The inert-knob lesson of the v0.14.0 bump: a knob that decodes but never arrives costs a
+        whole campaign and reads as a finding. pp is a GPU-consuming factor, so a dropped pp would
+        also mis-size the cluster.
+        """
+        y = run_blis.scenario_yaml("muse-spark-open-816b-a42b-nvfp4", "h100", "0.32.0",
+                                   {"tp": 8, "pp": 2, "dp": 1, "enable_expert_parallel": True},
+                                   {"max_model_len": 262144}, "muse-pp2tp8")
+        self.assertIn("pp: 2", y)
+        self.assertIn("nodes: 2", y)          # tp8 x pp2 = 16 GPUs = 2 whole nodes
+        self.assertIn("fabric:", y)           # multi-node, so a fabric is required
+        self.assertIn("cost-model-fabric", y)
+
+    def test_coefficients_include_fabric(self):
+        """cost-model-fabric prices cross-node links and is what REGISTRY_REF v0.3.0 adds.
+
+        A scenario omitting it runs rc=0 and prices the interconnect differently (48.61 vs 48.38
+        tok/s measured on Muse armB), so its absence would be a silent mispricing.
+        """
+        self.assertIn("cost-model-fabric", run_blis.COEFFICIENTS)
 
     def test_carries_the_wider_engine_surface(self):
         """Every knob in SCENARIO_ENGINE must reach the scenario's engine block.

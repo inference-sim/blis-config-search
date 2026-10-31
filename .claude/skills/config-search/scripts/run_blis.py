@@ -15,11 +15,23 @@
 #
 # Pinned stack: see pins.env, the single source of truth for the BLIS/catalog/registry refs that
 # price every run (scripts/test_build.py checks the docs and workflows against it). The registry
-# must carry the 6 coefficient sets named below, incl cost-model-memory.
+# must carry the 7 coefficient sets named below, incl cost-model-memory and cost-model-fabric.
 import argparse, hashlib, json, os, subprocess, sys, tempfile, time
 
+# cost-model-fabric is the cross-node/cross-rack interconnect term, and it is the set REGISTRY_REF
+# v0.3.0 adds (v0.2.0 has no such file, which is why the registry pin had to move with the BLIS
+# one). Every one of upstream's 40 Muse scenarios names it, so a scenario this script generates
+# names it too.
+#
+# It is NOT a hard requirement -- a scenario omitting it runs rc=0 -- which is exactly why it is
+# listed here rather than left to chance. Measured on the Muse armB layout (h100 roce, 2 nodes,
+# tp8 x pp2), holding the workload fixed: 48.61 tok/s with the set against 48.38 without, so the
+# term is small on this layout but real, and omitting it is a silent mispricing rather than an
+# error. The size of the gap is a property of this layout and should not be read as a bound: it
+# prices the links a collective actually crosses, so a layout that crosses more of them pays more.
 COEFFICIENTS = ["cost-model-primitives", "cost-model-collectives", "cost-model-host-overheads",
-                "cost-model-attention", "cost-model-recurrent", "cost-model-memory"]
+                "cost-model-attention", "cost-model-recurrent", "cost-model-memory",
+                "cost-model-fabric"]
 
 # --- candidate-key classification (allowlist; anything else is rejected, never silently ignored) ---
 SCENARIO_PARALLEL = ("tp", "pp", "dp", "enable_expert_parallel")       # -> scenario Deployment.parallel
@@ -376,8 +388,24 @@ def classify_config(config):
         # Fail here rather than let BLIS fail per-run: a typo'd EPP path would otherwise cost a
         # whole sweep of identical "no such file" rows.
         raise ConfigError(f"router_config {rc!r}: no such file")
-    if parallel["pp"] != 1:
-        raise ConfigError("pp>1: the pinned kernel does not price pipeline parallelism")
+    # pp>1 was refused through KERNEL_REF v0.4.0 ("the pinned kernel does not price pipeline
+    # parallelism"). Kernel v0.5.0 prices it: each stage is a step over its share of the layers
+    # (get_pp_indices), the embedding on the first and the head on the last, plus the boundary
+    # send and the receiving stage's TP all-gather; the binding rank is the stage whose pool holds
+    # the fewest tokens.
+    #
+    # It is a real lever, not merely accepted. Measured on the Muse armB layout (h100 roce, 2
+    # nodes, 16 GPUs, EP on, 8 requests of 4096/64): tp8 x pp2 = 96.80 tok/s against
+    # tp16 x pp1 = 99.47 at the SAME footprint -- so the two layouts price apart. The gap's size
+    # is a property of that workload; it is not a bound, and pp should be swept against the
+    # topology rather than assumed to cost a fixed amount.
+    #
+    # The boundary SEND is priced from the graph's pipeline_boundary_bytes_per_token, which only 5
+    # of the catalog's 42 models declare. A model without it is NOT refused: measured on
+    # qwen3-14b, tp2 x pp2 runs rc=0 and prices the stages while omitting the wire between them.
+    # That is a mispricing this layer cannot detect without reading every graph, and it is not an
+    # error, so it is left to the spec author (knobs.md says which models carry the field) and to
+    # the run's own pipeline_stages / pipeline_binding_stage assumption warnings.
     fp = footprint_gpus(parallel)
     # A multi-node single instance IS supported: the generated scenario names a fabric once the
     # pool spans nodes (see scenario_yaml), and BLIS prices the cross-node collectives from it.
@@ -455,8 +483,8 @@ def resolve_pd(cli, pd_parallel, pd_engine, base_parallel, base_engine):
         # The shared `speculative` block is already folded into base_engine; a per-role override
         # of it is refused below (one draft width per run), so only flat keys merge here.
         eng.update(pd_engine[role])
-        if int(par.get("pp", 1)) != 1:
-            raise ConfigError(f"{role}_pp>1: the pinned kernel does not price pipeline parallelism")
+        # pp>1 is priced from kernel v0.5.0 on each side of a disaggregated run too; see the
+        # colocated site in classify_config for what moved and what still refuses.
         fp = footprint_gpus(par)
         if fp > GPUS_PER_NODE and fp % GPUS_PER_NODE:
             raise ConfigError(
@@ -935,7 +963,91 @@ def _all_metrics(stdout):
     return out
 
 
+def _result_doc(stdout):
+    """The v0.15.0 Result document on stdout, or None for an older flat MetricsOutput.
+
+    v0.15.0's `feat(output)` made stdout ONE document (kind: Result) instead of the flat
+    MetricsOutput dict every earlier pin printed. Recognised by `kind` plus the sections this
+    module reads, never by `schema_version` alone -- a replay document is the same shape.
+    """
+    for o in _iter_json_objects(stdout):
+        if o.get("kind") == "Result" and isinstance(o.get("engine"), dict):
+            return o
+    return None
+
+
+# The legacy MetricsOutput key -> where the same number lives in a v0.15.0 Result document.
+#
+# `engine.cluster.whole_run` is the WHOLE RUN, which is what every earlier pin's stdout reported
+# and what the committed ledgers therefore hold; top-level `metrics` is the MEASURED WINDOW, a
+# different population (result_build.go standardMetrics). Mixing the two would make this bump a
+# silent re-baselining of every latency in the repo, so the whole-run block is the source and the
+# measured window is left to the Result document's own readers.
+_WHOLE_RUN_KEYS = ("tokens_per_sec", "responses_per_sec",
+                   "ttft_mean_ms", "ttft_p90_ms", "ttft_p95_ms", "ttft_p99_ms",
+                   "e2e_mean_ms", "e2e_p90_ms", "e2e_p95_ms", "e2e_p99_ms")
+
+# itl_* was RENAMED to step_interval_*, not dropped: result_inputs.go fills whole_run's
+# step_interval_* from whole.ITL*Ms, the very fields MetricsOutput's itl_* keys held ("the
+# step-interval series the legacy itl_* keys held"). So this is a rename to follow, NOT the
+# top-level metrics.itl_* -- those are FormulaTPOTExclFirst, per-request TPOT over the measured
+# window, a genuinely different measurement. Measured on one Muse run: whole-run
+# step_interval_p99 294.03 ms against measured-window itl_p99 33.87 ms, ~9x apart because a step
+# serves the whole batch. Reading the per-request figure into itl_p99_ms would silently rebase
+# every SLO verdict and every per-user rate in the repo against 12 committed reports.
+_ITL_FROM_STEP_INTERVAL = {"itl_mean_ms": "step_interval_mean_ms", "itl_p90_ms": "step_interval_p90_ms",
+                           "itl_p95_ms": "step_interval_p95_ms", "itl_p99_ms": "step_interval_p99_ms"}
+
+# Counters that moved out of the metrics dict into the document's own `requests` block, under
+# shorter names. _completion_issue reads all five, so without this remapping an incomplete or
+# overloaded run is ranked as a clean capacity point.
+_REQUEST_COUNTS = {"injected_requests": "injected", "completed_requests": "completed",
+                   "still_queued": "still_queued", "still_running": "still_running",
+                   "dropped_unservable": "dropped_unservable", "timed_out_requests": "timed_out",
+                   "length_capped_requests": "length_capped"}
+
+# Counters that stayed on the cluster aggregate but outside whole_run.
+_CLUSTER_KEYS = ("total_input_tokens", "total_output_tokens", "scheduling_delay_p99_ms",
+                 "kv_allocation_failures", "preemptions")
+
+
+def _flatten_result(doc):
+    """A v0.15.0 Result document as the flat MetricsOutput dict the rest of this module reads.
+
+    The aggregate was restructured by the bump while `engine.instances` kept emitting a verbatim
+    MetricsOutput per instance, so WITHOUT this a single-instance run (no instances block) has no
+    itl_* anywhere and every ITL SLO fails as "declared but not measured", while a multi-instance
+    run resolves normally off the per-instance rows. That asymmetry is why it reads as a finding
+    rather than a crash: a sweep reports 0 servable, or judges only its multi-instance arms.
+    """
+    cluster = ((doc.get("engine") or {}).get("cluster")) or {}
+    whole = cluster.get("whole_run") or {}
+    out = {"instance_id": "cluster"}
+    for k in _WHOLE_RUN_KEYS:
+        if k in whole:
+            out[k] = whole[k]
+    for legacy, new in _ITL_FROM_STEP_INTERVAL.items():
+        if new in whole:
+            out[legacy] = whole[new]
+        elif new in cluster:  # a document without whole_run: the aggregate IS the whole run
+            out[legacy] = cluster[new]
+    for k in _CLUSTER_KEYS:
+        if k in cluster:
+            out["preemption_count" if k == "preemptions" else k] = cluster[k]
+    reqs = doc.get("requests") or {}
+    for legacy, new in _REQUEST_COUNTS.items():
+        if new in reqs:
+            out[legacy] = reqs[new]
+    dur = cluster.get("simulated_duration_s")
+    if dur is not None:
+        out["vllm_estimated_duration_s"] = dur
+    return out
+
+
 def parse_metrics(stdout):
+    doc = _result_doc(stdout)
+    if doc is not None:
+        return _flatten_result(doc)
     cands = _all_metrics(stdout)
     for o in cands:
         if o.get("instance_id") == "cluster":
@@ -944,6 +1056,11 @@ def parse_metrics(stdout):
 
 
 def parse_all_instances(stdout):
+    doc = _result_doc(stdout)
+    if doc is not None:
+        inst = (doc.get("engine") or {}).get("instances") or {}
+        # Each value is a verbatim MetricsOutput, already carrying its own instance_id.
+        return [v for _, v in sorted(inst.items()) if isinstance(v, dict)]
     return [o for o in _all_metrics(stdout) if o.get("instance_id") not in (None, "cluster")]
 
 

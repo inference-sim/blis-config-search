@@ -99,8 +99,9 @@ sweeps:
 | `router.*` | llm-d's EndpointPickerConfig, not an engine key |
 
 The validator checks every name against the sibling `../blis-vllm` and `../blis-schemas`
-checkouts when they are present, and against the names pinned at blis-vllm v0.32.0 / blis-schemas
-v0.8.0 otherwise. A typo fails before any run — and the message suggests the right name.
+checkouts when they are present, and against the names built into the validator otherwise — the
+engine surface of the stack [`pins.env`](../pins.env) pins. A typo fails before any run — and the
+message suggests the right name.
 
 **Values are checked too.** `cudagraph_mode: [full]` is refused (the enum is upper-case),
 `cache_dtype: [fp16]` is refused (it is `float16`), and `quantization: [fp_8]` suggests `fp8` —
@@ -153,11 +154,14 @@ skipped like the model-aware rules, and the summary line says so rather than imp
 
 ### What the pinned stack can actually carry
 
-vLLM v0.32.0 defines ~51 engine fields, and at the **pinned** BLIS (v0.14.0, blis-schemas v0.8.0)
+vLLM v0.32.0 defines ~51 engine fields, and at the stack [`pins.env`](../pins.env) pins
 **all of them decode**: a pool's `engine:` is an opaque block opened by the engine model that
-`engine_version` names, which is blis-vllm v0.32.0's own `engineconfig.Engine`. Before v0.14.0
-the decode surface was blis-schemas' narrower 31-field struct, and naming one of the other 20
-failed **every** run with `field … not found in type deployment.Engine`.
+`engine_version` names, which is blis-vllm's own `engineconfig.Engine`. The pinned engine model is
+a blis fork tag (note the suffix), whose `rules/engineconfig` is byte-identical to the plain
+upstream v0.32.0 tag's — so these 51 names did not move when the pin last moved (checked
+tag-to-tag, both directions). Before v0.14.0 the decode surface was blis-schemas' narrower
+31-field struct, and naming one of the other 20 failed **every** run with
+`field … not found in type deployment.Engine`.
 
 **Decoding is no longer the interesting question, though — leverage is.** Of the 20 keys the bump
 opened up, only **three** change a number: `max_num_active_seqs`, `max_num_scheduled_tokens` and

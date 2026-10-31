@@ -4,11 +4,13 @@ Five separate questions. Confusing them is how a campaign gets spent on nothing.
 
 1. **Is the name real?** `engine:` keys are blis-vllm's engine-block keys (== vLLM's own config
    field names). ~51 exist at v0.32.0.
-2. **Can the pinned stack carry it?** **All 51 now decode.** BLIS v0.14.0 bundles blis-schemas
-   **v0.8.0**, where a pool's `engine:` is an *opaque block* opened by the engine model that
-   `engine_version` names — blis-vllm v0.32.0's `rules/engineconfig.Engine` — so the decode
-   surface IS blis-vllm's field list. (Until v0.12.0 it was blis-schemas' own 31-field struct, and
-   the other 20 keys failed every run with `field <name> not found in type deployment.Engine`.)
+2. **Can the pinned stack carry it?** **All 51 now decode.** At the stack `pins.env` pins, a
+   pool's `engine:` is an *opaque block* opened by the engine model that `engine_version` names —
+   blis-vllm's `rules/engineconfig.Engine` — so the decode surface IS blis-vllm's field list. The
+   pinned engine model is a blis fork tag (note the suffix), whose `rules/engineconfig` is
+   byte-identical to the plain upstream v0.32.0 tag's, so these 51 names did not move when the
+   pin last moved. (Until v0.12.0 it was blis-schemas' own 31-field struct, and the other 20 keys
+   failed every run with `field <name> not found in type deployment.Engine`.)
 3. **Will the cost model *price* it?** A different and now more important question, because the
    bump turned loud failures into silent ones. **Eighteen** knobs decode and are still refused:
    eleven run to completion and measure byte-identical (`ENGINE_INERT`), three have no cost term
@@ -150,7 +152,7 @@ DeepSeek-V4.1 refuses every MTP-family draft method and serves `dspark`.
 |---|---|
 | `tp` | Powers of two. Past 8 the instance spans nodes and must fill whole nodes. |
 | `dp`, `enable_expert_parallel` | **MoE only** — BLIS refuses `dp: 2` on a dense model. EP width is derived as `tp × dp`, so EP over width 1 shards nothing. |
-| `pp` | **Not sweepable**: the pinned kernel does not price pipeline parallelism. |
+| `pp` | **Sweepable from the v0.15.0 pin** (kernel v0.5.0 prices it; v0.4.0 and earlier refused it outright). Each stage is its own step over its share of the layers, plus a boundary send and the receiving stage's TP all-gather. The boundary *send* is priced from `pipeline_boundary_bytes_per_token`, which only **5 of the catalog's 42 models** declare (`muse-spark-open-816b-a42b` and its `-nvfp4` twin, `deepseek-v4-pro`, `deepseek-v4.1-flash`, `inkling`). A model without it still runs `pp: 2` at rc=0 — measured on `qwen3-14b` — so this is **not** a refusal but a silent omission of the boundary term: the stages are priced, the wire between them is not. Prefer a model that declares it when `pp` is the thing being measured, and read the run's own `pipeline_stages` / `pipeline_binding_stage` assumption warnings. Consumes GPUs like `tp` and `dp`: the footprint is `tp × pp × dp`, so a `pp` ladder changes the footprint unless `tp` moves with it. Measured on Muse armB (h100 roce, 16 GPUs, EP on): tp8 × pp2 = 96.80 tok/s vs tp16 × pp1 = 99.47 at the same footprint. |
 | `pcp`, `dcp` | Context parallelism. `dcp` must divide `tp` when `pcp` is off. |
 
 ## Router knobs

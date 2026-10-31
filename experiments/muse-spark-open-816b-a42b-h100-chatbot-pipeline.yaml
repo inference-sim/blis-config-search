@@ -1,0 +1,67 @@
+# Does pipeline parallelism pay for Muse-Spark on 16 H100s? The v0.15.0 pin is the first that
+# PRICES pp (kernel v0.5.0; every earlier pin refused pp>1), and Muse-Spark's graph carries the
+# pipeline_boundary_bytes_per_token the boundary send is priced from -- so this is the knob's
+# first measurement in this repo.
+#
+# pp consumes GPUs like tp and dp (footprint = tp x pp x dp), so tp moves INVERSELY with pp
+# below: a pp ladder at fixed tp would be a footprint ladder and confound the two.
+# Not swept: drafting (this nvfp4 graph declares no speculator, so every arm would be refused),
+# quantization (modelopt already, restating it misprices the weights), and the 1M window (it
+# changes what fits at 16 GPUs -- upstream measures that separately as arm B-1M).
+name: muse-spark-open-816b-a42b-h100-chatbot-pipeline
+
+scenario:
+  model: muse-spark-open-816b-a42b-nvfp4
+  hardware: h100
+  workload: chatbot
+  gpus: 16
+  # 100ms p99 ITL. Measured first, not guessed: the floor across this whole grid is 38ms p99
+  # (tp16 x pp1, c=8, max_num_seqs 256) because an 816B MoE on 16 H100s is a heavy step, so a
+  # tighter SLO like 25ms admits NOTHING and the campaign reports no winner at all. 100ms keeps
+  # every control arm servable and lets the widest pp arms fail on interactivity, which is the
+  # comparison this spec is for.
+  slo: {itl_p99: 100ms}
+  concurrency: [8, 32, 128, 256]
+
+sweeps:
+  # The control: one 16-way tensor-parallel instance, no boundary to pay for, EP across the full
+  # width. Every pp arm is read against this. max_model_len is stated because blis-vllm's rules
+  # make it mandatory, and 262144 is the window upstream's own 40 Muse scenarios use on H100, so
+  # these arms stay comparable to that matrix. block_size is deliberately absent: run_blis fills
+  # it per model (16 here), and pinning it in a spec would fight that.
+  - name: no-pipeline
+    narrative: The no-pipeline control at 16-way tensor parallelism; a pipelined arm has to beat
+      this at the same footprint and load to be worth its boundaries.
+    num-instances: [1]
+    parallel: {tp: [16], pp: [1], dp: [1], enable_expert_parallel: [true]}
+    engine:
+      max_model_len: [262144]
+      max_num_seqs: [64, 256]
+      max_num_batched_tokens: [8192]
+      gpu_memory_utilization: [0.9]
+      enable_prefix_caching: [true]
+      async_scheduling: [true]
+
+  # The pipeline ladder, same footprint and same engine settings, so the only thing changing is
+  # how the model is cut. The tp x pp cross is written out rather than narrowed because the
+  # sweeper keeps only the combos totalling scenario.gpus: tp8 x pp2 and tp4 x pp4 survive at 16,
+  # tp8 x pp4 (32) and tp4 x pp2 (8) are dropped. Two pp values, because one cannot tell
+  # "boundaries are cheap" apart from "narrower tensor groups are cheaper".
+  #
+  # Measured on tp8 x pp2 while verifying the pin (16 GPUs, EP on, 8 requests of 4096/64):
+  # 96.80 tok/s against the control's 99.47 -- real but small, which is why it is swept across
+  # the load ladder rather than concluded from that one point. Each stage's per-rank memory is
+  # its own and the binding rank is the stage holding the FEWEST tokens, so a pp arm's KV
+  # headroom is set by its worst stage.
+  - name: pipelined
+    narrative: Trading tensor width for pipeline stages should help once the batch is full
+      enough to keep every stage busy, and cost more at light load.
+    num-instances: [1]
+    parallel: {tp: [8, 4], pp: [2, 4], dp: [1], enable_expert_parallel: [true]}
+    engine:
+      max_model_len: [262144]
+      max_num_seqs: [64, 256]
+      max_num_batched_tokens: [8192]
+      gpu_memory_utilization: [0.9]
+      enable_prefix_caching: [true]
+      async_scheduling: [true]

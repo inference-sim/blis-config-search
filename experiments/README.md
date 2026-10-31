@@ -446,6 +446,9 @@ inference-sim release --bump-blis-pin.yml-->  DRAFT pin PR  <--fix commits--  pi
   listed in its batch's PR instead of being left silently stale. Each PR carries an old → new
   table of stack, winner, tok/s/GPU and servable runs.
 
+Every PR this loop opens carries the **`auto-update`** label, plus **`blis-pin`** (the draft pin
+PR) or **`report-regen`** (a batch of regenerated reports), so `label:auto-update` lists them all.
+
 So **a report with no spec and no submission cannot be regenerated**, and the test suite refuses
 one (`test_plan_covers_the_real_gallery`). Re-run a subset by hand with the `only` input.
 

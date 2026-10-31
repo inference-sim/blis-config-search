@@ -52,6 +52,7 @@ jobs:
     permissions:
       contents: write          # push the bump branch
       pull-requests: write     # open the PR
+      issues: write            # create the labels (labels live in the issues API)
     env:
       GH_TOKEN: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
     steps:
@@ -185,8 +186,15 @@ jobs:
           branch; pin-compat.yml gates it. Merging it triggers regen-reports.yml, which re-runs
           every committed report against the new stack."
           git push origin "$branch"
+          # Labels mark a PR this automation opened: `auto-update` for every one, plus its kind.
+          # --force makes creation idempotent (and keeps the colour/description current).
+          gh label create auto-update --force --color 5319e7 \
+            --description "Opened by the pin-bump automation, not by a person"
+          gh label create blis-pin --force --color 1d76db \
+            --description "Moves the pinned inference-sim; code fixes for the release go here"
           gh pr create --draft --title "Bump the pinned inference-sim to $tag" \
-            --body-file /tmp/body.md --base main --head "$branch"
+            --body-file /tmp/body.md --base main --head "$branch" \
+            --label auto-update --label blis-pin
           # An older bump PR the bot opened is now superseded; say so on it rather than closing a
           # PR a human may have pushed CATALOG/REGISTRY moves onto.
           new_url="$(gh pr view "$branch" --json url --jq .url)"

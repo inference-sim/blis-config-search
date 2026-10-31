@@ -198,6 +198,7 @@ jobs:
     permissions:
       contents: write          # push the batch branches
       pull-requests: write     # open the batch PRs
+      issues: write            # create the labels (labels live in the issues API)
     strategy:
       fail-fast: false
       max-parallel: 1          # each batch pushes its own branch, but serialise the gh calls
@@ -284,5 +285,12 @@ jobs:
 
           🤖 Generated with [Claude Code](https://claude.com/claude-code)
           EOF
+          # Labels mark a PR this automation opened: `auto-update` for every one, plus its kind.
+          # --force makes creation idempotent (and keeps the colour/description current).
+          gh label create auto-update --force --color 5319e7 \
+            --description "Opened by the pin-bump automation, not by a person"
+          gh label create report-regen --force --color 0e8a16 \
+            --description "Reports regenerated against a new pinned stack"
           gh pr create --title "Regenerate $BATCH reports on inference-sim $BLIS_REF" \
-            --body-file /tmp/body.md --base main --head "$branch"
+            --body-file /tmp/body.md --base main --head "$branch" \
+            --label auto-update --label report-regen

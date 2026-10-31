@@ -419,6 +419,13 @@ def test_workflow_wiring():
     check("test_experiment.py" not in bump,
           "the bump workflow must not require the suite to pass: a release that needs code "
           "changes still needs its PR (pin-compat says what to change)")
+    for name, text, kind in (("bump-blis-pin.yml", bump, "blis-pin"),
+                             ("regen-reports.yml", regen, "report-regen")):
+        check("--label auto-update" in text and f"--label {kind}" in text,
+              f"{name}'s PRs carry `auto-update` + `{kind}`, so a bot PR is told apart at a glance")
+        check("gh label create auto-update --force" in text and f"gh label create {kind} --force" in text,
+              f"{name} creates its labels first: `gh pr create --label` fails on a missing label")
+        check("issues: write" in text, f"{name} needs issues: write to create labels")
     check("blis_pin.py drift" in regen,
           "regeneration re-checks drift, so a pin that skipped the gate cannot start a campaign")
 

@@ -4,7 +4,7 @@ githubConfigUrl: https://github.com/inference-sim/blis-config-search
 githubConfigSecret: blis-config-search-runner-token   # key: github_token
 runnerScaleSetName: blis-bigmem                       # what `runs-on` names
 minRunners: 0
-maxRunners: 4                                         # = regen-reports' REGEN_MAX_PARALLEL
+maxRunners: 4                                         # REGEN_MAX_PARALLEL's default; 4 x 64Gi must fit the quota
 
 controllerServiceAccount:
   namespace: jchen
@@ -14,6 +14,7 @@ template:
   spec:
     # The chart's own runner SA may not use anyuid; jchen's `default` SA already may.
     serviceAccountName: default
+    automountServiceAccountToken: false   # jobs never need the k8s API; keep the SA token out
     securityContext:
       runAsUser: 1001          # the image's `runner` user; needs the anyuid SCC
       runAsGroup: 1001

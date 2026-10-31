@@ -22,6 +22,8 @@ gh variable set REGEN_RUNS_ON --body '"blis-bigmem"'
 
 The scale set idles at zero pods and starts one per queued job, up to four.
 
-The repo is public. Only those two workflows target `REGEN_RUNS_ON`, and neither runs a fork's
-code: pin-compat's `build` job checks `head.repo`, and regen-reports runs only on a push to `main`
-or a manual dispatch.
+The repo is public, and a fork's PR runs the fork's own workflow files, so any of them can target
+`blis-bigmem`. What keeps fork code off these runners is that every fork PR needs a maintainer's
+approval before its workflows run (Settings -> Actions -> General -> "Require approval for all
+external contributors"). Keep that setting, and don't approve a fork PR that changes
+`.github/workflows/`.

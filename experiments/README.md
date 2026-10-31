@@ -99,8 +99,9 @@ sweeps:
 | `router.*` | llm-d's EndpointPickerConfig, not an engine key |
 
 The validator checks every name against the sibling `../blis-vllm` and `../blis-schemas`
-checkouts when they are present, and against the names pinned at blis-vllm v0.32.0 / blis-schemas
-v0.8.0 otherwise. A typo fails before any run — and the message suggests the right name.
+checkouts when they are present, and against the names built into the validator otherwise — the
+engine surface of the stack [`pins.env`](../pins.env) pins. A typo fails before any run — and the
+message suggests the right name.
 
 **Values are checked too.** `cudagraph_mode: [full]` is refused (the enum is upper-case),
 `cache_dtype: [fp16]` is refused (it is `float16`), and `quantization: [fp_8]` suggests `fp8` —
@@ -153,13 +154,41 @@ skipped like the model-aware rules, and the summary line says so rather than imp
 
 ### What the pinned stack can actually carry
 
-vLLM v0.32.0 defines ~51 engine fields, but the **pinned** BLIS (v0.12.0, which bundles
-blis-schemas v0.5.0) has only 31, and the scenario decodes strictly. Naming one of the other 20 —
-`max_num_active_seqs`, `watermark`, `prefix_match_unit`, `stream_interval`, `linear_backend`, … —
-would fail **every** run with `field … not found in type deployment.Engine`, so the validator
-rejects them up front with that reason. They become sweepable when `pins.env` moves.
+vLLM v0.32.0 defines ~51 engine fields, and at the stack [`pins.env`](../pins.env) pins
+**all of them decode**: a pool's `engine:` is an opaque block opened by the engine model that
+`engine_version` names, which is blis-vllm's own `engineconfig.Engine`. The pinned engine model is
+a blis fork tag (note the suffix), whose `rules/engineconfig` is byte-identical to the plain
+upstream v0.32.0 tag's — so these 51 names did not move when the pin last moved (checked
+tag-to-tag, both directions). Before v0.14.0 the decode surface was blis-schemas' narrower
+31-field struct, and naming one of the other 20 failed **every** run with
+`field … not found in type deployment.Engine`.
 
-The 31 that do work, grouped: batching/admission (`max_num_seqs`, `max_num_batched_tokens`,
+**Decoding is no longer the interesting question, though — leverage is.** The bump opened up
+**21** keys, and only **three** change a number: `max_num_active_seqs`,
+`max_num_scheduled_tokens` and `frontend`. The other **18** are refused, in three measured
+groups: **11** decode, run to completion and measure *byte-identical* (the kernel cost model has
+no term for them, so they are carried as launch provenance), **3** have no cost term at all, and
+**4** are priced only in one shape. That was established by running each against the pinned
+binary with two contrasting values on `deepseek-v4-pro`/h200, `qwen3-14b`/h100 and
+`deepseek-v4.1-flash`/h200, beside a `max_num_seqs` control that moved every time.
+
+(Two different figures are in play, so to be explicit: **21** is what the bump opened up — the
+names that used to fail the decode and now run. The **20** above is `51 − 31`, the names the old
+31-field struct did not carry at all. They are not the same set.)
+
+So the validator refuses **eighteen** knobs, in three groups, each with its measured reason:
+
+| Why refused | Knobs |
+|---|---|
+| Decodes and runs, but measures identical | `watermark`, `stream_interval`, `kv_cache_memory_bytes`, `max_loras`, `custom_ops`, `use_trtllm_attention`, `mla_prefill_backend`, `indexer_kv_dtype`, `linear_backend`, `long_prefill_token_threshold_adaptive`, `decoder_replay_cudagraph_capture_sizes` |
+| No cost term at all | `prefix_match_unit`, `max_cpu_loras`, `prefix_cache_retention_interval` |
+| Priced only in one shape | `prefill_schedule_interval` (needs dp>1), `disable_hybrid_kv_cache_manager` (refused on sliding-window MLA), `env` (one variable is read), `kv_events` (a struct, not a bool) |
+
+A sweep over any of them runs to completion and reports a column of equal numbers, which looks
+like a finding. That is the expensive failure, so it is refused up front rather than left to burn
+the runs — the same reasoning as "Not every accepted knob is a lever" below.
+
+The 33 that do work, grouped: batching/admission (`max_num_seqs`, `max_num_batched_tokens`,
 `long_prefill_token_threshold`, `scheduling_policy`, `async_scheduling`), graph capture
 (`cudagraph_mode`, `max_cudagraph_capture_size`, `cudagraph_capture_sizes`), memory/precision
 (`cache_dtype`, `quantization`, `block_size`, `gpu_memory_utilization`, `max_model_len`),
@@ -167,7 +196,13 @@ attention (`enable_prefix_caching`, `disable_cascade_attn`, `swa_bounded_replay`
 collectives (`all2all_backend`, `moe_backend`, `allreduce_backend`,
 `disable_custom_all_reduce`), context parallelism (`dcp_comm_backend`, `dcp_q_replicate`,
 `cp_kv_cache_interleave_size`), recurrent caches (`mamba_cache_dtype`, `mamba_ssm_cache_dtype`,
-`mamba_cache_mode`), and the nested blocks below.
+`mamba_cache_mode`), the three the v0.14.0 pin opened up (`max_num_active_seqs`,
+`max_num_scheduled_tokens`, `frontend`), and the nested blocks below.
+
+`max_num_active_seqs` is the one worth knowing about: it is a large lever where it binds and inert
+where it does not. On `deepseek-v4-pro`/h200 tp2 dp4 chatbot it did nothing at c=8, and took
+2405.3 tok/s down to 808.4 (8 active seqs) and 1684.0 (32) at c=256 — an admission cap only bites
+once there is a queue to cap.
 
 ### Nested blocks
 
@@ -182,7 +217,12 @@ engine:
 ```
 
 `speculative` is also nested and needs **both** `method` and `num_spec_tokens`; acceptance comes
-from the registry, not a knob.
+from the registry, not a knob. It carries seven fields at this pin (it held two before v0.14.0),
+but only `method` and `num_spec_tokens` change a run. The sampling fields
+(`draft_sample_method`, `rejection_sample_method`, `enable_adaptive_verification`,
+`kv_cache_dtype`) are recorded as the launch gave them and never re-price acceptance, and
+`draft_model` cannot run on any catalog model (the drafter comes from the model's graph), so the
+validator refuses a sweep over any of them.
 
 ### Not every accepted knob is a lever
 

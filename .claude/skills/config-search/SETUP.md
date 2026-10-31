@@ -5,17 +5,17 @@ What `config-search` needs on the machine before a run.
 ## 1. Build the pinned BLIS binary (kernel backend)
 
 ```bash
-git clone --branch v0.12.0 --depth 1 https://github.com/inference-sim/inference-sim.git
+git clone --branch v0.15.0 --depth 1 https://github.com/inference-sim/inference-sim.git
 cd inference-sim
-# The v0.12.0 tag is NOT configured immutable upstream, so verify it still resolves
+# The v0.15.0 tag is NOT configured immutable upstream, so verify it still resolves
 # to the pinned commit before building; fail loudly if the tag has been moved.
-EXPECT=f199223d701d96dddeb1c314509bed003515b599   # release v0.12.0, "all routing through the embedded llm-d router" (kernel v0.3.0, schemas v0.5.0 in go.mod)
-test "$(git rev-parse HEAD)" = "$EXPECT" || { echo "v0.12.0 no longer resolves to $EXPECT -- aborting" >&2; exit 1; }
+EXPECT=762f1605ff27cd825d6b2cb2d9e991cd4b864c91   # release v0.15.0, the Muse-Spark release (kernel v0.5.0, schemas v0.10.0, blis-vllm v0.32.0-blis.1 in go.mod)
+test "$(git rev-parse HEAD)" = "$EXPECT" || { echo "v0.15.0 no longer resolves to $EXPECT -- aborting" >&2; exit 1; }
 go build -o blis main.go
 ```
 
 Point the skill at this `./blis` (the `--blis` arg, default `./blis`). The kernel cost-model
-backend is selected by the scenario's `coefficients:` list (the generated scenario names the six
+backend is selected by the scenario's `coefficients:` list (the generated scenario names the seven
 `cost-model-*` sets), so **no `--latency-model` CLI flag is passed** — v0.10.0 removed that flag
 and rejects it as unknown. `run_blis.py` writes the coefficients into the generated scenario.
 
@@ -33,22 +33,27 @@ cannot be reproduced arm-for-arm.
 ## 2. Catalog + registry (both required by the kernel)
 
 ```bash
-git clone --branch 0.4.0 --depth 1 https://github.com/inference-sim/blis-catalog.git
+git clone --branch 0.5.0 --depth 1 https://github.com/inference-sim/blis-catalog.git
 export BLIS_CATALOG=$PWD/blis-catalog
-git clone --branch v0.2.0 --depth 1 https://github.com/inference-sim/blis-registry.git
-export BLIS_REGISTRY=$PWD/blis-registry      # MUST be v0.2.0: it carries cost-model-memory AND
+git clone --branch v0.3.0 --depth 1 https://github.com/inference-sim/blis-registry.git
+export BLIS_REGISTRY=$PWD/blis-registry      # MUST be v0.3.0: it adds cost-model-fabric, the
+                                             # cross-node interconnect set every generated
+                                             # scenario now names (and every upstream Muse one
+                                             # does), on top of v0.2.0's cost-model-memory and
                                              # acceptance/, the measured speculative-decoding
                                              # acceptance lengths (v0.1.1 has no acceptance/)
 ```
 
 A model runs only if it is in the catalog (NS-6). `glm-5.3-flash`, `glm-5.3`, and `qwen3-14b` all
 ship in catalog `0.4.0`, which also adds `deepseek-v4.1-flash` and the `agentx-mvp` replay
-workload. The runner generates kernel scenario files into a `--scenarios` dir you choose (e.g.
-`/tmp/cs-scenarios`).
+workload. Catalog `0.5.0` adds the three Muse-Spark entries -- `muse-spark-open-816b-a42b`, its
+`-nvfp4` twin and the `muse-spark-open-dspark` drafter -- which do not exist in `0.4.0` at all,
+so Muse needs this pin and not merely a newer binary. The runner generates kernel scenario files
+into a `--scenarios` dir you choose (e.g. `/tmp/cs-scenarios`).
 
 The catalog pin and the binary pin move **together**: catalog `0.4.0`'s model graphs use schema
 fields that v0.10.0 cannot decode (it fails with hundreds of `field ... not found in type
-model.Node` errors), and v0.12.0 needs `0.3.0` for the entries above.
+model.Node` errors), and the pinned v0.15.0 needs `0.5.0` for the entries above.
 
 ## 2b. The AgentX replay corpus (only for a replay workload)
 

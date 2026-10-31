@@ -154,10 +154,14 @@ the cross-knob constraints. The summary:
    `scheduling_policy: priority` needs requests that carry priorities, `swa_bounded_replay` is
    read by DeepSeek-V4.1 alone. A column of identical numbers reads as "this knob does nothing" —
    a wasted campaign, not a finding.
-3. **Tier 3, not carried by the pinned stack** — vLLM v0.32.0 has ~51 engine fields; pinned BLIS
-   (blis-schemas v0.5.0) has 31. Naming one of the other 20 fails **every** run. If one of them is
-   what the user actually wants (`watermark`, `max_num_active_seqs`, `kv_cache_memory_bytes`), say
-   it needs a pins bump — do not silently substitute a different knob.
+3. **Tier 3, decodes but is refused anyway** — the pinned stack reads `engine:` as an opaque
+   block against blis-vllm's ~51 engine fields, so the **21** keys the v0.14.0 pin opened up all
+   decode and run. **18 stay refused**, measured rather than assumed: `ENGINE_INERT` (11, run to
+   completion and measure byte-identical), `ENGINE_NOT_MODELLED` (3, no cost term),
+   `ENGINE_CONDITIONAL` (4, priced only in one shape). So if the user wants `watermark` or
+   `kv_cache_memory_bytes`, a further pins bump will **not** help — say the kernel has no term for
+   it. Only `max_num_active_seqs`, `max_num_scheduled_tokens` and `frontend` became sweepable, and
+   the first needs concurrency to give it a queue to cap. Do not silently substitute another knob.
 
 **Every knob you sweep needs a reason it could move on *this* model and workload.** Gate it on
 its precondition; when a precondition fails, leave the knob out and record that in a `#` comment.

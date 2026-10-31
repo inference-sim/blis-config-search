@@ -662,6 +662,14 @@ class KnobSurfaceStaysInSync(unittest.TestCase):
             with self.assertRaises(run_blis.ConfigError, msg=knob):
                 run_blis.classify_config({"tp": 8, "num_instances": 1, knob: 1})
 
+    def test_not_wired_reasons_match_the_runners(self):
+        """The validator runs first, so its reason is the one a spec author sees: keep it the
+        runner's reason, not a stale copy of it."""
+        for knob, why in {**V.ENGINE_NOT_MODELLED, **V.ENGINE_CONDITIONAL}.items():
+            self.assertTrue(run_blis.UNSUPPORTED[knob].endswith(why),
+                            f"{knob}: validator says {why!r}, runner says "
+                            f"{run_blis.UNSUPPORTED[knob]!r}")
+
     def test_enum_values_are_read_from_the_rules_pack_when_present(self):
         enums, source = V.engine_enums()
         self.assertIn("cudagraph_mode", enums)
@@ -1363,11 +1371,39 @@ class ExtendedValueSets(unittest.TestCase):
         errs = self.errs({"speculative": {"method": ["dspar"], "num_spec_tokens": [3]}})
         self.assertTrue(any("dspark" in e for e in errs), errs)
 
-    def test_speculative_rejects_fields_the_pinned_schema_lacks(self):
-        """v0.32.0 has 7 speculative fields; pinned blis-schemas v0.5.0 holds 2."""
+    def test_speculative_rejects_fields_that_are_recorded_but_not_priced(self):
+        """All 7 of v0.32.0's speculative fields DECODE at the v0.14.0 pin; only 2 move a number.
+
+        Before the bump this was a decode refusal ("not a field the pinned stack carries"), since
+        blis-schemas v0.5.0's Speculative held just method + num_spec_tokens. Now the field
+        decodes, so the sweep would run and report differences that are pure noise -- acceptance
+        comes from the registry's measured profiles, selected by method and depth. That is worth
+        refusing for a different reason, and saying which.
+        """
+        for field, value in (("draft_sample_method", "greedy"),
+                             ("rejection_sample_method", "standard"),
+                             ("enable_adaptive_verification", True),
+                             ("kv_cache_dtype", "fp8")):
+            errs = self.errs({"speculative": {"method": ["dspark"], "num_spec_tokens": [3],
+                                              field: [value]}})
+            self.assertTrue(any("not priced by it" in e for e in errs), (field, errs))
+            self.assertTrue(any("registry" in e for e in errs), (field, errs))
+
+    def test_speculative_still_rejects_an_invented_field(self):
+        """The decode surface widened, so a typo must not slip through as 'not priced'."""
         errs = self.errs({"speculative": {"method": ["dspark"], "num_spec_tokens": [3],
-                                          "draft_sample_method": ["greedy"]}})
-        self.assertTrue(any("pinned stack carries" in e for e in errs), errs)
+                                          "draft_smaple_method": ["greedy"]}})
+        self.assertTrue(any("not a field the pinned stack carries" in e for e in errs), errs)
+        self.assertTrue(any("draft_sample_method" in e for e in errs), errs)
+
+    def test_speculative_refuses_a_drafter_checkpoint(self):
+        """draft_model decodes, but no sweep over it can RUN on any catalog model, so it is
+        refused here rather than burning the campaign at run time (see the validator's comment)."""
+        errs = self.errs({"speculative": {"method": ["dspark"],
+                                          "num_spec_tokens": [3],
+                                          "draft_model": ["eagle3-qwen3-14b"]}})
+        self.assertTrue(any("draft_model" in e for e in errs), errs)
+        self.assertTrue(any("no sweep over it can run" in e for e in errs), errs)
 
     def test_valid_speculative_passes(self):
         self.assertEqual([], self.errs({"speculative": {"method": ["dspark"],

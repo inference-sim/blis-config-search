@@ -3,6 +3,7 @@
 
     python3 scripts/test_run_blis.py          # or: python3 -m unittest -v  (from this dir)
 """
+import json
 import os
 import sys
 import tempfile
@@ -34,6 +35,108 @@ class ParseMetrics(unittest.TestCase):
         s = ('{"instance_id":"i0","tokens_per_sec":1.0}\n{"instance_id":"i1","tokens_per_sec":2.0}\n'
              '{"instance_id":"cluster","tokens_per_sec":3.0}')
         self.assertEqual([o["instance_id"] for o in run_blis.parse_all_instances(s)], ["i0", "i1"])
+
+
+# The v0.15.0 Result document, trimmed to the sections parse_metrics reads. Values are a real
+# single-instance Muse run's, so the numbers below are the pinned simulator's own.
+RESULT_DOC = json.dumps({
+    "kind": "Result", "schema_version": "1",
+    "window": {"start": "first_arrival_after_warmup", "duration_s": 4.792675, "requests": 8},
+    "requests": {"generated": 8, "injected": 8, "completed": 8, "still_queued": 0,
+                 "still_running": 0, "dropped_unservable": 0, "timed_out": 0, "length_capped": 0},
+    # The MEASURED WINDOW: per-request TPOT, deliberately NOT the source of itl_*.
+    "metrics": {"itl_p99_ms": 33.87192666666667, "itl_mean_ms": 27.831343253968253,
+                "output_tok_s": 106.82969322977252, "request_throughput": 1.6692139567151956},
+    "engine": {"cluster": {
+        "preemptions": 2, "kv_allocation_failures": 0, "scheduling_delay_p99_ms": 1.5,
+        "total_input_tokens": 32768, "total_output_tokens": 512, "simulated_duration_s": 5.29,
+        "step_interval_p99_ms": 294.031,
+        "whole_run": {"tokens_per_sec": 96.80435952382842, "responses_per_sec": 1.5125681175598191,
+                      "ttft_p99_ms": 349.06543, "ttft_mean_ms": 342.987,
+                      "e2e_p99_ms": 2479.9476, "e2e_mean_ms": 2097.138625,
+                      "step_interval_mean_ms": 27.831343253968253, "step_interval_p90_ms": 16.729,
+                      "step_interval_p95_ms": 16.729, "step_interval_p99_ms": 294.031}}}})
+
+
+class ResultDocument(unittest.TestCase):
+    """v0.15.0 made stdout one Result document; these pin the legacy field names to it.
+
+    The bump restructured the cluster aggregate but left `engine.instances` emitting a verbatim
+    MetricsOutput, so before the remapping a SINGLE-instance run had no itl_* anywhere (every ITL
+    SLO failing as "declared but not measured", a whole sweep reporting 0 servable) while a
+    multi-instance run still resolved off its per-instance rows. A test per field, because that
+    asymmetry reads as a finding rather than failing loudly.
+    """
+
+    def test_throughput_comes_from_whole_run(self):
+        self.assertEqual(run_blis.parse_metrics(RESULT_DOC)["tokens_per_sec"], 96.80435952382842)
+
+    def test_itl_is_the_renamed_step_interval_not_the_measured_window(self):
+        # Not the measured window's itl_p99 (33.87); see run_blis._ITL_FROM_STEP_INTERVAL.
+        m = run_blis.parse_metrics(RESULT_DOC)
+        self.assertEqual(m["itl_p99_ms"], 294.031)
+        self.assertEqual(m["itl_mean_ms"], 27.831343253968253)
+        self.assertEqual(m["itl_p90_ms"], 16.729)
+
+    def test_an_itl_slo_can_be_judged_at_all(self):
+        rec = {"metrics": run_blis.parse_metrics(RESULT_DOC), "metrics_all_instances": []}
+        worst, missing = run_blis.worst_itl_p99(rec)
+        self.assertFalse(missing, "a single-instance v0.15.0 run must still measure ITL")
+        self.assertEqual(worst, 294.031)
+
+    def test_completion_counters_follow_the_requests_block(self):
+        # They moved out of the metrics dict under shorter names; unmapped, _completion_issue can
+        # never fire and an overloaded run ranks as a clean capacity point.
+        m = run_blis.parse_metrics(RESULT_DOC)
+        self.assertEqual((m["injected_requests"], m["completed_requests"]), (8, 8))
+        self.assertIsNone(run_blis._completion_issue(m))
+
+    def test_an_overloaded_result_is_still_caught(self):
+        doc = json.loads(RESULT_DOC)
+        doc["requests"].update({"completed": 6, "still_queued": 2})
+        issue = run_blis._completion_issue(run_blis.parse_metrics(json.dumps(doc)))
+        self.assertIsNotNone(issue)
+        self.assertIn("injected=8", issue)
+
+    def test_cluster_counters_survive(self):
+        m = run_blis.parse_metrics(RESULT_DOC)
+        self.assertEqual(m["preemption_count"], 2)
+        self.assertEqual(m["total_output_tokens"], 512)
+        self.assertEqual(m["vllm_estimated_duration_s"], 5.29)
+
+    def test_instances_are_read_from_the_engine_block(self):
+        doc = json.loads(RESULT_DOC)
+        doc["engine"]["instances"] = {
+            "instance_1": {"instance_id": "instance_1", "tokens_per_sec": 2.0, "itl_p99_ms": 40.0},
+            "instance_0": {"instance_id": "instance_0", "tokens_per_sec": 1.0, "itl_p99_ms": 30.0}}
+        s = json.dumps(doc)
+        self.assertEqual([o["instance_id"] for o in run_blis.parse_all_instances(s)],
+                         ["instance_0", "instance_1"])
+        # The worst instance is over the aggregate's 294.031? No -- so the aggregate still wins,
+        # which is the point of including it rather than trusting the per-instance rows.
+        rec = {"metrics": run_blis.parse_metrics(s),
+               "metrics_all_instances": run_blis.parse_all_instances(s)}
+        self.assertEqual(run_blis.worst_itl_p99(rec), (294.031, False))
+
+    def test_a_pre_v0150_flat_output_still_parses(self):
+        # The fallback must stay: a contributor testing an older binary, and every committed
+        # report's recorded stdout, are the flat MetricsOutput shape.
+        s = '{"instance_id":"cluster","tokens_per_sec":11.0,"itl_p99_ms":5.47}'
+        m = run_blis.parse_metrics(s)
+        self.assertEqual((m["tokens_per_sec"], m["itl_p99_ms"]), (11.0, 5.47))
+
+    def test_itl_never_falls_back_to_the_clusters_measured_window_copy(self):
+        """`cluster`'s own step_interval_* is the measured window (see
+        run_blis._ITL_FROM_STEP_INTERVAL), so a document without whole_run yields nothing."""
+        doc = {"kind": "Result", "engine": {"cluster": {
+            "tokens_per_sec": 11.0,
+            # the measured-window copy, one level up from whole_run -- must not be read
+            "step_interval_p99_ms": 294.03,
+        }}}
+        m = run_blis.parse_metrics(json.dumps(doc))
+        self.assertNotIn("itl_p99_ms", m)
+        # {} is what makes run_one report "no cluster metrics parsed" rather than a later symptom
+        self.assertEqual({}, m)
 
 
 class CompletionIssue(unittest.TestCase):
@@ -150,17 +253,93 @@ class ClassifyConfig(unittest.TestCase):
             {"tp": 8, "long_prefill_token_threshold": 4096})
         self.assertEqual(4096, engine["long_prefill_token_threshold"])
 
-    def test_rejects_knobs_the_pinned_schema_has_no_field_for(self):
-        """vLLM v0.32.0 defines ~51 engine fields; the pinned blis-schemas v0.5.0 has 31. A key
-        outside those fails the scenario's strict decode, so it is refused here with that reason
-        rather than written into a scenario that cannot load."""
-        with self.assertRaises(run_blis.ConfigError) as e:
-            run_blis.classify_config({"tp": 8, "max_num_active_seqs": 128})
-        self.assertIn("pinned BLIS", str(e.exception))
+    def test_carries_the_priced_knobs_the_v0_14_0_pin_opened_up(self):
+        """Three of the 21 the bump opened up are priced, and those are swept.
 
-    def test_rejects_pp_gt_1(self):
-        with self.assertRaises(run_blis.ConfigError):
-            run_blis.classify_config({"tp": 8, "pp": 2})
+        Before the v0.14.0 pin a pool's `engine:` was a fixed 31-field struct, so each of these
+        failed every run of a sweep ("field max_num_active_seqs not found in type
+        deployment.Engine"). The bump reads `engine:` as an opaque block against blis-vllm's
+        engineconfig.Engine, which carries all 21 -- but only these three change a number,
+        measured against the pinned binary with contrasting values. The other 18 stay refused,
+        as ENGINE_INERT (11), ENGINE_NOT_MODELLED (3) and ENGINE_CONDITIONAL (4).
+        """
+        cfg = {"tp": 8, "num_instances": 1, "max_num_active_seqs": 128,
+               "max_num_scheduled_tokens": 2048, "frontend": "rust"}
+        _par, engine, _cli, _router = run_blis.classify_config(cfg)
+        for key, want in cfg.items():
+            if key in ("tp", "num_instances"):
+                continue
+            self.assertEqual(want, engine[key], key)
+
+    def test_refuses_the_knobs_that_decode_but_measure_identical(self):
+        """The other eleven decode and RUN -- which is why they must be refused here.
+
+        A knob that fails loudly costs one run; a knob that completes and reports the baseline
+        number costs the whole sweep AND reads as a finding. Each of these was measured
+        byte-identical on three model/hardware pairs with two contrasting values, beside a
+        max_num_seqs control that moved every time.
+        """
+        for knob in run_blis.ENGINE_DECODED_BUT_INERT:
+            with self.assertRaises(run_blis.ConfigError, msg=knob) as e:
+                run_blis.classify_config({"tp": 8, "num_instances": 1, knob: 1})
+            self.assertIn("no term for it", str(e.exception), knob)
+
+    def test_rejects_knobs_the_pinned_engine_decodes_but_does_not_price(self):
+        """The refusal did not disappear at the bump, it NARROWED -- and must say which reason.
+
+        A field that decodes but has no cost term is worse than one that fails loudly: the sweep
+        runs, every arm completes, and the report shows differences that are noise. So these are
+        still refused here, with the measured reason rather than "no such field".
+        """
+        for knob, value in (("prefix_match_unit", 16), ("max_cpu_loras", 8),
+                            ("prefix_cache_retention_interval", 60)):
+            with self.assertRaises(run_blis.ConfigError, msg=knob) as e:
+                run_blis.classify_config({"tp": 8, knob: value})
+            self.assertIn("not priced by it", str(e.exception), knob)
+
+    def test_rejects_knobs_the_pinned_engine_prices_only_in_one_shape(self):
+        """Conditionally-priced knobs name the condition, but are refused in every shape."""
+        for knob, value, want in (("prefill_schedule_interval", 2, "dp > 1"),
+                                  ("env", {"FOO": "1"}, "VLLM_USE_V2_MODEL_RUNNER"),
+                                  ("kv_events", True, "struct")):
+            with self.assertRaises(run_blis.ConfigError, msg=knob) as e:
+                run_blis.classify_config({"tp": 8, knob: value})
+            self.assertIn(want, str(e.exception), knob)
+
+    def test_accepts_pp_gt_1(self):
+        """pp>1 was refused through kernel v0.4.0 and is PRICED from v0.5.0, so it must pass.
+
+        The refusal is gone rather than narrowed: there is no shape of pp this layer still turns
+        away. Verified against the pinned binary on the Muse armB layout -- tp8 x pp2 = 96.80
+        tok/s against tp16 x pp1 = 99.47 at the same 16-GPU footprint with EP held on -- so the
+        two layouts price apart and pp is a lever rather than a no-op.
+        """
+        par, _, _, _ = run_blis.classify_config({"tp": 8, "pp": 2})
+        self.assertEqual((par["tp"], par["pp"]), (8, 2))
+        self.assertEqual(run_blis.footprint_gpus(par), 16)
+
+    def test_pp_reaches_the_scenario_yaml(self):
+        """A swept pp must land in the pool's `parallel:` block, not be dropped on the floor.
+
+        The inert-knob lesson of the v0.14.0 bump: a knob that decodes but never arrives costs a
+        whole campaign and reads as a finding. pp is a GPU-consuming factor, so a dropped pp would
+        also mis-size the cluster.
+        """
+        y = run_blis.scenario_yaml("muse-spark-open-816b-a42b-nvfp4", "h100", "0.32.0",
+                                   {"tp": 8, "pp": 2, "dp": 1, "enable_expert_parallel": True},
+                                   {"max_model_len": 262144}, "muse-pp2tp8")
+        self.assertIn("pp: 2", y)
+        self.assertIn("nodes: 2", y)          # tp8 x pp2 = 16 GPUs = 2 whole nodes
+        self.assertIn("fabric:", y)           # multi-node, so a fabric is required
+        self.assertIn("cost-model-fabric", y)
+
+    def test_coefficients_include_fabric(self):
+        """cost-model-fabric prices cross-node links and is what REGISTRY_REF v0.3.0 adds.
+
+        A scenario omitting it runs rc=0 and prices the interconnect differently (48.61 vs 48.38
+        tok/s measured on Muse armB), so its absence would be a silent mispricing.
+        """
+        self.assertIn("cost-model-fabric", run_blis.COEFFICIENTS)
 
     def test_carries_the_wider_engine_surface(self):
         """Every knob in SCENARIO_ENGINE must reach the scenario's engine block.
@@ -443,6 +622,22 @@ class WorkloadShapeIsPassedExplicitly(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--prompt-tokens") + 1], "10240")
 
 
+    def test_a_yaml_result_document_parses_like_the_json_one(self):
+        """An infinite grace has no JSON form, so those runs print YAML (run_blis.INF_NEEDS_YAML)."""
+        try:
+            import yaml
+        except ImportError:
+            self.skipTest("PyYAML not installed")
+        doc = json.loads(RESULT_DOC)
+        doc["input"] = {"run": {"workload": {"replay": {"grace_period_s": float("inf")}}}}
+        s = yaml.safe_dump(doc, sort_keys=False)
+        self.assertTrue(s.startswith("kind: Result") and ".inf" in s)
+        self.assertEqual(run_blis.parse_metrics(RESULT_DOC), run_blis.parse_metrics(s))
+        # A truncated or malformed document fails like a malformed JSON one: no metrics.
+        for bad in ("kind: Result\nengine: [\n", "kind: Result\n---\n- 1\n", "kind: Result\n"):
+            self.assertEqual({}, run_blis.parse_metrics(bad), bad)
+
+
 class ReplayCommand(unittest.TestCase):
     REPLAY = {"scenario": "inferencex-agentx-mvp", "corpus": "/c/traces.jsonl",
               "corpus_sha256": "abc123", "max_context_length": "max_model_len",
@@ -457,6 +652,17 @@ class ReplayCommand(unittest.TestCase):
         # the file's bytes tie a run to its corpus.
         self.assertEqual(cmd[cmd.index("--corpus-sha256") + 1], "abc123")
         self.assertEqual(cmd[cmd.index("--concurrency") + 1], "16")
+
+    def test_an_infinite_grace_asks_for_yaml(self):
+        for grace, yaml_out in (("inf", True), (".inf", True), ("30s", False)):
+            cmd = run_blis.build_replay_cmd("/b", "/cat", "/reg", "/sc", "s.yaml", 42, None, {},
+                                            dict(self.REPLAY, grace_period=grace))
+            self.assertEqual(cmd[cmd.index("--grace-period") + 1], grace)
+            self.assertEqual(yaml_out, "--format" in cmd and cmd[cmd.index("--format") + 1] == "yaml",
+                             grace)
+        cmd = run_blis.build_replay_cmd("/b", "/cat", "/reg", "/sc", "s.yaml", 42, None, {},
+                                        self.REPLAY)
+        self.assertNotIn("--format", cmd)
 
     def test_passes_no_num_requests(self):
         """A replay is bounded by its sending window, not a request count; --num-requests is not
@@ -515,8 +721,7 @@ class RouterBlockInScenario(unittest.TestCase):
 
 
 class SpeculativeDecoding(unittest.TestCase):
-    """Drafting is priced by v0.12.0 + registry v0.2.0; the runner used to refuse it outright as
-    "not yet validated on the kernel backend", which was true of v0.10.0 only."""
+    """Drafting is priced by the kernel; see run_blis's speculative comment."""
 
     def test_depth_becomes_a_nested_engine_block(self):
         _, eng, _, _ = run_blis.classify_config({"tp": 4, "num_speculative_tokens": 5})

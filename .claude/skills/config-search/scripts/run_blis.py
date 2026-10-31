@@ -15,20 +15,36 @@
 #
 # Pinned stack: see pins.env, the single source of truth for the BLIS/catalog/registry refs that
 # price every run (scripts/test_build.py checks the docs and workflows against it). The registry
-# must carry the 6 coefficient sets named below, incl cost-model-memory.
+# must carry the 7 coefficient sets named below, incl cost-model-memory and cost-model-fabric.
 import argparse, hashlib, json, os, subprocess, sys, tempfile, time
 
+# cost-model-fabric is the cross-node/cross-rack interconnect term, and it is the set REGISTRY_REF
+# v0.3.0 adds (v0.2.0 has no such file, which is why the registry pin had to move with the BLIS
+# one). Every one of upstream's 40 Muse scenarios names it, so a scenario this script generates
+# names it too.
+#
+# It is NOT a hard requirement -- a scenario omitting it runs rc=0 -- which is exactly why it is
+# listed here rather than left to chance. Measured on the Muse armB layout (h100 roce, 2 nodes,
+# tp8 x pp2), holding the workload fixed: 48.61 tok/s with the set against 48.38 without, so the
+# term is small on this layout but real, and omitting it is a silent mispricing rather than an
+# error. The size of the gap is a property of this layout and should not be read as a bound: it
+# prices the links a collective actually crosses, so a layout that crosses more of them pays more.
 COEFFICIENTS = ["cost-model-primitives", "cost-model-collectives", "cost-model-host-overheads",
-                "cost-model-attention", "cost-model-recurrent", "cost-model-memory"]
+                "cost-model-attention", "cost-model-recurrent", "cost-model-memory",
+                "cost-model-fabric"]
 
 # --- candidate-key classification (allowlist; anything else is rejected, never silently ignored) ---
 SCENARIO_PARALLEL = ("tp", "pp", "dp", "enable_expert_parallel")       # -> scenario Deployment.parallel
-# Engine fields the generated scenario may carry. The authority is NOT blis-vllm's v0.32.0 field
-# list (~51 names) but the `Engine` struct of the blis-schemas the PINNED BLIS was built against
-# (v0.5.0 at BLIS v0.12.0, 31 fields): the scenario decodes strictly, so a key outside that
-# struct is a hard failure -- "field max_num_active_seqs not found in type deployment.Engine" --
-# and every run of a sweep that names one dies the same way. Verified against
-# ~/go/pkg/mod/github.com/inference-sim/blis-schemas@v0.5.0.
+# Engine fields the generated scenario may carry. The authority IS blis-vllm v0.32.0's
+# rules/engineconfig.Engine (51 top-level yaml tags), because the pinned BLIS (pins.env) makes a
+# pool's `engine:` an opaque block (deployment.EngineBlock) opened by the engine model that
+# the scenario's `engine_version` names. Before v0.14.0 the authority was blis-schemas' own
+# 31-field struct, and the 20 names below this comment's old cut-off were hard decode failures
+# ("field max_num_active_seqs not found in type deployment.Engine"); they decode now.
+#
+# The scenario still decodes STRICTLY, so a key outside those 51 fails every run of a sweep. The
+# seven that decode but are not priced (or are priced only in one shape) are refused by name in
+# UNSUPPORTED below, with the measured reason, rather than being omitted from this list.
 #
 # Valid VALUES for the enumerated ones come from blis-vllm's rules pack
 # (rules/v0_32/pack.go Pack(): CUDAGraphModes, CacheDTypes, All2AllBackends, MoEBackends,
@@ -68,21 +84,69 @@ SCENARIO_ENGINE = (
     # skewed routing distribution, which is an MoE-only lever with a real memory cost.
     # `dbo` is dual-batch overlap; `engram_config` places Engram's host-side tables.
     "eplb", "dbo", "engram_config",
+    # --- opened up by the v0.12.0 -> v0.14.0 pin bump ---
+    # These were hard decode failures under blis-schemas v0.5.0's fixed Engine struct and were
+    # listed in UNSUPPORTED for that reason. v0.14.0 reads `engine:` as an opaque block against
+    # blis-vllm v0.32.0's engineconfig.Engine, which carries all 21 of them.
+    #
+    # Only the three below are PRICED, and that was established by running each against the
+    # pinned binary with two contrasting values, not by reading the struct. `max_num_active_seqs`
+    # is a large lever where it binds (deepseek-v4-pro/h200 tp2 dp4 chatbot: 2405.3 tok/s at
+    # c=256 falls to 808.4 at 8 active seqs, 1684.0 at 32) and inert at c=8, which is the usual
+    # admission-cap shape. The other eleven decode and run but are byte-identical on every
+    # scenario measured -- see ENGINE_DECODED_BUT_INERT below for what that means for a sweep.
+    "max_num_active_seqs", "max_num_scheduled_tokens", "frontend",
 )
-# Nested engine blocks and the fields each accepts, from blis-schemas v0.5.0's structs. A spec
-# states these as a mapping, e.g. `eplb: {enable_eplb: [true], num_redundant_experts: [0, 32]}`;
-# the runner renders them as sub-blocks and the validator checks their inner field names.
+# Carried by the pinned engine model, accepted at run time, and measured BYTE-IDENTICAL: sweeping
+# one burns runs to produce a column of equal numbers that reads as "this knob does nothing".
+#
+# Measured on deepseek-v4-pro/h200 (tp2 dp4, chatbot, c=8 and c=256), qwen3-14b/h100 (tp4) and
+# deepseek-v4.1-flash/h200 (tp2 dp4), two contrasting values each, against a `max_num_seqs`
+# control that moved as expected on every one. The kernel cost model has no term for them; the
+# engine carries them as launch provenance.
+#
+# `frontend` is deliberately NOT here: it is inert on v4-pro and qwen3-14b but DOES move
+# deepseek-v4.1-flash (4656.6 -> 4563.5 python->rust), so it is a real if narrow host-overhead
+# lever and belongs in SCENARIO_ENGINE above.
+#
+# These are refused rather than silently carried, for the reason experiments/README.md gives under
+# "Not every accepted knob is a lever": the sweep that teaches nothing is the expensive failure,
+# because it looks like a result. A spec that genuinely wants one recorded can state it as a
+# fixed engine default rather than a swept knob.
+ENGINE_DECODED_BUT_INERT = {
+    "watermark": "the KV-watermark fraction",
+    "stream_interval": "how often decoded tokens are flushed to the client",
+    "kv_cache_memory_bytes": "an explicit KV pool size (gpu_memory_utilization is the live knob)",
+    "max_loras": "the LoRA slot count",
+    "custom_ops": "the custom-op enable/disable list",
+    "use_trtllm_attention": "the TRT-LLM attention path",
+    "mla_prefill_backend": "the MLA prefill kernel choice",
+    "indexer_kv_dtype": "the DSA indexer's KV dtype",
+    "linear_backend": "the linear-layer kernel choice",
+    "long_prefill_token_threshold_adaptive": "adaptive chunked-prefill sizing",
+    "decoder_replay_cudagraph_capture_sizes": "the decode-replay capture plan",
+}
+# Nested engine blocks and the fields each accepts, from the pinned engine model's structs
+# (blis-vllm v0.32.0 rules/engineconfig). A spec states these as a mapping, e.g.
+# `eplb: {enable_eplb: [true], num_redundant_experts: [0, 32]}`; the runner renders them as
+# sub-blocks and the validator checks their inner field names.
+#
+# `speculative` gained five fields at the v0.14.0 pin (it was method + num_spec_tokens under
+# blis-schemas v0.5.0). Only method and num_spec_tokens select an acceptance profile and so move
+# a number; the rest are recorded provenance -- validate_experiment.SPECULATIVE_RECORDED_ONLY
+# refuses a sweep over them, with that reason.
 NESTED_ENGINE_FIELDS = {
     "eplb": ("enable_eplb", "num_redundant_experts", "window_size", "step_interval"),
     "dbo": ("enable_dbo", "dbo_decode_token_threshold", "dbo_prefill_token_threshold"),
     "engram_config": ("cpu_offload", "dp_shared_memory", "use_thp"),
-    "speculative": ("method", "num_spec_tokens"),
+    "speculative": ("method", "num_spec_tokens", "draft_model", "kv_cache_dtype",
+                    "draft_sample_method", "rejection_sample_method",
+                    "enable_adaptive_verification"),
 }
-# Speculative decoding IS priced by the kernel (v0.12.0 + registry v0.2.0) -- the earlier runner
-# refused it as "not yet validated on the kernel backend", which was true of v0.10.0 and is stale.
-# It is a nested `speculative: {method, num_spec_tokens}` block on the pool's engine
-# (blis-schemas v0.5.0 Deployment.Pool.Engine.Speculative), so the two candidate keys below are
-# folded into that block rather than emitted as flat engine fields.
+# Speculative decoding IS priced by the kernel (since BLIS v0.12.0 + registry v0.2.0; v0.14.0 added
+# only the five extra fields above). It is a nested `speculative: {method, num_spec_tokens}` block
+# on the pool's engine (the pinned engine model's engineconfig.Engine.Speculative), so the two
+# candidate keys below are folded into that block rather than emitted as flat engine fields.
 #
 # The ACCEPTANCE (how many drafted tokens land) is not a deployment property: it depends on the
 # model, drafter and traffic. BLIS resolves it from the registry's acceptance/ profiles, selected
@@ -100,8 +164,8 @@ SPECULATIVE_CLI = {"speculative_category": "--speculative-category",
 CLI_FLAGS = {"num_instances": "--num-instances", "concurrency": "--concurrency",
              "scheduler": "--scheduler", "preemption_policy": "--preemption-policy"}
 # The llm-d EndpointPickerConfig this deployment routes with, as a path. Named by the scenario's
-# DEPLOYMENT-level `router:` block (blis-schemas v0.5.0 spec/deployment/deployment.go:49) -- see
-# ROUTING_MOVED below for why this replaced the former --routing-policy flag.
+# DEPLOYMENT-level `router:` block (blis-schemas spec/deployment/deployment.go, pinned in
+# pins.env) -- see ROUTING_MOVED below for why this replaced the former --routing-policy flag.
 SCENARIO_ROUTER = ("router_config",)
 PARALLEL_DEFAULTS = {"tp": 1, "pp": 1, "dp": 1, "enable_expert_parallel": False}
 GPUS_PER_NODE = 8   # single-node H100; a per-instance footprint beyond this spans nodes (needs a fabric)
@@ -111,6 +175,13 @@ DEFAULT_FABRIC = "ib-400g"   # InfiniBand NDR 400 Gb/s; the standard H100 multi-
 # empty precision lets the checkpoint format govern (e.g. qwen3-14b stays BF16), so forcing FP8 here
 # would silently mis-price every non-FP8 model. `block_size` is also absent here because its right
 # value depends on the MODEL -- see default_block_size(), which fills it in per run.
+#
+# `max_model_len` is not merely a convenience here: blis-vllm v0.32.0's rules make it MANDATORY
+# ("must be stated; an unstated or auto window is the model's or the memory's"), so the pinned
+# stack refuses a scenario without it. Because this default always emits one, the five shipped
+# specs that never mention max_model_len still run at the pin -- the requirement is met
+# by the runner, not by the spec. Do not "fix" those specs by adding it; stating it there would
+# pin a context window the spec does not actually care about.
 ENGINE_DEFAULTS = {"max_num_batched_tokens": 8192, "max_num_seqs": 256,
                    "max_model_len": 32768, "cudagraph_mode": "PIECEWISE", "gpu_memory_utilization": 0.9}
 # A DSA sparse-MLA model's indexer runs on 64-token kernel blocks, so a stated block_size must be a
@@ -188,7 +259,12 @@ DEFAULT_PD_CONNECTOR = "NixlConnector"
 # is NOT here: it is one configuration per run rather than a per-pool knob, so a per-role
 # drafting key is refused outright (PD_SPECULATIVE) and the folded `speculative` block is
 # compared separately.
-PD_MUST_MATCH = ("dp", "block_size", "cache_dtype", "quantization")
+# Transcribed from blis-vllm v0.32.0 compat/build/pools.go, not guessed: block_size (:172) and
+# dp (:188) are each checked on their own, and requireSameKVCacheFormat (:329) compares exactly
+# four cache-format fields. `quantization` was listed here and is NOT compared by any of them --
+# it is the weights' format, which a handoff never moves -- so a P/D sweep over it is legitimate.
+PD_MUST_MATCH = ("dp", "block_size", "cache_dtype", "mamba_cache_dtype",
+                 "mamba_ssm_cache_dtype", "mamba_cache_mode")
 
 # Deliberately unsupported in this runner -> fail loudly with the reason (do not silently drop).
 UNSUPPORTED = {
@@ -203,20 +279,52 @@ UNSUPPORTED = {
     "encode_instances":
         "--encode-instances is not supported: there is no encode role in a blis-schemas "
         "deployment",
-    # Engine fields that blis-vllm v0.32.0 defines but the PINNED stack's blis-schemas (v0.5.0)
-    # does not, so the scenario's strict decode refuses them. Named here with that reason rather
-    # than reported as typos: they are real vLLM knobs, just not sweepable until the pin moves.
-    **{k: (f"{k} is a vLLM v0.32.0 engine field, but the pinned BLIS (v0.12.0, blis-schemas "
-           f"v0.5.0) has no such field on its Engine struct, so the scenario would fail to "
-           f"decode ('field {k} not found in type deployment.Engine'). Sweepable only after the "
-           f"pins move.")
-       for k in ("max_num_active_seqs", "max_num_scheduled_tokens", "watermark",
-                 "prefill_schedule_interval", "stream_interval", "prefix_match_unit",
-                 "prefix_cache_retention_interval", "disable_hybrid_kv_cache_manager",
-                 "kv_cache_memory_bytes", "kv_events", "max_loras", "max_cpu_loras",
-                 "custom_ops", "decoder_replay_cudagraph_capture_sizes",
-                 "use_trtllm_attention", "mla_prefill_backend", "indexer_kv_dtype",
-                 "linear_backend", "long_prefill_token_threshold_adaptive", "env", "frontend")},
+    # Engine fields the pinned stack DECODES but its engine model does not price, and ones it
+    # prices only in a particular shape. Under BLIS v0.12.0 this covered 21 names and was about
+    # decoding (blis-schemas v0.5.0's Engine was a fixed 31-field struct); v0.14.0 makes `engine:`
+    # an opaque block opened by blis-vllm v0.32.0's engineconfig.Engine, so all 21 decode and 3
+    # are swept normally. These seven are refused because a sweep over them reports noise; the
+    # other eleven are refused as ENGINE_DECODED_BUT_INERT, for measuring identical.
+    #
+    # Kept in sync with validate_experiment.ENGINE_NOT_WIRED by test_experiment.py.
+    "prefix_match_unit":
+        "prefix_match_unit decodes under the pinned engine model but is not priced by it: prefix "
+        "matching is modelled at block granularity, so sweeping the unit reports noise "
+        "(upstream blis-vllm#7)",
+    "max_cpu_loras":
+        "max_cpu_loras decodes under the pinned engine model but is not priced by it: there is no "
+        "CPU-side LoRA swap term in the cost model (upstream blis-vllm#5)",
+    "prefix_cache_retention_interval":
+        "prefix_cache_retention_interval decodes under the pinned engine model but is not priced "
+        "by it: the prefix cache is modelled without eviction over time, so retention has no "
+        "effect on any run",
+    # These three are refused OUTRIGHT, not gated on their condition. The condition is stated so
+    # the reason is auditable, but do not read it as "satisfy it and the sweep runs" -- the runner
+    # refuses every shape. Gating on dp / model family / env key would be a real improvement and
+    # is deliberately not in this change.
+    "prefill_schedule_interval":
+        "prefill_schedule_interval is refused: it is priced only when the pool has dp > 1 (with a "
+        "single data-parallel rank there is no cross-rank prefill schedule to interval), and the "
+        "runner does not gate on dp -- it refuses the knob in every shape",
+    "disable_hybrid_kv_cache_manager":
+        "disable_hybrid_kv_cache_manager is refused: the binary rejects it on a sliding-window "
+        "MLA model (the DeepSeek-V4 family), where the hybrid manager is what models the sliding "
+        "window, and the runner refuses it on every model rather than gating on the family",
+    "env":
+        "env is refused: the pinned engine model reads exactly one variable, "
+        "VLLM_USE_V2_MODEL_RUNNER, and any other key is carried but never read, so a sweep over "
+        "it reports noise -- the runner refuses the block rather than gating on the key",
+    "kv_events":
+        "kv_events is a struct under the pinned engine model (publisher/topic/buffer), not a "
+        "bool, and none of its inner fields is sweepable at this pin either (no spec can express "
+        "them) -- so it is not sweepable at all here, in any form",
+    # Decoded and accepted, but measured byte-identical on every scenario tried.
+    **{k: (f"{k} ({what}) is carried by the pinned engine model but the kernel cost model has no "
+           f"term for it: measured byte-identical on deepseek-v4-pro/h200, qwen3-14b/h100 and "
+           f"deepseek-v4.1-flash/h200 with two contrasting values each, so a sweep over it "
+           f"returns a column of equal numbers. State it as a fixed engine default if the run "
+           f"should record it.")
+       for k, what in ENGINE_DECODED_BUT_INERT.items()},
 }
 
 
@@ -286,8 +394,24 @@ def classify_config(config):
         # Fail here rather than let BLIS fail per-run: a typo'd EPP path would otherwise cost a
         # whole sweep of identical "no such file" rows.
         raise ConfigError(f"router_config {rc!r}: no such file")
-    if parallel["pp"] != 1:
-        raise ConfigError("pp>1: the pinned kernel does not price pipeline parallelism")
+    # pp>1 was refused through KERNEL_REF v0.4.0 ("the pinned kernel does not price pipeline
+    # parallelism"). Kernel v0.5.0 prices it: each stage is a step over its share of the layers
+    # (get_pp_indices), the embedding on the first and the head on the last, plus the boundary
+    # send and the receiving stage's TP all-gather; the binding rank is the stage whose pool holds
+    # the fewest tokens.
+    #
+    # It is a real lever, not merely accepted. Measured on the Muse armB layout (h100 roce, 2
+    # nodes, 16 GPUs, EP on, 8 requests of 4096/64): tp8 x pp2 = 96.80 tok/s against
+    # tp16 x pp1 = 99.47 at the SAME footprint -- so the two layouts price apart. The gap's size
+    # is a property of that workload; it is not a bound, and pp should be swept against the
+    # topology rather than assumed to cost a fixed amount.
+    #
+    # The boundary SEND is priced from the graph's pipeline_boundary_bytes_per_token, which only 5
+    # of the catalog's 42 models declare. A model without it is NOT refused: measured on
+    # qwen3-14b, tp2 x pp2 runs rc=0 and prices the stages while omitting the wire between them.
+    # That is a mispricing this layer cannot detect without reading every graph, and it is not an
+    # error, so it is left to the spec author (knobs.md says which models carry the field) and to
+    # the run's own pipeline_stages / pipeline_binding_stage assumption warnings.
     fp = footprint_gpus(parallel)
     # A multi-node single instance IS supported: the generated scenario names a fabric once the
     # pool spans nodes (see scenario_yaml), and BLIS prices the cross-node collectives from it.
@@ -365,8 +489,8 @@ def resolve_pd(cli, pd_parallel, pd_engine, base_parallel, base_engine):
         # The shared `speculative` block is already folded into base_engine; a per-role override
         # of it is refused below (one draft width per run), so only flat keys merge here.
         eng.update(pd_engine[role])
-        if int(par.get("pp", 1)) != 1:
-            raise ConfigError(f"{role}_pp>1: the pinned kernel does not price pipeline parallelism")
+        # pp>1 is priced from kernel v0.5.0 on each side of a disaggregated run too; see the
+        # colocated site in classify_config for what moved and what still refuses.
         fp = footprint_gpus(par)
         if fp > GPUS_PER_NODE and fp % GPUS_PER_NODE:
             raise ConfigError(
@@ -401,8 +525,15 @@ def _pd_mismatch_reason(knob, a, b):
         "block_size": "a P/D handoff moves whole KV blocks, so the pools must page identically",
         "cache_dtype": "the handoff moves the prefill pool's KV representation into the decode "
                        "pool's blocks with no conversion modelled, so the cache formats must agree",
-        "quantization": "the pools' KV cache formats must agree for the handoff to move pages "
-                        "the decode engine holds",
+        # No `quantization` entry: requireSameKVCacheFormat compares cache_dtype and the three
+        # mamba_* fields and does NOT compare quantization, so PD_MUST_MATCH dropped it. A reason
+        # for a knob that is never checked would be dead text.
+        "mamba_cache_dtype": "requireSameKVCacheFormat compares the recurrent cache format too, "
+                             "and the handoff moves those pages without conversion",
+        "mamba_ssm_cache_dtype": "requireSameKVCacheFormat compares the SSM cache format too, and "
+                                 "the handoff moves those pages without conversion",
+        "mamba_cache_mode": "requireSameKVCacheFormat compares the recurrent cache mode, which "
+                            "decides the page layout the handoff has to move",
     }.get(knob, "BLIS requires the two pools to agree on this")
     return (f"the prefill pool states {knob}={a!r} and the decode pool {knob}={b!r}: {why}")
 
@@ -845,7 +976,93 @@ def _all_metrics(stdout):
     return out
 
 
+def _result_doc(stdout):
+    """The v0.15.0 Result document on stdout, or None for an older flat MetricsOutput.
+
+    v0.15.0's `feat(output)` made stdout ONE document (kind: Result) instead of the flat
+    MetricsOutput dict every earlier pin printed. Recognised by `kind` plus the sections this
+    module reads, never by `schema_version` alone -- a replay document is the same shape.
+    """
+    if stdout.lstrip().startswith("kind: Result"):    # see INF_NEEDS_YAML
+        import yaml
+        try:
+            o = yaml.load(stdout, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
+        except yaml.YAMLError:
+            return None     # truncated output fails as "no cluster metrics parsed", like JSON
+        return o if isinstance(o, dict) and isinstance(o.get("engine"), dict) else None
+    for o in _iter_json_objects(stdout):
+        if o.get("kind") == "Result" and isinstance(o.get("engine"), dict):
+            return o
+    return None
+
+
+# The legacy MetricsOutput key -> where the same number lives in a v0.15.0 Result document.
+#
+# `engine.cluster.whole_run` is the WHOLE RUN, which is what every earlier pin's stdout reported
+# and what the committed ledgers therefore hold; top-level `metrics` is the MEASURED WINDOW, a
+# different population (result_build.go standardMetrics). Mixing the two would make this bump a
+# silent re-baselining of every latency in the repo, so the whole-run block is the source and the
+# measured window is left to the Result document's own readers.
+_WHOLE_RUN_KEYS = {k: k for k in ("tokens_per_sec", "responses_per_sec",
+                                   "ttft_mean_ms", "ttft_p90_ms", "ttft_p95_ms", "ttft_p99_ms",
+                                   "e2e_mean_ms", "e2e_p90_ms", "e2e_p95_ms", "e2e_p99_ms")}
+
+# itl_* was RENAMED to step_interval_*, not dropped: result_inputs.go fills whole_run's
+# step_interval_* from whole.ITL*Ms, the very fields MetricsOutput's itl_* keys held ("the
+# step-interval series the legacy itl_* keys held"). So this is a rename to follow, NOT the
+# top-level metrics.itl_* -- those are FormulaTPOTExclFirst, per-request TPOT over the measured
+# window, a genuinely different measurement. Measured on one Muse run: whole-run
+# step_interval_p99 294.03 ms against measured-window itl_p99 33.87 ms, ~9x apart because a step
+# serves the whole batch. Reading the per-request figure into itl_p99_ms would silently rebase
+# every SLO verdict and every per-user rate in the repo against 12 committed reports. The same
+# holds for the step_interval_* on `cluster` itself: result_inputs.go fills that copy from `sum`
+# (the measured window), so it is not a fallback for whole_run's either.
+_ITL_FROM_STEP_INTERVAL = {"itl_mean_ms": "step_interval_mean_ms", "itl_p90_ms": "step_interval_p90_ms",
+                           "itl_p95_ms": "step_interval_p95_ms", "itl_p99_ms": "step_interval_p99_ms"}
+
+# Counters that moved out of the metrics dict into the document's own `requests` block, under
+# shorter names. _completion_issue reads all five, so without this remapping an incomplete or
+# overloaded run is ranked as a clean capacity point.
+_REQUEST_COUNTS = {"injected_requests": "injected", "completed_requests": "completed",
+                   "still_queued": "still_queued", "still_running": "still_running",
+                   "dropped_unservable": "dropped_unservable", "timed_out_requests": "timed_out",
+                   "length_capped_requests": "length_capped"}
+
+# Counters that stayed on the cluster aggregate but outside whole_run.
+_CLUSTER_KEYS = {**{k: k for k in ("total_input_tokens", "total_output_tokens",
+                                    "scheduling_delay_p99_ms", "kv_allocation_failures")},
+                 "preemption_count": "preemptions",
+                 "vllm_estimated_duration_s": "simulated_duration_s"}
+
+
+def _flatten_result(doc):
+    """A v0.15.0 Result document as the flat MetricsOutput dict the rest of this module reads.
+
+    The aggregate was restructured by the bump while `engine.instances` kept emitting a verbatim
+    MetricsOutput per instance, so WITHOUT this a single-instance run (no instances block) has no
+    itl_* anywhere and every ITL SLO fails as "declared but not measured", while a multi-instance
+    run resolves normally off the per-instance rows. That asymmetry is why it reads as a finding
+    rather than a crash: a sweep reports 0 servable, or judges only its multi-instance arms.
+    """
+    cluster = ((doc.get("engine") or {}).get("cluster")) or {}
+    whole = cluster.get("whole_run") or {}
+    if not whole:
+        return {}   # no whole-run aggregate: fail as "no cluster metrics parsed", not later
+    out = {"instance_id": "cluster"}
+    # itl_* ONLY from whole_run, never the cluster's own step_interval_* (see
+    # _ITL_FROM_STEP_INTERVAL); hence the guard above rather than a fallback.
+    for src, mapping in ((whole, _WHOLE_RUN_KEYS), (whole, _ITL_FROM_STEP_INTERVAL),
+                         (cluster, _CLUSTER_KEYS), (doc.get("requests") or {}, _REQUEST_COUNTS)):
+        for legacy, new in mapping.items():
+            if new in src:
+                out[legacy] = src[new]
+    return out
+
+
 def parse_metrics(stdout):
+    doc = _result_doc(stdout)
+    if doc is not None:
+        return _flatten_result(doc)
     cands = _all_metrics(stdout)
     for o in cands:
         if o.get("instance_id") == "cluster":
@@ -854,6 +1071,11 @@ def parse_metrics(stdout):
 
 
 def parse_all_instances(stdout):
+    doc = _result_doc(stdout)
+    if doc is not None:
+        inst = (doc.get("engine") or {}).get("instances") or {}
+        # Each value is a verbatim MetricsOutput, already carrying its own instance_id.
+        return [v for _, v in sorted(inst.items()) if isinstance(v, dict)]
     return [o for o in _all_metrics(stdout) if o.get("instance_id") not in (None, "cluster")]
 
 
@@ -1029,6 +1251,13 @@ def _cli_flag(key):
     raise KeyError(key)
 
 
+# The Result document echoes its input, and JSON has no infinity: an infinite grace makes BLIS exit
+# fatally AFTER simulating ("result: .inf has no JSON form"). A large finite grace is no stand-in --
+# the measured window then runs to the grace end, so its rates shrink by orders of magnitude.
+# YAML encodes `.inf`, so those runs ask for YAML; the document is otherwise the same.
+INF_NEEDS_YAML = ("inf", ".inf")
+
+
 def build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed, defaults, cli,
                      replay):
     """The `blis replay --agentic-scenario` command for a trace-REPLAY workload.
@@ -1063,6 +1292,8 @@ def build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed
         cmd += ["--benchmark-duration", str(replay["benchmark_duration"])]
     if replay.get("grace_period"):
         cmd += ["--grace-period", str(replay["grace_period"])]
+        if str(replay["grace_period"]) in INF_NEEDS_YAML:
+            cmd += ["--format", "yaml"]
     if replay.get("corpus_cache"):
         cmd += ["--corpus-cache", replay["corpus_cache"]]
     if seed is not None:

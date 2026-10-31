@@ -267,6 +267,38 @@ def _workload_entry(path, name):
     }
 
 
+def _priced_by(pins, reports_dir=None):
+    """The simulator version to publish as having priced the committed reports.
+
+    BLIS_REF alone is wrong the moment a pin moves: the new ref did not price the old reports.
+    Each report's scenario.json records the `pinned_stack.blis` that did, so:
+
+      * every report agrees with the pin  -> that version, plainly;
+      * reports disagree with each other  -> the distinct versions, newest pin first, because a
+        gallery spanning two simulators must not read as though it spans one;
+      * no report records one (or none exist) -> fall back to BLIS_REF, the ref the workflow
+        clones and builds, which is the best available statement.
+
+    Deliberately NOT a re-measurement claim: it reports what the artifacts say priced them.
+    """
+    want = pins.get("BLIS_REF")
+    rdir = reports_dir or os.path.join(ROOT, "reports")
+    found = []
+    if os.path.isdir(rdir):
+        for name in sorted(os.listdir(rdir)):
+            sc = _load_json(os.path.join(rdir, name, "scenario.json"), {}) or {}
+            got = ((sc.get("pinned_stack") or {}).get("blis"))
+            if got and got not in found:
+                found.append(got)
+    if not found:
+        return want or "unpinned (no BLIS_REF in pins.env)"
+    if found == [want]:
+        return want
+    # Pin first when it is among them, so the newest stack leads; then the rest, stably.
+    ordered = ([want] if want in found else []) + [v for v in found if v != want]
+    return ", ".join(ordered)
+
+
 def _stack(pins, versions):
     """The pinned stack as ONE dependency with its transitives, not a flat row of peers.
 
@@ -385,11 +417,15 @@ def build(siblings):
     # about the reports: whatever branch a developer happened to leave it on would be published as
     # provenance, and in CI (which clones the pinned ref to ./upstream, not ../inference-sim) the
     # pill read "absent" even though every run was priced by the pin.
+    # ... but BLIS_REF is the CURRENT pin, which is only the right answer while no committed
+    # report predates it. A pin bump makes the two diverge, and then publishing BLIS_REF would
+    # claim the new simulator priced runs it never saw. So the reports get asked first: each
+    # scenario.json records the `pinned_stack.blis` that actually priced it.
     pins = read_pins()
     versions = {
         "blis-catalog": _git_describe(catalog),
         "blis-registry": _git_describe(registry),
-        "inference-sim": pins.get("BLIS_REF") or "unpinned (no BLIS_REF in pins.env)",
+        "inference-sim": _priced_by(pins),
     }
     return {"models": models, "hardware": hardware, "workloads": workloads,
             "fabrics": fabrics, "storage": storage, "registry": reg_sets, "versions": versions,

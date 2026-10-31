@@ -330,7 +330,12 @@ def test_displayed_stack_survives_a_fresh_clone():
           "precondition: without siblings the legacy describe yields 'absent'")
 
     want = {
-        "inference-sim": pins.get("BLIS_REF"),
+        # The ROOT is deliberately NOT BLIS_REF. It is what PRICED the committed reports, which is
+        # what _priced_by resolves: a bumped pin did not price the older reports, so publishing
+        # the pin here would claim a simulator priced runs it never saw. The DEPS below are the
+        # pin, because they describe the stack that pin resolves to. Both halves still have to
+        # come from pins.env rather than a sibling describe, which is this test's subject.
+        "inference-sim": bc._priced_by(pins),
         "blis-latency-kernel": pins.get("KERNEL_REF"),
         "blis-schemas": pins.get("SCHEMAS_REF"),
         "blis-vllm": pins.get("VLLM_REF"),
@@ -378,12 +383,56 @@ def test_pins_are_the_single_source_of_the_sim_version():
     check(bool(ref) and bool(sha), "pins.env must define BLIS_REF and BLIS_SHA")
     check(len(sha or "") == 40, "BLIS_SHA should be a full 40-char commit sha")
 
-    # the pill is the pin, and never a description of some sibling checkout
+    # The pill names what PRICED the committed reports, and is never a description of some
+    # sibling checkout. While no report predates the pin those are the same string; a pin bump
+    # makes them diverge, and then publishing BLIS_REF would claim the new simulator priced runs
+    # it never saw. So the reports are asked first, via their recorded pinned_stack.blis.
     cat = bc.build("/nonexistent-siblings-xyz")
-    check(cat["versions"]["inference-sim"] == ref,
-          f"version pill should be the pinned {ref}, got {cat['versions']['inference-sim']!r}")
-    check("absent" not in cat["versions"]["inference-sim"],
+    pill = cat["versions"]["inference-sim"]
+    check("absent" not in pill,
           "the sim version must not depend on a sibling checkout being present")
+    recorded = []
+    rdir = os.path.join(ROOT, "reports")
+    if os.path.isdir(rdir):
+        for name in sorted(os.listdir(rdir)):
+            p = os.path.join(rdir, name, "scenario.json")
+            if not os.path.isfile(p):
+                continue
+            with open(p) as f:
+                got = ((json.load(f).get("pinned_stack") or {}).get("blis"))
+            if got and got not in recorded:
+                recorded.append(got)
+    for v in recorded:
+        check(v in pill, f"a report priced by {v} must be represented in the pill, got {pill!r}")
+
+    # ...and the three branches of that rule, on synthetic report dirs rather than the real
+    # gallery, so the test keeps meaning after the next pin bump.
+    tmp = tempfile.mkdtemp()
+    try:
+        def _report(name, blis):
+            d = os.path.join(tmp, name)
+            os.makedirs(d)
+            with open(os.path.join(d, "scenario.json"), "w") as f:
+                json.dump({"pinned_stack": {"blis": blis}}, f)
+
+        pin = {"BLIS_REF": "v9.9.9"}
+        empty = os.path.join(tmp, "no-reports-here")
+        os.makedirs(empty)
+        check(bc._priced_by(pin, empty) == "v9.9.9",
+              "with no committed report to go on, the pill falls back to the pin")
+        check("unpinned" in bc._priced_by({}, empty),
+              "with neither a pin nor a report, the pill says so instead of guessing")
+        _report("a", "v9.9.9")
+        _report("b", "v9.9.9")
+        check(bc._priced_by(pin, tmp) == "v9.9.9",
+              "reports that all agree with the pin publish as that one version")
+        _report("c", "v9.9.8")
+        check(bc._priced_by(pin, tmp) == "v9.9.9, v9.9.8",
+              "a gallery spanning two simulators must name both, pin first, not read as one")
+        check(bc._priced_by({"BLIS_REF": "v9.9.7"}, tmp) == "v9.9.9, v9.9.8",
+              "a pin nothing was priced by is not published as having priced anything")
+    finally:
+        shutil.rmtree(tmp)
 
     # SETUP.md documents the same pin a human would clone
     with open(os.path.join(ROOT, ".claude", "skills", "config-search", "SETUP.md")) as f:
@@ -408,6 +457,35 @@ def test_pins_are_the_single_source_of_the_sim_version():
     # copy of the pin, which is the drift pins.env exists to prevent.
     check("$BLIS_SHA" in exp_wf, "run-experiment.yml should verify BLIS_SHA from pins.env")
     check(sha not in exp_wf, "run-experiment.yml hard-codes the sha; read it from pins.env")
+
+    # ...and the SWEEPER must check it too, not just CI. The gap this closes (#23): only the
+    # workflows verified BLIS_SHA, so `grep BLIS_SHA scripts/run_experiment.py` came back empty
+    # and a contributor sweeping locally against an off-pin binary got real-looking numbers with
+    # nothing in the output to say so. CI still refuses outright (it verifies on clone, above);
+    # the runner WARNS, because testing against an unreleased simulator is a legitimate thing to
+    # do locally and is how a pin bump gets evaluated at all.
+    import run_search
+    for fn in ("blis_pin_warning", "_blis_source_commit"):
+        check(hasattr(run_search, fn), f"run_search should define {fn} (the runner-side pin check)")
+    # The check compares a COMMIT to BLIS_SHA. It must not compare the binary digest: the same
+    # tag builds to different bytes per toolchain, so a digest pin would fire on honest builds
+    # (v0.12.0 is recorded with two different digests across the committed reports alone).
+    with open(os.path.join(ROOT, "pins.env")) as f:
+        pins_txt = f.read()
+    check("BLIS_DIGEST" not in pins_txt and "BLIS_SHA256" not in pins_txt,
+          "pins.env must not pin a binary DIGEST: it is build-dependent, so it would be wrong "
+          "for every contributor but the one who wrote it (see test_search's pin tests)")
+    on_pin = {"blis": ref, "resolved": {"blis": {"sha256": "ab" * 32, "commit": sha}}}
+    check(run_search.blis_pin_warning(on_pin, pins) == "",
+          "a binary built from the pinned commit must not warn")
+    off = {"blis": ref, "resolved": {"blis": {"sha256": "ab" * 32, "commit": "c" * 40}}}
+    check(bool(run_search.blis_pin_warning(off, pins)),
+          "a binary built from another commit must warn")
+    # Both runners must apply it; the sweeper is the one that was missing it.
+    with open(os.path.join(ROOT, "scripts", "run_experiment.py")) as f:
+        exp_py = f.read()
+    check("_blis_pin_warning" in exp_py,
+          "run_experiment.py should warn when an off-pin simulator prices a sweep (#23)")
 
     # The catalog must be cloned BEFORE the validate step, or the existence check on
     # scenario.model/hardware/workload silently no-ops and a typo'd identifier still reaches the

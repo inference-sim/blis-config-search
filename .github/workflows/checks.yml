@@ -8,6 +8,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  # The bot's PRs (bump-blis-pin, regen-reports) dispatch this, since their PR event starts nothing.
+  workflow_dispatch:
 
 permissions:
   contents: read

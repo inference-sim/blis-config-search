@@ -467,6 +467,15 @@ def test_workflow_wiring():
         check("issues: write" in text, f"{name} needs issues: write to create labels")
     check("blis_pin.py drift" in regen,
           "regeneration re-checks drift, so a pin that skipped the gate cannot start a campaign")
+    checks_yml = open(os.path.join(wf, "checks.yml")).read()
+    check("workflow_dispatch:" in checks_yml.split("\njobs:")[0],
+          "checks.yml is dispatchable: a GITHUB_TOKEN PR event starts no workflows")
+    check("inputs.base" in compat and "inputs.pr" in compat,
+          "a dispatched pin-compat still compares against the base and comments on the PR")
+    for name, text in (("bump-blis-pin.yml", bump), ("regen-reports.yml", regen)):
+        check("actions: write" in text and "gh workflow run checks.yml" in text
+              and "gh workflow run pin-compat.yml" in text and "-f base=main" in text,
+              f"{name} dispatches CI on its own PR, so the required gate reports without a PAT")
 
 
 if __name__ == "__main__":

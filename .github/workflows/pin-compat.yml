@@ -35,7 +35,15 @@ name: pin-compat
 
 on:
   pull_request:
+  # The bot's PRs dispatch this with the PR's base and number, since their PR event starts nothing.
   workflow_dispatch:
+    inputs:
+      base:
+        description: "branch to compare pins against (blank = check the pins as they stand)"
+        required: false
+      pr:
+        description: "PR number to comment the result on (blank = no comment)"
+        required: false
 
 permissions:
   contents: read
@@ -58,12 +66,14 @@ jobs:
       - name: Did this PR move a pin's value?
         id: diff
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
+          BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
         run: |
           set -euo pipefail
           if [ -z "${BASE:-}" ]; then          # workflow_dispatch: check the pins as they stand
             echo "moved=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
+          # A dispatched base is a branch name; a PR's is a sha.
+          if git rev-parse -q --verify "origin/$BASE" >/dev/null; then BASE="origin/$BASE"; fi
           git show "$BASE:pins.env" > /tmp/base-pins.env
           moved="$(python3 -I scripts/blis_pin.py changed /tmp/base-pins.env)"
           echo "pins moved against the base branch: $moved"
@@ -179,7 +189,9 @@ jobs:
   # One comment on the PR saying what is left to fix, so the next push can be aimed at it.
   report:
     needs: [build, smoke]
-    if: always() && github.event_name == 'pull_request' && needs.build.result == 'success'
+    if: >-
+      always() && needs.build.result == 'success' &&
+      (github.event_name == 'pull_request' || inputs.pr != '')
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -196,10 +208,11 @@ jobs:
           merge-multiple: true
       - name: Comment the gate result on the PR
         env:
-          PR: ${{ github.event.pull_request.number }}
+          PR: ${{ github.event.pull_request.number || inputs.pr }}
           RESULT: ${{ needs.smoke.result }}
         run: |
           set -uo pipefail
+          [[ "$PR" =~ ^[0-9]+$ ]] || { echo "not a PR number: $PR" >&2; exit 1; }
           files=("$RUNNER_TEMP"/smoke/*.json)
           marker="<!-- pin-compat -->"
           {

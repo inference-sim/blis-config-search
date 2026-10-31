@@ -24,9 +24,9 @@ name: bump-blis-pin
 # What it deliberately leaves to the reviewer: CATALOG_REF and REGISTRY_REF. They are separate
 # repos and nothing upstream states which ones a release needs, so they are flagged, not guessed.
 #
-# Token: a PR opened with the default GITHUB_TOKEN does not trigger other workflows, so neither
-# checks.yml nor the pin-compat gate would run on it. Set a PIN_BOT_TOKEN secret (a fine-grained PAT or GitHub App token with
-# contents + pull-requests write) to get CI on the bot's PRs; without it the PR still opens.
+# Token: a PR opened with the default GITHUB_TOKEN triggers no workflows, so after opening it this
+# job dispatches checks.yml and pin-compat.yml on its branch. An optional PIN_BOT_TOKEN secret
+# (contents + pull-requests write) opens the PR as that user instead, and CI then runs on its own.
 
 on:
   schedule:
@@ -53,8 +53,10 @@ jobs:
       contents: write          # push the bump branch
       pull-requests: write     # open the PR
       issues: write            # create the labels (labels live in the issues API)
+      actions: write           # dispatch CI on the PR when there is no PIN_BOT_TOKEN
     env:
       GH_TOKEN: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+      HAS_BOT_TOKEN: ${{ secrets.PIN_BOT_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -202,6 +204,12 @@ jobs:
           gh pr create --draft --title "Bump the pinned inference-sim to $tag" \
             --body-file /tmp/body.md --base main --head "$branch" \
             --label auto-update --label blis-pin
+          # A PR opened with GITHUB_TOKEN starts no workflows, but a dispatch does: start its CI here.
+          if [ "$HAS_BOT_TOKEN" != true ]; then
+            pr="$(gh pr view "$branch" --json number --jq .number)"
+            gh workflow run checks.yml --ref "$branch"
+            gh workflow run pin-compat.yml --ref "$branch" -f base=main -f pr="$pr"
+          fi
           # An older bump PR the bot opened is now superseded; say so on it rather than closing a
           # PR a human may have pushed CATALOG/REGISTRY moves onto.
           new_url="$(gh pr view "$branch" --json url --jq .url)"

@@ -30,7 +30,7 @@ name: regen-reports
 #   REGEN_MAX_PARALLEL     report jobs at once, default 4.
 #   REGEN_RUN_TIMEOUT      per-BLIS-run timeout in seconds, default 1800.
 #
-# Token: as in bump-blis-pin.yml, set PIN_BOT_TOKEN so checks.yml runs on the bot's PRs.
+# Token: as in bump-blis-pin.yml, each batch PR dispatches its own CI unless PIN_BOT_TOKEN is set.
 
 on:
   push:
@@ -205,6 +205,7 @@ jobs:
       contents: write          # push the batch branches
       pull-requests: write     # open the batch PRs
       issues: write            # create the labels (labels live in the issues API)
+      actions: write           # dispatch CI on the PR when there is no PIN_BOT_TOKEN
     strategy:
       fail-fast: false
       max-parallel: 1          # each batch pushes its own branch, but serialise the gh calls
@@ -213,6 +214,7 @@ jobs:
     name: pr ${{ matrix.batch.name }}
     env:
       GH_TOKEN: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+      HAS_BOT_TOKEN: ${{ secrets.PIN_BOT_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -307,3 +309,9 @@ jobs:
           gh pr create --title "Regenerate $BATCH reports on inference-sim $BLIS_REF" \
             --body-file /tmp/body.md --base main --head "$branch" \
             --label auto-update --label report-regen
+          # A PR opened with GITHUB_TOKEN starts no workflows, but a dispatch does: start its CI here.
+          if [ "$HAS_BOT_TOKEN" != true ]; then
+            pr="$(gh pr view "$branch" --json number --jq .number)"
+            gh workflow run checks.yml --ref "$branch"
+            gh workflow run pin-compat.yml --ref "$branch" -f base=main -f pr="$pr"
+          fi

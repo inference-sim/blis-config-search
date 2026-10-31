@@ -11,7 +11,9 @@ Reads (read-only, never mutated):
   blis-catalog/networks/*.yaml, devices/storage.yaml              -> fabrics, storage
   blis-registry/coefficients/*.yaml                              -> registry sets
 
-Emits window.CATALOG = {models, hardware, workloads, fabrics, storage, registry, versions}.
+Emits window.CATALOG = {models, hardware, workloads, fabrics, storage, registry, versions,
+stack}, where `stack` is the pinned BLIS stack as one root dependency plus the transitives
+it resolves to (see _stack); `versions` stays a flat map for anything already reading it.
 Pure + deterministic: entries sorted by name, JSON serialized with sort_keys. Never runs
 BLIS. If a sibling repo is absent, its section is empty and `versions` records "absent" so
 the webpage can show "catalog built without <repo>" instead of failing.
@@ -265,6 +267,69 @@ def _workload_entry(path, name):
     }
 
 
+def _stack(pins, versions):
+    """The pinned stack as ONE dependency with its transitives, not a flat row of peers.
+
+    The footer used to list blis-catalog / blis-registry / inference-sim as three flat pills,
+    which reads as "this site has three dependencies of equal standing". It has one: the BLIS
+    simulator binary. The catalog and registry are data that binary is run against, and the
+    latency kernel is pinned inside inference-sim's own go.mod -- recorded here, never cloned
+    by this repo. So `root` is BLIS and `deps` is what it resolves to, and the webpage can show
+    the root alone until asked to expand.
+
+    KERNEL_REF is carried through even though `versions` never had it: it prices every run (it
+    is the cost model), so omitting it from the displayed stack understated what pins a number.
+
+    Every row is sourced from pins.env, NOT from _git_describe of a sibling checkout, and that
+    is a bug fix rather than a preference. `versions` reads the catalog and registry off
+    ../blis-catalog and ../blis-registry, which do not exist under actions/checkout -- so on the
+    deployed site both pills have always read the literal string "absent", exactly the failure
+    already documented above for inference-sim ("the pill read absent even though every run was
+    priced by the pin"). That one row was moved to pins.env; these two were left behind. pins.env
+    is committed, so it is the only source that survives a fresh clone.
+
+    The describe is kept as a FALLBACK, for the case pins.env omits a ref: then an ambient
+    checkout is still a better answer than "absent". Where both exist the pin wins, because the
+    footer's job is provenance for the committed reports and the pin is the authority on that --
+    a developer's sibling checkout sitting ahead of the pin (0.5.0 vs a pinned 0.4.0) must not be
+    published as having priced reports it never saw.
+
+    The rows come from two kinds of pin, which is why some are conditional:
+
+      * DERIVED (kernel, schemas, vllm) -- Go dependencies compiled into the binary, written to
+        pins.env from inference-sim's go.mod by scripts/sync_pins.py. A derived key can be legally
+        ABSENT: blis-vllm is not a dependency before BLIS v0.14.0, so at an older pin there is no
+        row for it rather than a row reading "absent". Omitting beats inventing.
+      * HAND-PINNED (catalog, registry) -- data directories passed to the binary, not Go modules,
+        so BLIS_REF can never determine them. Always shown.
+    """
+    def dep(name, version, note):
+        return {"name": name, "version": version or "absent", "note": note}
+
+    deps = [dep("blis-latency-kernel", pins.get("KERNEL_REF"),
+                "cost model, derived from inference-sim's go.mod at the pinned ref")]
+    # Present only from BLIS v0.14.0, where the engine surface moved into blis-vllm and it became
+    # a real dependency; before that it is a reference consulted at authoring time, not something
+    # that priced a run, so it earns no provenance row.
+    if pins.get("VLLM_REF"):
+        deps.append(dep("blis-vllm", pins["VLLM_REF"],
+                        "engine config surface (vLLM's startup rules), derived from go.mod"))
+    if pins.get("SCHEMAS_REF"):
+        deps.append(dep("blis-schemas", pins["SCHEMAS_REF"],
+                        "deployment/engine structs the scenario decodes against, derived from go.mod"))
+    deps += [
+        dep("blis-catalog", pins.get("CATALOG_REF") or versions.get("blis-catalog"),
+            "models, hardware, workloads the binary is run against"),
+        dep("blis-registry", pins.get("REGISTRY_REF") or versions.get("blis-registry"),
+            "cost-model coefficients and speculative-decoding profiles"),
+    ]
+    return {
+        "root": dep("inference-sim", versions.get("inference-sim"),
+                    "the BLIS simulator whose binary prices every run"),
+        "deps": deps,
+    }
+
+
 def build(siblings):
     catalog = os.path.join(siblings, "blis-catalog")
     registry = os.path.join(siblings, "blis-registry")
@@ -327,7 +392,8 @@ def build(siblings):
         "inference-sim": pins.get("BLIS_REF") or "unpinned (no BLIS_REF in pins.env)",
     }
     return {"models": models, "hardware": hardware, "workloads": workloads,
-            "fabrics": fabrics, "storage": storage, "registry": reg_sets, "versions": versions}
+            "fabrics": fabrics, "storage": storage, "registry": reg_sets, "versions": versions,
+            "stack": _stack(pins, versions)}
 
 
 def main(argv=None):

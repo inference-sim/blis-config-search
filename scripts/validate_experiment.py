@@ -282,6 +282,12 @@ ROUTER_PLUGIN_PARAMS = {
 }
 
 
+# The blis-vllm rules pack the enum reader parses (rules/<RULES_PACK>/pack.go): the vLLM version
+# the pinned stack models. A release whose blis-vllm adds a newer pack is a drift the pin-bump
+# gate reports (scripts/blis_pin.py drift), since the reader would keep reading the old one.
+RULES_PACK = "v0_32"
+
+
 def _names_from_blis_vllm():
     """Engine field names read from a ../blis-vllm checkout, or None.
 
@@ -323,7 +329,7 @@ def _enums_from_blis_vllm():
     The pack's `Pack()` builds each set with a `set("a", "b", ...)` call against a named field,
     so the names and their members can be read directly rather than mirrored by hand.
     """
-    path = os.path.join(SIBLINGS, "blis-vllm", "rules", "v0_32", "pack.go")
+    path = os.path.join(SIBLINGS, "blis-vllm", "rules", RULES_PACK, "pack.go")
     try:
         with open(path, encoding="utf-8") as f:
             src = f.read()

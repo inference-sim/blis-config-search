@@ -1,0 +1,259 @@
+name: pin-compat
+
+# The compatibility gate for a PR that moves the pinned stack. Make its `gate` job a REQUIRED
+# check on main (not the others: they are skipped on ordinary PRs, see the trigger note below).
+#
+# A new inference-sim can need code changes in THIS repo -- v0.14.0 needed 14 files (PR #25):
+# knob tables in validate_experiment.py, run_blis.py's UNSUPPORTED / PD_MUST_MATCH, a newly
+# mandatory field. Those changes belong on the pin PR itself, because merging the pin is what
+# starts regen-reports.yml, and a regeneration run on code that does not fit the stack spends
+# hours producing broken or silently wrong reports. So the pin PR is the compatibility PR, and
+# this gate keeps it unmergeable until the code fits the stack:
+#
+#   bump-blis-pin.yml opens a DRAFT pin PR
+#     -> this gate fails, listing what broke
+#     -> a person (or Claude) pushes fixes onto the same branch; the gate re-runs on each push
+#     -> green: mark ready, review, merge  -> regen-reports.yml regenerates every report
+#
+# What it checks, all against the NEW binary (none of it is visible to a dry run):
+#   drift  the validator's PINNED knob tables -- what checks.yml validates specs with -- against
+#          the blis-vllm / blis-schemas versions the release's go.mod requires. Any difference is
+#          a table to update on this PR.
+#   suite  the hermetic tests, plus the same tests again with those checkouts as ../ siblings,
+#          so the live-vocabulary paths in validate_experiment.py run too.
+#   smoke  a few rows from each committed report's OWN ledger, re-run through run_blis.run_one:
+#          a row that ran before and fails now (LOUD), or a knob that moved the numbers before
+#          and now measures identically to its baseline (SILENT -- the v0.14.0 failure mode).
+#
+# Trigger: EVERY pull request, deliberately without a `paths:` filter. A workflow skipped by a
+# path filter never reports, so a required check on it would sit "pending" forever on every PR
+# that does not touch pins.env. Instead `changed` compares pin VALUES against the base branch --
+# a comment-only pins.env edit moves nothing -- and the heavy jobs run only when one moved.
+# `gate` always reports: success when nothing moved or everything passed, failure otherwise.
+# The smoke job needs the 568 MB replay corpus for the AgentX reports; it is cached per catalog
+# pin, as in regen-reports.
+
+on:
+  pull_request:
+  # The bot's PRs dispatch this with the PR's base and number, since their PR event starts nothing.
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "branch to compare pins against (blank = check the pins as they stand)"
+        required: false
+      pr:
+        description: "PR number to comment the result on (blank = no comment)"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pin-compat-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changed:
+    runs-on: ubuntu-latest
+    outputs:
+      moved: ${{ steps.diff.outputs.moved }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyyaml
+      - name: Did this PR move a pin's value?
+        id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || inputs.base }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE:-}" ]; then          # workflow_dispatch: check the pins as they stand
+            echo "moved=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # A dispatched base is a branch name; a PR's is a sha.
+          if git rev-parse -q --verify "origin/$BASE" >/dev/null; then BASE="origin/$BASE"; fi
+          git show "$BASE:pins.env" > /tmp/base-pins.env
+          moved="$(python3 -I scripts/blis_pin.py changed /tmp/base-pins.env)"
+          echo "pins moved against the base branch: $moved"
+          echo "moved=$([ "$moved" = "{}" ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: changed
+    # A fork's pin move would run the fork's code on REGEN_RUNS_ON (possibly self-hosted): no.
+    if: >-
+      needs.changed.outputs.moved == 'true' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    outputs:
+      reports: ${{ steps.ids.outputs.reports }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyyaml jsonschema
+      - name: Clone the pinned simulator, and the modules its go.mod names
+        run: |
+          set -euo pipefail
+          set -a; . ./pins.env; set +a
+          git clone --branch "$BLIS_REF" --depth 1 https://github.com/inference-sim/inference-sim.git upstream
+          test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
+            echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
+          # blis-vllm + blis-schemas at the versions THIS release builds against, as ../ siblings:
+          # the layout validate_experiment.py reads live vocabulary from.
+          mkdir -p "$RUNNER_TEMP/stack"
+          python3 -I scripts/blis_pin.py modules upstream/go.mod | while read -r mod ver; do
+            case "$mod" in blis-vllm|blis-schemas)
+              git clone --branch "$ver" --depth 1 "https://github.com/inference-sim/$mod.git" "$RUNNER_TEMP/stack/$mod" ;;
+            esac
+          done
+      - uses: actions/setup-go@v5
+        with: { go-version-file: upstream/go.mod }
+      - run: cd upstream && go build -o blis main.go && ./blis --help >/dev/null
+      - name: Knob tables vs the new stack
+        run: python3 -I scripts/blis_pin.py drift --siblings "$RUNNER_TEMP/stack" --go-mod upstream/go.mod
+      - name: Hermetic suite
+        run: |
+          set -euo pipefail
+          python3 -I scripts/test_build.py
+          python3 -I scripts/test_blis_pin.py
+          python3 -I scripts/test_experiment.py
+          python3 -I .claude/skills/config-search/scripts/test_run_blis.py
+      - name: The same suite with the new stack as ../ siblings (live-vocabulary paths)
+        run: |
+          set -euo pipefail
+          for mod in blis-vllm blis-schemas; do cp -r "$RUNNER_TEMP/stack/$mod" "../$mod"; done
+          python3 -I scripts/test_experiment.py
+          python3 -I scripts/validate_experiment.py experiments/
+          rm -rf ../blis-vllm ../blis-schemas
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pin-compat-blis
+          path: upstream/blis
+          retention-days: 3
+      - name: Reports to smoke
+        id: ids
+        run: |
+          python3 -I scripts/blis_pin.py plan > /tmp/plan.json
+          echo "reports=$(python3 -c 'import json;print(json.dumps([{"id":r["id"],"replay":r["replay"]} for r in json.load(open("/tmp/plan.json"))["reports"]]))')" >> "$GITHUB_OUTPUT"
+
+  smoke:
+    needs: build
+    if: needs.build.outputs.reports != '[]'
+    runs-on: ${{ fromJSON(vars.REGEN_RUNS_ON || '"ubuntu-latest"') }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        report: ${{ fromJSON(needs.build.outputs.reports) }}
+    name: smoke ${{ matrix.report.id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyyaml
+      - uses: actions/download-artifact@v4
+        with: { name: pin-compat-blis, path: .build }
+      - name: Clone the pinned catalog + registry
+        id: stack
+        run: |
+          set -euo pipefail
+          chmod +x .build/blis
+          set -a; . ./pins.env; set +a
+          git clone --branch "$CATALOG_REF" --depth 1 https://github.com/inference-sim/blis-catalog.git ../blis-catalog
+          git clone --branch "$REGISTRY_REF" --depth 1 https://github.com/inference-sim/blis-registry.git ../blis-registry
+          echo "catalog_ref=$CATALOG_REF" >> "$GITHUB_OUTPUT"
+      - name: Restore the replay corpus
+        if: matrix.report.replay
+        uses: actions/cache@v4
+        with:
+          path: .corpus/traces.jsonl
+          key: replay-corpus-${{ steps.stack.outputs.catalog_ref }}
+      - name: Re-run ${{ matrix.report.id }}'s own rows on the new binary
+        run: |
+          set -euo pipefail
+          python3 -I scripts/blis_pin.py smoke "${{ matrix.report.id }}" \
+            --blis .build/blis --catalog ../blis-catalog --registry ../blis-registry \
+            --corpus .corpus/traces.jsonl --corpus-cache "$RUNNER_TEMP/agx-cache" \
+            --max-parallel 2 --timeout "${{ vars.REGEN_RUN_TIMEOUT || '1800' }}" \
+            --json "$RUNNER_TEMP/smoke-${{ matrix.report.id }}.json" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-${{ matrix.report.id }}
+          path: ${{ runner.temp }}/smoke-${{ matrix.report.id }}.json
+          if-no-files-found: ignore
+
+  # One comment on the PR saying what is left to fix, so the next push can be aimed at it.
+  report:
+    needs: [build, smoke]
+    if: >-
+      always() && needs.build.result == 'success' &&
+      (github.event_name == 'pull_request' || inputs.pr != '')
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: smoke-*
+          path: ${{ runner.temp }}/smoke
+          merge-multiple: true
+      - name: Comment the gate result on the PR
+        env:
+          PR: ${{ github.event.pull_request.number || inputs.pr }}
+          RESULT: ${{ needs.smoke.result }}
+        run: |
+          set -uo pipefail
+          [[ "$PR" =~ ^[0-9]+$ ]] || { echo "not a PR number: $PR" >&2; exit 1; }
+          files=("$RUNNER_TEMP"/smoke/*.json)
+          marker="<!-- pin-compat -->"
+          {
+            echo "$marker"
+            echo "### pin-compat: $([ "$RESULT" = success ] && echo '✅ the code fits the new stack' || echo '❌ changes needed on this branch')"
+            echo
+            if [ -e "${files[0]}" ]; then python3 -I scripts/blis_pin.py smoke-summary "${files[@]}"; fi
+            echo
+            echo "_Commit ${GITHUB_SHA::10}, [run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID). Push fixes to this branch; the gate re-runs and this comment updates. Regeneration starts only after merge._"
+          } > /tmp/comment.md
+          # Edit OUR comment, found by its marker: --edit-last would take the token user's latest
+          # comment, which for github-actions[bot] is the pages.yml preview link.
+          id="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+                --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | tail -1)"
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@/tmp/comment.md >/dev/null
+          else
+            gh pr comment "$PR" --body-file /tmp/comment.md
+          fi
+
+  # The ONE check to mark required. It always runs, so it always reports.
+  gate:
+    needs: [changed, build, smoke]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pass when no pin moved, or every compatibility check passed
+        env:
+          MOVED: ${{ needs.changed.outputs.moved }}
+          CHANGED: ${{ needs.changed.result }}
+          BUILD: ${{ needs.build.result }}
+          SMOKE: ${{ needs.smoke.result }}
+          REPORTS: ${{ needs.build.outputs.reports }}
+          FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          echo "changed=$CHANGED moved=$MOVED build=$BUILD smoke=$SMOKE"
+          [ "$CHANGED" = success ] || { echo "could not tell whether a pin moved"; exit 1; }
+          if [ "$MOVED" != true ]; then echo "no pin value moved -- nothing to check"; exit 0; fi
+          if [ "$FORK" = true ]; then
+            echo "a pin move from a fork is not run here -- push the branch to this repo"; exit 1; fi
+          # smoke is skipped (not failed) only when there is no committed report to re-run.
+          [ "$SMOKE" = skipped ] && [ "$REPORTS" = "[]" ] && SMOKE=success
+          [ "$BUILD" = success ] && [ "$SMOKE" = success ] || {
+            echo "the code does not fit the new stack yet -- see the failed jobs above"; exit 1; }

@@ -446,6 +446,57 @@ the scenario's SLOs, breaking ties on fleet tok/s then the lighter load. A run t
 can never win, however fast it is, and a declared SLO that wasn't measured counts as a miss rather
 than a silent pass.
 
+## When the pinned simulator moves
+
+Every report is a function of its spec **and** the pins, so a pin bump makes every committed
+report stale at once. And a new simulator can need code changes here first: v0.14.0 needed 14
+files (#25), and turned 11 knobs silently inert. So the loop has a gate between the bump and
+the regeneration, and the code changes land on the pin PR itself:
+
+```
+inference-sim release --bump-blis-pin.yml-->  DRAFT pin PR  <--fix commits--  pin-compat.yml
+   --green, ready, merge-->  regen-reports.yml  --one job per report-->  one PR per model batch
+```
+
+* **`bump-blis-pin.yml`** polls upstream daily (or on `repository_dispatch: inference-sim-release`,
+  or by hand). For a release newer than `BLIS_REF` it rewrites `pins.env` + SETUP.md, checks the
+  tag's commit and that the release builds, and opens a **draft** PR with a checklist. It does not
+  require this repo's tests to pass: a release that needs code changes still needs its PR. It
+  never guesses `CATALOG_REF` / `REGISTRY_REF`.
+* **`pin-compat.yml`** runs on every PR, and does its work only when a pin's *value* moves against
+  the base branch. Mark its **`gate`** job as the required check: it always reports, and passes when
+  no pin moved. Against
+  the new binary it runs:
+  * `blis_pin.py drift`: the validator's pinned knob tables against the `blis-vllm` /
+    `blis-schemas` versions the release's go.mod names;
+  * the suite twice, once hermetic and once with those modules as `../` siblings;
+  * `blis_pin.py smoke`: a few rows from each report's own ledger, re-run. It fails on a row that
+    ran before and fails now (**LOUD**), and on a knob that moved the numbers before and now
+    measures identically to its baseline (**SILENT**).
+
+  It comments what is left to fix. Push the fixes (knob tables, `run_blis.py`, a submission
+  field the new stack refuses) onto the same branch until it is green.
+* **`regen-reports.yml`** runs when a push to main changes a pin's *value*, which normally means
+  the merged pin PR, with its fixes already on main. It re-checks `drift` first, so a pin that
+  skipped the gate cannot start a campaign. `scripts/blis_pin.py plan` classifies every
+  `reports/<id>/` by its source:
+  * an `experiments/` spec, re-swept by `run_experiment.py`;
+  * a `submissions/` file, re-searched by `run_search.py`.
+
+  It batches them by model, at most four per PR. Each report is its own job, and a failed one is
+  listed in its batch's PR instead of being left silently stale. Each PR carries an old → new
+  table of stack, winner, tok/s/GPU and servable runs.
+
+Every PR this loop opens carries the **`auto-update`** label, plus **`blis-pin`** (the draft pin
+PR) or **`report-regen`** (a batch of regenerated reports), so `label:auto-update` lists them all.
+
+So **a report with no spec and no submission cannot be regenerated**, and the test suite refuses
+one (`test_plan_covers_the_real_gallery`). Re-run a subset by hand with the `only` input.
+
+The 64-GPU AgentX replays need more memory than a hosted runner has; point the `REGEN_RUNS_ON`
+repository variable at a larger runner (see the workflow header for all four sizing variables).
+The smoke jobs use the same runner.
+
 ## Not supported (per #21)
 
 - Adaptive SLO probes or open-loop `--rate` — load is the fixed `concurrency` list.

@@ -84,12 +84,17 @@ jobs:
           if [ "$newer" != "True" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          # One PR per release: a daily poll must not open a second PR for the same tag.
-          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
-            echo "$branch already exists -- its PR is the one to review"
+          # One PR per release: a daily poll must not open a second PR (open OR closed) for a tag.
+          if [ -n "$(gh pr list --head "$branch" --state all --json number --jq '.[].number')" ]; then
+            echo "$branch already has a PR -- that is the one to review"
             echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          { echo "skip=false"; echo "tag=$tag"; echo "current=$current"; echo "branch=$branch"; } >> "$GITHUB_OUTPUT"
+          # A branch with no PR is an earlier run that failed between push and `gh pr create`;
+          # reopen from it instead of skipping that release for good.
+          exists=false
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then exists=true; fi
+          { echo "skip=false"; echo "tag=$tag"; echo "current=$current"; echo "branch=$branch"
+            echo "exists=$exists"; } >> "$GITHUB_OUTPUT"
 
       - name: Rewrite the pins
         if: steps.target.outputs.skip == 'false'
@@ -178,14 +183,16 @@ jobs:
           PY
           git config user.name  "blis-config-search-bot"
           git config user.email "bot@users.noreply.github.com"
-          git checkout -b "$branch"
-          git add pins.env .claude/skills/config-search/SETUP.md
-          git commit -m "Bump the pinned inference-sim to $tag
+          if [ "${{ steps.target.outputs.exists }}" != true ]; then
+            git checkout -b "$branch"
+            git add pins.env .claude/skills/config-search/SETUP.md
+            git commit -m "Bump the pinned inference-sim to $tag
 
           Opened by bump-blis-pin.yml as a draft. Code changes the release needs go on this
           branch; pin-compat.yml gates it. Merging it triggers regen-reports.yml, which re-runs
           every committed report against the new stack."
-          git push origin "$branch"
+            git push origin "$branch"
+          fi
           # Labels mark a PR this automation opened: `auto-update` for every one, plus its kind.
           # --force makes creation idempotent (and keeps the colour/description current).
           gh label create auto-update --force --color 5319e7 \

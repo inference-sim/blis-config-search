@@ -42,7 +42,7 @@ on:
         description: "comma-separated report ids to regenerate (blank = every committed report)"
         required: false
       force:
-        description: "regenerate even though no stack pin changed in the last commit"
+        description: "regenerate even though no stack pin changed"
         type: boolean
         default: true
 
@@ -63,7 +63,7 @@ jobs:
       blis_ref: ${{ steps.plan.outputs.blis_ref }}
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 2 }
+        with: { fetch-depth: 0 }
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install pyyaml
@@ -72,12 +72,16 @@ jobs:
         env:
           ONLY: ${{ github.event.inputs.only }}
           FORCE: ${{ github.event.inputs.force }}
+          BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
           # A comment-only edit to pins.env matches the `paths` filter but moves no pin, and
-          # must not queue hours of sweeps; compare VALUES, not bytes.
+          # must not queue hours of sweeps; compare VALUES, not bytes. Against the commit before
+          # the PUSH, not HEAD^: a rebase-merged pin PR ends in its fix commits, not the bump.
           if [ "${FORCE:-false}" != "true" ]; then
-            git show HEAD^:pins.env > /tmp/old-pins.env
+            old="HEAD^"
+            if [ -n "${BEFORE:-}" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then old="$BEFORE"; fi
+            git show "$old:pins.env" > /tmp/old-pins.env
             moved="$(python3 -I scripts/blis_pin.py changed /tmp/old-pins.env)"
             echo "moved: $moved"
             if [ "$moved" = "{}" ]; then
@@ -166,8 +170,10 @@ jobs:
           set -euo pipefail
           chmod +x .build/blis
           set -a; . ./pins.env; set +a
-          git clone --branch "$CATALOG_REF" --depth 1 https://github.com/inference-sim/blis-catalog.git ../blis-catalog
-          git clone --branch "$REGISTRY_REF" --depth 1 https://github.com/inference-sim/blis-registry.git ../blis-registry
+          # Inside the checkout, as run-experiment.yml does: a ledger's cmd records ./blis-catalog,
+          # and a path outside the repo would stay absolute (a runner path in a committed report).
+          git clone --branch "$CATALOG_REF" --depth 1 https://github.com/inference-sim/blis-catalog.git blis-catalog
+          git clone --branch "$REGISTRY_REF" --depth 1 https://github.com/inference-sim/blis-registry.git blis-registry
           echo "catalog_ref=$CATALOG_REF" >> "$GITHUB_OUTPUT"
       # The 568 MB replay corpus is pinned by the catalog, so one download per catalog pin serves
       # every replay report in the campaign. blis_pin.py digest-checks it either way.
@@ -181,7 +187,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -I scripts/blis_pin.py regen "${{ matrix.report.id }}" \
-            --blis .build/blis --catalog ../blis-catalog --registry ../blis-registry \
+            --blis .build/blis --catalog blis-catalog --registry blis-registry \
             --out "$RUNNER_TEMP/regen" --timeout "${{ vars.REGEN_RUN_TIMEOUT || '1800' }}"
       - uses: actions/upload-artifact@v4
         with:
@@ -241,6 +247,13 @@ jobs:
           echo "regenerated: ${ok:-none}; failed: ${failed:-none}"
           { echo "ok=$ok"; echo "failed=$failed"; } >> "$GITHUB_OUTPUT"
           [ -n "$ok" ] || { echo "::error::no report in batch ${{ matrix.batch.name }} regenerated"; exit 1; }
+          # The AgentX narratives quote their 4node/8node and h100 siblings, so they are written
+          # only now, with the whole batch side by side in reports/ (as regen_agentx.sh does).
+          for id in $ok; do
+            if [ -f "$RUNNER_TEMP/old-reports/$id/report.json" ]; then
+              python3 -I scripts/write_agentx_report.py "reports/$id"
+            fi
+          done
       - name: Build the site to validate the regenerated reports
         run: python3 -I scripts/build_gallery.py --no-mock --out /tmp/site-check
       - name: Open the batch PR

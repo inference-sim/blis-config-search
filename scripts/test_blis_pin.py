@@ -332,6 +332,15 @@ def test_smoke_verdicts():
             r = B.smoke("r", "blis", "cat", "reg", root=root)
             check(any(f.startswith("SILENT") and "max_num_seqs" in f for f in r["failures"]),
                   f"a knob that moved before and is identical now is SILENT: {r['failures']}")
+            run_blis.run_one = fake(lambda c: _rec(c, 99.0, error="overloaded: still_queued=3"))
+            r = B.smoke("r", "blis", "cat", "reg", root=root)
+            check(not r["failures"] and len(r["warnings"]) == 3,
+                  f"a row that runs but tips into overload is a warning, not LOUD: {r}")
+            check("**Warnings**" in B.smoke_markdown([r]), "the comment lists the warnings")
+            run_blis.run_one = fake(lambda c: _rec(c, 0, error="unsupported config: x"))
+            r = B.smoke("r", "blis", "cat", "reg", root=root)
+            check(sum(f.startswith("LOUD") for f in r["failures"]) == 3,
+                  "a config the new stack refuses is LOUD")
             run_blis.run_one = fake(lambda c: _rec(c, 0, rc=1, error="field x not found"))
             r = B.smoke("r", "blis", "cat", "reg", root=root)
             check(sum(f.startswith("LOUD") for f in r["failures"]) == 3,
@@ -405,8 +414,16 @@ def test_workflow_wiring():
               f"{name} must build with the toolchain the release's go.mod names")
     check("$BLIS_SHA" in regen, "regen-reports.yml must refuse a moved tag")
     check("scripts/blis_pin.py bump" in bump, "the bump PR is written by blis_pin.py")
-    check("bump/blis-pin-" in bump and "ls-remote --exit-code --heads" in bump,
+    check("bump/blis-pin-" in bump and 'gh pr list --head "$branch" --state all' in bump,
           "the daily poll must not open a second PR for a release it already proposed")
+    check("exists=$exists" in bump and "steps.target.outputs.exists" in bump,
+          "a pushed branch with no PR (a failed create) is resumed, not skipped forever")
+    check("github.event.before" in regen and "fetch-depth: 0" in regen,
+          "pins are compared across the whole push: a rebase-merged pin PR ends in its fixes")
+    check("../blis-catalog" not in regen and "--catalog blis-catalog" in regen,
+          "regen clones the catalog inside the checkout, so ledger cmds stay relative")
+    check("write_agentx_report.py" in regen.split("\n  pr:", 1)[-1],
+          "AgentX narratives are written once the batch sits side by side (they read siblings)")
     check('paths: ["pins.env"]' in regen and "branches: [main]" in regen,
           "regeneration triggers on a pins.env change reaching main")
     check("scripts/blis_pin.py changed" in regen,
@@ -431,6 +448,12 @@ def test_workflow_wiring():
     for step in ("blis_pin.py drift", "blis_pin.py smoke", "blis_pin.py modules"):
         check(step in compat, f"the gate runs `{step}`")
     check("fail-fast: false" in compat, "one report's smoke failure must not hide the others'")
+    check("<!-- pin-compat -->" in compat and "comment \"$PR\" --edit-last" not in compat,
+          "the gate comment is found by its marker, not as the token user's latest comment")
+    check("head.repo.full_name == github.repository" in compat,
+          "a fork's pin move does not run fork code on the regen runner")
+    check("needs.build.outputs.reports != '[]'" in compat and 'REPORTS" = "[]"' in gate,
+          "no committed reports means no smoke matrix, and the gate still passes")
     check("--draft" in bump, "the bot's pin PR opens as a draft: it is where fixes get pushed")
     check("test_experiment.py" not in bump,
           "the bump workflow must not require the suite to pass: a release that needs code "

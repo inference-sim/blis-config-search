@@ -30,7 +30,8 @@ What "its source" is, per report directory (the `kind` in a plan):
   * experiment -- the dir has experiment.json, so run_experiment.py swept a spec. The spec is
     experiments/<name>.yaml, falling back to the spec.yaml the run dir carries.
   * submission -- submissions/<run_id>.yaml exists, so run_search.py searched it. An AgentX
-    replay dir also carried a report.json, which write_agentx_report.py re-derives from the data.
+    replay dir also carried a report.json, which write_agentx_report.py re-derives from the data
+    -- once the whole batch is in reports/, since it reads sibling runs (regen-reports.yml `pr`).
   * orphan     -- neither. It cannot be regenerated, so the plan lists it for a human instead of
     guessing; a PR that silently skipped it would leave one stale report looking current.
 
@@ -368,10 +369,8 @@ def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1,
             fetch_submission_corpus(os.path.join(ROOT, e["source"]), catalog, corpus)
             cmd += ["--corpus", corpus, "--corpus-cache", corpus_cache]
         _run(cmd)
-        if e["narrative"]:
-            # The AgentX replay reports carry an authored-from-data narrative; re-derive it so the
-            # prose quotes the NEW numbers (regen_agentx.sh step 3).
-            _run([py, "-I", "scripts/write_agentx_report.py", os.path.join(out, run_id)])
+        # No narrative here: write_agentx_report.py reads the 4node/8node and h100 siblings, which
+        # only sit beside this run once the batch is swapped into reports/ (regen-reports.yml `pr`).
     else:
         raise SystemExit(f"{run_id} has no source to regenerate from (no experiment spec, no "
                          f"submissions/{run_id}.yaml)")
@@ -484,6 +483,14 @@ def _ok(rec):
     return rec.get("returncode") == 0 and not rec.get("error") and bool(m.get("tokens_per_sec"))
 
 
+def _broken(rec):
+    """The engine refused or crashed. An overloaded/incomplete run still RAN: a release that is
+    merely slower can tip a near-saturation row over, and that is a numbers change, not a break."""
+    m = rec.get("metrics") or {}
+    return (rec.get("returncode") != 0 or not m.get("tokens_per_sec")
+            or (rec.get("error") or "").startswith("unsupported config"))
+
+
 def _tps(rec):
     return (rec.get("metrics") or {}).get("tokens_per_sec") or 0.0
 
@@ -593,7 +600,8 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
     import run_blis
     entry = classify(run_id, root)
     if entry["kind"] == "orphan":
-        return {"id": run_id, "checks": [], "failures": [f"{run_id}: no source to run from"]}
+        return {"id": run_id, "checks": [], "failures": [f"{run_id}: no source to run from"],
+                "warnings": []}
     if entry["replay"]:
         if not corpus:
             raise SystemExit(f"{run_id} is a replay report; smoke needs --corpus")
@@ -625,17 +633,19 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
         new = dict(ex.map(_one, sorted(todo)))
     shutil.rmtree(scen_dir, ignore_errors=True)
 
-    checks, failures = [], []
+    checks, failures, warnings = [], [], []
     for key, old in sorted(todo.items()):
         n = new[key]
+        why = (n.get("error") or (n.get("stderr_tail") or "")[-300:]).strip()
         checks.append({"config": old["config"], "old_tps": round(_tps(old), 1),
-                       "new_tps": round(_tps(n), 1) if _ok(n) else None,
-                       "error": None if _ok(n) else (n.get("error") or
-                                                     (n.get("stderr_tail") or "")[-400:])})
-        if not _ok(n):
+                       "new_tps": None if _broken(n) else round(_tps(n), 1),
+                       "error": None if _ok(n) else why})
+        if _broken(n):
             failures.append(f"LOUD: {run_id} {_cfg_phrase(old['config'])} ran on the old stack "
-                            f"and fails on the new one: "
-                            f"{(n.get('error') or (n.get('stderr_tail') or '')[-300:]).strip()}")
+                            f"and fails on the new one: {why}")
+        elif not _ok(n):
+            warnings.append(f"{run_id} {_cfg_phrase(old['config'])} still runs but no longer "
+                            f"completes cleanly ({why}): expect its report to move on regeneration")
     for p in pairs:
         if p["row"] is None or not p["moved"]:
             continue
@@ -647,7 +657,7 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
                 f"{_tps(p['row']):.1f} on the old stack and now measures IDENTICALLY to its "
                 f"baseline ({_tps(b):.1f}) -- the new release no longer models it. Move it to the "
                 f"validator's inert table (validate_experiment.py) so specs stop sweeping it.")
-    return {"id": run_id, "checks": checks, "failures": failures,
+    return {"id": run_id, "checks": checks, "failures": failures, "warnings": warnings,
             "pairs": [{"knob": p["knob"], "moved": p["moved"]} for p in pairs]}
 
 
@@ -736,6 +746,10 @@ def smoke_markdown(results):
     if fails:
         rows += ["", "**Failures** — fix these on this PR; regeneration only starts after merge:", ""]
         rows += [f"- {f}" for f in fails]
+    warns = [w for r in results for w in r.get("warnings", [])]
+    if warns:
+        rows += ["", "**Warnings** — not a failure, but the numbers will move:", ""]
+        rows += [f"- {w}" for w in warns]
     return "\n".join(rows)
 
 

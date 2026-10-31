@@ -71,7 +71,11 @@ jobs:
 
   build:
     needs: changed
-    if: needs.changed.outputs.moved == 'true'
+    # A fork's pin move would run the fork's code on REGEN_RUNS_ON (possibly self-hosted): no.
+    if: >-
+      needs.changed.outputs.moved == 'true' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     outputs:
       reports: ${{ steps.ids.outputs.reports }}
@@ -127,6 +131,7 @@ jobs:
 
   smoke:
     needs: build
+    if: needs.build.outputs.reports != '[]'
     runs-on: ${{ fromJSON(vars.REGEN_RUNS_ON || '"ubuntu-latest"') }}
     timeout-minutes: 90
     strategy:
@@ -196,15 +201,24 @@ jobs:
         run: |
           set -uo pipefail
           files=("$RUNNER_TEMP"/smoke/*.json)
+          marker="<!-- pin-compat -->"
           {
+            echo "$marker"
             echo "### pin-compat: $([ "$RESULT" = success ] && echo '✅ the code fits the new stack' || echo '❌ changes needed on this branch')"
             echo
             if [ -e "${files[0]}" ]; then python3 -I scripts/blis_pin.py smoke-summary "${files[@]}"; fi
             echo
             echo "_Commit ${GITHUB_SHA::10}, [run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID). Push fixes to this branch; the gate re-runs and this comment updates. Regeneration starts only after merge._"
           } > /tmp/comment.md
-          gh pr comment "$PR" --edit-last --body-file /tmp/comment.md 2>/dev/null \
-            || gh pr comment "$PR" --body-file /tmp/comment.md
+          # Edit OUR comment, found by its marker: --edit-last would take the token user's latest
+          # comment, which for github-actions[bot] is the pages.yml preview link.
+          id="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+                --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | tail -1)"
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@/tmp/comment.md >/dev/null
+          else
+            gh pr comment "$PR" --body-file /tmp/comment.md
+          fi
 
   # The ONE check to mark required. It always runs, so it always reports.
   gate:
@@ -218,9 +232,15 @@ jobs:
           CHANGED: ${{ needs.changed.result }}
           BUILD: ${{ needs.build.result }}
           SMOKE: ${{ needs.smoke.result }}
+          REPORTS: ${{ needs.build.outputs.reports }}
+          FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
           echo "changed=$CHANGED moved=$MOVED build=$BUILD smoke=$SMOKE"
           [ "$CHANGED" = success ] || { echo "could not tell whether a pin moved"; exit 1; }
           if [ "$MOVED" != true ]; then echo "no pin value moved -- nothing to check"; exit 0; fi
+          if [ "$FORK" = true ]; then
+            echo "a pin move from a fork is not run here -- push the branch to this repo"; exit 1; fi
+          # smoke is skipped (not failed) only when there is no committed report to re-run.
+          [ "$SMOKE" = skipped ] && [ "$REPORTS" = "[]" ] && SMOKE=success
           [ "$BUILD" = success ] && [ "$SMOKE" = success ] || {
             echo "the code does not fit the new stack yet -- see the failed jobs above"; exit 1; }

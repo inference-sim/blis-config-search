@@ -80,8 +80,9 @@ GPUS_PER_NODE = 8          # a per-instance footprint past this spans nodes (run
 # ---------------------------------------------------------------------------------------------
 # Knob names. Each set below has an authoritative upstream source, read when the checkout is
 # present so a spec is validated against the stack that will actually run it. The fallbacks are
-# the names verified at blis-vllm v0.32.0 / blis-schemas v0.8.0 and are what CI uses, where only
-# this repo is checked out.
+# the names verified against the stack pins.env pins, and are what CI uses, where only this repo
+# is checked out. No version literal here on purpose: it read v0.8.0 while the pin had moved to
+# v0.10.0, and the fallback's whole job is to match whatever pins.env currently names.
 
 # blis-schemas spec/deployment/deployment.go, Parallelism's yaml tags.
 PARALLEL_KNOBS = frozenset({
@@ -111,9 +112,11 @@ ENGINE_KNOBS = frozenset({
 #
 # This list used to be much longer, and was about DECODING: under BLIS v0.12.0 a pool's `engine:`
 # was a fixed 31-field struct in blis-schemas v0.5.0, so 21 real vLLM knobs failed every run with
-# "field <name> not found in type deployment.Engine". BLIS v0.14.0 (blis-schemas v0.8.0) makes
-# `engine:` an OPAQUE block opened by the engine model that `engine_version` selects -- blis-vllm
-# v0.32.0's rules/engineconfig.Engine -- so all 21 now decode. Only 3 of them (max_num_active_seqs,
+# "field <name> not found in type deployment.Engine". The v0.14.0 bump made `engine:` an OPAQUE
+# block opened by the engine model that `engine_version` selects -- blis-vllm's
+# rules/engineconfig.Engine -- so all 21 now decode. (Versions deliberately unpinned in this
+# comment; pins.env states the current stack, and the pin has moved twice since.)
+# Only 3 of them (max_num_active_seqs,
 # max_num_scheduled_tokens, frontend) actually move a number and are swept like any other knob.
 #
 # What remains is a different refusal, and a narrower one: the field decodes, but the engine model
@@ -384,7 +387,10 @@ def knob_vocabulary():
         return PARALLEL_KNOBS, eng, "../blis-vllm checkout + pinned parallel names"
     if par:
         return par, ENGINE_KNOBS, "../blis-schemas checkout + pinned engine names"
-    return PARALLEL_KNOBS, ENGINE_KNOBS, "pinned names (blis-vllm v0.32.0 / blis-schemas v0.8.0)"
+    # No version literal here: this string is printed on every CI validation run, and a hardcoded
+    # schemas/vllm version silently goes stale on the next pin bump (it read v0.8.0 while the pin
+    # had moved to v0.10.0). pins.env is the source of truth for which stack that is.
+    return PARALLEL_KNOBS, ENGINE_KNOBS, "pinned names (see pins.env for the stack)"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -1158,9 +1164,23 @@ def _check_engine(engine, where, vocabulary, source, errs, enums=None):
         errs.append(f"{where}.speculative: must be a mapping with method and num_spec_tokens")
         return
     for key in spec:
-        if key in SPECULATIVE_RECORDED_ONLY:
-            # These four DECODE under the pinned engine model (blis-vllm v0.32.0's Speculative
-            # carries all seven fields; the old blis-schemas v0.5.0 struct held only two), but the
+        if key == "draft_model":
+            # Refused because a sweep over it CANNOT RUN on any catalog model, which is worse than
+            # noise. The two halves of the catalog fail it for opposite reasons:
+            #   * the 19 of 42 models whose graph declares a speculator -- the binary refuses the
+            #     deployment ("the target graph already states a speculator; one drafter runs");
+            #   * the other 23 -- run_blis refuses drafting up front ("declares no speculator in
+            #     its catalog graph").
+            # 19 + 23 == 42, so there is no model where a draft_model arm completes. The validator
+            # never invokes the binary, so this has to be stated here or the whole sweep burns.
+            errs.append(f"{where}.speculative.draft_model: carried by the pinned stack but no "
+                        f"sweep over it can run -- a model whose graph declares a speculator is "
+                        f"refused by the simulator (one drafter runs), and a model without one "
+                        f"cannot draft at all, which covers every model in the catalog. The "
+                        f"drafter comes from the model's own graph; choose the model instead")
+        elif key in SPECULATIVE_RECORDED_ONLY:
+            # These four DECODE under the pinned engine model (blis-vllm's Speculative carries all
+            # seven fields; the pre-v0.14.0 blis-schemas struct held only two), but the
             # struct's own doc is explicit that acceptance is calibration input: they "are carried
             # as the launch gave them and recorded, but they do not change which drafts a
             # simulator accepts". So a sweep over one reports noise.

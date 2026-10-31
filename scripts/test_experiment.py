@@ -1388,11 +1388,21 @@ class ExtendedValueSets(unittest.TestCase):
         self.assertTrue(any("not a field the pinned stack carries" in e for e in errs), errs)
         self.assertTrue(any("draft_sample_method" in e for e in errs), errs)
 
-    def test_speculative_accepts_a_drafter_checkpoint(self):
-        """draft_model selects a different drafter graph, so it IS a real sweep at this pin."""
-        self.assertEqual([], self.errs({"speculative": {"method": ["dspark"],
-                                                        "num_spec_tokens": [3],
-                                                        "draft_model": ["eagle3-qwen3-14b"]}}))
+    def test_speculative_refuses_a_drafter_checkpoint(self):
+        """draft_model decodes, but no sweep over it can RUN on any catalog model, so it is
+        refused here rather than burning the campaign at run time.
+
+        This test asserted the opposite ("it IS a real sweep at this pin") and passed, because the
+        validator never invokes the binary. Measured: a model whose graph declares a speculator is
+        refused by the simulator ("the target graph already states a speculator; one drafter
+        runs") -- 19 of the catalog's 42 -- and run_blis refuses drafting up front on the other 23
+        ("declares no speculator in its catalog graph"). 19 + 23 == 42, so every arm of a
+        draft_model sweep dies, which is the silent burn this repo refuses knobs to prevent."""
+        errs = self.errs({"speculative": {"method": ["dspark"],
+                                          "num_spec_tokens": [3],
+                                          "draft_model": ["eagle3-qwen3-14b"]}})
+        self.assertTrue(any("draft_model" in e for e in errs), errs)
+        self.assertTrue(any("no sweep over it can run" in e for e in errs), errs)
 
     def test_valid_speculative_passes(self):
         self.assertEqual([], self.errs({"speculative": {"method": ["dspark"],

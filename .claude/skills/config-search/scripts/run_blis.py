@@ -299,19 +299,26 @@ UNSUPPORTED = {
         "prefix_cache_retention_interval decodes under the pinned engine model but is not priced "
         "by it: the prefix cache is modelled without eviction over time, so retention has no "
         "effect on any run",
+    # These three are refused OUTRIGHT, not gated on their condition. The condition is stated so
+    # the reason is auditable, but do not read it as "satisfy it and the sweep runs" -- the runner
+    # refuses every shape. Gating on dp / model family / env key would be a real improvement and
+    # is deliberately not in this change.
     "prefill_schedule_interval":
-        "prefill_schedule_interval is priced only when the pool has dp > 1: with a single "
-        "data-parallel rank there is no cross-rank prefill schedule to interval",
+        "prefill_schedule_interval is refused: it is priced only when the pool has dp > 1 (with a "
+        "single data-parallel rank there is no cross-rank prefill schedule to interval), and the "
+        "runner does not gate on dp -- it refuses the knob in every shape",
     "disable_hybrid_kv_cache_manager":
-        "disable_hybrid_kv_cache_manager is refused on a sliding-window MLA model (the "
-        "DeepSeek-V4 family): the hybrid manager is what models the sliding window, so disabling "
-        "it has no priced alternative",
+        "disable_hybrid_kv_cache_manager is refused: the binary rejects it on a sliding-window "
+        "MLA model (the DeepSeek-V4 family), where the hybrid manager is what models the sliding "
+        "window, and the runner refuses it on every model rather than gating on the family",
     "env":
-        "the pinned engine model reads exactly one variable, VLLM_USE_V2_MODEL_RUNNER; any other "
-        "key is carried but never read, so a sweep over it reports noise",
+        "env is refused: the pinned engine model reads exactly one variable, "
+        "VLLM_USE_V2_MODEL_RUNNER, and any other key is carried but never read, so a sweep over "
+        "it reports noise -- the runner refuses the block rather than gating on the key",
     "kv_events":
         "kv_events is a struct under the pinned engine model (publisher/topic/buffer), not a "
-        "bool: sweep its inner fields, not the block itself",
+        "bool, and none of its inner fields is sweepable at this pin either (no spec can express "
+        "them) -- so it is not sweepable at all here, in any form",
     # Decoded and accepted, but measured byte-identical on every scenario tried.
     **{k: (f"{k} ({what}) is carried by the pinned engine model but the kernel cost model has no "
            f"term for it: measured byte-identical on deepseek-v4-pro/h200, qwen3-14b/h100 and "
@@ -519,8 +526,15 @@ def _pd_mismatch_reason(knob, a, b):
         "block_size": "a P/D handoff moves whole KV blocks, so the pools must page identically",
         "cache_dtype": "the handoff moves the prefill pool's KV representation into the decode "
                        "pool's blocks with no conversion modelled, so the cache formats must agree",
-        "quantization": "the pools' KV cache formats must agree for the handoff to move pages "
-                        "the decode engine holds",
+        # No `quantization` entry: requireSameKVCacheFormat compares cache_dtype and the three
+        # mamba_* fields and does NOT compare quantization, so PD_MUST_MATCH dropped it. A reason
+        # for a knob that is never checked would be dead text.
+        "mamba_cache_dtype": "requireSameKVCacheFormat compares the recurrent cache format too, "
+                             "and the handoff moves those pages without conversion",
+        "mamba_ssm_cache_dtype": "requireSameKVCacheFormat compares the SSM cache format too, and "
+                                 "the handoff moves those pages without conversion",
+        "mamba_cache_mode": "requireSameKVCacheFormat compares the recurrent cache mode, which "
+                            "decides the page layout the handoff has to move",
     }.get(knob, "BLIS requires the two pools to agree on this")
     return (f"the prefill pool states {knob}={a!r} and the decode pool {knob}={b!r}: {why}")
 
@@ -1027,10 +1041,16 @@ def _flatten_result(doc):
         if k in whole:
             out[k] = whole[k]
     for legacy, new in _ITL_FROM_STEP_INTERVAL.items():
+        # ONLY from whole_run. There is an identically-named step_interval_* one level up, on
+        # `cluster` itself, and it is NOT a fallback for this: result_inputs.go fills the cluster
+        # copy from `sum` (MeasuredSummary -- the measured window) and whole_run's from
+        # `whole.ITL*Ms`. Those are the two populations this mapping exists to keep apart, so
+        # reaching for the cluster copy when whole_run is missing would silently re-baseline every
+        # latency in the repo -- the exact failure the rename caused. Upstream sets whole_run
+        # unconditionally; if that ever changes, let parse_metrics return {} and fail loudly
+        # instead ("no cluster metrics parsed").
         if new in whole:
             out[legacy] = whole[new]
-        elif new in cluster:  # a document without whole_run: the aggregate IS the whole run
-            out[legacy] = cluster[new]
     for k in _CLUSTER_KEYS:
         if k in cluster:
             out["preemption_count" if k == "preemptions" else k] = cluster[k]

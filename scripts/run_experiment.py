@@ -549,7 +549,10 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     # Skipped on a dry run, which prices nothing.
     if not dry_run:
         warn = _blis_pin_warning(blis, catalog, registry)
-        if warn and verbose:
+        # NOT gated on `verbose`: run_search.py's equivalent is unconditional, and a quiet
+        # invocation is exactly the one that would publish off-pin numbers with no warning
+        # anywhere in the output -- the failure #23 is about.
+        if warn:
             print(f"WARNING: {warn}\n         Every number in this report is priced by that "
                   f"binary, and scenario.json records its digest.", file=sys.stderr, flush=True)
 

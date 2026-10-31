@@ -127,6 +127,22 @@ class ResultDocument(unittest.TestCase):
         m = run_blis.parse_metrics(s)
         self.assertEqual((m["tokens_per_sec"], m["itl_p99_ms"]), (11.0, 5.47))
 
+    def test_itl_never_falls_back_to_the_clusters_measured_window_copy(self):
+        """`cluster` carries its OWN step_interval_* beside whole_run's, and they are different
+        populations: result_inputs.go fills the cluster copy from `sum` (MeasuredSummary, the
+        measured window) and whole_run's from `whole.ITL*Ms`. Taking the cluster copy when
+        whole_run is absent would re-baseline every latency in the repo against the 12 committed
+        reports -- silently, which is what made the rename expensive in the first place. So a
+        document without whole_run must yield NO itl_*, and fail loudly downstream."""
+        doc = {"kind": "Result", "engine": {"cluster": {
+            "tokens_per_sec": 11.0,
+            # the measured-window copy, one level up from whole_run -- must not be read
+            "step_interval_p99_ms": 294.03,
+        }}}
+        m = run_blis.parse_metrics(json.dumps(doc))
+        self.assertNotIn("itl_p99_ms", m)
+        self.assertNotEqual(m.get("itl_p99_ms"), 294.03)
+
 
 class CompletionIssue(unittest.TestCase):
     def test_clean(self):

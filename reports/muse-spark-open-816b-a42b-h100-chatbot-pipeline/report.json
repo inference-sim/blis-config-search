@@ -1,0 +1,53 @@
+{
+  "explore_prose": [
+    "Every run in this experiment is in the explorer below: filter by outcome to see which settings held the SLOs, or by setting to compare one sweep against another.",
+    "Each sweep's hypothesis was written before the runs, and is quoted beside that sweep's measured result below."
+  ],
+  "hero": [
+    {
+      "h": "What was tested",
+      "html": "6 configurations over 2 sweeps (no-pipeline, pipelined), each at 4 load levels, every run on exactly 16 GPUs."
+    },
+    {
+      "h": "What was found",
+      "html": "<strong>1x TP16 + EP (max seqs 256)</strong>, from the <em>no-pipeline</em> sweep, reached 245.63 tok/s/GPU (3930.1 tok/s across the fleet) at concurrency 256 while holding the scenario's SLOs."
+    },
+    {
+      "h": "What to run",
+      "html": "1x TP16 + EP (max seqs 256) at concurrency 256. 17 of 24 runs held the SLOs.",
+      "run": true
+    }
+  ],
+  "meta": [
+    "BLIS discrete-event simulation",
+    "Experiment Spec (RFC #21)",
+    "deterministic sweep \u2014 no LLM in the measurement path",
+    "seed 42"
+  ],
+  "recommendation_num": 4,
+  "recommendation_prose": [
+    "The table below ranks the measured operating points by output tok/s per GPU, the objective this experiment selects on, among runs that held the scenario's SLOs."
+  ],
+  "sections": [
+    {
+      "caption_note": "2 configurations, 8 runs.",
+      "num": 2,
+      "prose": [
+        "The no-pipeline control at 16-way tensor parallelism; a pipelined arm has to beat this at the same footprint and load to be worth its boundaries.",
+        "Measured: best was <strong>1x TP16 + EP (max seqs 256)</strong> at 245.63 tok/s/GPU (concurrency 256)."
+      ],
+      "title": "Sweep: no-pipeline"
+    },
+    {
+      "caption_note": "4 configurations, 16 runs.",
+      "num": 3,
+      "prose": [
+        "Trading tensor width for pipeline stages should help once the batch is full enough to keep every stage busy, and cost more at light load.",
+        "Measured: best was <strong>1x TP8 + EP (max seqs 256)</strong> at 132.06 tok/s/GPU (concurrency 128)."
+      ],
+      "title": "Sweep: pipelined"
+    }
+  ],
+  "standfirst": "A deterministic sweep over chatbot traffic, comparing 2 designs on one GPU budget.",
+  "title": "muse-spark-open-816b-a42b-nvfp4 on 16x h100: muse-spark-open-816b-a42b-h100-chatbot-pipeline"
+}

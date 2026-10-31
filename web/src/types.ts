@@ -203,6 +203,20 @@ export interface Catalog {
   storage: { name: string; read_mbs: number | null; write_mbs: number | null; base_latency_us: number | null }[]
   registry: { name: string; entries: number }[]
   versions: Record<string, string>
+  // The pinned stack as one root dependency (BLIS) plus what it resolves to. Optional: a
+  // catalog.js generated before build_catalog.py grew `stack` has only the flat `versions`.
+  stack?: Stack
+}
+
+export interface StackDep {
+  name: string
+  version: string
+  note: string
+}
+
+export interface Stack {
+  root: StackDep
+  deps: StackDep[]
 }
 
 export type Mode = 'pages' | 'local'

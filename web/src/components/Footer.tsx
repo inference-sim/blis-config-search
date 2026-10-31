@@ -1,10 +1,46 @@
-import type { Catalog, Mode } from '../types'
+import { useState } from 'react'
+import type { Catalog, Mode, Stack } from '../types'
 
 // The provenance/trust strip, moved out of the old sidebar rail (the left column on the
-// Reports page is now the mock-A facet-filter rail). Catalog version pills + the
+// Reports page is now the mock-A facet-filter rail). The pinned-stack disclosure + the
 // simulator-predictions note + the GitHub link live here.
+
+// The stack is ONE dependency, not a flat row of peers: the BLIS simulator binary prices every
+// run, and the kernel/catalog/registry are what that binary resolves to. So BLIS is the only
+// pill shown at rest, and expanding it reveals the transitives (see build_catalog._stack).
+function StackPills({ stack }: { stack: Stack }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <span className="footstack">
+      <button
+        type="button"
+        className="pill stackroot"
+        aria-expanded={open}
+        title={stack.root.note}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
+        <span className="pk">{stack.root.name}</span> {stack.root.version}
+        {!open && stack.deps.length > 0 && (
+          <span className="depcount">+{stack.deps.length}</span>
+        )}
+      </button>
+      {open && (
+        <span className="footdeps">
+          {stack.deps.map((d) => (
+            <span className="pill dep" key={d.name} title={d.note}>
+              <span className="pk">{d.name}</span> {d.version}
+            </span>
+          ))}
+        </span>
+      )}
+    </span>
+  )
+}
+
 export function Footer({ catalog, mode, hasMock }: { catalog: Catalog | null; mode: Mode | null; hasMock: boolean }) {
-  const versions = catalog ? Object.entries(catalog.versions) : []
+  // Fall back to the old flat pills for a catalog.js generated before `stack` existed.
+  const versions = catalog && !catalog.stack ? Object.entries(catalog.versions) : []
   return (
     <footer className="sitefoot">
       <div className="footinner">
@@ -15,6 +51,7 @@ export function Footer({ catalog, mode, hasMock }: { catalog: Catalog | null; mo
           {hasMock && <> Scenarios badged <span className="mock">mock</span> are synthetic placeholders, not BLIS output.</>}
         </p>
         <div className="footmeta">
+          {catalog?.stack && <StackPills stack={catalog.stack} />}
           {versions.length > 0 && (
             <span className="footvers">
               {versions.map(([k, v]) => (

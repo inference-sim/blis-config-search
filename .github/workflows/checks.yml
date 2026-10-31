@@ -24,6 +24,21 @@ jobs:
       # Those tests skip when it is absent, so it goes here rather than in the five other
       # workflows that only need pyyaml -- notably NOT in the fork-safe `experiments` job below.
       - run: pip install pyyaml jsonschema
+      # test_build.py checks pins.env's generated block against inference-sim's go.mod, and SKIPS
+      # when there is no sibling checkout to derive from -- so without this clone the drift guard
+      # silently passes in CI and only ever fires on a developer's machine, which is backwards.
+      # Shallow and tags-only: the test reads `git show <BLIS_REF>:go.mod` and nothing else.
+      - name: Clone the pinned inference-sim (for the derived-pins drift check)
+        run: |
+          set -euo pipefail
+          . ./pins.env
+          git clone --filter=blob:none --no-checkout \
+            https://github.com/inference-sim/inference-sim.git ../inference-sim
+          git -C ../inference-sim fetch --depth 1 origin "refs/tags/$BLIS_REF:refs/tags/$BLIS_REF"
+          # The tag is not immutable upstream; the pin is only meaningful if it still resolves to
+          # the recorded commit, so refuse a moved tag here as the other workflows do on clone.
+          test "$(git -C ../inference-sim rev-parse "$BLIS_REF^{commit}")" = "$BLIS_SHA" || {
+            echo "::error::$BLIS_REF no longer points at $BLIS_SHA" >&2; exit 1; }
       - name: Build + catalog + backend tests
         run: |
           python3 -I scripts/test_build.py

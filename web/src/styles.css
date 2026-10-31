@@ -201,6 +201,15 @@ dl.metrics dd,.stats dd{margin:0;font-family:var(--font-mono);font-variant-numer
 .footvers{display:flex;flex-wrap:wrap;gap:6px}
 .footmeta .pill{display:inline-block;font-family:var(--font-mono);font-size:11px;padding:2px 8px;border-radius:3px;background:var(--accent-soft);color:var(--accent-ink);border:1px solid var(--accent)}
 .footmeta .pill .pk{color:var(--muted);font-weight:500}
+/* The pinned stack: BLIS is the disclosure button, its transitives appear beside it when open. */
+.footstack{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.footmeta .pill.stackroot{display:inline-flex;align-items:center;gap:6px;cursor:pointer;font:inherit;font-family:var(--font-mono);font-size:11px;line-height:inherit}
+.footmeta .pill.stackroot:hover{background:var(--accent);color:#fff}
+.footmeta .pill.stackroot:hover .pk{color:rgba(255,255,255,.75)}
+.footmeta .pill.stackroot .caret{font-size:9px;opacity:.75}
+.footmeta .pill.stackroot .depcount{color:var(--muted);font-weight:500}
+.footdeps{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.footmeta .pill.dep{background:transparent;border-color:var(--line);color:var(--muted)}
 .footmode{color:var(--muted)}
 .footmeta .ghlink{display:inline-flex;align-items:center;gap:6px;color:var(--accent);font-weight:500}
 

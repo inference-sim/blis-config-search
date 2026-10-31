@@ -163,13 +163,18 @@ tag-to-tag, both directions). Before v0.14.0 the decode surface was blis-schemas
 31-field struct, and naming one of the other 20 failed **every** run with
 `field … not found in type deployment.Engine`.
 
-**Decoding is no longer the interesting question, though — leverage is.** Of the 20 keys the bump
-opened up, only **three** change a number: `max_num_active_seqs`, `max_num_scheduled_tokens` and
-`frontend`. The remaining eleven decode, run to completion, and measure *byte-identical* — the
-kernel cost model has no term for them, so they are carried as launch provenance. That was
-established by running each against the pinned binary with two contrasting values on
-`deepseek-v4-pro`/h200, `qwen3-14b`/h100 and `deepseek-v4.1-flash`/h200, beside a `max_num_seqs`
-control that moved every time.
+**Decoding is no longer the interesting question, though — leverage is.** The bump opened up
+**21** keys, and only **three** change a number: `max_num_active_seqs`,
+`max_num_scheduled_tokens` and `frontend`. The other **18** are refused, in three measured
+groups: **11** decode, run to completion and measure *byte-identical* (the kernel cost model has
+no term for them, so they are carried as launch provenance), **3** have no cost term at all, and
+**4** are priced only in one shape. That was established by running each against the pinned
+binary with two contrasting values on `deepseek-v4-pro`/h200, `qwen3-14b`/h100 and
+`deepseek-v4.1-flash`/h200, beside a `max_num_seqs` control that moved every time.
+
+(Two different figures are in play, so to be explicit: **21** is what the bump opened up — the
+names that used to fail the decode and now run. The **20** above is `51 − 31`, the names the old
+31-field struct did not carry at all. They are not the same set.)
 
 So the validator refuses **eighteen** knobs, in three groups, each with its measured reason:
 

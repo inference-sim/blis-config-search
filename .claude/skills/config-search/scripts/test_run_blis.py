@@ -243,13 +243,14 @@ class ClassifyConfig(unittest.TestCase):
         self.assertEqual(4096, engine["long_prefill_token_threshold"])
 
     def test_carries_the_priced_knobs_the_v0_14_0_pin_opened_up(self):
-        """Three of the 14 the bump opened up are priced, and those are swept.
+        """Three of the 21 the bump opened up are priced, and those are swept.
 
-        Under blis-schemas v0.5.0 a pool's `engine:` was a fixed 31-field struct, so each of these
+        Before the v0.14.0 pin a pool's `engine:` was a fixed 31-field struct, so each of these
         failed every run of a sweep ("field max_num_active_seqs not found in type
-        deployment.Engine"). BLIS v0.14.0 reads `engine:` as an opaque block against blis-vllm
-        v0.32.0's engineconfig.Engine, which carries all 14 -- but only these three change a
-        number, measured against the pinned binary with contrasting values.
+        deployment.Engine"). The bump reads `engine:` as an opaque block against blis-vllm's
+        engineconfig.Engine, which carries all 21 -- but only these three change a number,
+        measured against the pinned binary with contrasting values. The other 18 stay refused,
+        as ENGINE_INERT (11), ENGINE_NOT_MODELLED (3) and ENGINE_CONDITIONAL (4).
         """
         cfg = {"tp": 8, "num_instances": 1, "max_num_active_seqs": 128,
                "max_num_scheduled_tokens": 2048, "frontend": "rust"}

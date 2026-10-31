@@ -15,8 +15,9 @@ Five separate questions. Confusing them is how a campaign gets spent on nothing.
    bump turned loud failures into silent ones. **Eighteen** knobs decode and are still refused:
    eleven run to completion and measure byte-identical (`ENGINE_INERT`), three have no cost term
    (`ENGINE_NOT_MODELLED`), four are priced only in one shape (`ENGINE_CONDITIONAL`). All three
-   lists were measured against the pinned binary, not read off the struct. Of the 20 keys the
-   bump opened up, only `max_num_active_seqs`, `max_num_scheduled_tokens` and `frontend` move a
+   lists were measured against the pinned binary, not read off the struct. Of the **21** keys the
+   bump opened up (3 priced + these 18; not to be confused with the 20 above, which is `51 − 31`),
+   only `max_num_active_seqs`, `max_num_scheduled_tokens` and `frontend` move a
    number — and the first only once concurrency gives it a queue to cap (v4-pro/h200 tp2 dp4:
    inert at c=8; 2405.3 → 808.4 tok/s at c=256 with 8 active seqs).
 4. **Is the value legal?** Most of these knobs are closed enums. The engine refuses an unknown

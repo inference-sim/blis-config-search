@@ -250,6 +250,51 @@ def test_catalog_workload_kinds():
         shutil.rmtree(tmp)
 
 
+def test_displayed_stack_survives_a_fresh_clone():
+    """Every row of the footer's dependency stack must come from pins.env.
+
+    The regression this guards is the one already fixed for inference-sim, left in place for its
+    two neighbours: `versions["blis-catalog"]` / `["blis-registry"]` are a `git describe` of
+    ../blis-catalog and ../blis-registry, and NOTHING clones those as siblings in CI --
+    actions/checkout takes this repo alone. So both pills read the literal string "absent" on the
+    deployed site, while a developer with sibling checkouts saw real numbers locally and could not
+    reproduce it.
+
+    Asserted against a siblings dir that does not exist, which is exactly the CI condition.
+    """
+    print("test_displayed_stack_survives_a_fresh_clone")
+    pins = bc.read_pins()
+    cat = bc.build("/nonexistent-siblings-xyz")
+    stack = cat["stack"]
+
+    # the flat `versions` map is left as it was -- it still degrades to "absent", by design
+    check(cat["versions"]["blis-catalog"] == "absent",
+          "precondition: without siblings the legacy describe yields 'absent'")
+
+    want = {
+        "inference-sim": pins.get("BLIS_REF"),
+        "blis-latency-kernel": pins.get("KERNEL_REF"),
+        "blis-catalog": pins.get("CATALOG_REF"),
+        "blis-registry": pins.get("REGISTRY_REF"),
+    }
+    rows = [stack["root"]] + list(stack["deps"])
+    check(len(rows) == 4, f"the stack should show 4 dependencies, got {len(rows)}")
+    for row in rows:
+        exp = want.get(row["name"])
+        check(exp is not None, f"unexpected stack row {row['name']!r}")
+        check(row["version"] == exp,
+              f"{row['name']} should show the pinned {exp!r}, got {row['version']!r}")
+        check("absent" not in row["version"],
+              f"{row['name']} reads 'absent' on a fresh clone -- it must come from pins.env")
+        check(row["note"], f"{row['name']} should carry a note saying what it does")
+
+    # BLIS is the root; the rest are what it resolves to, never peers of it
+    check(stack["root"]["name"] == "inference-sim",
+          "the simulator binary is the root dependency, not one of several peers")
+    check("blis-latency-kernel" in [d["name"] for d in stack["deps"]],
+          "the latency kernel prices every run; it must appear in the stack")
+
+
 def test_pins_are_the_single_source_of_the_sim_version():
     """pins.env is the authority for "which simulator priced these reports".
 
@@ -440,6 +485,7 @@ if __name__ == "__main__":
     test_build_determinism_and_nomock()
     test_catalog_workload_kinds()
     test_pins_are_the_single_source_of_the_sim_version()
+    test_displayed_stack_survives_a_fresh_clone()
     test_lexicon_mirror_is_in_sync()
     test_catalog()
     print(f"\n{PASS} passed, {FAIL} failed")

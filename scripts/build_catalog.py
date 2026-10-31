@@ -279,6 +279,20 @@ def _stack(pins, versions):
 
     KERNEL_REF is carried through even though `versions` never had it: it prices every run (it
     is the cost model), so omitting it from the displayed stack understated what pins a number.
+
+    Every row is sourced from pins.env, NOT from _git_describe of a sibling checkout, and that
+    is a bug fix rather than a preference. `versions` reads the catalog and registry off
+    ../blis-catalog and ../blis-registry, which do not exist under actions/checkout -- so on the
+    deployed site both pills have always read the literal string "absent", exactly the failure
+    already documented above for inference-sim ("the pill read absent even though every run was
+    priced by the pin"). That one row was moved to pins.env; these two were left behind. pins.env
+    is committed, so it is the only source that survives a fresh clone.
+
+    The describe is kept as a FALLBACK, for the case pins.env omits a ref: then an ambient
+    checkout is still a better answer than "absent". Where both exist the pin wins, because the
+    footer's job is provenance for the committed reports and the pin is the authority on that --
+    a developer's sibling checkout sitting ahead of the pin (0.5.0 vs a pinned 0.4.0) must not be
+    published as having priced reports it never saw.
     """
     def dep(name, version, note):
         return {"name": name, "version": version or "absent", "note": note}
@@ -289,9 +303,9 @@ def _stack(pins, versions):
         "deps": [
             dep("blis-latency-kernel", pins.get("KERNEL_REF"),
                 "cost model, pinned in inference-sim's go.mod at this ref"),
-            dep("blis-catalog", versions.get("blis-catalog"),
+            dep("blis-catalog", pins.get("CATALOG_REF") or versions.get("blis-catalog"),
                 "models, hardware, workloads the binary is run against"),
-            dep("blis-registry", versions.get("blis-registry"),
+            dep("blis-registry", pins.get("REGISTRY_REF") or versions.get("blis-registry"),
                 "cost-model coefficients and speculative-decoding profiles"),
         ],
     }

@@ -985,8 +985,11 @@ def _result_doc(stdout):
     """
     if stdout.lstrip().startswith("kind: Result"):    # see INF_NEEDS_YAML
         import yaml
-        o = yaml.load(stdout, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
-        return o if isinstance(o.get("engine"), dict) else None
+        try:
+            o = yaml.load(stdout, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
+        except yaml.YAMLError:
+            return None     # truncated output fails as "no cluster metrics parsed", like JSON
+        return o if isinstance(o, dict) and isinstance(o.get("engine"), dict) else None
     for o in _iter_json_objects(stdout):
         if o.get("kind") == "Result" and isinstance(o.get("engine"), dict):
             return o

@@ -633,6 +633,9 @@ class WorkloadShapeIsPassedExplicitly(unittest.TestCase):
         s = yaml.safe_dump(doc, sort_keys=False)
         self.assertTrue(s.startswith("kind: Result") and ".inf" in s)
         self.assertEqual(run_blis.parse_metrics(RESULT_DOC), run_blis.parse_metrics(s))
+        # A truncated or malformed document fails like a malformed JSON one: no metrics.
+        for bad in ("kind: Result\nengine: [\n", "kind: Result\n---\n- 1\n", "kind: Result\n"):
+            self.assertEqual({}, run_blis.parse_metrics(bad), bad)
 
 
 class ReplayCommand(unittest.TestCase):

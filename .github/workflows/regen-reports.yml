@@ -24,8 +24,8 @@ name: regen-reports
 #   REGEN_RUNS_ON          JSON runner label(s), default "ubuntu-latest". The 64-GPU AgentX replays
 #                          peak above 20 GiB RSS; a hosted runner has 16 GiB, and a cgroup that is
 #                          too small never OOM-kills -- it stalls in direct reclaim until the
-#                          timeout. Point this at a larger or self-hosted runner, e.g.
-#                          ["self-hosted","linux","x64","bigmem"].
+#                          timeout. Point this at a larger or self-hosted runner, e.g. the
+#                          ARC scale set in deploy/openshift/arc/: "blis-bigmem".
 #   REGEN_TIMEOUT_MINUTES  per-report job timeout, default 350 (hosted runners cap at 360).
 #   REGEN_MAX_PARALLEL     report jobs at once, default 4.
 #   REGEN_RUN_TIMEOUT      per-BLIS-run timeout in seconds, default 1800.

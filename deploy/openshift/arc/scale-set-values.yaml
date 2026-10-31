@@ -1,0 +1,30 @@
+# gha-runner-scale-set for this repo: the runners pin-compat's smoke and regen-reports' sweeps
+# use via `vars.REGEN_RUNS_ON` (see README.md).
+githubConfigUrl: https://github.com/inference-sim/blis-config-search
+githubConfigSecret: blis-config-search-runner-token   # key: github_token
+runnerScaleSetName: blis-bigmem                       # what `runs-on` names
+minRunners: 0
+maxRunners: 4                                         # REGEN_MAX_PARALLEL's default; 4 x 64Gi must fit the quota
+
+controllerServiceAccount:
+  namespace: jchen
+  name: arc-gha-rs-controller
+
+template:
+  spec:
+    # The chart's own runner SA may not use anyuid; jchen's `default` SA already may.
+    serviceAccountName: default
+    automountServiceAccountToken: false   # jobs never need the k8s API; keep the SA token out
+    securityContext:
+      runAsUser: 1001          # the image's `runner` user; needs the anyuid SCC
+      runAsGroup: 1001
+      fsGroup: 1001
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:2.338.2
+        command: ["/home/runner/run.sh"]
+        resources:
+          # One AgentX replay peaks at 15-19 GiB RSS, 64-GPU sweeps >20 GiB. A too-small limit
+          # stalls in direct reclaim rather than OOM-killing, so leave generous headroom.
+          requests: {cpu: "8", memory: 64Gi}
+          limits: {cpu: "16", memory: 96Gi}

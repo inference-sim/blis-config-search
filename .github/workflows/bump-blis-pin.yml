@@ -1,0 +1,197 @@
+name: bump-blis-pin
+
+# Step one of the pin-bump loop. When inference-sim publishes a release newer than the one
+# pins.env names, open a DRAFT PR that moves the pin. That PR is also where any code changes the
+# release needs are made: pin-compat.yml gates it, and fixes are pushed onto the same branch
+# until the gate is green. Merging it is what triggers regen-reports.yml.
+#
+#   upstream release --this-->  draft pin PR  <--fix commits--  pin-compat.yml (required check)
+#     --ready + merge-->  regen-reports.yml  -->  report PRs (batched)
+#
+# Three ways in, all landing on the same steps:
+#   * schedule           -- a daily poll of upstream's latest release; the safety net.
+#   * repository_dispatch -- `inference-sim-release`, for upstream's release workflow to send so
+#                           the PR opens within minutes instead of by tomorrow:
+#                             gh api repos/inference-sim/blis-config-search/dispatches \
+#                               -f event_type=inference-sim-release -F client_payload[tag]=vX.Y.Z
+#   * workflow_dispatch  -- a maintainer, optionally naming the tag.
+#
+# What this workflow proves: the tag resolves to the commit it records, and the simulator BUILDS
+# there (a release that does not build is upstream's bug, so no PR). It deliberately does NOT
+# require this repo's tests to pass: a release that needs code changes here must still get its
+# PR, because that PR is where the changes go. pin-compat.yml says what to change.
+#
+# What it deliberately leaves to the reviewer: CATALOG_REF and REGISTRY_REF. They are separate
+# repos and nothing upstream states which ones a release needs, so they are flagged, not guessed.
+#
+# Token: a PR opened with the default GITHUB_TOKEN does not trigger other workflows, so neither
+# checks.yml nor the pin-compat gate would run on it. Set a PIN_BOT_TOKEN secret (a fine-grained PAT or GitHub App token with
+# contents + pull-requests write) to get CI on the bot's PRs; without it the PR still opens.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  repository_dispatch:
+    types: [inference-sim-release]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "inference-sim release tag to pin (blank = upstream's latest release)"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bump-blis-pin
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # push the bump branch
+      pull-requests: write     # open the PR
+    env:
+      GH_TOKEN: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyyaml jsonschema
+
+      - name: Decide the target release
+        id: target
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag || github.event.client_payload.tag }}
+        run: |
+          set -euo pipefail
+          python3 -I scripts/blis_pin.py latest > /tmp/latest.json
+          current="$(python3 -c 'import json;print(json.load(open("/tmp/latest.json"))["current"])')"
+          if [ -n "${INPUT_TAG:-}" ]; then
+            tag="$INPUT_TAG"
+          else
+            tag="$(python3 -c 'import json;print(json.load(open("/tmp/latest.json"))["tag"])')"
+          fi
+          # Only a plain vX.Y.Z, so the value is safe to use in a branch name and a shell word.
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not a release tag: $tag" >&2; exit 1; }
+          newer="$(python3 -I -c 'import sys; sys.path.insert(0,"scripts"); import blis_pin as b; print(b.newer(sys.argv[1], sys.argv[2]))' "$tag" "$current")"
+          branch="bump/blis-pin-$tag"
+          echo "pinned $current, target $tag (newer: $newer)"
+          if [ "$newer" != "True" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # One PR per release: a daily poll must not open a second PR for the same tag.
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "$branch already exists -- its PR is the one to review"
+            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          { echo "skip=false"; echo "tag=$tag"; echo "current=$current"; echo "branch=$branch"; } >> "$GITHUB_OUTPUT"
+
+      - name: Rewrite the pins
+        if: steps.target.outputs.skip == 'false'
+        id: bump
+        run: |
+          set -euo pipefail
+          name="$(python3 -c 'import json;print(json.load(open("/tmp/latest.json"))["name"])')"
+          if [ "$(python3 -c 'import json;print(json.load(open("/tmp/latest.json"))["tag"])')" != "${{ steps.target.outputs.tag }}" ]; then
+            name=""   # an explicitly requested older tag: the latest release's title is not its title
+          fi
+          python3 -I scripts/blis_pin.py bump "${{ steps.target.outputs.tag }}" --release-name "$name" | tee /tmp/moved.json
+          git diff --stat
+
+      - name: Clone the simulator at the new pin
+        if: steps.target.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          set -a; . ./pins.env; set +a
+          git clone --branch "$BLIS_REF" --depth 1 https://github.com/inference-sim/inference-sim.git upstream
+          test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
+            echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
+
+      # The release's own go.mod names its toolchain, so a release that needs a newer Go builds
+      # without anyone editing this file.
+      - uses: actions/setup-go@v5
+        if: steps.target.outputs.skip == 'false'
+        with: { go-version-file: upstream/go.mod }
+
+      - name: Build the release
+        if: steps.target.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          ( cd upstream && go build -o blis main.go )
+          ./upstream/blis --help >/dev/null
+          python3 -I scripts/blis_pin.py modules upstream/go.mod > /tmp/modules.txt
+          rm -rf upstream
+
+      - name: Open the pin PR
+        if: steps.target.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          tag="${{ steps.target.outputs.tag }}"; current="${{ steps.target.outputs.current }}"
+          branch="${{ steps.target.outputs.branch }}"
+          python3 -I scripts/blis_pin.py plan > /tmp/plan.json
+          python3 - "$tag" "$current" > /tmp/body.md <<'PY'
+          import json, sys
+          tag, current = sys.argv[1], sys.argv[2]
+          rel = json.load(open("/tmp/latest.json"))
+          moved = json.load(open("/tmp/moved.json"))
+          plan = json.load(open("/tmp/plan.json"))
+          print(f"Moves the pinned inference-sim **{current} → {tag}**"
+                + (f" ([release notes]({rel['url']}))" if rel["tag"] == tag else "") + ".\n")
+          print("| pin | from | to |\n|---|---|---|")
+          for k, (a, b) in moved.items():
+              print(f"| `{k}` | `{a}` | `{b}` |")
+          mods = open("/tmp/modules.txt").read().split()
+          print("\nThe release builds against " + ", ".join(
+              f"`{m}` {v}" for m, v in zip(mods[::2], mods[1::2])) + ".\n")
+          print("**This is a draft on purpose.** A release can need code changes in this repo "
+                "(v0.14.0 needed 14 files, #25), and they belong on THIS branch: merging it is what "
+                "starts the regeneration of every report, so the code has to fit the new stack "
+                "first. `pin-compat` re-runs on every push and comments what is still broken.\n")
+          print("**Before marking ready:**\n"
+                "- [ ] `pin-compat` is green: knob tables match the new modules (`drift`), the "
+                "suite passes, and each report's own rows re-run on the new binary (`smoke`) "
+                "with no LOUD (now fails) or SILENT (knob now inert) findings.\n"
+                "- [ ] Release notes read for behaviour the knob tables should learn even where "
+                "no committed report exercises it (`validate_experiment.py`, `run_blis.py`, "
+                "`.claude/skills/blis-experiment/references/knobs.md`).\n"
+                "- [ ] `CATALOG_REF` / `REGISTRY_REF`: does this release need newer ones? The bot "
+                "does not guess; move them here if so (the gate re-runs).\n"
+                "- [ ] Any submission or spec that must change to keep running (a field the new "
+                "stack refuses) is changed here, with the reason in its # comment.\n")
+          print(f"**On merge**, `regen-reports.yml` regenerates all {len(plan['reports'])} committed "
+                f"report(s) against the new stack and opens one PR per batch:\n")
+          for b in plan["batches"]:
+              print(f"- `{b['name']}`: " + ", ".join(f"`{i}`" for i in b["ids"]))
+          if plan["orphans"]:
+              print("\n**Cannot be regenerated** (no spec or submission to run from), so they will "
+                    "keep the old stack label until handled by hand: "
+                    + ", ".join(f"`{o['id']}`" for o in plan["orphans"]))
+          if rel["tag"] == tag and rel.get("body"):
+              print("\n<details><summary>Upstream release notes</summary>\n\n"
+                    + rel["body"][:20000] + "\n\n</details>")
+          print("\n🤖 Generated with [Claude Code](https://claude.com/claude-code)")
+          PY
+          git config user.name  "blis-config-search-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add pins.env .claude/skills/config-search/SETUP.md
+          git commit -m "Bump the pinned inference-sim to $tag
+
+          Opened by bump-blis-pin.yml as a draft. Code changes the release needs go on this
+          branch; pin-compat.yml gates it. Merging it triggers regen-reports.yml, which re-runs
+          every committed report against the new stack."
+          git push origin "$branch"
+          gh pr create --draft --title "Bump the pinned inference-sim to $tag" \
+            --body-file /tmp/body.md --base main --head "$branch"
+          # An older bump PR the bot opened is now superseded; say so on it rather than closing a
+          # PR a human may have pushed CATALOG/REGISTRY moves onto.
+          new_url="$(gh pr view "$branch" --json url --jq .url)"
+          gh pr list --state open --json number,headRefName \
+            --jq '.[] | select(.headRefName | startswith("bump/blis-pin-")) | select(.headRefName != "'"$branch"'") | .number' |
+          while read -r n; do
+            gh pr comment "$n" --body "Superseded by $new_url ($tag). Close this one unless it carries changes that should move over."
+          done

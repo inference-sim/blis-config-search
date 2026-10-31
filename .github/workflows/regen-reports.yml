@@ -1,0 +1,288 @@
+name: regen-reports
+
+# The last step of the pin-bump loop. When a push to main moves a stack pin in pins.env (normally the
+# merge of a bump-blis-pin.yml PR), every committed report is now labelled with a stack the site
+# no longer runs. This re-runs each one from its source against the new pins and opens the
+# results as PRs -- one per BATCH, so a reviewer reads one model's reports side by side instead of
+# one enormous diff.
+#
+#   push to main moving pins.env -- normally the merge of a pin PR that pin-compat.yml passed, so
+#   any code changes the release needed are already on main
+#     -> plan     classify every reports/<id>/ (experiment spec | submission | orphan), batch by model
+#     -> build    the pinned simulator, once, shared by every report job; re-checks `drift` so a
+#                 pin that skipped the gate cannot start a campaign
+#     -> regen    ONE JOB PER REPORT (matrix): a report is hours of BLIS, so each gets its own
+#                 runner and its own timeout, and one failure costs one report, not the campaign
+#     -> pr       ONE PR PER BATCH, with a before/after table; a failed report is listed in its
+#                 batch's PR as "not regenerated" rather than silently left stale
+#
+# Like run-experiment.yml it needs no approval gate and no secrets: both runners
+# (run_experiment.py, run_search.py) are LLM-free and deterministic at a fixed seed, and nothing
+# publishes until a human merges a batch PR.
+#
+# Sizing, via repository VARIABLES (Settings -> Secrets and variables -> Actions -> Variables):
+#   REGEN_RUNS_ON          JSON runner label(s), default "ubuntu-latest". The 64-GPU AgentX replays
+#                          peak above 20 GiB RSS; a hosted runner has 16 GiB, and a cgroup that is
+#                          too small never OOM-kills -- it stalls in direct reclaim until the
+#                          timeout. Point this at a larger or self-hosted runner, e.g.
+#                          ["self-hosted","linux","x64","bigmem"].
+#   REGEN_TIMEOUT_MINUTES  per-report job timeout, default 350 (hosted runners cap at 360).
+#   REGEN_MAX_PARALLEL     report jobs at once, default 4.
+#   REGEN_RUN_TIMEOUT      per-BLIS-run timeout in seconds, default 1800.
+#
+# Token: as in bump-blis-pin.yml, set PIN_BOT_TOKEN so checks.yml runs on the bot's PRs.
+
+on:
+  push:
+    branches: [main]
+    paths: ["pins.env"]
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "comma-separated report ids to regenerate (blank = every committed report)"
+        required: false
+      force:
+        description: "regenerate even though no stack pin changed in the last commit"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regen-reports
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+      reports: ${{ steps.plan.outputs.reports }}
+      batches: ${{ steps.plan.outputs.batches }}
+      blis_ref: ${{ steps.plan.outputs.blis_ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 2 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyyaml
+      - name: Did a stack pin move, and what is there to regenerate?
+        id: plan
+        env:
+          ONLY: ${{ github.event.inputs.only }}
+          FORCE: ${{ github.event.inputs.force }}
+        run: |
+          set -euo pipefail
+          # A comment-only edit to pins.env matches the `paths` filter but moves no pin, and
+          # must not queue hours of sweeps; compare VALUES, not bytes.
+          if [ "${FORCE:-false}" != "true" ]; then
+            git show HEAD^:pins.env > /tmp/old-pins.env
+            moved="$(python3 -I scripts/blis_pin.py changed /tmp/old-pins.env)"
+            echo "moved: $moved"
+            if [ "$moved" = "{}" ]; then
+              echo "no stack pin changed -- nothing to regenerate"
+              echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+          fi
+          python3 -I scripts/blis_pin.py plan --only "${ONLY:-}" > /tmp/plan.json
+          python3 - <<'PY'
+          import json, os
+          plan = json.load(open("/tmp/plan.json"))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"run={'true' if plan['reports'] else 'false'}\n")
+              out.write("reports=" + json.dumps([{"id": r["id"], "replay": r["replay"]}
+                                                 for r in plan["reports"]]) + "\n")
+              out.write("batches=" + json.dumps(plan["batches"]) + "\n")
+          for b in plan["batches"]:
+              print(f"batch {b['name']}: {', '.join(b['ids'])}")
+          for o in plan["orphans"]:
+              print(f"::warning::{o['id']} has no spec or submission to regenerate from; "
+                    f"it keeps its old stack label until handled by hand")
+          PY
+          set -a; . ./pins.env; set +a
+          echo "blis_ref=$BLIS_REF" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ${{ fromJSON(vars.REGEN_RUNS_ON || '"ubuntu-latest"') }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone the pinned simulator
+        run: |
+          set -euo pipefail
+          set -a; . ./pins.env; set +a
+          git clone --branch "$BLIS_REF" --depth 1 https://github.com/inference-sim/inference-sim.git upstream
+          # The tag is not immutable upstream; refuse to build a moved tag (same check as SETUP.md).
+          test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
+            echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
+      - uses: actions/setup-go@v5
+        with: { go-version-file: upstream/go.mod }
+      - run: cd upstream && go build -o blis main.go
+      # Belt and braces for a pins.env that reached main without the pin-compat gate (a direct
+      # push, an admin merge): hours of runs on knob tables that do not fit the stack would
+      # produce reports that are wrong in ways a reviewer cannot see. Seconds, so always run it.
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyyaml
+      - name: Refuse to regenerate on knob tables that do not fit the stack
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/stack"
+          python3 -I scripts/blis_pin.py modules upstream/go.mod | while read -r mod ver; do
+            case "$mod" in blis-vllm|blis-schemas)
+              git clone --branch "$ver" --depth 1 "https://github.com/inference-sim/$mod.git" "$RUNNER_TEMP/stack/$mod" ;;
+            esac
+          done
+          python3 -I scripts/blis_pin.py drift --siblings "$RUNNER_TEMP/stack"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blis
+          path: upstream/blis
+          retention-days: 7
+
+  regen:
+    needs: [plan, build]
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ${{ fromJSON(vars.REGEN_RUNS_ON || '"ubuntu-latest"') }}
+    timeout-minutes: ${{ fromJSON(vars.REGEN_TIMEOUT_MINUTES || '350') }}
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(vars.REGEN_MAX_PARALLEL || '4') }}
+      matrix:
+        report: ${{ fromJSON(needs.plan.outputs.reports) }}
+    name: regen ${{ matrix.report.id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyyaml
+      - uses: actions/download-artifact@v4
+        with: { name: blis, path: .build }
+      - name: Clone the pinned catalog + registry
+        id: stack
+        run: |
+          set -euo pipefail
+          chmod +x .build/blis
+          set -a; . ./pins.env; set +a
+          git clone --branch "$CATALOG_REF" --depth 1 https://github.com/inference-sim/blis-catalog.git ../blis-catalog
+          git clone --branch "$REGISTRY_REF" --depth 1 https://github.com/inference-sim/blis-registry.git ../blis-registry
+          echo "catalog_ref=$CATALOG_REF" >> "$GITHUB_OUTPUT"
+      # The 568 MB replay corpus is pinned by the catalog, so one download per catalog pin serves
+      # every replay report in the campaign. blis_pin.py digest-checks it either way.
+      - name: Restore the replay corpus
+        if: matrix.report.replay
+        uses: actions/cache@v4
+        with:
+          path: .corpus/traces.jsonl
+          key: replay-corpus-${{ steps.stack.outputs.catalog_ref }}
+      - name: Regenerate ${{ matrix.report.id }}
+        run: |
+          set -euo pipefail
+          python3 -I scripts/blis_pin.py regen "${{ matrix.report.id }}" \
+            --blis .build/blis --catalog ../blis-catalog --registry ../blis-registry \
+            --out "$RUNNER_TEMP/regen" --timeout "${{ vars.REGEN_RUN_TIMEOUT || '1800' }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: regen-${{ matrix.report.id }}
+          path: ${{ runner.temp }}/regen/${{ matrix.report.id }}
+          retention-days: 14
+          if-no-files-found: error
+
+  pr:
+    needs: [plan, build, regen]
+    # Run even when some report jobs failed: a batch PR lists its failures instead of vanishing.
+    if: always() && needs.plan.outputs.run == 'true' && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # push the batch branches
+      pull-requests: write     # open the batch PRs
+    strategy:
+      fail-fast: false
+      max-parallel: 1          # each batch pushes its own branch, but serialise the gh calls
+      matrix:
+        batch: ${{ fromJSON(needs.plan.outputs.batches) }}
+    name: pr ${{ matrix.batch.name }}
+    env:
+      GH_TOKEN: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyyaml
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: regen-*
+          path: ${{ runner.temp }}/regen-artifacts
+      - name: Swap the regenerated reports in
+        id: swap
+        env:
+          IDS: ${{ join(matrix.batch.ids, ' ') }}
+        run: |
+          set -euo pipefail
+          art="$RUNNER_TEMP/regen-artifacts"
+          cp -r reports "$RUNNER_TEMP/old-reports"
+          ok=""; failed=""
+          for id in $IDS; do
+            if [ -f "$art/regen-$id/scenario.json" ]; then
+              # Whole-directory swap: a file the new run no longer writes must not survive.
+              rm -rf "reports/$id"
+              cp -r "$art/regen-$id" "reports/$id"
+              ok="$ok $id"
+            else
+              failed="$failed $id"
+            fi
+          done
+          ok="$(echo $ok | xargs)"; failed="$(echo $failed | xargs)"
+          echo "regenerated: ${ok:-none}; failed: ${failed:-none}"
+          { echo "ok=$ok"; echo "failed=$failed"; } >> "$GITHUB_OUTPUT"
+          [ -n "$ok" ] || { echo "::error::no report in batch ${{ matrix.batch.name }} regenerated"; exit 1; }
+      - name: Build the site to validate the regenerated reports
+        run: python3 -I scripts/build_gallery.py --no-mock --out /tmp/site-check
+      - name: Open the batch PR
+        env:
+          OK: ${{ steps.swap.outputs.ok }}
+          FAILED: ${{ steps.swap.outputs.failed }}
+          BATCH: ${{ matrix.batch.name }}
+          BLIS_REF: ${{ needs.plan.outputs.blis_ref }}
+        run: |
+          set -euo pipefail
+          branch="regen/${BLIS_REF}-run${GITHUB_RUN_ID}-${BATCH}"
+          git config user.name  "blis-config-search-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add reports/
+          if git diff --cached --quiet; then
+            echo "regeneration reproduced every report in $BATCH byte-for-byte -- no PR needed"
+            exit 0
+          fi
+          table="$(python3 -I scripts/blis_pin.py summary --old "$RUNNER_TEMP/old-reports" \
+                   --new reports --failed "$(echo $FAILED | tr ' ' ',')" $OK $FAILED)"
+          git commit -m "Regenerate the $BATCH reports against inference-sim $BLIS_REF
+
+          Produced by regen-reports.yml from each report's own spec or submission, after the pin
+          move merged in ${GITHUB_SHA::10}. No LLM in this path."
+          git push origin "$branch"
+          cat > /tmp/body.md <<EOF
+          Regenerates the **$BATCH** reports against the stack now pinned in \`pins.env\`
+          (inference-sim **$BLIS_REF**, merged in ${GITHUB_SHA::10}).
+
+          $table
+
+          Each report was re-run from its own source — its experiment spec or its submission — at
+          its recorded seed, by the deterministic runners (no LLM). The directory is replaced whole,
+          so nothing from the old run survives beside the new one.
+
+          **Review the movement, not just the totals:** a changed winner or a large tok/s/GPU swing is
+          the simulator change showing through, and is worth a sentence in the release notes. Merge
+          to publish through \`pages.yml\`.
+
+          This is one of several batch PRs from [this run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID); each can merge on its own.
+
+          🤖 Generated with [Claude Code](https://claude.com/claude-code)
+          EOF
+          gh pr create --title "Regenerate $BATCH reports on inference-sim $BLIS_REF" \
+            --body-file /tmp/body.md --base main --head "$branch"

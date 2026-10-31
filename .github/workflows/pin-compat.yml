@@ -1,0 +1,176 @@
+name: pin-compat
+
+# The compatibility gate for a PR that moves the pinned stack. Make it a REQUIRED check on main.
+#
+# A new inference-sim can need code changes in THIS repo -- v0.14.0 needed 14 files (PR #25):
+# knob tables in validate_experiment.py, run_blis.py's UNSUPPORTED / PD_MUST_MATCH, a newly
+# mandatory field. Those changes belong on the pin PR itself, because merging the pin is what
+# starts regen-reports.yml, and a regeneration run on code that does not fit the stack spends
+# hours producing broken or silently wrong reports. So the pin PR is the compatibility PR, and
+# this gate keeps it unmergeable until the code fits the stack:
+#
+#   bump-blis-pin.yml opens a DRAFT pin PR
+#     -> this gate fails, listing what broke
+#     -> a person (or Claude) pushes fixes onto the same branch; the gate re-runs on each push
+#     -> green: mark ready, review, merge  -> regen-reports.yml regenerates every report
+#
+# What it checks, all against the NEW binary (none of it is visible to a dry run):
+#   drift  the validator's PINNED knob tables -- what checks.yml validates specs with -- against
+#          the blis-vllm / blis-schemas versions the release's go.mod requires. Any difference is
+#          a table to update on this PR.
+#   suite  the hermetic tests, plus the same tests again with those checkouts as ../ siblings,
+#          so the live-vocabulary paths in validate_experiment.py run too.
+#   smoke  a few rows from each committed report's OWN ledger, re-run through run_blis.run_one:
+#          a row that ran before and fails now (LOUD), or a knob that moved the numbers before
+#          and now measures identically to its baseline (SILENT -- the v0.14.0 failure mode).
+#
+# Runs only when pins.env changes, so an ordinary PR pays nothing. The smoke job needs the
+# 568 MB replay corpus for the AgentX reports; it is cached per catalog pin, as in regen-reports.
+
+on:
+  pull_request:
+    paths: ["pins.env"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pin-compat-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      reports: ${{ steps.ids.outputs.reports }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyyaml jsonschema
+      - name: Clone the pinned simulator, and the modules its go.mod names
+        run: |
+          set -euo pipefail
+          set -a; . ./pins.env; set +a
+          git clone --branch "$BLIS_REF" --depth 1 https://github.com/inference-sim/inference-sim.git upstream
+          test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
+            echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
+          # blis-vllm + blis-schemas at the versions THIS release builds against, as ../ siblings:
+          # the layout validate_experiment.py reads live vocabulary from.
+          mkdir -p "$RUNNER_TEMP/stack"
+          python3 -I scripts/blis_pin.py modules upstream/go.mod | while read -r mod ver; do
+            case "$mod" in blis-vllm|blis-schemas)
+              git clone --branch "$ver" --depth 1 "https://github.com/inference-sim/$mod.git" "$RUNNER_TEMP/stack/$mod" ;;
+            esac
+          done
+      - uses: actions/setup-go@v5
+        with: { go-version-file: upstream/go.mod }
+      - run: cd upstream && go build -o blis main.go && ./blis --help >/dev/null
+      - name: Knob tables vs the new stack
+        run: python3 -I scripts/blis_pin.py drift --siblings "$RUNNER_TEMP/stack"
+      - name: Hermetic suite
+        run: |
+          set -euo pipefail
+          python3 -I scripts/test_build.py
+          python3 -I scripts/test_blis_pin.py
+          python3 -I scripts/test_experiment.py
+          python3 -I .claude/skills/config-search/scripts/test_run_blis.py
+      - name: The same suite with the new stack as ../ siblings (live-vocabulary paths)
+        run: |
+          set -euo pipefail
+          for mod in blis-vllm blis-schemas; do cp -r "$RUNNER_TEMP/stack/$mod" "../$mod"; done
+          python3 -I scripts/test_experiment.py
+          python3 -I scripts/validate_experiment.py experiments/
+          rm -rf ../blis-vllm ../blis-schemas
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pin-compat-blis
+          path: upstream/blis
+          retention-days: 3
+      - name: Reports to smoke
+        id: ids
+        run: |
+          python3 -I scripts/blis_pin.py plan > /tmp/plan.json
+          echo "reports=$(python3 -c 'import json;print(json.dumps([{"id":r["id"],"replay":r["replay"]} for r in json.load(open("/tmp/plan.json"))["reports"]]))')" >> "$GITHUB_OUTPUT"
+
+  smoke:
+    needs: build
+    runs-on: ${{ fromJSON(vars.REGEN_RUNS_ON || '"ubuntu-latest"') }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        report: ${{ fromJSON(needs.build.outputs.reports) }}
+    name: smoke ${{ matrix.report.id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyyaml
+      - uses: actions/download-artifact@v4
+        with: { name: pin-compat-blis, path: .build }
+      - name: Clone the pinned catalog + registry
+        id: stack
+        run: |
+          set -euo pipefail
+          chmod +x .build/blis
+          set -a; . ./pins.env; set +a
+          git clone --branch "$CATALOG_REF" --depth 1 https://github.com/inference-sim/blis-catalog.git ../blis-catalog
+          git clone --branch "$REGISTRY_REF" --depth 1 https://github.com/inference-sim/blis-registry.git ../blis-registry
+          echo "catalog_ref=$CATALOG_REF" >> "$GITHUB_OUTPUT"
+      - name: Restore the replay corpus
+        if: matrix.report.replay
+        uses: actions/cache@v4
+        with:
+          path: .corpus/traces.jsonl
+          key: replay-corpus-${{ steps.stack.outputs.catalog_ref }}
+      - name: Re-run ${{ matrix.report.id }}'s own rows on the new binary
+        run: |
+          set -euo pipefail
+          python3 -I scripts/blis_pin.py smoke "${{ matrix.report.id }}" \
+            --blis .build/blis --catalog ../blis-catalog --registry ../blis-registry \
+            --corpus .corpus/traces.jsonl --corpus-cache "$RUNNER_TEMP/agx-cache" \
+            --max-parallel 2 --timeout "${{ vars.REGEN_RUN_TIMEOUT || '1800' }}" \
+            --json "$RUNNER_TEMP/smoke-${{ matrix.report.id }}.json" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-${{ matrix.report.id }}
+          path: ${{ runner.temp }}/smoke-${{ matrix.report.id }}.json
+          if-no-files-found: ignore
+
+  # One comment on the PR saying what is left to fix, so the next push can be aimed at it.
+  report:
+    needs: [build, smoke]
+    if: always() && github.event_name == 'pull_request' && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: smoke-*
+          path: ${{ runner.temp }}/smoke
+          merge-multiple: true
+      - name: Comment the gate result on the PR
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          RESULT: ${{ needs.smoke.result }}
+        run: |
+          set -uo pipefail
+          files=("$RUNNER_TEMP"/smoke/*.json)
+          {
+            echo "### pin-compat: $([ "$RESULT" = success ] && echo '✅ the code fits the new stack' || echo '❌ changes needed on this branch')"
+            echo
+            if [ -e "${files[0]}" ]; then python3 -I scripts/blis_pin.py smoke-summary "${files[@]}"; fi
+            echo
+            echo "_Commit ${GITHUB_SHA::10}, [run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID). Push fixes to this branch; the gate re-runs and this comment updates. Regeneration starts only after merge._"
+          } > /tmp/comment.md
+          gh pr comment "$PR" --edit-last --body-file /tmp/comment.md 2>/dev/null \
+            || gh pr comment "$PR" --body-file /tmp/comment.md

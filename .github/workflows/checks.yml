@@ -28,6 +28,7 @@ jobs:
         run: |
           python3 -I scripts/test_build.py
           python3 -I scripts/test_backend.py
+          python3 -I scripts/test_blis_pin.py
       - name: Skill report/runner tests (data producer contract)
         run: |
           python3 -I .claude/skills/config-search/scripts/test_report.py

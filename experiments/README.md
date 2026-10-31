@@ -456,7 +456,7 @@ one (`test_plan_covers_the_real_gallery`). Re-run a subset by hand with the `onl
 
 The 64-GPU AgentX replays need more memory than a hosted runner has; point the `REGEN_RUNS_ON`
 repository variable at a larger runner (see the workflow header for all four sizing variables).
-The smoke jobs use the same runner.
+The smoke jobs use the same runner. `deploy/openshift/arc/` sets one up on OpenShift.
 
 ## Not supported (per #21)
 

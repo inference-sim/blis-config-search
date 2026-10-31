@@ -1,0 +1,4 @@
+# gha-runner-scale-set-controller, scoped to the jchen namespace only (see README.md).
+flags:
+  watchSingleNamespace: jchen
+  logLevel: info

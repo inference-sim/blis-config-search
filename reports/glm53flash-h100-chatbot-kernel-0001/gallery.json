@@ -1,8 +1,8 @@
 {
-  "generated": "2026-10-27",
+  "generated": "2026-10-31",
   "isl_osl": "",
   "n_runs": 197,
   "n_servable": 92,
-  "reason": "2x TP8 + EP at default engine and routing settings gives the most tok/s/GPU (26.7 tok/s/GPU, 427.3 tok/s fleet) while holding the 50 tok/s/user floor; usable load c=3 (C*=4, headroom 0.8).",
+  "reason": "2x TP8 + EP at default engine and routing settings gives the most tok/s/GPU (27.2 tok/s/GPU, 434.5 tok/s fleet) while holding the 50 tok/s/user floor; usable load c=3 (C*=4, headroom 0.8).",
   "synthetic": false
 }

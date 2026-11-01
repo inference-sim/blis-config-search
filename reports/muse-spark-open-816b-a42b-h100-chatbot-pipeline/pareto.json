@@ -1,0 +1,148 @@
+{
+  "dropped": [
+    {
+      "count": 2,
+      "gpus": 8,
+      "reason": "uses 8 GPUs, not the scenario's 16"
+    },
+    {
+      "count": 2,
+      "gpus": 32,
+      "reason": "uses 32 GPUs, not the scenario's 16"
+    }
+  ],
+  "finalists": [
+    {
+      "at_c_use": {
+        "itl_p99_ms": 87.938,
+        "tok_per_s_per_user": 11.4,
+        "tokens_per_sec": 3930.1,
+        "tokens_per_sec_per_gpu": 245.63
+      },
+      "c_star": 256,
+      "c_use": 256,
+      "config": {
+        "async_scheduling": true,
+        "concurrency": 256,
+        "dp": 1,
+        "enable_expert_parallel": true,
+        "enable_prefix_caching": true,
+        "gpu_memory_utilization": 0.9,
+        "max_model_len": 262144,
+        "max_num_batched_tokens": 8192,
+        "max_num_seqs": 256,
+        "num_instances": 1,
+        "pp": 1,
+        "tp": 16
+      },
+      "curve": [
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 38.231,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 26.2,
+          "tokens_per_sec": 488.8,
+          "ttft_p99_ms": 327.1
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 45.494,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 22.0,
+          "tokens_per_sec": 1183.3,
+          "ttft_p99_ms": 1288.3
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 69.301,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 14.4,
+          "tokens_per_sec": 2872.8,
+          "ttft_p99_ms": 4977.5
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 87.938,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 11.4,
+          "tokens_per_sec": 3930.1,
+          "ttft_p99_ms": 9931.2
+        }
+      ],
+      "gpus": 16,
+      "label": "1x TP16 + EP",
+      "sweep": "no-pipeline",
+      "variant": "max seqs 256"
+    },
+    {
+      "at_c_use": {
+        "itl_p99_ms": 90.208,
+        "tok_per_s_per_user": 11.1,
+        "tokens_per_sec": 2112.9,
+        "tokens_per_sec_per_gpu": 132.06
+      },
+      "c_star": 128,
+      "c_use": 128,
+      "config": {
+        "async_scheduling": true,
+        "concurrency": 128,
+        "dp": 1,
+        "enable_expert_parallel": true,
+        "enable_prefix_caching": true,
+        "gpu_memory_utilization": 0.9,
+        "max_model_len": 262144,
+        "max_num_batched_tokens": 8192,
+        "max_num_seqs": 256,
+        "num_instances": 1,
+        "pp": 2,
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 52.451,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 19.1,
+          "tokens_per_sec": 386.1,
+          "ttft_p99_ms": 377.7
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 61.401,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 16.3,
+          "tokens_per_sec": 862.6,
+          "ttft_p99_ms": 1313.6
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 90.208,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 11.1,
+          "tokens_per_sec": 2112.9,
+          "ttft_p99_ms": 5058.1
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 109.801,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 9.1,
+          "tokens_per_sec": 3061.8,
+          "ttft_p99_ms": 9962.4
+        }
+      ],
+      "gpus": 16,
+      "label": "1x TP8 + EP",
+      "sweep": "pipelined",
+      "variant": "max seqs 256"
+    }
+  ],
+  "run_id": "muse-spark-open-816b-a42b-h100-chatbot-pipeline",
+  "winner": {
+    "chosen": "1x TP16 + EP (max seqs 256)",
+    "label": "1x TP16 + EP",
+    "reason": "1x TP16 + EP (max seqs 256) in sweep 'no-pipeline' gives the most tok/s/GPU (245.63 tok/s/GPU, 3930.1 tok/s fleet) while holding the scenario's SLOs, at concurrency 256.",
+    "sweep": "no-pipeline",
+    "variant": "max seqs 256"
+  }
+}

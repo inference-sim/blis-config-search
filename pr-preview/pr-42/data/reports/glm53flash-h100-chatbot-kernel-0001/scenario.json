@@ -1,0 +1,22 @@
+{
+  "gpu_budget": 16,
+  "hardware": "h100",
+  "headroom": 0.8,
+  "interactivity_floor": {
+    "itl_p99_ms_max": 20.0,
+    "tok_per_s_per_user": 50.0
+  },
+  "model": "glm-5.3-flash",
+  "objective": "dual-pareto",
+  "pinned_stack": {
+    "blis": "v0.12.0",
+    "catalog": "0.3.0",
+    "kernel": "v0.3.0",
+    "registry": "v0.2.0"
+  },
+  "run_id": "glm53flash-h100-chatbot-kernel-0001",
+  "seed": 0,
+  "workload": {
+    "preset": "chatbot"
+  }
+}

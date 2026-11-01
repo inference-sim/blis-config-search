@@ -366,8 +366,8 @@ def winner_reason(f, floor_rate, headroom):
                     f"C*={f['c_star']}, headroom {headroom:g} targets c={target}, but that load "
                     f"measured below the floor, so the recommendation backs off to the highest "
                     f"servable measured load")
-    return (f"{f['label']} {how} gives the most tok/s/GPU "
-            f"({a['tokens_per_sec_per_gpu']:g} tok/s/GPU, {a['tokens_per_sec']:g} tok/s fleet) "
+    return (f"{f['label']} {how} gives the most tok/s/accelerator "
+            f"({a['tokens_per_sec_per_gpu']:g} tok/s/accelerator, {a['tokens_per_sec']:g} tok/s fleet) "
             f"while holding the {floor_rate:g} tok/s/user floor; "
             f"usable load c={f['c_use']} ({headroom_txt}).{scope}")
 

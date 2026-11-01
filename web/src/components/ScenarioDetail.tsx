@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
-import type { RunRecord, Scenario } from '../types'
+import type { Catalog, RunRecord, Scenario } from '../types'
 import { reportHref } from '../load'
-import { EMPTY_SEL, dash, emphasis, finite, fnum, operatingPoints, resolveHighlight, runFlags, selectRecords, sortRows, toggleHighlight, useSort, type Selection, type SortState } from '../lib'
+import { EMPTY_SEL, catalogDoc, dash, emphasis, finite, fnum, operatingPoints, resolveHighlight, runFlags, selectRecords, sortRows, toggleHighlight, useSort, type Selection, type SortState } from '../lib'
 import { OBJECTIVE, OPERATING_COLUMNS, figure as fig, help as lexHelp, label as lexLabel, metric } from '../lexicon'
 import { Crossfilter } from './Crossfilter'
 import { MockBadge, CaveatBadge } from './Reports'
+import { CatRef } from './Coverage'
 
 const PALETTE = ['#1f6e5c', '#34366e', '#b5651d', '#a3301f', '#6b7d1f', '#7a4a8c', '#2a7f9e', '#8a6d00']
 
@@ -22,7 +23,7 @@ const NO_HL: HL = { active: null, onHover: () => {}, onToggle: () => {}, onClear
 function seriesProps(hl: HL, name: string) {
   return {
     tabIndex: 0, role: 'button' as const, className: 'hl-target',
-    'aria-label': `${name}${hl.active === name ? ' (highlighted)' : ''} — press Enter to toggle highlight`,
+    'aria-label': `${name}${hl.active === name ? ' (highlighted)' : ''}, press Enter to toggle highlight`,
     'aria-pressed': hl.active === name,
     onPointerEnter: () => hl.onHover(name), onPointerLeave: () => hl.onHover(null),
     onFocus: () => hl.onHover(name), onBlur: () => hl.onHover(null),
@@ -151,7 +152,7 @@ export function PointDetail({ r, onClose, pinned = true, scenarioHasCmd = true }
           {defList([
             ['Tensor parallel', r.tp], ['Data parallel', r.dp], ['Pipeline parallel', r.pp],
             ['Expert parallel', r.epw ? `width ${r.epw}` : 'off'],
-            ['Instances', r.ni], ['GPUs total', finite(r.gpus) ? fnum(r.gpus, 0) : null],
+            ['Instances', r.ni], ['Accelerators total', finite(r.gpus) ? fnum(r.gpus, 0) : null],
             ['Nodes', r.nodes], ['Fabric', r.fabric],
           ])}
         </section>
@@ -570,7 +571,7 @@ export function Lines({ recs, shownRecs, get, xl, yl, label, colors, showKnee = 
                   : undefined}>
                 <title>{`${name}${variant ? ` (${variant})` : ''} · conc ${fnum(p.x, 0)} · ${fnum(p.y)}`
                   + `${p.ok ? '' : ' · not servable'}`
-                  + (p.id && onPick ? ' — click for the deployment' : '')}</title>
+                  + (p.id && onPick ? '. Click for the deployment' : '')}</title>
               </circle>
             ))}
           </g>
@@ -621,23 +622,23 @@ function axesSearched(recs: RunRecord[]): string[] {
   return out
 }
 
-/** Scatter: the efficiency/interactivity trade-off — name the most GPU-efficient point that still
+/** Scatter: the efficiency/interactivity trade-off — name the most accelerator-efficient point that still
  *  holds the floor, and what pushing past it costs. */
 function explainScatter(recs: RunRecord[]): string | null {
   const ok = recs.filter((r) => r.ok && finite(r.tpg) && finite(r.pu))
   const bad = recs.filter((r) => !r.ok && finite(r.tpg) && finite(r.pu))
-  if (ok.length === 0) return bad.length ? 'No run in view holds the interactivity floor — every point here breaks it.' : null
+  if (ok.length === 0) return bad.length ? 'No run in view holds the interactivity floor; every point here breaks it.' : null
   const best = ok.reduce((a, b) => ((b.tpg as number) > (a.tpg as number) ? b : a))
   let s = `The highest filled point is ${best.series} at ${fnum(best.conc, 0)} concurrent `
-    + `sessions: ${fnum(best.tpg)} tok/s per GPU while each user still sees ${fnum(best.pu)} tok/s.`
+    + `sessions: ${fnum(best.tpg)} tok/s per accelerator while each user still sees ${fnum(best.pu)} tok/s.`
   if (bad.length) {
     const over = bad.reduce((a, b) => ((b.tpg as number) > (a.tpg as number) ? b : a))
     const drop = finite(best.pu) && finite(over.pu) ? Math.round((1 - (over.pu as number) / (best.pu as number)) * 100) : null
-    s += ` Hollow points push per-GPU throughput higher — up to ${fnum(over.tpg)} tok/s/GPU — but`
+    s += ` Hollow points push per-accelerator throughput higher (up to ${fnum(over.tpg)} tok/s/accelerator), but`
       + (drop !== null && drop > 0 ? ` per-user speed falls ${drop}% to ${fnum(over.pu)} tok/s,` : ' per-user speed collapses,')
       + ' which is why peak efficiency alone is the wrong thing to rank on.'
   } else {
-    s += ' No run in view breaks the floor, so the frontier is still rising — the limit is past the loads swept here.'
+    s += ' No run in view breaks the floor, so the frontier is still rising; the limit is past the loads swept here.'
   }
   return s
 }
@@ -661,7 +662,7 @@ function explainPerUser(recs: RunRecord[], seriesList: string[]): string | null 
     .sort((a, b) => b.last - a.last)
     .map((l) => `${l.s} holds to ${l.last} session${l.last === 1 ? '' : 's'}${l.knee !== null ? ` (breaks at ${l.knee})` : ''}`)
   const spread = limits.length > 1 && limits[0].last > 0
-    ? ` That is a ${(limits[0].last / Math.max(1, limits[limits.length - 1].last)).toFixed(1)}× spread in how many sessions a configuration carries — from configuration alone, on the same hardware and workload.`
+    ? ` That is a ${(limits[0].last / Math.max(1, limits[limits.length - 1].last)).toFixed(1)}× spread in how many sessions a configuration carries, from configuration alone, on the same hardware and workload.`
     : ''
   const anyKnee = limits.some((l) => l.knee !== null)
   return `${fmtList(parts)}.${spread}`
@@ -700,11 +701,11 @@ function explainLatency(recs: RunRecord[], m: LatMetric): string | null {
   const vals = ok.map((r) => m.get(r) as number)
   const lo = Math.min(...vals)
   const hi = Math.max(...vals)
-  let s = `While a configuration is healthy its ${m.phrase} barely moves — ${fnum(lo, 1)}`
+  let s = `While a configuration is healthy its ${m.phrase} barely moves: ${fnum(lo, 1)}`
     + `${hi > lo ? `–${fnum(hi, 1)}` : ''} ms across the servable loads in view.`
   if (bad.length) {
     const worst = Math.max(...bad.map((r) => m.get(r) as number))
-    s += ` Past the knee it climbs to ${fnum(worst, 1)} ms — roughly ${Math.max(2, Math.round(worst / Math.max(lo, 0.001)))}× the healthy value.`
+    s += ` Past the knee it climbs to ${fnum(worst, 1)} ms, roughly ${Math.max(2, Math.round(worst / Math.max(lo, 0.001)))}× the healthy value.`
       + ' Adding load beyond that point buys little throughput and costs every user noticeably.'
   } else {
     s += ' Nothing in view crosses the ceiling, so the decode path is not yet the binding constraint.'
@@ -755,7 +756,7 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
   const clearPick = () => { setPicked(null); setSticky(null) }
   const regime = useMemo(() => (recs.some((r) => !r.ok && (r.viol ?? []).some((v) => /kv|preempt|memory/i.test(v))) ? 'KV-bound' : 'compute-bound'), [recs])
   // Hovering a chart line emphasises a whole series; the panel previews THAT series' operating
-  // point — its most efficient servable run (max tok/s/GPU, the objective the search and the
+  // point — its most efficient servable run (max tok/s/accelerator, the objective the search and the
   // "What to run" table rank on). Resolve within the series: operatingPoints(shown) keeps only
   // the single best series per load, so a series that never wins a load would resolve to nothing
   // and the box would stay blank for most lines. Declared BEFORE the early return below so the
@@ -776,9 +777,9 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
       </div>
     )
   }
-  // Scatter axes: x = per-user rate (interactivity), y = tok/s/GPU (how efficiently each GPU is
-  // used). Plotting per-GPU throughput lets you compare GPU utilisation directly across configs,
-  // independent of how many GPUs each one uses.
+  // Scatter axes: x = per-user rate (interactivity), y = tok/s/accelerator (how efficiently each accelerator is
+  // used). Plotting per-accelerator throughput lets you compare accelerator utilization directly across configs,
+  // independent of how many accelerators each one uses.
   const pts: Pt[] = shown.filter((r) => finite(r.tpg) && finite(r.pu)).map((r) => ({
     x: r.pu as number,
     y: r.tpg as number,
@@ -790,7 +791,7 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
     // (same config identity the Lines charts group by: series + variant).
     order: finite(r.conc) ? (r.conc as number) : undefined,
     cfg: `${r.series}\u0000${r.variant ?? ''}`,
-    title: `${r.series}${r.variant ? ` (${r.variant})` : ''} · conc ${r.conc ?? dash} · ${fnum(r.tpg)} tok/s/GPU · ${fnum(r.pu)} tok/s/user · ${r.ok ? 'servable' : r.status} — click for the deployment`,
+    title: `${r.series}${r.variant ? ` (${r.variant})` : ''} · conc ${r.conc ?? dash} · ${fnum(r.tpg)} tok/s/accelerator · ${fnum(r.pu)} tok/s/user · ${r.ok ? 'servable' : r.status}. Click for the deployment`,
   }))
   const hidden = shown.length - pts.length
   // Whether ANY run in the scenario recorded a command — drives whether the Reproduce panel shows
@@ -849,7 +850,7 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
               </select>
             </label>
           </div>
-          <p className="vc-s">{latMetric.label} — {fig('latency_vs_load').caption}</p>
+          <p className="vc-s">{latMetric.label}: {fig('latency_vs_load').caption}</p>
           <Lines recs={recs} shownRecs={shown} get={latMetric.get} xl={fig('latency_vs_load').xl}
             yl={latMetric.label} label={`${latMetric.label} by ${fig('latency_vs_load').xl}`}
             colors={colors} showKnee hl={hl} onPick={pickRun} picked={picked} />
@@ -867,7 +868,7 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
           winner={winner} winnerName={winnerName} showState />
         {active !== null && (
           <div className="hl-bar" role="status">
-            <span>Highlighting <b className="mono">{active}</b>{sticky === null && ' (hover)'} — emphasis only, filters unchanged.</span>
+            <span>Highlighting <b className="mono">{active}</b>{sticky === null && ' (hover)'}: emphasis only, filters unchanged.</span>
             {sticky !== null && <button type="button" className="hl-clear" onClick={hl.onClear}>clear highlight</button>}
           </div>
         )}
@@ -892,7 +893,7 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
       <div className="op-sec">
         <h4 className="op-h">All runs</h4>
         <p className="op-s">
-          Every run in the sweep — including the ones that broke the floor, with the reason in the
+          Every run in the sweep, including the ones that broke the floor, with the reason in the
           status column. Same format as above; click a row for the full deployment.
         </p>
       </div>
@@ -922,7 +923,7 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
   )
 }
 
-export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios: Scenario[] }) {
+export function ScenarioDetail({ runId, scenarios, catalog }: { runId: string; scenarios: Scenario[]; catalog?: Catalog | null }) {
   const s = scenarios.find((x) => x.run_id === runId)
   // Records are inlined on the scenario (stage-data.mjs), so the explorer renders from the
   // one scenarios.json load — no per-scenario fetch, no loading state, works everywhere.
@@ -937,7 +938,7 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
     )
   }
   const w = s.winner
-  // The two best alternatives to the recommended config, ranked by efficiency (tok/s/GPU
+  // The two best alternatives to the recommended config, ranked by efficiency (tok/s/accelerator
   // then total tok/s), shown side-by-side under the recommendation.
   //
   // A config is identified by label + variant, not label alone: once the search refines engine
@@ -952,10 +953,10 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
   return (
     <div>
       <p className="crumb"><a href="#/reports">← all reports</a></p>
-      <h2 className="viewhead">{s.model}{s.synthetic && <MockBadge />}{!s.synthetic && s.caveat && <CaveatBadge caveat={s.caveat} />}</h2>
+      <h2 className="viewhead">{s.model}{catalogDoc(catalog, 'model', s.model) && <a className="specsheet" href={catalogDoc(catalog, 'model', s.model) as string} target="_blank" rel="noreferrer">model spec sheet ↗</a>}{s.synthetic && <MockBadge />}{!s.synthetic && s.caveat && <CaveatBadge caveat={s.caveat} />}</h2>
       <div className="specchips">
-        <span className="spec">{s.hardware}</span><span className="spec">{s.gpu_budget} GPUs</span>
-        <span className="spec">{s.workload}</span><span className="spec">{s.isl_osl}</span>
+        <CatRef href={catalogDoc(catalog, 'hardware', s.hardware)}>{s.hardware}</CatRef><span className="spec">{s.gpu_budget} accelerators</span>
+        <CatRef href={catalogDoc(catalog, 'workload', s.workload)}>{s.workload}</CatRef><span className="spec">{s.isl_osl}</span>
         {/* The interactivity floor is the premise of every servable/not call below, so state it
             here with the other constraints rather than only in the dek far down the briefing. */}
         {s.floor && <span className="spec floor" title="Interactivity floor: a run is servable only if it holds this.">floor: {s.floor}</span>}
@@ -969,7 +970,7 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
       <section className="briefing" aria-label="Top configs to try">
         <div className="seclabel2">Top configs to try</div>
         {/* Row 1: the recommended config, prominent. Row 2: the next two runners-up,
-            ranked by tok/s/GPU (efficiency), side by side. */}
+            ranked by tok/s/accelerator (efficiency), side by side. */}
         <div className="reccard">
           <div className="recrank">RECOMMENDED</div>
           <div className="rechead">
@@ -978,13 +979,13 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
           </div>
           <div className="recstats">
             <div><dt>cluster tok/s</dt><dd className="num best">{fnum(w.tps)}</dd></div>
-            <div><dt>tok/s/GPU</dt><dd className="num best">{fnum(w.tps_per_gpu)}</dd></div>
+            <div><dt>tok/s/accelerator</dt><dd className="num best">{fnum(w.tps_per_gpu)}</dd></div>
             <div><dt>tok/s/user</dt><dd className="num best">{fnum(w.per_user)}</dd></div>
             <div><dt>ITL p99 (ms)</dt><dd className="num best">{fnum(w.itl_p99, 2)}</dd></div>
             {/* c_use is the recommended load AND the load measured. When it backed off below the
                 0.8xC* target, say so here rather than showing a bare number that looks like the
                 target. */}
-            <div><dt>GPUs · load</dt><dd className="num"><span className="num">{fnum(w.gpus, 0)}</span> · c<span className="num">{fnum(w.c_use, 0)}</span>{w.c_use_target != null && w.c_use_target !== w.c_use && <span className="note" title={`the 0.8xC* target of c${w.c_use_target} measured below the interactivity floor, so the recommendation is the highest servable measured load`}> (backed off from c{w.c_use_target})</span>}</dd></div>
+            <div><dt>Accelerators · load</dt><dd className="num"><span className="num">{fnum(w.gpus, 0)}</span> · c<span className="num">{fnum(w.c_use, 0)}</span>{w.c_use_target != null && w.c_use_target !== w.c_use && <span className="note" title={`the 0.8xC* target of c${w.c_use_target} measured below the interactivity floor, so the recommendation is the highest servable measured load`}> (backed off from c{w.c_use_target})</span>}</dd></div>
           </div>
         </div>
         {runnersUp.length > 0 && (
@@ -995,10 +996,10 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
                 <div className="runlabel">{f.name ?? f.label}</div>
                 <div className="runstats">
                   <div><dt>tok/s</dt><dd className="num">{fnum(f.tps)}</dd></div>
-                  <div><dt>tok/s/GPU</dt><dd className="num">{fnum(f.tps_per_gpu)}</dd></div>
+                  <div><dt>tok/s/accelerator</dt><dd className="num">{fnum(f.tps_per_gpu)}</dd></div>
                   <div><dt>tok/s/user</dt><dd className="num">{fnum(f.per_user)}</dd></div>
                   <div><dt>ITL p99</dt><dd className="num">{fnum(f.itl_p99, 2)}</dd></div>
-                  <div><dt>GPUs · load</dt><dd className="num"><span className="num">{fnum(f.gpus, 0)}</span> · c<span className="num">{fnum(f.c_use, 0)}</span></dd></div>
+                  <div><dt>Accelerators · load</dt><dd className="num"><span className="num">{fnum(f.gpus, 0)}</span> · c<span className="num">{fnum(f.c_use, 0)}</span></dd></div>
                 </div>
               </div>
             ))}
@@ -1011,8 +1012,8 @@ export function ScenarioDetail({ runId, scenarios }: { runId: string; scenarios:
             finalists and how the order was chosen. */}
         <p className="dek method"><b>How these were chosen:</b> every candidate topology that held
           the floor at some load becomes a finalist, recorded at its usable operating point
-          (headroom × the highest servable load). Finalists — and the runners-up above — are ranked
-          by tok/s per GPU, the search objective; the recommendation is the top of that ranking.</p>
+          (headroom × the highest servable load). Finalists and the runners-up above are ranked
+          by tok/s per accelerator, the search objective; the recommendation is the top of that ranking.</p>
       </section>
 
       <section aria-label="Pareto explorer">

@@ -960,7 +960,7 @@ def _report_json(report):
         name = (f"{winner['label']} ({winner['variant']})" if winner.get("variant")
                 else winner["label"])
         found = (f"<strong>{name}</strong>, from the <em>{winner['sweep']}</em> sweep, reached "
-                 f"{winner['tokens_per_sec_per_gpu']:g} tok/s/GPU "
+                 f"{winner['tokens_per_sec_per_gpu']:g} tok/s/accelerator "
                  f"({winner['tokens_per_sec']:g} tok/s across the fleet) at concurrency "
                  f"{winner['concurrency']} while holding the scenario's SLOs.")
         run_html = (f"{name} at concurrency {winner['concurrency']}. "
@@ -976,7 +976,7 @@ def _report_json(report):
         if best:
             outcome = (f"Measured: best was <strong>{best['label']}"
                        + (f" ({best['variant']})" if best.get("variant") else "")
-                       + f"</strong> at {best['tokens_per_sec_per_gpu']:g} tok/s/GPU "
+                       + f"</strong> at {best['tokens_per_sec_per_gpu']:g} tok/s/accelerator "
                        f"(concurrency {best['concurrency']}).")
         else:
             outcome = ("Measured: no configuration in this sweep held the SLOs at any "
@@ -1083,8 +1083,8 @@ def _pareto_json(report):
         out["winner"] = {
             "chosen": name, "label": winner["label"], "variant": winner.get("variant", ""),
             "sweep": winner["sweep"],
-            "reason": (f"{name} in sweep '{winner['sweep']}' gives the most tok/s/GPU "
-                       f"({winner['tokens_per_sec_per_gpu']:g} tok/s/GPU, "
+            "reason": (f"{name} in sweep '{winner['sweep']}' gives the most tok/s/accelerator "
+                       f"({winner['tokens_per_sec_per_gpu']:g} tok/s/accelerator, "
                        f"{winner['tokens_per_sec']:g} tok/s fleet) while holding the "
                        f"scenario's SLOs, at concurrency {winner['concurrency']}."),
         }
@@ -1136,7 +1136,7 @@ def main(argv=None):
             print(f"best: {winner['label']}"
                   + (f" ({winner['variant']})" if winner.get("variant") else "")
                   + f" in '{winner['sweep']}' -- "
-                  f"{winner['tokens_per_sec_per_gpu']:g} tok/s/GPU at c={winner['concurrency']}")
+                  f"{winner['tokens_per_sec_per_gpu']:g} tok/s/accelerator at c={winner['concurrency']}")
         elif not args.dry_run:
             print("best: none -- no run met the scenario's SLOs")
         if not args.dry_run:

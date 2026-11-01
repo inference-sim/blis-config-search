@@ -3,7 +3,7 @@
 // config-search renders the same runs twice: this React dashboard and the standalone HTML report
 // (.claude/skills/config-search/scripts/report.py). They had grown two vocabularies for one set
 // of numbers and, worse, two ranking objectives for "What to run" — the report ranked operating
-// points by per-user rate while this app ranked them by tok/s/GPU, so at high load the two tables
+// points by per-user rate while this app ranked them by tok/s/accelerator, so at high load the two tables
 // recommended DIFFERENT configurations for one scenario (issue #13).
 //
 // Both surfaces now read their labels, captions and ranking objective from one JSON file. The

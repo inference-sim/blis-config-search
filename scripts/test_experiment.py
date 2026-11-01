@@ -1830,7 +1830,7 @@ class DryRunPlan(unittest.TestCase):
         self.assertEqual("a", out["winner"]["chosen"])
         self.assertEqual(1, len(out["finalists"]))
         self.assertEqual(1, len(out["finalists"][0]["curve"]))
-        self.assertIn("tok/s/GPU", out["winner"]["reason"])
+        self.assertIn("tok/s/accelerator", out["winner"]["reason"])
 
     def test_recorded_commands_do_not_depend_on_where_the_sweep_ran(self):
         """A re-run's ledger must differ only when a RESULT differs.

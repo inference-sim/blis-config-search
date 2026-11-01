@@ -118,7 +118,7 @@ export function Crossfilter({ recs, sel, setSel, shownCount, onPickSeries }: {
       </div>
       {metrics.length > 0 && (
         <>
-          <div className="xf-sec">Filter by outcome — brush a range</div>
+          <div className="xf-sec">Filter by outcome: brush a range</div>
           <div className="hists">
             {metrics.map((m) => <BrushHistogram key={m} recs={recs} sel={sel} metric={m} onRange={(r) => setRange(m, r)} />)}
           </div>
@@ -126,7 +126,7 @@ export function Crossfilter({ recs, sel, setSel, shownCount, onPickSeries }: {
       )}
       {fields.length > 0 && (
         <>
-          <div className="xf-sec">Filter by setting — click a level</div>
+          <div className="xf-sec">Filter by setting: click a level</div>
           <div className="facetgrid">
             {fields.map((k) => {
               const picked = sel.facets[k] ?? []

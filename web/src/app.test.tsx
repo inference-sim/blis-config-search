@@ -1,15 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import type { Catalog, RunRecord, Scenario, WorkloadEntry } from './types'
-import { facetCounts, filterScenarios, topConfigs, NO_FILTERS, parseRoute, filterRecords, countReports, coverageRows, TAB_LABELS } from './lib'
+import { facetCounts, filterScenarios, topConfigs, NO_FILTERS, parseRoute, filterRecords, coverageRows, TAB_LABELS } from './lib'
 import { OBJECTIVE, label as lexLabel, metric } from './lexicon'
 import { ScenarioDetail } from './components/ScenarioDetail'
 import { Reports } from './components/Reports'
 import { Submit } from './components/Submit'
 import { Coverage } from './components/Coverage'
-import { Models } from './components/Models'
-import { Workloads } from './components/Workloads'
-import { Gpus } from './components/Gpus'
 import { Footer } from './components/Footer'
 
 const w = { label: '1x TP8', tp: 8, ni: 1, gpus: 8, c_use: 1, tps: 1, tps_per_gpu: 1, per_user: 1, itl_p99: 1 }
@@ -26,7 +23,6 @@ describe('filters', () => {
     expect(hw).toEqual([{ value: 'H100', count: 1 }, { value: 'H200', count: 0 }])
     const gpu = facetCounts(S, NO_FILTERS, 'gpu')
     expect(gpu.map((g) => g.value)).toEqual(['8', '16'])
-    expect(countReports(S, 'model', 'M1')).toBe(2)
   })
 })
 
@@ -84,11 +80,11 @@ describe('#11 coverage view', () => {
   it('shows the recommended config inline, so the table answers "what should I run?"', () => {
     render(<Coverage scenarios={C} />)
     // the winner is the payload a reader came for; every row states one
-    expect(document.querySelector('.readout tbody')?.textContent).toContain('1x TP8')
+    expect(document.querySelector('.readout tbody')?.textContent).toContain('1×TP8')
     expect(document.querySelectorAll('.readout tbody .covwin')).toHaveLength(2)
   })
 
-  it('names the best config by tok/s/GPU when a tuple has several reports', () => {
+  it('names the best config by tok/s/accelerator when a tuple has several reports', () => {
     // two searches of the same tuple: the row must still answer with ONE config, picked on the
     // objective the search itself optimises, not print "2 reports" in the config column too.
     const win = (label: string, tpg: number) => ({ ...w, label, name: label, tps_per_gpu: tpg })
@@ -98,17 +94,17 @@ describe('#11 coverage view', () => {
     ]
     render(<Coverage scenarios={rows} />)
     const tr = document.querySelector('.readout tbody tr') as Element
-    expect(tr.querySelector('.covwin')?.textContent).toBe('8x TP2 + EP')
+    expect(tr.querySelector('.covwin')?.textContent).toBe('8×TP2 + EP')
     expect(tr.textContent).toContain('71')
     // the count still lives in the report column, where it belongs
-    expect(tr.querySelector('a')?.textContent).toContain('2 reports')
+    expect(tr.querySelector('td:last-child a')?.textContent).toContain('2 reports')
   })
 
-  it('centers tok/s/GPU without riding on num, which means right-aligned', () => {
+  it('centers tok/s/accelerator without riding on num, which means right-aligned', () => {
     render(<Coverage scenarios={C} />)
     const tbl = document.querySelector('table.readout') as Element
     const head = [...tbl.querySelectorAll('thead th')]
-    const i = head.findIndex((t) => (t.textContent ?? '').includes('tok/s/GPU'))
+    const i = head.findIndex((t) => (t.textContent ?? '').includes('tok/s/accelerator'))
     const cell = tbl.querySelectorAll('tbody tr')[0].querySelectorAll('td')[i]
     // centered, and NOT carrying the right-align class
     expect(cell.classList.contains('ctr')).toBe(true)
@@ -120,14 +116,14 @@ describe('#11 coverage view', () => {
   })
 
   it('aligns every measured column the same way, so they read as a set', () => {
-    // One convention for the table: measured quantities are centered. A mix (GPU budget
-    // right-aligned beside a centered tok/s/GPU) makes two numeric columns of the same kind
+    // One convention for the table: measured quantities are centered. A mix (accelerator budget
+    // right-aligned beside a centered tok/s/accelerator) makes two numeric columns of the same kind
     // sit differently. Asserted over all numeric columns, so a new one cannot quietly diverge.
     render(<Coverage scenarios={C} />)
     const tbl = document.querySelector('table.readout') as Element
     const head = [...tbl.querySelectorAll('thead th')].map((t) => (t.textContent ?? '').replace(/[▲▼]/g, '').trim())
     const cells = [...tbl.querySelectorAll('tbody tr')[0].querySelectorAll('td')]
-    const measured = ['GPU budget', 'tok/s/GPU']
+    const measured = ['Accelerator budget', 'tok/s/accelerator']
     for (const label of measured) {
       const i = head.indexOf(label)
       expect(i, `${label} column present`).toBeGreaterThan(-1)
@@ -140,15 +136,15 @@ describe('#11 coverage view', () => {
     expect(cells.some((c) => c.classList.contains('num'))).toBe(false)
   })
 
-  it('capitalizes GPU in the headers and drops the × from the budget cell', () => {
+  it('capitalizes the hardware and budget headers and drops the × from the budget cell', () => {
     render(<Coverage scenarios={C} />)
     const labels = [...document.querySelectorAll('table.readout thead th')]
       .map((t) => (t.textContent ?? '').replace(/[▲▼]/g, '').trim())
-    expect(labels).toContain('GPU')
-    expect(labels).toContain('GPU budget')
-    expect(labels).not.toContain('gpu')
-    expect(labels).not.toContain('gpu budget')
-    // the budget reads as a bare count; the GPU column already names the device
+    expect(labels).toContain('Hardware')
+    expect(labels).toContain('Accelerator budget')
+    expect(labels).not.toContain('hardware')
+    expect(labels).not.toContain('accelerator budget')
+    // the budget reads as a bare count; the Hardware column already names the device
     const cells = [...document.querySelectorAll('table.readout tbody tr')]
       .map((tr) => tr.querySelectorAll('td')[2].textContent ?? '')
     expect(cells).toContain('16')
@@ -159,18 +155,14 @@ describe('#11 coverage view', () => {
     render(<Coverage scenarios={C} />)
     const text = document.querySelector('.dek')?.textContent ?? ''
     // the exact flow a reader sees: JSX whitespace juggling must not double or drop a space
-    expect(text).toContain('that has been searched — 2 combinations, 3 reports.')
+    expect(text).toBe('The best config for each searched combination. Click a model, hardware or workload for its spec sheet.')
     expect(text).not.toMatch(/\s{2,}/)
     expect(text).not.toMatch(/\s+[.,]/)
   })
 
-  it('balances the intro so it does not wrap to a short orphan line', () => {
-    // `.dek` caps at 1100px while the Coverage table runs the full 1480px width, so the
-    // paragraph broke ~380px short of the table edge and dropped a four-word orphan onto
-    // line 2 — which read as text cut off or oddly indented. Balanced wrapping evens the
-    // lines; jsdom applies no layout, so the class is what we can assert here.
+  it('lets the intro use the full width instead of balancing it into early breaks', () => {
     render(<Coverage scenarios={C} />)
-    expect(document.querySelector('.dek')?.classList.contains('balance')).toBe(true)
+    expect(document.querySelector('.dek')?.classList.contains('balance')).toBe(false)
   })
 
   it('says so when nothing has been searched yet', () => {
@@ -179,85 +171,37 @@ describe('#11 coverage view', () => {
     expect(document.querySelector('.readout')).toBeNull()
   })
 
-  it('keeps the per-entity spec sheets reachable as secondary links, not top-level tabs', () => {
-    // the primary nav is Reports / Coverage / Submit — the three catalog tabs are demoted
+  it('points to blis-catalog for spec sheets instead of hosting them', () => {
     expect(TAB_LABELS.map(([t]) => t)).toEqual(['reports', 'coverage', 'submit'])
-    // ...but their routes still resolve, so the secondary links and old bookmarks work
-    expect(parseRoute('#/models').tab).toBe('models')
-    expect(parseRoute('#/workloads').tab).toBe('workloads')
-    expect(parseRoute('#/gpus').tab).toBe('gpus')
-    expect(parseRoute('#/coverage').tab).toBe('coverage')
-    // Coverage renders the disclosure to each spec sheet
-    render(<Coverage scenarios={C} />)
-    const hrefs = [...document.querySelectorAll('.catlinks a')].map((a) => a.getAttribute('href'))
-    expect(hrefs).toEqual(expect.arrayContaining(['#/models', '#/workloads', '#/gpus']))
+    expect(parseRoute('#/models').tab).toBe('reports')
+    const catalog = {
+      models: [{ name: 'm1' }], hardware: [{ name: 'h100' }], fabrics: [], storage: [], registry: [],
+      workloads: [{ name: 'agentx-mvp', kind: 'replay', scenario: 'inferencex-agentx-mvp' }], versions: { 'blis-catalog': '0.5.0' },
+    } as unknown as Catalog
+    const rows = [mk('a', 'm1', 'H100', 'chatbot', 16, false), mk('b', 'm9', 'H100', 'inferencex-agentx-mvp', 8, false)]
+    render(<Coverage scenarios={rows} catalog={catalog} />)
+    const [a, b] = [...document.querySelectorAll('.readout tbody tr')].map((tr) => [...tr.querySelectorAll('a.catref')].map((x) => x.getAttribute('href')))
+    const base = 'https://inference-sim.github.io/blis-catalog/0.5/reference'
+    expect(a).toEqual([`${base}/models/m1/`, `${base}/hardware/`, `${base}/workloads/#shapes`])
+    // a model the catalog does not list gets no dead link; a replay jumps to the replay section
+    expect(b).toEqual([`${base}/hardware/`, `${base}/workloads/#replay-workloads`])
+    const btns = [...document.querySelectorAll('.catbtns a')]
+    expect(btns.map((x) => [x.textContent, x.getAttribute('href')])).toEqual([['Models', `${base}/models/`], ['Chips', `${base}/hardware/`], ['Workloads', `${base}/workloads/`]])
   })
 
-  it('separates trace-driven replays from shapes and shows a replay its provenance', () => {
-    // A replay states no ISL/OSL distribution — the corpus carries per-request lengths — so
-    // the page must not render it as a shape row of em-dashes, which would read as missing
-    // data. It gets its own table showing scenario + pinned corpus instead.
-    const wl = (over: Partial<WorkloadEntry>): WorkloadEntry => ({
-      name: 'x', kind: 'shape', scenario: null, harness_version: null, corpus: null,
-      corpus_revision: null, category: null, thinking: null, prefix_tokens: 0,
-      isl_mean: 1, isl_stdev: 1, isl_min: 1, isl_max: 1,
-      osl_mean: 1, osl_stdev: 1, osl_min: 1, osl_max: 1, ...over,
-    })
-    const cat: Catalog = {
-      models: [], hardware: [], fabrics: [], storage: [], registry: [], versions: {},
-      workloads: [
-        wl({ name: 'sharegpt', isl_mean: 208, osl_mean: 185 }),
-        wl({
-          name: 'agentx-mvp', kind: 'replay', scenario: 'inferencex-agentx-mvp',
-          harness_version: '0.12.0', corpus: 'semianalysisai/cc-traces-weka-062126-256k',
-          corpus_revision: '8fecd2fc', category: 'coding', thinking: 'on',
-          prefix_tokens: null, isl_mean: null, isl_stdev: null, isl_min: null, isl_max: null,
-          osl_mean: null, osl_stdev: null, osl_min: null, osl_max: null,
-        }),
-      ],
-    }
-    render(<Workloads catalog={cat} scenarios={[]} />)
-    const caps = [...document.querySelectorAll('caption')].map((c) => c.textContent)
-    expect(caps).toEqual(['Workload shapes', 'Trace-driven replay workloads'])
-
-    // the shape lands in the shapes table, the replay in the replay table — not mixed
-    const [shapeTable, replayTable] = [...document.querySelectorAll('table')]
-    expect(shapeTable.textContent).toContain('sharegpt')
-    expect(shapeTable.textContent).not.toContain('agentx-mvp')
-    expect(replayTable.textContent).toContain('agentx-mvp')
-
-    // the replay's provenance is what's shown, and the ISL/OSL heads are absent there
-    expect(replayTable.textContent).toContain('inferencex-agentx-mvp')
-    expect(replayTable.textContent).toContain('semianalysisai/cc-traces-weka-062126-256k')
-    expect(replayTable.textContent).toContain('@8fecd2fc')
-    const replayHeads = [...replayTable.querySelectorAll('thead th')].map((th) => th.textContent)
-    expect(replayHeads.join()).not.toContain('ISL')
-    expect(replayHeads.join()).not.toContain('OSL')
+  it('links the scenario page to its model, hardware and workload spec sheets', () => {
+    const catalog = { models: [{ name: 'm1' }], hardware: [{ name: 'h100' }], workloads: [], fabrics: [], storage: [], registry: [], versions: { 'blis-catalog': '0.5.0' } } as unknown as Catalog
+    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false)]} catalog={catalog} />)
+    const base = 'https://inference-sim.github.io/blis-catalog/0.5/reference'
+    expect(document.querySelector('.viewhead .specsheet')?.getAttribute('href')).toBe(`${base}/models/m1/`)
+    expect([...document.querySelectorAll('.specchips a.catref')].map((x) => x.getAttribute('href'))).toEqual([`${base}/hardware/`, `${base}/workloads/#shapes`])
   })
 
-  it('omits the replay table entirely when the catalog has no replay workload', () => {
-    // an older catalog checkout has only shapes; it must not grow an empty second table
-    const cat: Catalog = {
-      models: [], hardware: [], fabrics: [], storage: [], registry: [], versions: {},
-      workloads: [{ name: 'chatbot', kind: 'shape' } as WorkloadEntry],
-    }
-    render(<Workloads catalog={cat} scenarios={[]} />)
-    expect([...document.querySelectorAll('caption')].map((c) => c.textContent)).toEqual(['Workload shapes'])
-  })
-
-  it('gives each demoted spec sheet a breadcrumb back to Coverage', () => {
-    // no longer a top-level tab, so the only way back out is in the view itself
-    const cat: Catalog = {
-      models: [{ name: 'm1' } as Catalog['models'][number]],
-      hardware: [{ name: 'h100' } as Catalog['hardware'][number]],
-      workloads: [{ name: 'chatbot' } as Catalog['workloads'][number]],
-      fabrics: [], storage: [], registry: [], versions: {},
-    }
-    for (const view of [<Models catalog={cat} scenarios={C} />, <Workloads catalog={cat} scenarios={C} />, <Gpus catalog={cat} scenarios={C} />]) {
-      const { unmount } = render(view)
-      expect(document.querySelector('.crumb a')?.getAttribute('href')).toBe('#/coverage')
-      unmount()
-    }
+  it('joins the replica count and captions the config with its variant', () => {
+    const s = mk('v', 'm1', 'H100', 'chatbot', 16, false)
+    render(<Coverage scenarios={[{ ...s, winner: { ...s.winner, label: '8x TP4 + EP', variant: 'max seqs 256' } }]} />)
+    expect(document.querySelector('.covwin')?.textContent).toBe('8×TP4 + EP')
+    expect(document.querySelector('.covvar')?.textContent).toBe('max seqs 256')
   })
 })
 
@@ -353,7 +297,7 @@ describe('what to run: operating points', () => {
     render(<ScenarioDetail runId="a" scenarios={[scen([rec()])]} />)
     const blurb = document.querySelector('.op-sec .op-s')?.textContent ?? ''
     expect(blurb).toContain(OBJECTIVE.blurb)
-    expect(blurb).toContain(OBJECTIVE.label)   // names tok/s per GPU explicitly
+    expect(blurb).toContain(OBJECTIVE.label)   // names tok/s per accelerator explicitly
   })
 
   it('shows one row per load, pairing the flags with what they delivered', () => {
@@ -415,7 +359,7 @@ describe('what to run: operating points', () => {
     expect(th.getAttribute('aria-sort')).toBe('descending')
   })
 
-  it('picks the best-per-GPU run at each load, matching the objective', () => {
+  it('picks the best-per-accelerator run at each load, matching the objective', () => {
     render(<ScenarioDetail runId="a" scenarios={[scen([
       rec({ id: 'fast-user', conc: 512, pu: 131, tpg: 23, series: '64x TP8 + EP' }),
       rec({ id: 'best-gpu', conc: 512, pu: 83, tpg: 67, series: '64x TP4xDP2 + EP' }),
@@ -700,50 +644,78 @@ describe('click a point for its deployment', () => {
   })
 })
 
-describe('Submit workload choices', () => {
-  const wl = (name: string, kind: 'shape' | 'replay'): WorkloadEntry =>
-    ({ name, kind } as WorkloadEntry)
-  const cat = (workloads: WorkloadEntry[]): Catalog => ({
-    models: [{ name: 'm1' } as Catalog['models'][number]],
+describe('Submit experiment spec', () => {
+  const wl = (name: string, kind: 'shape' | 'replay'): WorkloadEntry => ({ name, kind } as WorkloadEntry)
+  const cat = (workloads: WorkloadEntry[] = [wl('chatbot', 'shape')]): Catalog => ({
+    models: [{ name: 'm1', arch: 'MoE' } as Catalog['models'][number]],
     hardware: [{ name: 'h100' } as Catalog['hardware'][number]],
     workloads, fabrics: [], storage: [], registry: [], versions: {},
   })
-  // Dropdown is a custom listbox (a native select cannot be themed), so the options only
-  // exist in the DOM once it is opened.
+  const spec = () => screen.getByLabelText('Generated experiment spec').textContent ?? ''
+  // Dropdown is a custom listbox, so its options only exist once it is opened.
   const offered = () => {
     fireEvent.click(screen.getByLabelText('Workload'))
     return [...document.querySelectorAll('[role="option"]')].map((o) => o.textContent)
   }
 
-  it('offers shape presets and withholds trace-driven replays', () => {
-    // a replay cannot be run by `blis run --workload` (LoadWorkload refuses it), so offering
-    // it would let someone submit a scenario that cannot start
-    render(<Submit catalog={cat([
-      wl('agentx-mvp', 'replay'), wl('chatbot', 'shape'), wl('sharegpt', 'shape'),
-    ])} mode="pages" />)
-    expect(offered()).toEqual(['chatbot', 'sharegpt'])
-    // and it says why, rather than silently dropping it
-    expect(document.body.textContent).toContain('trace-driven')
+  it('emits an experiment spec, not a legacy scenario', () => {
+    render(<Submit catalog={cat()} mode="pages" />)
+    const y = spec()
+    expect(y).toContain('name: m1-h100-chatbot-16gpu')
+    expect(y).toContain('  gpus: 16')
+    expect(y).toContain('slo: {itl_p99: 20ms}')
+    expect(y).toContain('sweeps:')
+    expect(y).not.toContain('gpu_budget')
+    expect(y).not.toContain('interactivity_floor')
+    const pr = screen.getByRole('link', { name: /Open a pull request/ }).getAttribute('href') ?? ''
+    expect(new URL(pr).searchParams.get('filename')).toBe('experiments/m1-h100-chatbot-16gpu.yaml')
+  })
+
+  it('keeps every sweep on the GPU budget', () => {
+    render(<Submit catalog={cat()} mode="pages" />)
+    // 16 GPUs: tp [8, 4, 2, 1] x num-instances [2, 4, 8, 16] pair up to exactly 16
+    expect(spec()).toContain('num-instances: [2, 4, 8, 16]')
+    expect(spec()).toContain('parallel: {tp: [8, 4, 2, 1], enable_expert_parallel: [true]}')
+  })
+
+  it('lets targets other than inter-token latency be set', () => {
+    render(<Submit catalog={cat()} mode="pages" />)
+    fireEvent.click(screen.getByLabelText('Inter-token latency'))
+    fireEvent.click(screen.getByLabelText('Time to first token'))
+    fireEvent.change(screen.getByLabelText('Time to first token cap'), { target: { value: '1.5' } })
+    expect(spec()).toContain('slo: {ttft_p99: 1.5s}')
+    fireEvent.click(screen.getByLabelText('Time to first token'))
+    expect(spec()).not.toContain('slo:')
+  })
+
+  it('offers replays and adds the replay block for one', () => {
+    render(<Submit catalog={cat([wl('chatbot', 'shape'), wl('agentx-mvp', 'replay')])} mode="pages" />)
+    expect(offered()).toEqual(['chatbot', 'agentx-mvp (replay)'])
+    fireEvent.mouseDown(screen.getByText('agentx-mvp (replay)'))
+    expect(spec()).toContain('  workload: agentx-mvp')
+    expect(spec()).toContain('corpus: .corpus/traces.jsonl')
   })
 
   it('defaults to a shape even when a replay sorts first', () => {
-    // the replay sorts ahead of every shape alphabetically, so a naive workloads[0] default
-    // would emit an unrunnable scenario before the user touches anything
     render(<Submit catalog={cat([wl('agentx-mvp', 'replay'), wl('chatbot', 'shape')])} mode="pages" />)
-    expect(screen.getByLabelText('Workload').textContent).toContain('chatbot')
-    expect(screen.getByLabelText('Generated scenario.yaml').textContent).toContain('preset: chatbot')
-    expect(screen.getByLabelText('Generated scenario.yaml').textContent).not.toContain('agentx-mvp')
+    expect(spec()).toContain('  workload: chatbot')
+    expect(spec()).not.toContain('replay:')
   })
 
-  it('says nothing about replays when the catalog has none', () => {
-    render(<Submit catalog={cat([wl('chatbot', 'shape')])} mode="pages" />)
-    expect(document.body.textContent).not.toContain('trace-driven')
+  it('drops the routing sweep when one instance takes the whole budget', () => {
+    render(<Submit catalog={cat()} mode="pages" />)
+    fireEvent.change(screen.getByLabelText('Accelerator budget'), { target: { value: '8' } })
+    // 8 GPUs still allows 2x TP4 etc.; 1 GPU leaves only 1x TP1
+    expect(spec()).toContain('name: routing')
+    fireEvent.change(screen.getByLabelText('Accelerator budget'), { target: { value: '1' } })
+    expect(spec()).not.toContain('name: routing')
   })
 
-  it('treats a catalog staged before kind existed as all shapes', () => {
-    // an older catalog.json has no `kind`; it predates replays, so nothing should be withheld
-    render(<Submit catalog={cat([{ name: 'chatbot' } as WorkloadEntry])} mode="pages" />)
-    expect(offered()).toEqual(['chatbot'])
+  it('refuses a name the validator would reject', () => {
+    render(<Submit catalog={cat()} mode="pages" />)
+    fireEvent.change(screen.getByLabelText('Spec name'), { target: { value: 'Bad Name' } })
+    expect(screen.queryByRole('link', { name: /Open a pull request/ })).toBeNull()
+    expect(document.body.textContent).toContain('lowercase letters, digits and dashes')
   })
 })
 
@@ -756,9 +728,9 @@ describe('Submit numeric inputs', () => {
   }
   const fields = () => {
     render(<Submit catalog={catalog} mode="pages" />)
-    const [budget, floor] = screen.getAllByRole('spinbutton') as HTMLInputElement[]
-    return { budget, floor }
+    return { budget: screen.getByLabelText('Accelerator budget') as HTMLInputElement, itl: screen.getByLabelText('Inter-token latency cap') as HTMLInputElement }
   }
+  const spec = () => screen.getByLabelText('Generated experiment spec').textContent ?? ''
 
   it('lets you clear the field instead of snapping back to 1', () => {
     const { budget } = fields()
@@ -767,20 +739,19 @@ describe('Submit numeric inputs', () => {
   })
 
   it('lets you retype a value digit by digit', () => {
-    const { floor } = fields()
-    fireEvent.change(floor, { target: { value: '' } })
-    fireEvent.change(floor, { target: { value: '8' } })
-    fireEvent.change(floor, { target: { value: '80' } })
-    expect(floor.value).toBe('80')
-    // interactivity_floor is a mapping (the pipeline calls .get on it), so the value lands on the
-    // nested tok_per_s_per_user key, not a bare `interactivity_floor: 80`.
-    expect(screen.getByLabelText('Generated scenario.yaml').textContent).toContain('tok_per_s_per_user: 80')
+    const { itl } = fields()
+    fireEvent.change(itl, { target: { value: '' } })
+    fireEvent.change(itl, { target: { value: '2' } })
+    fireEvent.change(itl, { target: { value: '25' } })
+    expect(itl.value).toBe('25')
+    expect(spec()).toContain('itl_p99: 25ms')
+    expect(document.body.textContent).toContain('40 tok/s per user')
   })
 
   it('keeps the YAML on the last valid value while the field is empty', () => {
     const { budget } = fields()
     fireEvent.change(budget, { target: { value: '' } })
-    expect(screen.getByLabelText('Generated scenario.yaml').textContent).toContain('gpu_budget: 16')
+    expect(spec()).toContain('gpus: 16')
   })
 
   it('restores the last valid value when an emptied field loses focus', () => {
@@ -800,6 +771,47 @@ describe('scenario cards', () => {
     expect(rows.some((t) => t.startsWith('Workload'))).toBe(true)
     // the model is the card heading, a line of its own
     expect(card.querySelector('.cardhead h3')?.textContent).toBe('m1')
+  })
+
+  it('shows the cluster as count × hardware', () => {
+    render(<Reports scenarios={[mk('a', 'm1', 'B200', 'chatbot', 32, false)]} params={{}} />)
+    const dd = document.querySelector('.card .specrows > div:first-child dd')
+    expect(dd?.textContent).toBe('32 × B200')
+  })
+
+  it('joins the replica count to the shape and leaves node count off the cluster', () => {
+    const s = mk('a', 'm1', 'B200', 'chatbot', 32, false)
+    render(<Reports scenarios={[{ ...s, winner: { ...s.winner, label: '8x TP4 + EP' } }]} params={{}} />)
+    expect(document.querySelector('.card .win')?.textContent).toBe('8×TP4 + EP')
+    expect(document.querySelector('.card .specrows dd')?.textContent).not.toMatch(/nodes/)
+  })
+
+  it('captions the config with its knob variant only, never the replica shape', () => {
+    const s = mk('a', 'm1', 'B200', 'chatbot', 32, false)
+    const withVariant = { ...s, run_id: 'v', winner: { ...s.winner, ni: 8, tp: 4, variant: 'prefix-affinity routing' } }
+    const bare = { ...s, run_id: 'b', winner: { ...s.winner, ni: 8, tp: 4, variant: '' } }
+    render(<Reports scenarios={[withVariant, bare]} params={{}} />)
+    const [a, b] = [...document.querySelectorAll('.card')]
+    expect(a.querySelector('.winsub')?.textContent).toBe('prefix-affinity routing')
+    expect(b.querySelector('.winsub')).toBeNull()
+  })
+
+  it('labels each performance number and gives latency its own column', () => {
+    render(<Reports scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false)]} params={{}} />)
+    const labels = [...document.querySelectorAll('.card .perf .l')].map((l) => l.textContent)
+    expect(labels).toEqual(['Per accelerator', 'Per user', 'Latency p99'])
+  })
+
+  it('drops the latency column when the winner has no latency', () => {
+    const s = mk('a', 'm1', 'H100', 'chatbot', 16, false)
+    render(<Reports scenarios={[{ ...s, winner: { ...s.winner, itl_p99: null as unknown as number } }]} params={{}} />)
+    expect([...document.querySelectorAll('.card .perf .l')].map((l) => l.textContent)).toEqual(['Per accelerator', 'Per user'])
+  })
+
+  it('orders the filter rail model, workload, hardware, then budget', () => {
+    render(<Reports scenarios={[mk('a', 'm1', 'B200', 'chatbot', 32, false)]} params={{}} />)
+    const labels = [...document.querySelectorAll('.facetrail .flabel')].map((p) => p.textContent)
+    expect(labels).toEqual(['Model', 'Workload', 'Hardware', 'Accelerator budget'])
   })
 
   it('does not show the sweep-size "N/M servable" line on the card', () => {
@@ -845,7 +857,7 @@ describe('ScenarioDetail', () => {
       expect.arrayContaining([expect.stringContaining('A'), expect.stringContaining('B')]))
   })
 
-  it('plots the scatter as tok/s/GPU (y) against tok/s/user (x)', () => {
+  it('plots the scatter as tok/s/accelerator (y) against tok/s/user (x)', () => {
     render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, twoSeries())]} />)
     const scatter = [...document.querySelectorAll('svg.chart')]
       .find((s) => s.querySelectorAll('circle.pt').length > 0) as Element
@@ -853,7 +865,7 @@ describe('ScenarioDetail', () => {
     // The axis names are the SHARED ones (issue #13): the standalone report labels the same two
     // quantities from the same lexicon entries, so asserting the literals here would re-introduce
     // exactly the drift this file is now the dashboard half of.
-    expect(axes).toContain(lexLabel('tpg'))   // y: compare GPU utilisation across configs
+    expect(axes).toContain(lexLabel('tpg'))   // y: compare accelerator utilization across configs
     expect(axes).toContain(lexLabel('pu'))    // x: interactivity
   })
 
@@ -882,7 +894,7 @@ describe('ScenarioDetail', () => {
   it('#5 states how finalists were chosen in the briefing', () => {
     render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, twoSeries())]} />)
     expect(screen.getByText(/how these were chosen/i)).toBeTruthy()
-    expect(document.querySelector('.dek.method')?.textContent).toMatch(/tok\/s per GPU/i)
+    expect(document.querySelector('.dek.method')?.textContent).toMatch(/tok\/s per accelerator/i)
   })
 
   it('#9 header terms open a hover/focus tooltip showing the description', () => {
@@ -965,42 +977,44 @@ describe('footer pinned-stack disclosure', () => {
     stack, ...over,
   })
 
-  it('shows BLIS alone at rest, with the transitives collapsed behind it', () => {
+  const pills = () => [...document.querySelectorAll('.footstack .pill')].map((p) => p.textContent?.trim())
+  const toggle = () => screen.getByRole('button')
+
+  it('shows BLIS alone at rest as a plain pill, with a +N toggle beside it', () => {
     render(<Footer catalog={cat()} mode="local" hasMock={false} />)
-    const root = screen.getByRole('button', { expanded: false })
-    expect(root.textContent).toContain('inference-sim')
-    expect(root.textContent).toContain('v0.12.0')
-    // the count tells you there is more without spending the space
-    expect(root.textContent).toContain('+4')
-    // ...and the transitives are genuinely not rendered, not merely hidden
-    expect(document.querySelector('.footdeps')).toBeNull()
+    expect(pills()).toEqual(['inference-sim v0.12.0'])
+    // only the count is clickable, not the BLIS pill
+    expect(screen.getAllByRole('button')).toHaveLength(1)
+    expect(toggle().textContent).toBe('+4 more')
+    expect(toggle().getAttribute('aria-expanded')).toBe('false')
     expect(document.querySelector('.footmeta')?.textContent).not.toContain('blis-catalog')
   })
 
-  it('reveals the kernel, catalog and registry when expanded, and hides them again', () => {
+  it('reveals the deps as the same pills when expanded, and collapses again', () => {
     render(<Footer catalog={cat()} mode="local" hasMock={false} />)
-    fireEvent.click(screen.getByRole('button', { expanded: false }))
-    const deps = [...document.querySelectorAll('.footdeps .pill')].map((p) => p.textContent?.trim())
-    expect(deps).toEqual([
-      'blis-latency-kernel v0.3.0', 'blis-schemas v0.5.0',
+    fireEvent.click(toggle())
+    expect(pills()).toEqual([
+      'inference-sim v0.12.0', 'blis-latency-kernel v0.3.0', 'blis-schemas v0.5.0',
       'blis-catalog 0.4.0', 'blis-registry v0.2.0',
     ])
-    // collapsing puts it back
-    fireEvent.click(screen.getByRole('button', { expanded: true }))
-    expect(document.querySelector('.footdeps')).toBeNull()
+    // every dep carries the same pill class as the root, so they render identically
+    expect(new Set([...document.querySelectorAll('.footstack .pill')].map((p) => p.className))).toEqual(new Set(['pill']))
+    expect(toggle().textContent).toBe('show less')
+    expect(toggle().getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(toggle())
+    expect(pills()).toEqual(['inference-sim v0.12.0'])
+    expect(toggle().textContent).toBe('+4 more')
   })
 
   it('surfaces the latency kernel, which the old flat version pills dropped entirely', () => {
     // KERNEL_REF prices every run but was never in `versions`, so it was invisible.
     render(<Footer catalog={cat()} mode="local" hasMock={false} />)
-    fireEvent.click(screen.getByRole('button', { expanded: false }))
-    expect(document.querySelector('.footdeps')?.textContent).toContain('blis-latency-kernel')
+    fireEvent.click(toggle())
+    expect(document.querySelector('.footstack')?.textContent).toContain('blis-latency-kernel')
   })
 
   it('renders however many deps the pin states, not a fixed four', () => {
-    // blis-vllm is a dependency only from BLIS v0.14.0, where the engine surface moved into it.
-    // At an older pin build_catalog omits the row entirely rather than showing it as "absent",
-    // so the footer must be driven by the array and not a hardcoded count.
+    // blis-vllm is a dependency only from BLIS v0.14.0; build_catalog omits it at older pins.
     const withVllm: Catalog['stack'] = {
       root: { name: 'inference-sim', version: 'v0.15.0', note: 'prices every run' },
       deps: [
@@ -1010,19 +1024,27 @@ describe('footer pinned-stack disclosure', () => {
       ],
     }
     render(<Footer catalog={cat({ stack: withVllm })} mode="local" hasMock={false} />)
-    const root = screen.getByRole('button', { expanded: false })
-    expect(root.textContent).toContain('+5')
-    fireEvent.click(root)
-    const names = [...document.querySelectorAll('.footdeps .pill .pk')].map((p) => p.textContent)
+    expect(toggle().textContent).toBe('+5 more')
+    fireEvent.click(toggle())
+    const names = [...document.querySelectorAll('.footstack .pill .pk')].map((p) => p.textContent)
     expect(names).toEqual([
-      'blis-latency-kernel', 'blis-vllm', 'blis-schemas', 'blis-catalog', 'blis-registry',
+      'inference-sim', 'blis-latency-kernel', 'blis-vllm', 'blis-schemas', 'blis-catalog', 'blis-registry',
     ])
   })
 
-  it('shows no dep count when the stack somehow has none', () => {
-    // defensive: a stack with an empty deps array should read as a plain pill, not "+0"
+  it('shows only the pinned simulator version, with older ones in the tooltip', () => {
+    const multi: Catalog['stack'] = { root: { name: 'inference-sim', version: 'v0.15.0, v0.12.0', note: 'prices every run' }, deps: stack!.deps }
+    render(<Footer catalog={cat({ stack: multi })} mode="local" hasMock={false} />)
+    const root = document.querySelector('.footstack .pill') as Element
+    expect(root.textContent).toContain('v0.15.0')
+    expect(root.textContent).not.toContain('v0.12.0')
+    expect(root.getAttribute('title')).toContain('v0.12.0')
+  })
+
+  it('shows no toggle when the stack somehow has none', () => {
     render(<Footer catalog={cat({ stack: { root: stack!.root, deps: [] } })} mode="local" hasMock={false} />)
-    expect(screen.getByRole('button').textContent).not.toContain('+0')
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(pills()).toEqual(['inference-sim v0.12.0'])
   })
 
   it('falls back to flat pills for a catalog.js generated before `stack` existed', () => {

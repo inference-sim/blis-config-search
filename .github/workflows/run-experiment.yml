@@ -199,9 +199,12 @@ jobs:
 
       - name: Name the report
         id: name
-        # The report dir is the spec's name field, which need not match its file name.
+        # The report dir is the spec's name field, read at the swept commit so a mid-sweep
+        # rename or delete on main can't drop the report.
         run: |
-          echo "name=$(sed -n 's/^name: *//p' "$SPEC" | head -1)" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          git fetch -q --depth 1 origin "$GITHUB_SHA"
+          echo "name=$(git show "$GITHUB_SHA:$SPEC" | sed -n 's/^name: *//p' | head -1)" >> "$GITHUB_OUTPUT"
 
       # A pattern, not a name: a failed sweep leaves no artifact, and that must not error here.
       - uses: actions/download-artifact@v8

@@ -1,0 +1,52 @@
+{
+  "gpu_budget": 512,
+  "hardware": "h200",
+  "headroom": 0.8,
+  "interactivity_floor": {
+    "itl_p99_ms_max": 20.0,
+    "tok_per_s_per_user": 50.0
+  },
+  "model": "kimi-k2.5",
+  "objective": "dual-pareto",
+  "pinned_stack": {
+    "blis": "v0.15.0",
+    "catalog": "0.5.0",
+    "kernel": "v0.5.0",
+    "registry": "v0.3.0",
+    "resolved": {
+      "blis": {
+        "sha256": "46bf00c739eafba4cdb347d4bfdd30bd63e815acaff1525c291b5b8ea947b197"
+      },
+      "catalog": {
+        "commit": "b5550f750cb51571498577fbdc1c68f78cda67db",
+        "describe": "0.5.0"
+      },
+      "registry": {
+        "commit": "96bead697172ab7f2cf8346e04e65b837014d867",
+        "describe": "v0.3.0"
+      }
+    }
+  },
+  "run_id": "kimi-k2-5-h200-multidoc",
+  "seed": 0,
+  "topology_coverage": {
+    "footprint_caps_attempted": [
+      8
+    ],
+    "max_candidates": 12,
+    "omitted": [
+      "128x TP2xDP2",
+      "128x TP1xDP4",
+      "256x TP2 + EP",
+      "256x TP1xDP2 + EP",
+      "256x TP2",
+      "256x TP1xDP2",
+      "512x TP1"
+    ],
+    "probed": 12,
+    "valid_layouts": 19
+  },
+  "workload": {
+    "preset": "multidoc"
+  }
+}

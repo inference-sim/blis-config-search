@@ -1,9 +1,8 @@
 import type { ReactNode } from 'react'
 import type { Catalog, Scenario } from '../types'
-import { catalogDoc, catalogIndex, configLabel, coverageHref, coverageRows, dash, fnum, type CoverageRow } from '../lib'
+import { SPEC_DOC, catalogDoc, catalogIndex, configLabel, coverageHref, coverageRows, dash, fnum, type CoverageRow } from '../lib'
 import { CatalogTable, type Col } from './CatalogTable'
 import { MockBadge } from './Reports'
-import { SPEC_DOC } from './Footer'
 
 /** The winner of the report this row recommends; `coverageRows` already resolved which. */
 const bestWinner = (r: CoverageRow) => r.best?.winner ?? null
@@ -17,7 +16,7 @@ const bestWinner = (r: CoverageRow) => r.best?.winner ?? null
  *
  * Alignment convention: every measured column here is centered (`center` + `numeric`) rather
  * than right-aligned, so the numeric columns read as one set. A new measured column follows
- * suit — mixing the two makes columns of the same kind sit differently.
+ * suit; mixing the two makes columns of the same kind sit differently.
  */
 /** A chip that opens its blis-catalog spec sheet; plain text when the catalog does not list it. */
 export function CatRef({ href, children, className = 'spec' }: { href: string | null; children: ReactNode; className?: string }) {

@@ -21,7 +21,7 @@ export const TAB_LABELS: [Tab, string][] = [
   ['coverage', 'Coverage'],
   ['submit', 'Submit'],
 ]
-export const CATALOG_REPO = 'https://github.com/inference-sim/blis-catalog'
+export const SPEC_DOC = 'https://github.com/inference-sim/blis-config-search/blob/main/experiments/README.md'
 
 /** blis-catalog's docs for the version we pin; the site is published per minor ("0.5.0" → /0.5/). */
 export function catalogBase(catalog: Catalog | null | undefined): string {
@@ -128,8 +128,8 @@ export interface CoverageRow {
   n_real: number
   /**
    * The report whose config this row recommends, resolved once at build time (the table reads
-   * it per cell, per sort). With several reports on one tuple — a re-search, or a narrower
-   * sweep — each named its own winner, so they are ranked on tok/s/accelerator: the dual-Pareto
+   * it per cell, per sort). With several reports on one tuple (a re-search, or a narrower
+   * sweep) each named its own winner, so they are ranked on tok/s/accelerator: the dual-Pareto
    * objective the search picks its own winner on, and the one `operatingPoints` ranks by. Real
    * runs beat synthetic placeholders outright, since a mock's numbers are illustrative.
    */
@@ -393,8 +393,8 @@ function cmpRank(a: number[], b: number[]): number {
 }
 
 /**
- * One operating point per load: the best SERVABLE run at that concurrency on the shared objective
- * — tok/s per accelerator, the efficiency half of the dual-Pareto objective the search optimises and
+ * One operating point per load: the best SERVABLE run at that concurrency on the shared objective:
+ * tok/s per accelerator, the efficiency half of the dual-Pareto objective the search optimises and
  * picks its own winner on (lexicon `objective`, which report.py's `operating_points` reads too).
  *
  * Ranking by per-user rate instead — which the standalone report used to do — made the table

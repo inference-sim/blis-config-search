@@ -622,7 +622,7 @@ function axesSearched(recs: RunRecord[]): string[] {
   return out
 }
 
-/** Scatter: the efficiency/interactivity trade-off — name the most accelerator-efficient point that still
+/** Scatter: the efficiency/interactivity trade-off: name the most accelerator-efficient point that still
  *  holds the floor, and what pushing past it costs. */
 function explainScatter(recs: RunRecord[]): string | null {
   const ok = recs.filter((r) => r.ok && finite(r.tpg) && finite(r.pu))
@@ -756,7 +756,7 @@ export function Explorer({ recs, runId, winner = null, winnerName = null }: {
   const clearPick = () => { setPicked(null); setSticky(null) }
   const regime = useMemo(() => (recs.some((r) => !r.ok && (r.viol ?? []).some((v) => /kv|preempt|memory/i.test(v))) ? 'KV-bound' : 'compute-bound'), [recs])
   // Hovering a chart line emphasises a whole series; the panel previews THAT series' operating
-  // point — its most efficient servable run (max tok/s/accelerator, the objective the search and the
+  // point: its most efficient servable run (max tok/s/accelerator, the objective the search and the
   // "What to run" table rank on). Resolve within the series: operatingPoints(shown) keeps only
   // the single best series per load, so a series that never wins a load would resolve to nothing
   // and the box would stay blank for most lines. Declared BEFORE the early return below so the
@@ -950,10 +950,11 @@ export function ScenarioDetail({ runId, scenarios, catalog }: { runId: string; s
     .filter((f) => key(f) !== key(w))
     .sort((a, b) => b.tps_per_gpu - a.tps_per_gpu || b.tps - a.tps)
     .slice(0, 2)
+  const modelDoc = catalogDoc(catalog, 'model', s.model)
   return (
     <div>
       <p className="crumb"><a href="#/reports">← all reports</a></p>
-      <h2 className="viewhead">{s.model}{catalogDoc(catalog, 'model', s.model) && <a className="specsheet" href={catalogDoc(catalog, 'model', s.model) as string} target="_blank" rel="noreferrer">model spec sheet ↗</a>}{s.synthetic && <MockBadge />}{!s.synthetic && s.caveat && <CaveatBadge caveat={s.caveat} />}</h2>
+      <h2 className="viewhead">{s.model}{modelDoc && <a className="specsheet" href={modelDoc} target="_blank" rel="noreferrer">model spec sheet ↗</a>}{s.synthetic && <MockBadge />}{!s.synthetic && s.caveat && <CaveatBadge caveat={s.caveat} />}</h2>
       <div className="specchips">
         <CatRef href={catalogDoc(catalog, 'hardware', s.hardware)}>{s.hardware}</CatRef><span className="spec">{s.gpu_budget} accelerators</span>
         <CatRef href={catalogDoc(catalog, 'workload', s.workload)}>{s.workload}</CatRef><span className="spec">{s.isl_osl}</span>

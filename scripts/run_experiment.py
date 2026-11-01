@@ -688,7 +688,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                      "engine": shared_engine or None, "replay": replay},
         "slo_ms": slo_ms,
         "interactivity_floor": {"tok_per_s_per_user": floor_rate_from(slo_ms)},
-        "objective": "max output tok/s per GPU subject to the scenario's SLOs",
+        "objective": "max output tok/s per accelerator subject to the scenario's SLOs",
         "sweeps": sweep_results,
         "best_overall": best_of(all_rows),
         "pinned_stack": _pinned_stack(blis, catalog, registry),
@@ -1006,7 +1006,7 @@ def _report_json(report):
         "sections": sections,
         "recommendation_num": num,
         "recommendation_prose": [
-            ("The table below ranks the measured operating points by output tok/s per GPU, the "
+            ("The table below ranks the measured operating points by output tok/s per accelerator, the "
              "objective this experiment selects on, among runs that held the scenario's SLOs."),
         ],
     }

@@ -647,7 +647,7 @@ describe('click a point for its deployment', () => {
 describe('Submit experiment spec', () => {
   const wl = (name: string, kind: 'shape' | 'replay'): WorkloadEntry => ({ name, kind } as WorkloadEntry)
   const cat = (workloads: WorkloadEntry[] = [wl('chatbot', 'shape')]): Catalog => ({
-    models: [{ name: 'm1', arch: 'MoE' } as Catalog['models'][number]],
+    models: [{ name: 'm1', arch: 'MoE', context: 262144 } as Catalog['models'][number]],
     hardware: [{ name: 'h100' } as Catalog['hardware'][number]],
     workloads, fabrics: [], storage: [], registry: [], versions: {},
   })
@@ -694,12 +694,14 @@ describe('Submit experiment spec', () => {
     fireEvent.mouseDown(screen.getByText('agentx-mvp (replay)'))
     expect(spec()).toContain('  workload: agentx-mvp')
     expect(spec()).toContain('corpus: .corpus/traces.jsonl')
+    expect(spec()).toContain('  engine: {max_model_len: 262144}')
   })
 
   it('defaults to a shape even when a replay sorts first', () => {
     render(<Submit catalog={cat([wl('agentx-mvp', 'replay'), wl('chatbot', 'shape')])} mode="pages" />)
     expect(spec()).toContain('  workload: chatbot')
     expect(spec()).not.toContain('replay:')
+    expect(spec()).not.toContain('max_model_len')
   })
 
   it('drops the routing sweep when one instance takes the whole budget', () => {

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Catalog, Mode, Stack } from '../types'
+import { SPEC_DOC } from '../lib'
 
 // The provenance/trust strip, moved out of the old sidebar rail (the left column on the
 // Reports page is now the mock-A facet-filter rail). The pinned-stack disclosure + the
@@ -38,8 +39,6 @@ function StackPills({ stack }: { stack: Stack }) {
     </span>
   )
 }
-
-export const SPEC_DOC = 'https://github.com/inference-sim/blis-config-search/blob/main/experiments/README.md'
 
 export function Footer({ catalog, mode, hasMock }: { catalog: Catalog | null; mode: Mode | null; hasMock: boolean }) {
   // Fall back to the old flat pills for a catalog.js generated before `stack` existed.

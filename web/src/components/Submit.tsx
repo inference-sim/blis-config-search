@@ -1,10 +1,9 @@
 import { useState, type ReactNode } from 'react'
 import type { Catalog, HardwareEntry, Mode, ModelEntry, WorkloadEntry } from '../types'
 import { Dropdown } from './Dropdown'
-import { fnum } from '../lib'
+import { SPEC_DOC, fnum } from '../lib'
 
 const REPO = 'https://github.com/inference-sim/blis-config-search'
-const SPECS_DOC = `${REPO}/blob/main/experiments/README.md`
 const SKILL_DOC = `${REPO}/blob/main/.claude/skills/blis-experiment/SKILL.md`
 // Per-instance footprints stay within one 8-GPU node, so no shape straddles a node boundary.
 const TP_CHOICES = [8, 4, 2, 1]
@@ -23,6 +22,8 @@ export interface Draft {
   /** Replay workloads only: the arm of the catalog this workload belongs to. */
   replay: boolean
   moe: boolean
+  /** The model's catalog context window; a replay sets max_model_len to it. */
+  context: number | null
   gpus: number
   concurrency: number[]
   slo: Record<TargetKey, Target>
@@ -95,6 +96,7 @@ export function buildYaml(d: Draft): string {
     ...(slo.length ? [`  slo: {${slo.join(', ')}}`] : []),
     `  concurrency: ${list(d.concurrency)}`,
     ...(d.replay ? [
+      ...(d.context ? [`  engine: {max_model_len: ${d.context}}   # at the 32k default every replay trace is filtered out`] : []),
       '  replay:',
       '    corpus: .corpus/traces.jsonl   # fetched by scripts/fetch_corpus.py',
       '    grace_period: inf              # the 30s default misreads saturated loads as incomplete',
@@ -210,7 +212,8 @@ const wlFacts = (w?: WorkloadEntry) => !w ? '' : w.kind === 'replay'
 
 export function Submit({ catalog, mode }: { catalog: Catalog; mode: Mode }) {
   const isReplay = (w?: WorkloadEntry) => w?.kind === 'replay'
-  const isMoe = (name: string) => catalog.models.find((m) => m.name === name)?.arch === 'MoE'
+  const modelOf = (name: string) => catalog.models.find((m) => m.name === name)
+  const isMoe = (name: string) => modelOf(name)?.arch === 'MoE'
   // A replay sorts ahead of the shapes, so default to the first shape: it needs no corpus.
   const firstWl = catalog.workloads.find((w) => !isReplay(w)) ?? catalog.workloads[0]
   const firstModel = catalog.models[0]?.name ?? ''
@@ -222,6 +225,7 @@ export function Submit({ catalog, mode }: { catalog: Catalog; mode: Mode }) {
     workload: firstWl?.name ?? '',
     replay: isReplay(firstWl),
     moe: isMoe(firstModel),
+    context: modelOf(firstModel)?.context ?? null,
     gpus: 16,
     concurrency: [4, 16, 64, 256],
     slo: {
@@ -271,7 +275,7 @@ export function Submit({ catalog, mode }: { catalog: Catalog; mode: Mode }) {
       <div className="sb-layout">
         <div className="sb-form">
           <Section title="Model" sub="The catalog model to serve.">
-            <Dropdown ariaLabel="Model" value={d.model} options={opts(catalog.models)} onChange={(v) => set({ model: v, moe: isMoe(v) })} />
+            <Dropdown ariaLabel="Model" value={d.model} options={opts(catalog.models)} onChange={(v) => set({ model: v, moe: isMoe(v), context: modelOf(v)?.context ?? null })} />
             <p className="sb-note">{modelFacts(model)}</p>
           </Section>
 
@@ -341,7 +345,7 @@ export function Submit({ catalog, mode }: { catalog: Catalog; mode: Mode }) {
             <pre className="yaml cmd">{`python3 -I scripts/validate_experiment.py ${file}\npython3 -I scripts/run_experiment.py ${file} --dry-run`}</pre>
             {mode === 'local' && <pre className="yaml cmd">{`python3 -I scripts/run_experiment.py ${file}`}</pre>}
             <p>
-              Need help with knobs? The <a href={SKILL_DOC} target="_blank" rel="noreferrer"><span className="mono">blis-experiment</span></a> skill drafts a spec from a one-line question; the <a href={SPECS_DOC} target="_blank" rel="noreferrer">spec guide</a> lists every rule.
+              Need help with knobs? The <a href={SKILL_DOC} target="_blank" rel="noreferrer"><span className="mono">blis-experiment</span></a> skill drafts a spec from a one-line question; the <a href={SPEC_DOC} target="_blank" rel="noreferrer">spec guide</a> lists every rule.
             </p>
           </details>
         </aside>

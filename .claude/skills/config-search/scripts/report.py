@@ -528,7 +528,7 @@ def _routing_arm(cfg):
 
 def _series_label(tp, ni, par):
     """e.g. "32x TP4xDP2 + EP". dp is shown only when > 1: a label that hid it made TP1 and
-    TP1xDP8 — different deployments on different accelerator counts — read as the same series."""
+    TP1xDP8 (different deployments on different accelerator counts) read as the same series."""
     ep = " + EP" if par.get("enable_expert_parallel") else ""
     dp = par.get("dp", 1) or 1
     shape = f"TP{tp}" + (f"xDP{dp}" if dp > 1 else "")

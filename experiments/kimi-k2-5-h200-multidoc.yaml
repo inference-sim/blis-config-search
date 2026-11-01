@@ -1,0 +1,66 @@
+# Which fleet shape and batch caps give Kimi-K2.5 the most tok/s/GPU on 512 H200s under 10k-token prompts at 20 ms ITL?
+# MoE 384 experts, MLA, no speculator. Floor on v0.15.0: tp x dp >= 8 (width 4 is 138.8 GiB fixed vs a 125.8 GiB budget).
+# Probes: max_num_batched_tokens 32768 is the only lever that met 20 ms ITL; EP off cost 30%; fp8 KV +11%.
+# Bounded to <3 h serial (16-27 s/run): engine sweeps cross the fleet ends, 64 x width 8 and 8 x width 64.
+# Left out: deepep_low_latency (DeepEP buffers exceed 140 GiB), gpu_memory_utilization, eplb, moe_backend and dbo
+# (each within 0.6% or inert), speculative and quantization (none declared; checkpoint fixed), prefix caching (shape workload).
+name: kimi-k2-5-h200-multidoc
+
+scenario:
+  model: kimi-k2.5
+  hardware: h200
+  workload: multidoc
+  gpus: 512
+  slo: {itl_p99: 20ms}
+  concurrency: [64, 256, 1024, 2048]
+
+sweeps:
+  - name: topology-ep
+    narrative: Expert parallelism should win at every width, and wider tp should beat wider dp on 10k-token prompts.
+    num-instances: [64, 32, 16, 8]
+    parallel: {tp: [4, 8, 16], dp: [1, 2, 4, 8], enable_expert_parallel: [true, false]}
+    engine:
+      max_num_batched_tokens: [32768]
+
+  - name: batch-prefill
+    narrative: The per-step token cap should set ITL, and chunking long prefills should trade throughput for ITL below it.
+    num-instances: [64, 8]
+    parallel: {tp: [8], dp: [1, 8], enable_expert_parallel: [true]}
+    engine:
+      max_num_batched_tokens: [4096, 8192, 16384, 32768]
+      long_prefill_token_threshold: [0, 1024]
+
+  - name: kv-capacity
+    # MLA KV is replicated per tp rank, so the seq cap decides whether KV ever binds.
+    narrative: fp8 KV should pay most where many resident 10k-token sequences make KV the binding resource.
+    num-instances: [64, 8]
+    parallel: {tp: [8], dp: [1, 8], enable_expert_parallel: [true]}
+    engine:
+      cache_dtype: [auto, fp8]
+      max_num_seqs: [256, 1024]
+      max_num_batched_tokens: [8192, 32768]
+
+  - name: moe-collective
+    narrative: The all2all gap should widen with EP width and per-step tokens, since 10k prompts push heavy dispatch volume.
+    num-instances: [64, 16, 8]
+    parallel: {tp: [8], dp: [1, 4, 8], enable_expert_parallel: [true]}
+    engine:
+      all2all_backend: [allgather_reducescatter, deepep_high_throughput, deepep_v2, pplx]
+      max_num_batched_tokens: [8192, 32768]
+
+  - name: cudagraph
+    narrative: FULL capture should edge PIECEWISE and NONE should lose heavily, by a similar margin at both fleet ends.
+    num-instances: [64, 8]
+    parallel: {tp: [8], dp: [1, 8], enable_expert_parallel: [true]}
+    engine:
+      cudagraph_mode: [NONE, PIECEWISE, FULL]
+      max_num_batched_tokens: [32768]
+
+  - name: routing
+    narrative: Load- and KV-aware routing should beat random by more on 64 instances than on 8, as long prompts land unevenly.
+    num-instances: [64, 8]
+    parallel: {tp: [8], dp: [1, 8], enable_expert_parallel: [true]}
+    engine:
+      max_num_batched_tokens: [32768]
+    router:
+      endpoint_picker_config: [random.yaml, load-aware.yaml, queue-kv.yaml]

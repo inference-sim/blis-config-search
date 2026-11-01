@@ -32,6 +32,8 @@ D = sys.argv[1]
 for need in ("scenario.json", "pareto.json", "runs.jsonl"):
     if not os.path.isfile(os.path.join(D, need)):
         raise SystemExit(f"{D}: not a completed run directory (no {need})")
+if os.path.isfile(os.path.join(D, "experiment.json")):
+    raise SystemExit(f"{D}: an experiment run directory; run_experiment.py writes its report.json")
 HW_LABEL = {"h100": "H100", "h200": "H200", "b200": "B200"}
 
 sc = json.load(open(f"{D}/scenario.json"))

@@ -29,6 +29,7 @@ import run_blis                     # noqa: E402
 import fetch_corpus as FC           # noqa: E402
 
 EXPERIMENTS = os.path.join(ROOT, "experiments")
+FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata")
 ROUTING = os.path.join(ROOT, "routing")
 
 
@@ -95,7 +96,7 @@ def _structurally_bad():
     are the three classes schema.json's own description says it cannot reach, so requiring the
     schema to catch them would be asserting a contract nobody signed.
     """
-    base, _ = V.load(os.path.join(EXPERIMENTS, "glm-5-3-flash-h100-chatbot-engine.yaml"))
+    base, _ = V.load(os.path.join(FIXTURES, "engine-spec.yaml"))
 
     def mutate(fn):
         doc = copy.deepcopy(base)
@@ -231,7 +232,7 @@ class SchemaAgreesWithValidator(unittest.TestCase):
     def test_the_corpus_is_one_mutation_off_a_spec_that_really_passes(self):
         """Guards the corpus, not the schema: if the base spec stopped validating, every case
         above would 'pass' for the wrong reason and the suite would go quietly blind."""
-        base, err = V.load(os.path.join(EXPERIMENTS, "glm-5-3-flash-h100-chatbot-engine.yaml"))
+        base, err = V.load(os.path.join(FIXTURES, "engine-spec.yaml"))
         self.assertIsNone(err)
         self.assertEqual([], V.validate(copy.deepcopy(base), ROUTING))
         self.assertEqual([], self.errors(base))
@@ -241,7 +242,7 @@ class SchemaAgreesWithValidator(unittest.TestCase):
         the validator really does cover them. Pins the division of labour in both directions: if
         the schema ever grew a knob-name enum, this says so instead of leaving two places to
         maintain the vocabulary; if the validator ever stopped checking, it says that too."""
-        base, _ = V.load(os.path.join(EXPERIMENTS, "glm-5-3-flash-h100-chatbot-engine.yaml"))
+        base, _ = V.load(os.path.join(FIXTURES, "engine-spec.yaml"))
 
         def typo(d):
             d["sweeps"][0].setdefault("engine", {})["max_num_seq"] = [256]
@@ -1796,8 +1797,15 @@ class DryRunPlan(unittest.TestCase):
                 self.assertTrue(s["narrative"], f"{path}: {s['name']} lost its narrative")
 
     def test_scenario_json_carries_the_experiment_narrative(self):
-        doc, _ = V.load(os.path.join(EXPERIMENTS,
-                                     "qwen3-14b-h100-chatbot-kv-precision.yaml"))
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write("name: kv\nscenario: {model: qwen3-14b, hardware: h100, workload: chatbot,"
+                    " gpus: 16, slo: {itl_p99: 20ms}, concurrency: [8]}\nsweeps:\n"
+                    "  - {name: a, narrative: bf16 KV., num-instances: [16],"
+                    " engine: {cache_dtype: [auto]}}\n"
+                    "  - {name: b, narrative: fp8 KV., num-instances: [16],"
+                    " engine: {cache_dtype: [fp8]}}\n")
+        self.addCleanup(os.remove, f.name)
+        doc, _ = V.load(f.name)
         report = E.run_experiment(doc, None, None, None, "/nonexistent", dry_run=True,
                                   verbose=False)
         sc = E._scenario_json(doc, report)
@@ -1861,6 +1869,21 @@ class DryRunPlan(unittest.TestCase):
                     f"arg under {'link' if arg_base == link else 'real'}, "
                     f"out_dir {'link' if out_dir == link else 'real'}")
                 self.assertEqual(["--seed", "42"], rec["cmd"][4:])
+
+    def test_sweep_drops_a_replaced_search_reports_sidecar(self):
+        """A spec named after a config-search report overwrites its dir; gallery.json must go."""
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "gallery.json"), "w") as f:
+                f.write("{}")
+            orig = (E._scenario_json, E._pareto_json, E._report_json)
+            E._scenario_json = E._pareto_json = lambda *a: {}
+            E._report_json = lambda *a: {}
+            try:
+                E._write_run_dir(d, {"name": "x"}, {}, [])
+            finally:
+                E._scenario_json, E._pareto_json, E._report_json = orig
+            self.assertFalse(os.path.exists(os.path.join(d, "gallery.json")))
+            self.assertTrue(os.path.exists(os.path.join(d, "experiment.json")))
 
     def test_relativize_tolerates_a_row_with_no_command(self):
         rec = {"cmd": None}

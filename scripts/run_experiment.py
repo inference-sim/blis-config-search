@@ -908,6 +908,9 @@ def _blis_pin_warning(blis, catalog, registry):
         return ""
 
 
+SEARCH_ONLY_FILES = ("gallery.json",)
+
+
 def _write_run_dir(out_dir, spec, report, runs):
     """Write reports/<name>/ -- the run directory the report and gallery read.
 
@@ -916,6 +919,10 @@ def _write_run_dir(out_dir, spec, report, runs):
     re-checked against the numbers) without the repo it came from.
     """
     os.makedirs(out_dir, exist_ok=True)
+    # A sweep can replace a config-search report of the same name; its sidecar would outlive it.
+    for stale in SEARCH_ONLY_FILES:
+        if os.path.isfile(os.path.join(out_dir, stale)):
+            os.remove(os.path.join(out_dir, stale))
     with open(os.path.join(out_dir, "runs.jsonl"), "w", encoding="utf-8") as f:
         for rec in runs:
             f.write(json.dumps(rec, sort_keys=True) + "\n")

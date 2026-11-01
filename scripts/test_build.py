@@ -137,6 +137,13 @@ def test_validation():
         check(row["winner"]["tps"] == 1842.0, "winner tps projected")
         check(row["hardware"] == "H100", "hardware uppercased")
 
+        # A swept dir has experiment.json and no gallery.json; its counts must still project.
+        os.remove(os.path.join(rd, "gallery.json"))
+        json.dump({"totals": {"configs": 3, "runs": 12, "servable": 5}},
+                  open(os.path.join(rd, "experiment.json"), "w"))
+        _, row = bg.validate_and_project(rd)
+        check((row["n_runs"], row["n_servable"]) == (12, 5), "experiment totals projected")
+
         # bad run_id (directory name)
         bad = os.path.join(tmp, "Bad_Name!!")
         _mk_run_dir(bad, "x")

@@ -93,6 +93,8 @@ def validate_and_project(run_dir):
     scenario = report_py._read_json(os.path.join(run_dir, "scenario.json"), {})
     pareto = report_py._read_json(os.path.join(run_dir, "pareto.json"), {})
     gallery = report_py._read_json(os.path.join(run_dir, "gallery.json"), {})
+    # A swept dir has no sidecar; its run counts live in experiment.json.
+    totals = report_py._read_json(os.path.join(run_dir, "experiment.json"), {}).get("totals") or {}
     if not pareto:
         raise Invalid(f"{name}: pareto.json missing or empty")
 
@@ -188,8 +190,8 @@ def validate_and_project(run_dir):
         "model": model, "hardware": hardware.upper(), "gpu_budget": gpu_budget,
         "workload": workload, "isl_osl": str(gallery.get("isl_osl", "")),
         "floor": floor_str, "headroom": scenario.get("headroom"),
-        "n_runs": int(gallery.get("n_runs", 0) or 0),
-        "n_servable": int(gallery.get("n_servable", 0) or 0),
+        "n_runs": int(gallery.get("n_runs", totals.get("runs", 0)) or 0),
+        "n_servable": int(gallery.get("n_servable", totals.get("servable", 0)) or 0),
         "generated": str(gallery.get("generated", "")),
         "winner": winner, "finalists": finalists,
         "reason": str(gallery.get("reason") or (pareto.get("winner") or {}).get("reason", "")),

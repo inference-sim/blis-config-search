@@ -1,13 +1,50 @@
 {
+  "experiment": {
+    "description": "",
+    "name": "glm53flash-h100-chatbot-kernel-0001",
+    "sweeps": [
+      {
+        "name": "shape-and-ep",
+        "narrative": "EP should pay most at tp 8 and fade as dp grows, since wider dp already splits the batch and EP adds dispatch on top."
+      },
+      {
+        "name": "batch-caps-vs-shape",
+        "narrative": "The sequence cap should bind well before the token cap on short chatbot prompts, and hardest on one wide instance."
+      },
+      {
+        "name": "moe-dispatch",
+        "narrative": "DeepEP backends should lose to allgather/pplx at small dp and close the gap as dp widens, where the token cap admits them."
+      },
+      {
+        "name": "eplb-vs-dispatch",
+        "narrative": "Redundant experts should help most at the widest dp, where an uneven expert load stalls the most ranks."
+      },
+      {
+        "name": "graph-capture",
+        "narrative": "Full graph capture should beat PIECEWISE by a few percent at every shape, and NONE should roughly halve throughput."
+      },
+      {
+        "name": "capture-size-vs-batch",
+        "narrative": "A small capture size should cost throughput only when max_num_seqs lets the batch grow past it."
+      },
+      {
+        "name": "prefill-admission",
+        "narrative": "Chunking prefills below the 256-token median prompt should cut the ITL tail but cost throughput, most on one wide instance."
+      },
+      {
+        "name": "routing",
+        "narrative": "With only two endpoints, routing should move throughput a few percent at most, slightly more when the batch cap binds."
+      }
+    ]
+  },
   "gpu_budget": 16,
   "hardware": "h100",
-  "headroom": 0.8,
+  "headroom": 1.0,
   "interactivity_floor": {
-    "itl_p99_ms_max": 20.0,
     "tok_per_s_per_user": 50.0
   },
   "model": "glm-5.3-flash",
-  "objective": "dual-pareto",
+  "objective": "max output tok/s per GPU subject to the scenario's SLOs",
   "pinned_stack": {
     "blis": "v0.15.0",
     "catalog": "0.5.0",
@@ -15,7 +52,9 @@
     "registry": "v0.3.0",
     "resolved": {
       "blis": {
-        "sha256": "46bf00c739eafba4cdb347d4bfdd30bd63e815acaff1525c291b5b8ea947b197"
+        "commit": "762f1605ff27cd825d6b2cb2d9e991cd4b864c91",
+        "describe": "v0.15.0",
+        "sha256": "49948939a5a58bcb86e034df0a00fa93cf2c636b7a5a3a128a2b4b9764e73a68"
       },
       "catalog": {
         "commit": "b5550f750cb51571498577fbdc1c68f78cda67db",
@@ -28,23 +67,9 @@
     }
   },
   "run_id": "glm53flash-h100-chatbot-kernel-0001",
-  "seed": 0,
-  "topology_coverage": {
-    "footprint_caps_attempted": [
-      8
-    ],
-    "max_candidates": 12,
-    "omitted": [
-      "4x TP2xDP2",
-      "4x TP1xDP4",
-      "8x TP2 + EP",
-      "8x TP1xDP2 + EP",
-      "8x TP2",
-      "8x TP1xDP2",
-      "16x TP1"
-    ],
-    "probed": 12,
-    "valid_layouts": 19
+  "seed": 42,
+  "slos": {
+    "itl_p99": "20ms"
   },
   "workload": {
     "preset": "chatbot"

@@ -1,62 +1,93 @@
 {
+  "experiment": {
+    "description": "",
+    "name": "deepseek-v4-1-flash-b200-agentx-4node",
+    "sweeps": [
+      {
+        "name": "topology-ep",
+        "narrative": "Mid-width tp4 instances should win at the SLO, and EP should matter little at dp 1 but cost throughput once dp spreads experts wider."
+      },
+      {
+        "name": "batch-tokens",
+        "narrative": "The per-step token cap should bind harder on four wide instances than on eight narrow ones, since long agentic prompts concentrate per instance."
+      },
+      {
+        "name": "prefill-chunking",
+        "narrative": "Capping prefill chunks should cost throughput at both widths, more where fewer decodes share each instance's token budget."
+      },
+      {
+        "name": "kv-capacity",
+        "narrative": "nvfp4 KV and a higher memory fraction both buy cache, so on a prefix-heavy replay they should substitute rather than add."
+      },
+      {
+        "name": "moe-collective",
+        "narrative": "A DeepEP backend should beat the allgather default at EP 16, and the gap should shrink or flip at EP 4."
+      },
+      {
+        "name": "drafting",
+        "narrative": "dspark should raise throughput more on narrow instances, while K=5 may push wide shapes past the 20ms ITL floor."
+      },
+      {
+        "name": "routing-prefix-cache",
+        "narrative": "Prefix-affinity with caching on should lead and random with caching off trail, and the gap should widen from four instances to eight."
+      },
+      {
+        "name": "cudagraph",
+        "narrative": "Full capture should edge out the PIECEWISE default by a few percent."
+      }
+    ]
+  },
   "gpu_budget": 32,
   "hardware": "b200",
-  "headroom": 0.8,
+  "headroom": 1.0,
   "interactivity_floor": {
-    "itl_p99_ms_max": 20.0,
     "tok_per_s_per_user": 50.0
   },
   "model": "deepseek-v4.1-flash",
-  "objective": "dual-pareto",
+  "objective": "max output tok/s per GPU subject to the scenario's SLOs",
   "pinned_stack": {
-    "blis": "v0.12.0",
-    "catalog": "0.4.0",
-    "catalog_declared_at_search_time": "0.3.0",
-    "kernel": "v0.3.0",
-    "registry": "v0.2.0",
+    "blis": "v0.15.0",
+    "catalog": "0.5.0",
+    "kernel": "v0.5.0",
+    "registry": "v0.3.0",
     "resolved": {
       "blis": {
-        "sha256": "02b5b0335501b46b7a90235484be5e644159b946a40def4fbd6392b760b132c0"
+        "commit": "762f1605ff27cd825d6b2cb2d9e991cd4b864c91",
+        "describe": "v0.15.0",
+        "sha256": "49948939a5a58bcb86e034df0a00fa93cf2c636b7a5a3a128a2b4b9764e73a68"
       },
       "catalog": {
-        "commit": "ba542f0986c9f39fc1f18619b94f655a654d9940",
-        "describe": "0.4.0"
+        "commit": "b5550f750cb51571498577fbdc1c68f78cda67db",
+        "describe": "0.5.0"
       },
       "registry": {
-        "commit": "7f6662d7188dc3dc873a37623e1f7bbfe1d6081b",
-        "describe": "v0.2.0"
+        "commit": "96bead697172ab7f2cf8346e04e65b837014d867",
+        "describe": "v0.3.0"
       }
     }
   },
   "run_id": "deepseek-v4-1-flash-b200-agentx-4node",
   "seed": 42,
-  "topology_coverage": {
-    "derived_post_hoc": true,
-    "footprint_caps_attempted": [
-      8
-    ],
-    "max_candidates": 12,
-    "omitted": [
-      "8x TP2xDP2",
-      "8x TP1xDP4",
-      "16x TP2 + EP",
-      "16x TP1xDP2 + EP",
-      "16x TP2",
-      "16x TP1xDP2",
-      "32x TP1"
-    ],
-    "probed": 12,
-    "valid_layouts": 19
+  "slos": {
+    "itl_p99": "20ms"
   },
   "workload": {
     "replay": {
+      "_overrides": {
+        "grace_period": {
+          "catalog": "30s",
+          "spec": "inf"
+        }
+      },
       "benchmark_duration": "900s",
-      "corpus": "/Users/jchen/go/src/inference-sim/inference-sim/traces.jsonl",
-      "corpus_cache": "/tmp/agx-cache",
+      "category": "coding",
+      "corpus": ".corpus/traces.jsonl",
+      "corpus_cache": "/tmp/agx-cache-b200",
       "corpus_sha256": "e39cd2ff3eba21d4a3664be51da743ac3d2149a1933898cafc7bfeac8147eeef",
       "grace_period": "inf",
       "max_context_length": "max_model_len",
-      "scenario": "inferencex-agentx-mvp"
+      "scenario": "inferencex-agentx-mvp",
+      "thinking": "on"
     }
   }
 }

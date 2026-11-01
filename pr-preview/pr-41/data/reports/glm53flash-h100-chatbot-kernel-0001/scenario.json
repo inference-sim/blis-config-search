@@ -1,0 +1,52 @@
+{
+  "gpu_budget": 16,
+  "hardware": "h100",
+  "headroom": 0.8,
+  "interactivity_floor": {
+    "itl_p99_ms_max": 20.0,
+    "tok_per_s_per_user": 50.0
+  },
+  "model": "glm-5.3-flash",
+  "objective": "dual-pareto",
+  "pinned_stack": {
+    "blis": "v0.15.0",
+    "catalog": "0.5.0",
+    "kernel": "v0.5.0",
+    "registry": "v0.3.0",
+    "resolved": {
+      "blis": {
+        "sha256": "46bf00c739eafba4cdb347d4bfdd30bd63e815acaff1525c291b5b8ea947b197"
+      },
+      "catalog": {
+        "commit": "b5550f750cb51571498577fbdc1c68f78cda67db",
+        "describe": "0.5.0"
+      },
+      "registry": {
+        "commit": "96bead697172ab7f2cf8346e04e65b837014d867",
+        "describe": "v0.3.0"
+      }
+    }
+  },
+  "run_id": "glm53flash-h100-chatbot-kernel-0001",
+  "seed": 0,
+  "topology_coverage": {
+    "footprint_caps_attempted": [
+      8
+    ],
+    "max_candidates": 12,
+    "omitted": [
+      "4x TP2xDP2",
+      "4x TP1xDP4",
+      "8x TP2 + EP",
+      "8x TP1xDP2 + EP",
+      "8x TP2",
+      "8x TP1xDP2",
+      "16x TP1"
+    ],
+    "probed": 12,
+    "valid_layouts": 19
+  },
+  "workload": {
+    "preset": "chatbot"
+  }
+}

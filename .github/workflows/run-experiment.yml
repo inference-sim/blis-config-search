@@ -17,8 +17,8 @@ name: run-experiment
 #     and publishing is still gated on a human merging that PR.
 #   * It never writes to main. The bot PR is the only output.
 #
-# A maintainer can also dispatch this manually for a spec that is already on main (e.g. to
-# re-run after a pins bump), which is the `workflow_dispatch` path below.
+# A maintainer can also dispatch this manually with `spec: all` or a list of specs already on
+# main (e.g. to regenerate reports after a pins or sweeper change).
 
 on:
   push:
@@ -28,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       spec:
-        description: "experiments/<name>.yaml to run (blank = every spec the push changed)"
+        description: "'all', or space-separated experiments/<name>.yaml (blank = specs the last commit changed)"
         required: false
       timeout:
         description: "per-BLIS-run timeout in seconds"
@@ -55,14 +55,19 @@ jobs:
           BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          if [ -n "$REQUESTED" ]; then
-            case "$REQUESTED" in
-              experiments/*.yaml) ;;
-              *) echo "spec must be experiments/<name>.yaml" >&2; exit 1 ;;
-            esac
-            case "$REQUESTED" in *..*|/*) echo "unsafe path" >&2; exit 1 ;; esac
-            test -f "$REQUESTED" || { echo "no such spec: $REQUESTED" >&2; exit 1; }
-            specs="$REQUESTED"
+          if [ "$REQUESTED" = all ]; then
+            specs="$(ls experiments/*.yaml)"
+          elif [ -n "$REQUESTED" ]; then
+            specs=""
+            for spec in $REQUESTED; do
+              case "$spec" in
+                experiments/*.yaml) ;;
+                *) echo "spec must be experiments/<name>.yaml: $spec" >&2; exit 1 ;;
+              esac
+              case "$spec" in *..*|/*) echo "unsafe path: $spec" >&2; exit 1 ;; esac
+              test -f "$spec" || { echo "no such spec: $spec" >&2; exit 1; }
+              specs="$specs$spec"$'\n'
+            done
           else
             # Only the specs this push touched (all its commits, not just the last one).
             old=HEAD^

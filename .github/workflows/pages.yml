@@ -38,8 +38,13 @@ permissions:
   contents: read
 
 concurrency:
-  # Every deploy commits to the one gh-pages branch, so they queue rather than race on it.
-  group: pages-deploy
+  # One group per PR (and one for main), NOT one shared group: GitHub keeps at most one pending
+  # run per group and cancels the older pending run when a newer one arrives, so a single
+  # shared group silently cancelled previews whenever 3+ PRs pushed at once (e.g. a regen batch).
+  # Runs for the same PR still queue in order. Runs for different PRs may push gh-pages
+  # concurrently; each touches only its own pr-preview/pr-<N>/ folder, and the deploy action
+  # (JamesIves, also used inside pr-preview-action) rebases and retries a rejected push.
+  group: pages-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:

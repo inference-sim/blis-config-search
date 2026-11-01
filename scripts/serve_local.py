@@ -1,22 +1,15 @@
 #!/usr/bin/env python3
-"""Local companion server for the config-search webpage (LOCAL mode only).
+"""Local static server for the config-search webpage (LOCAL mode only).
 
     cd web && SITE_MODE=local npm run build            # build the local-mode SPA (web/dist)
-    python3 -I scripts/serve_local.py                  # serve web/dist + accept submissions
+    python3 -I scripts/serve_local.py                  # serve web/dist
 
-Serves the built SPA in `web/dist/` AND exposes a tiny submission API the Submit tab calls
-when the site was built in local mode. This is the "run the search yourself" path from the
-spec (§12): it runs ONLY on a user's own machine, against their own LLM, and is never part
-of the GitHub Pages deployment (the Pages build is `--mode pages` and has no server).
+Serves the built SPA in `web/dist/`. In local mode the Submit tab shows the
+`run_experiment.py` command to run yourself; nothing here runs BLIS or an LLM.
 
 Endpoints (local only):
-  GET  /                      -> the static site (site/index.html, assets, reports)
+  GET  /                      -> the static site (web/dist/index.html, assets, reports)
   GET  /api/health            -> {"ok": true, "mode": "local"}
-  POST /api/search            -> validate a submitted Scenario, write submissions/<name>.yaml,
-                                 and return the command to run the config-search skill against
-                                 it. (The search BRAIN is an LLM; this server does not embed an
-                                 LLM — it prepares the submission and hands back the exact,
-                                 reviewable command, so the user stays in control of what runs.)
 
 Stdlib only; no third-party deps. Binds localhost by default.
 
@@ -26,127 +19,10 @@ this outside the sandbox or with sandbox.network.allowLocalBinding enabled.
 import argparse
 import json
 import os
-import re
-import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from functools import partial
-
-try:
-    import yaml
-except ImportError:
-    yaml = None
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-# The webpage is the built Vite SPA in web/dist/ (the old static site/ is just the data
-# producer's output). Serve web/dist so ONE server both serves the page and answers
-# /api/search — otherwise the page and the API are on different origins and "Run" fails.
 SITE = os.environ.get("CS_SITE_DIR") or os.path.join(ROOT, "web", "dist")
-SUBMISSIONS = os.path.join(ROOT, "submissions")
-
-NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
-KNOWN_HARDWARE = {"h100", "h200", "gb200-nvl72", "gb300", "a100-80", "a100-sxm", "b200", "b300", "l40s"}
-
-
-def _catalog():
-    """The staged catalog. The Vite build stages it as web/dist/data/catalog.json; the old
-    static build wrote catalog.js. Try both."""
-    candidates = [
-        os.path.join(SITE, "data", "catalog.json"),   # Vite SPA build
-        os.path.join(SITE, "catalog.js"),             # legacy static build
-    ]
-    for path in candidates:
-        try:
-            txt = open(path, encoding="utf-8").read()
-            return json.loads(txt[txt.index("{"):txt.rindex("}") + 1])
-        except Exception:
-            continue
-    return {}
-
-
-def _catalog_models():
-    return {m["name"] for m in _catalog().get("models", [])}
-
-
-# The shape presets the catalog has always carried. Used ONLY as the floor when no catalog
-# is staged (CI, a fresh clone): without it an unstaged build would accept any workload
-# string, which is weaker than this validator was before it read the catalog.
-BASE_WORKLOADS = {"chatbot", "summarization", "contentgen", "multidoc"}
-
-
-def _catalog_shape_workloads():
-    """Workload presets a search can actually run: the catalog's SHAPES only.
-
-    `blis run --workload <name>` resolves the name to <catalog>/workloads/<name>.yaml and
-    loads it with blis-schemas' LoadWorkload, which REFUSES a replay workload ("is a replay
-    workload, not a shape"). So a trace-driven replay (agentx-mvp) is not submittable through
-    this form — accepting one would queue a run that cannot start. Replays need a corpus
-    fetched and digest-checked and a lane count, which this Scenario shape cannot express.
-
-    Shapes are read from the catalog rather than hardcoded so a preset added upstream (the
-    ShareGPT one, say) is submittable without editing a list here."""
-    wls = _catalog().get("workloads") or []
-    if not wls:
-        return set(BASE_WORKLOADS)
-    # `kind` is absent in a catalog.json staged before the two arms were distinguished; such
-    # a build predates replays, so every entry in it is a shape.
-    return {w["name"] for w in wls if w.get("kind", "shape") != "replay"}
-
-
-def validate_scenario(body):
-    """Validate a submitted Scenario dict. Returns (scenario_dict, errors[])."""
-    errors = []
-    model = str(body.get("model", "")).strip()
-    hardware = str(body.get("hardware", "")).strip().lower()
-    workload = str(body.get("workload", "")).strip().lower()
-    try:
-        gpu_budget = int(body.get("gpu_budget"))
-    except (TypeError, ValueError):
-        gpu_budget = None
-
-    models = _catalog_models()
-    if models and model not in models:
-        errors.append(f"unknown model {model!r}")
-    elif not model:
-        errors.append("model is required")
-    if hardware not in KNOWN_HARDWARE:
-        errors.append(f"unknown hardware {hardware!r}")
-    shapes = _catalog_shape_workloads()
-    if workload not in shapes:
-        # name the alternatives: the caller cannot know which presets this catalog defines,
-        # and a replay rejected here is rejected for a reason worth stating
-        replays = {w["name"] for w in (_catalog().get("workloads") or []) if w.get("kind") == "replay"}
-        if workload in replays:
-            errors.append(f"workload {workload!r} is a trace-driven replay, which a search "
-                          f"scenario cannot run; choose a shape preset: {', '.join(sorted(shapes))}")
-        else:
-            errors.append(f"unknown workload {workload!r} (catalog defines: {', '.join(sorted(shapes))})")
-    elif not workload:
-        errors.append("workload is required")
-    if not gpu_budget or not (1 <= gpu_budget <= 100000):
-        errors.append("gpu_budget must be an integer in [1, 100000]")
-
-    floor = body.get("interactivity_floor") or {}
-    rate = floor.get("tok_per_s_per_user", 50)
-    try:
-        rate = float(rate)
-    except (TypeError, ValueError):
-        errors.append("interactivity_floor.tok_per_s_per_user must be numeric")
-        rate = 50.0
-
-    scenario = {
-        "model": model, "hardware": hardware, "gpu_budget": gpu_budget,
-        "workload": {"preset": workload},
-        "objective": "dual-pareto",
-        "interactivity_floor": {"tok_per_s_per_user": rate},
-        "headroom": 0.8, "seed": 0,
-    }
-    return scenario, errors
-
-
-def scenario_yaml(scenario):
-    if yaml:
-        return yaml.safe_dump(scenario, sort_keys=False)
-    return json.dumps(scenario, indent=2)  # fallback: valid YAML is a superset of JSON
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -163,64 +39,6 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/health":
             return self._send(200, {"ok": True, "mode": "local"})
         return self._serve_static()
-
-    def do_POST(self):
-        if self.path != "/api/search":
-            return self._send(404, {"error": "not found"})
-        try:
-            n = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(n) or b"{}")
-        except (ValueError, TypeError):
-            return self._send(400, {"error": "invalid JSON body"})
-
-        scenario, errors = validate_scenario(body)
-        if errors:
-            return self._send(400, {"error": "validation failed", "details": errors})
-
-        # Derive a safe submission name and write the scenario for the user to run/commit.
-        name = body.get("name") or f"{scenario['model']}-{scenario['hardware']}-{scenario['workload']['preset']}"
-        name = re.sub(r"[^a-z0-9-]", "-", name.lower()).strip("-")[:64] or "submission"
-        if not NAME_RE.match(name):
-            name = "submission"
-        os.makedirs(SUBMISSIONS, exist_ok=True)
-        out = os.path.join(SUBMISSIONS, f"{name}.yaml")
-        with open(out, "w", encoding="utf-8") as f:
-            f.write(scenario_yaml(scenario))
-
-        # Run the deterministic mini-search (real BLIS runs) for this scenario, then restage the
-        # SPA data so the new report shows up. This is local-only; the public Pages site never
-        # runs this. If the pinned binary is missing or nothing is servable, report it cleanly.
-        import subprocess
-        search = os.path.join(ROOT, "scripts", "run_search.py")
-        proc = subprocess.run([sys.executable, "-I", search, "--submission", out],
-                              capture_output=True, text=True, cwd=ROOT)
-        log = (proc.stdout + proc.stderr).strip()
-        if proc.returncode != 0:
-            return self._send(200, {
-                "ok": False, "submission": os.path.relpath(out, ROOT),
-                "error": "search did not produce a report",
-                "log": log,
-                "hint": "If the binary is missing, build it (see SETUP.md). The scenario YAML is saved.",
-            })
-        # Rebuild the SPA so web/dist (what this server serves) includes the new run dir.
-        # `npm run build` runs prebuild=stage:data, which re-runs build_gallery + staging, then
-        # vite emits dist/. REUSE_SITE=1 keeps the data producer from rebuilding the whole site
-        # tree twice (run_search already wrote the new report into reports/).
-        build = subprocess.run(["npm", "run", "build"],
-                               capture_output=True, text=True, cwd=os.path.join(ROOT, "web"),
-                               env={**os.environ, "SITE_MODE": "local"})
-        if build.returncode != 0:
-            return self._send(200, {
-                "ok": False, "submission": os.path.relpath(out, ROOT),
-                "error": "report generated but site rebuild failed",
-                "log": log + "\n--- build ---\n" + (build.stdout + build.stderr)[-800:],
-            })
-        return self._send(200, {
-            "ok": True,
-            "submission": os.path.relpath(out, ROOT),
-            "log": log,
-            "next": "Report generated and the site rebuilt. Refresh the Reports tab to see it.",
-        })
 
     def _serve_static(self):
         # Minimal, path-traversal-safe static file server rooted at site/.
@@ -259,7 +77,6 @@ def main(argv=None):
                          "  cd web && SITE_MODE=local npm run build")
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"config-search local server on http://{args.host}:{args.port}  (serving {os.path.relpath(SITE, ROOT)}/)")
-    print("  POST /api/search accepts a Scenario; the search runs via the config-search skill in your Claude session.")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Scenario } from './types'
+import type { Catalog, Scenario } from './types'
 import * as lex from './lexicon'
 
 // ---------- formatting ----------
@@ -9,31 +9,47 @@ export function fnum(v: number | null | undefined, digits = 1): string {
 }
 
 // ---------- routing ----------
-export type Tab = 'reports' | 'coverage' | 'models' | 'workloads' | 'gpus' | 'submit'
+export type Tab = 'reports' | 'coverage' | 'submit'
 export interface Route {
   tab: Tab
   runId: string | null
   params: Record<string, string>
 }
-/** Every addressable route. Models/workloads/gpus resolve but are not in the primary nav. */
-const TABS: Tab[] = ['reports', 'coverage', 'models', 'workloads', 'gpus', 'submit']
-/** The primary nav. The three per-entity spec sheets are demoted to links on Coverage: with
- *  only a handful of scenarios searched, a full spec-sheet per catalog entry is mostly empty
- *  `reports` cells, and the question a reader arrives with — what has been searched? — was
- *  split across all three. Coverage answers it in one table. */
+const TABS: Tab[] = ['reports', 'coverage', 'submit']
 export const TAB_LABELS: [Tab, string][] = [
   ['reports', 'Reports'],
   ['coverage', 'Coverage'],
   ['submit', 'Submit'],
 ]
-/** The spec sheets, as the secondary links Coverage discloses them through. */
-export const CATALOG_TABS: [Tab, string][] = [
-  ['models', 'Models'],
-  ['workloads', 'Workloads'],
-  ['gpus', 'GPUs'],
-]
-/** A demoted spec-sheet route — not a primary tab, so the nav marks Coverage active for it. */
-export const isCatalogTab = (t: Tab): boolean => CATALOG_TABS.some(([tab]) => tab === t)
+export const SPEC_DOC = 'https://github.com/inference-sim/blis-config-search/blob/main/experiments/README.md'
+
+/** blis-catalog's docs for the version we pin; the site is published per minor ("0.5.0" → /0.5/). */
+export function catalogBase(catalog: Catalog | null | undefined): string {
+  const m = (catalog?.versions['blis-catalog'] ?? '').match(/^v?(\d+)\.(\d+)/)
+  return `https://inference-sim.github.io/blis-catalog/${m ? `${m[1]}.${m[2]}` : 'latest'}/reference`
+}
+
+/** The catalog's top-level listings, in the catalog's own names. */
+export const catalogIndex = (catalog: Catalog | null | undefined) => {
+  const base = catalogBase(catalog)
+  return [
+    { label: 'Models', href: `${base}/models/` },
+    { label: 'Chips', href: `${base}/hardware/` },
+    { label: 'Workloads', href: `${base}/workloads/` },
+  ]
+}
+
+/** One entry's spec-sheet page, or null when the catalog does not list it (no dead links). */
+export function catalogDoc(catalog: Catalog | null | undefined, kind: 'model' | 'hardware' | 'workload', name: string): string | null {
+  const base = catalogBase(catalog)
+  const n = name.toLowerCase()
+  const is = (v: string | null | undefined) => v?.toLowerCase() === n
+  if (kind === 'model') return !catalog || catalog.models.some((e) => is(e.name)) ? `${base}/models/${encodeURIComponent(n)}/` : null
+  if (kind === 'hardware') return !catalog || catalog.hardware.some((e) => is(e.name)) ? `${base}/hardware/` : null
+  // a replay is reported under its scenario name ("inferencex-agentx-mvp"), not its file name
+  const replay = catalog?.workloads.some((w) => w.kind === 'replay' && (is(w.name) || is(w.scenario)))
+  return `${base}/workloads/${replay ? '#replay-workloads' : '#shapes'}`
+}
 
 export function parseRoute(hash: string): Route {
   const h = hash.replace(/^#\/?/, '')
@@ -99,10 +115,6 @@ export function topConfigs(filtered: Scenario[]): { items: Scenario[]; mockOnly:
   return { items: filtered, mockOnly: filtered.length > 0 }
 }
 
-export function countReports(scenarios: Scenario[], key: 'model' | 'hardware' | 'workload', name: string): number {
-  return scenarios.filter((s) => lc(s[key]) === lc(name)).length
-}
-
 // ---------- coverage: what has actually been searched ----------
 
 /** One searched combination: the filter tuple plus every report behind it. */
@@ -116,15 +128,15 @@ export interface CoverageRow {
   n_real: number
   /**
    * The report whose config this row recommends, resolved once at build time (the table reads
-   * it per cell, per sort). With several reports on one tuple — a re-search, or a narrower
-   * sweep — each named its own winner, so they are ranked on tok/s/GPU: the dual-Pareto
+   * it per cell, per sort). With several reports on one tuple (a re-search, or a narrower
+   * sweep) each named its own winner, so they are ranked on tok/s/accelerator: the dual-Pareto
    * objective the search picks its own winner on, and the one `operatingPoints` ranks by. Real
    * runs beat synthetic placeholders outright, since a mock's numbers are illustrative.
    */
   best: Scenario | null
 }
 
-/** Best of a tuple's reports on tok/s/GPU, preferring real runs. See `CoverageRow.best`. */
+/** Best of a tuple's reports on tok/s/accelerator, preferring real runs. See `CoverageRow.best`. */
 function pickBest(scenarios: Scenario[], n_real: number): Scenario | null {
   const pool = n_real > 0 ? scenarios.filter((s) => !s.synthetic) : scenarios
   let best: Scenario | null = null
@@ -135,12 +147,12 @@ function pickBest(scenarios: Scenario[], n_real: number): Scenario | null {
 }
 
 /**
- * The inverse of `countReports`: instead of asking "how many reports mention this catalog
+ * Instead of asking "how many reports mention this catalog
  * entry?", enumerate the (model, hardware, workload, budget) tuples that HAVE a report and
  * group by them. Only searched combinations get a row, so there is no empty-cell row to read
  * past. Order is the scenario list's own — build_gallery already emits it sorted.
  *
- * Grouping is case-insensitive, matching `countReports` and `canonFilters`. build_gallery
+ * Grouping is case-insensitive, matching `canonFilters`. build_gallery
  * normalizes hardware (lowercases it, validates against the known set, emits upper) but passes
  * model and workload straight through from the scenario yaml, so two runs of one combination
  * can disagree on case; they are still one combination. Display uses the first spelling seen.
@@ -364,7 +376,7 @@ export function runFlags(r: RunRecord): { flag: string; value: string }[] {
   return out
 }
 
-/** Rank one run on the SHARED objective (lexicon `objective`): tok/s per GPU, then fleet tok/s,
+/** Rank one run on the SHARED objective (lexicon `objective`): tok/s per accelerator, then fleet tok/s,
  *  then tok/s per user. Returned as a tuple compared left to right, so the tiebreaks make the
  *  pick deterministic rather than record-order dependent. Mirrors report.py `_obj_rank`. */
 function objRank(r: RunRecord): number[] {
@@ -381,13 +393,13 @@ function cmpRank(a: number[], b: number[]): number {
 }
 
 /**
- * One operating point per load: the best SERVABLE run at that concurrency on the shared objective
- * — tok/s per GPU, the efficiency half of the dual-Pareto objective the search optimises and
+ * One operating point per load: the best SERVABLE run at that concurrency on the shared objective:
+ * tok/s per accelerator, the efficiency half of the dual-Pareto objective the search optimises and
  * picks its own winner on (lexicon `objective`, which report.py's `operating_points` reads too).
  *
  * Ranking by per-user rate instead — which the standalone report used to do — made the table
  * recommend the fastest-per-user shape while the card above recommended the most efficient one:
- * on kimi-k2.5 that is TP8+EP at 23 tok/s/GPU versus the winner's TP4xDP2+EP at 67. That was the
+ * on kimi-k2.5 that is TP8+EP at 23 tok/s/accelerator versus the winner's TP4xDP2+EP at 67. That was the
  * cross-surface disagreement issue #13 is about; both tables now rank on this one objective.
  */
 export function operatingPoints(recs: RunRecord[]): RunRecord[] {
@@ -400,4 +412,16 @@ export function operatingPoints(recs: RunRecord[]): RunRecord[] {
     if (c > 0 || (c === 0 && String(r.id) < String(cur.id))) best.set(r.conc, r)
   }
   return [...best.values()].sort((a, b) => (a.conc as number) - (b.conc as number))
+}
+
+// ---------- scenario card ----------
+/** "8x TP4 + EP" → "8×TP4 + EP": in mono the space after the count reads as a gap. */
+export const configLabel = (label: string): string => label.replace(/^(\d+)x /, '$1×')
+
+/** "replay · ~84,556 in / 928 out per request" → "84.6k in / 928 out"; "" when absent. */
+export function workloadShape(islOsl: string | null | undefined): string {
+  const m = (islOsl ?? '').match(/~?([\d,]+)\s*in\s*\/\s*~?([\d,]+)\s*out/)
+  if (!m) return ''
+  const k = (v: string) => { const x = Number(v.replace(/,/g, '')); return x >= 1000 ? `${fnum(x / 1000, 1)}k` : fnum(x, 0) }
+  return `${k(m[1])} in / ${k(m[2])} out`
 }

@@ -34,7 +34,7 @@ scripts/
                              catalog.js, mode.js, per-scenario records.json; copy app/)
   build_catalog.py           sibling BLIS repos -> catalog.js (read-only, pinned, graceful)
   gen_demo_reports.py        synthesize the clearly-MOCK demo run dirs (incl. runs.jsonl)
-  serve_local.py             local companion server (local mode only)
+  serve_local.py             local static server for web/dist (local mode only)
   run_submission.py          CI automation entrypoint (validate + delegate to approved runner)
   test_build.py              hermetic tests (validation, determinism, --no-mock, catalog)
 site/                        build output = Pages publish root (gitignored; CI rebuilds)
@@ -58,20 +58,19 @@ dirs (the production view); `--reports` / `--out` / `--siblings` override paths.
 
 ```bash
 python3 -I scripts/build_gallery.py --mode local
-python3 -I scripts/serve_local.py             # serves site/ + POST /api/search
+python3 -I scripts/serve_local.py             # serves web/dist
 ```
 
-In local mode the Submit tab is live: it validates your Scenario, writes
-`submissions/<name>.yaml`, and hands back the exact `/config-search` command to run in your
-own Claude session against your own LLM. Nothing is sent to a hosted service.
+In local mode the Submit tab also shows the `run_experiment.py` command for the drafted spec,
+to run on your own machine. Nothing is sent to a hosted service.
 
 ## Modes
 
 - **pages** (default; GitHub Pages): fully static. The Submit form is an editable *builder* —
   it produces a copy-ready `scenario.yaml` + a prefilled GitHub PR link + PR steps — but
   **cannot execute** a search (no run button, no network). This is the only mode CI publishes.
-- **local** (`--mode local`, your machine): same site, but the Submit form can POST to the
-  local companion server to run the search. Never published.
+- **local** (`--mode local`, your machine): same site, plus the local `run_experiment.py`
+  command on the Submit tab. Never published.
 
 ## Adding a scenario (the PR → CI → publish path)
 

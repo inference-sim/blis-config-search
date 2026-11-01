@@ -78,12 +78,12 @@ describe('operatingPoints', () => {
       p('c', 256, { tpg: 40, series: 'X' }),
     ])
     expect(rows.map((x) => x.conc)).toEqual([128, 256])
-    expect(rows[0].id).toBe('b')          // 67 > 50 tok/s/GPU
+    expect(rows[0].id).toBe('b')          // 67 > 50 tok/s/accelerator
   })
 
-  it('ranks by tok/s per GPU, the objective the winner is chosen on', () => {
+  it('ranks by tok/s per accelerator, the objective the winner is chosen on', () => {
     // On kimi-k2.5 the per-USER best at every load is TP8+EP, while the search's winner is
-    // TP4xDP2+EP (best per GPU). Ranking per-user made the table contradict the recommendation.
+    // TP4xDP2+EP (best per accelerator). Ranking per-user made the table contradict the recommendation.
     const rows = operatingPoints([
       p('fast-user', 512, { pu: 131, tpg: 23, series: '64x TP8 + EP' }),
       p('best-gpu', 512, { pu: 83, tpg: 67, series: '64x TP4xDP2 + EP' }),
@@ -156,7 +156,7 @@ describe('report/dashboard parity (issue #13)', () => {
     ...over,
   })
 
-  it('ranks operating points on tok/s per GPU, the stated shared objective', () => {
+  it('ranks operating points on tok/s per accelerator, the stated shared objective', () => {
     expect(OBJECTIVE.key).toBe('tpg')
     // The exact disagreement from the issue: the fastest-per-user run is not the most efficient.
     const pts = operatingPoints([
@@ -175,7 +175,7 @@ describe('report/dashboard parity (issue #13)', () => {
   })
 
   it('falls through the declared tiebreak chain when the objective ties', () => {
-    // equal tok/s/GPU -> fleet tok/s decides (the first tiebreak the lexicon declares)
+    // equal tok/s/accelerator -> fleet tok/s decides (the first tiebreak the lexicon declares)
     const pts = operatingPoints([
       rec({ id: 'small', tpg: 50, cl: 400, gpus: 8 }),
       rec({ id: 'big', tpg: 50, cl: 5000, gpus: 100 }),
@@ -184,7 +184,7 @@ describe('report/dashboard parity (issue #13)', () => {
     expect(OBJECTIVE.tiebreak[0]).toBe('cl')
   })
 
-  it('skips runs with no per-GPU figure rather than ranking them as infinitely inefficient', () => {
+  it('skips runs with no per-accelerator figure rather than ranking them as infinitely inefficient', () => {
     const pts = operatingPoints([rec({ id: 'no-tpg', tpg: null }), rec({ id: 'ok', tpg: 50 })])
     expect(pts.map((p) => p.id)).toEqual(['ok'])
   })

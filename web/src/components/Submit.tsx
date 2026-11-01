@@ -1,52 +1,136 @@
-import { useState } from 'react'
-import type { Catalog, Mode } from '../types'
+import { useState, type ReactNode } from 'react'
+import type { Catalog, HardwareEntry, Mode, ModelEntry, WorkloadEntry } from '../types'
 import { Dropdown } from './Dropdown'
-import { fnum } from '../lib'
+import { SPEC_DOC, fnum } from '../lib'
 
 const REPO = 'https://github.com/inference-sim/blis-config-search'
+const SKILL_DOC = `${REPO}/blob/main/.claude/skills/blis-experiment/SKILL.md`
+// Per-instance footprints stay within one 8-GPU node, so no shape straddles a node boundary.
+const TP_CHOICES = [8, 4, 2, 1]
+const ROUTERS = ['random.yaml', 'queue.yaml', 'load-aware.yaml', 'queue-kv.yaml', 'prefix-affinity.yaml']
 
+export type Unit = 'us' | 'ms' | 's'
+export interface Target { on: boolean; value: number; unit: Unit }
+export type TargetKey = 'itl_p99' | 'ttft_p99' | 'e2e_p99'
 export interface Draft {
+  /** null = derived from the scenario, so it follows the pickers until someone types one. */
+  name: string | null
+  question: string
   model: string
   hardware: string
   workload: string
-  gpu_budget: number
-  floor: number
+  /** Replay workloads only: the arm of the catalog this workload belongs to. */
+  replay: boolean
+  moe: boolean
+  /** The model's catalog context window; a replay sets max_model_len to it. */
+  context: number | null
+  gpus: number
+  concurrency: number[]
+  slo: Record<TargetKey, Target>
+  sweeps: { batch: boolean; routing: boolean }
 }
-const HEADROOM = 0.8
+
+export const TARGETS: { key: TargetKey; label: string; hint: string }[] = [
+  { key: 'itl_p99', label: 'Inter-token latency', hint: 'p99 gap between streamed tokens' },
+  { key: 'ttft_p99', label: 'Time to first token', hint: 'p99 wait before the first token' },
+  { key: 'e2e_p99', label: 'End-to-end latency', hint: 'p99 time for a whole request' },
+]
+
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+export const autoName = (d: Pick<Draft, 'model' | 'hardware' | 'workload' | 'gpus'>) =>
+  slug(`${d.model}-${d.hardware}-${d.workload}-${d.gpus}gpu`).slice(0, 64).replace(/-+$/, '')
+export const specName = (d: Draft) => d.name ?? autoName(d)
+export const NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
+
+const toMs = (t: Target) => t.value * (t.unit === 's' ? 1000 : t.unit === 'us' ? 0.001 : 1)
+/** An ITL cap is a per-user streaming rate: 20 ms/token == 50 tok/s/user. */
+export const perUserRate = (t: Target) => 1000 / toMs(t)
+
+/** The (tp, instances) pairs that use exactly `gpus`, widest instance first. */
+export function shapes(gpus: number): { tp: number; ni: number }[] {
+  return TP_CHOICES.filter((tp) => gpus % tp === 0).map((tp) => ({ tp, ni: gpus / tp }))
+}
+
+interface Sweep { name: string; narrative: string; shapes: { tp: number; ni: number }[]; engine?: string; router?: string; values: number }
+
+export function plannedSweeps(d: Draft): Sweep[] {
+  const all = shapes(d.gpus)
+  const ends = all.length > 1 ? [all[0], all[all.length - 1]] : all
+  const multi = all.filter((s) => s.ni > 1)
+  const out: Sweep[] = [{
+    name: 'topology',
+    narrative: 'Wider instances should win at the SLO until the extra replicas of narrow ones buy back more than their per-step latency costs.',
+    shapes: all, values: 1,
+  }]
+  if (d.sweeps.batch) out.push({
+    name: 'batch-cap-vs-shape',
+    narrative: 'The sequence cap should bind hard on one wide instance and barely on many narrow ones.',
+    shapes: ends, engine: 'max_num_seqs: [32, 128, 512]', values: 3,
+  })
+  if (d.sweeps.routing && multi.length > 0) out.push({
+    name: 'routing',
+    narrative: 'Load-aware routing should beat random most where instances are many and queues form.',
+    shapes: multi.length > 1 ? [multi[0], multi[multi.length - 1]] : multi,
+    router: `endpoint_picker_config: [${ROUTERS.join(', ')}]`, values: ROUTERS.length,
+  })
+  return out
+}
+
+export const runCount = (d: Draft) =>
+  plannedSweeps(d).reduce((n, s) => n + s.shapes.length * s.values, 0) * d.concurrency.length
+
+const list = (xs: (number | string | boolean)[]) => `[${xs.join(', ')}]`
+const duration = (t: Target) => `${+t.value.toFixed(3)}${t.unit}`
 
 export function buildYaml(d: Draft): string {
-  return [
-    `model: ${d.model}`,
-    `hardware: ${d.hardware}`,
-    `gpu_budget: ${d.gpu_budget}`,
-    `workload:`,
-    `  preset: ${d.workload}`,
-    `objective: dual-pareto`,
-    // interactivity_floor is a mapping everywhere it is read (run_search, report.py, serve_local
-    // all call .get on it). A bare `interactivity_floor: 50` crashes the pipeline with
-    // AttributeError, so emit the nested shape.
-    `interactivity_floor:`,
-    `  tok_per_s_per_user: ${d.floor}   # min tok/s/user`,
-    `headroom: ${HEADROOM}`,
+  const slo = TARGETS.filter((t) => d.slo[t.key].on).map((t) => `${t.key}: ${duration(d.slo[t.key])}`)
+  const lines = [
+    `# ${d.question.trim() || 'What question does this experiment answer? (one line, as a # comment)'}`,
+    `name: ${specName(d)}`,
     '',
-  ].join('\n')
+    'scenario:',
+    `  model: ${d.model}`,
+    `  hardware: ${d.hardware}`,
+    `  workload: ${d.workload}`,
+    `  gpus: ${d.gpus}`,
+    ...(slo.length ? [`  slo: {${slo.join(', ')}}`] : []),
+    `  concurrency: ${list(d.concurrency)}`,
+    ...(d.replay ? [
+      ...(d.context ? [`  engine: {max_model_len: ${d.context}}   # at the 32k default every replay trace is filtered out`] : []),
+      '  replay:',
+      '    corpus: .corpus/traces.jsonl   # fetched by scripts/fetch_corpus.py',
+      '    grace_period: inf              # the 30s default misreads saturated loads as incomplete',
+    ] : []),
+    '',
+    'sweeps:',
+  ]
+  for (const s of plannedSweeps(d)) {
+    const par = [`tp: ${list(s.shapes.map((x) => x.tp))}`, ...(d.moe ? ['enable_expert_parallel: [true]'] : [])]
+    lines.push(
+      `  - name: ${s.name}`,
+      `    narrative: ${s.narrative}`,
+      `    num-instances: ${list(s.shapes.map((x) => x.ni))}`,
+      `    parallel: {${par.join(', ')}}`,
+      ...(s.engine ? [`    engine: {${s.engine}}`] : []),
+      ...(s.router ? [`    router: {${s.router}}`] : []),
+      '',
+    )
+  }
+  return lines.join('\n')
 }
+
 export function prLink(d: Draft, yaml: string): string {
-  // CI (generate-report.yml) only accepts submissions/*.yaml; a scenarios/ path is rejected.
-  const q = new URLSearchParams({ filename: `submissions/${d.model}-${d.hardware}-${d.workload}.yaml`, value: yaml })
+  // GitHub's new-file page forks the repo for anyone without write access, then offers the PR.
+  const q = new URLSearchParams({ filename: `experiments/${specName(d)}.yaml`, value: yaml })
   return `${REPO}/new/main?${q.toString()}`
 }
 
 /**
- * A number field you can actually edit: the text being typed lives in local state, so clearing
- * the box (or passing through "" / "1." on the way to another value) leaves it cleared instead of
- * snapping back to a fallback. `onCommit` fires only for values that parse to a positive number,
- * so the draft — and the YAML below — hold the last good value while the box is mid-edit. On blur
- * an empty or invalid box is restored to that last good value.
+ * A number field you can actually edit: the typed text lives in local state, so clearing the box
+ * leaves it cleared. `onCommit` fires only for positive numbers; blur restores the last good value.
  */
 function NumField({ value, integer, onCommit, ariaLabel }: { value: number; integer?: boolean; onCommit: (n: number) => void; ariaLabel: string }) {
   const [text, setText] = useState(String(value))
-  // Track the committed value so an outside change (not our own typing) refreshes the box.
   const [seen, setSeen] = useState(value)
   if (seen !== value) {
     setSeen(value)
@@ -56,15 +140,15 @@ function NumField({ value, integer, onCommit, ariaLabel }: { value: number; inte
     <input
       className="numin"
       type="number"
-      min={1}
-      step={1}
+      min={integer ? 1 : 0}
+      step={integer ? 1 : 'any'}
       aria-label={ariaLabel}
       value={text}
       onChange={(e) => {
         setText(e.target.value)
         const n = Number(e.target.value)
         if (e.target.value.trim() !== '' && Number.isFinite(n) && n > 0) {
-          const v = integer ? Math.round(n) : n
+          const v = integer ? Math.max(1, Math.round(n)) : n
           setSeen(v)
           onCommit(v)
         }
@@ -74,27 +158,96 @@ function NumField({ value, integer, onCommit, ariaLabel }: { value: number; inte
   )
 }
 
+/** Comma-separated load ladder; commits a sorted, de-duplicated list of positive integers. */
+export function parseLadder(text: string): number[] | null {
+  const parts = text.split(/[\s,]+/).filter(Boolean)
+  const ns = parts.map(Number)
+  if (!parts.length || ns.some((n) => !Number.isInteger(n) || n < 1)) return null
+  return [...new Set(ns)].sort((a, b) => a - b)
+}
+
+function LadderField({ value, onCommit }: { value: number[]; onCommit: (v: number[]) => void }) {
+  const [text, setText] = useState(value.join(', '))
+  const bad = parseLadder(text) === null
+  return (
+    <input
+      className={`numin${bad ? ' bad' : ''}`}
+      aria-label="Concurrency ladder"
+      aria-invalid={bad}
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value)
+        const v = parseLadder(e.target.value)
+        if (v) onCommit(v)
+      }}
+      onBlur={() => setText(value.join(', '))}
+    />
+  )
+}
+
+function Section({ title, sub, children }: { title: string; sub: string; children: ReactNode }) {
+  return (
+    <section className="sb-sec">
+      <div className="sb-sechead"><h3>{title}</h3><p>{sub}</p></div>
+      <div className="sb-secbody">{children}</div>
+    </section>
+  )
+}
+
+/** One muted line of catalog facts under a picker, e.g. "MoE · 128 experts · 16k context". */
+const facts = (xs: (string | number | null | false | undefined)[]) => xs.filter(Boolean).join(' · ')
+const modelFacts = (m?: ModelEntry) => !m ? '' : facts([
+  m.arch === 'MoE' && m.experts ? `MoE, ${m.experts} experts` : m.arch,
+  m.params && `${fnum(m.params.total_b, 0)}B params`,
+  m.context && `${fnum(m.context / 1024, 0)}k context`,
+  m.quant,
+])
+const hwFacts = (h?: HardwareEntry) => !h ? '' : facts([
+  h.memory_gib && `${fnum(h.memory_gib, 0)} GiB`,
+  h.bw_tbs && `${fnum(h.bw_tbs, 2)} TB/s`,
+])
+const wlFacts = (w?: WorkloadEntry) => !w ? '' : w.kind === 'replay'
+  ? facts(['trace replay', w.corpus])
+  : facts(['synthetic', w.isl_mean && `~${fnum(w.isl_mean, 0)} tok in`, w.osl_mean && `~${fnum(w.osl_mean, 0)} tok out`])
+
 export function Submit({ catalog, mode }: { catalog: Catalog; mode: Mode }) {
-  // Only SHAPE workloads are submittable. `blis run --workload <name>` resolves the name to
-  // <catalog>/workloads/<name>.yaml through blis-schemas' LoadWorkload, which refuses a replay
-  // ("is a replay workload, not a shape"), so offering a trace-driven replay here would let
-  // someone queue a run that cannot start. A replay also needs its corpus fetched and
-  // digest-checked and a lane count, none of which this Scenario expresses.
-  // `kind` is absent in a catalog staged before the two arms were distinguished; such a build
-  // predates replays, so treat its entries as shapes.
-  const shapes = catalog.workloads.filter((w) => (w.kind ?? 'shape') !== 'replay')
-  const replayCount = catalog.workloads.length - shapes.length
+  const isReplay = (w?: WorkloadEntry) => w?.kind === 'replay'
+  const modelOf = (name: string) => catalog.models.find((m) => m.name === name)
+  const isMoe = (name: string) => modelOf(name)?.arch === 'MoE'
+  // A replay sorts ahead of the shapes, so default to the first shape: it needs no corpus.
+  const firstWl = catalog.workloads.find((w) => !isReplay(w)) ?? catalog.workloads[0]
+  const firstModel = catalog.models[0]?.name ?? ''
   const [d, setD] = useState<Draft>({
-    model: catalog.models[0]?.name ?? '',
+    name: null,
+    question: '',
+    model: firstModel,
     hardware: catalog.hardware.find((h) => h.name === 'h100')?.name ?? catalog.hardware[0]?.name ?? '',
-    workload: shapes[0]?.name ?? '',
-    gpu_budget: 16,
-    floor: 50,
+    workload: firstWl?.name ?? '',
+    replay: isReplay(firstWl),
+    moe: isMoe(firstModel),
+    context: modelOf(firstModel)?.context ?? null,
+    gpus: 16,
+    concurrency: [4, 16, 64, 256],
+    slo: {
+      itl_p99: { on: true, value: 20, unit: 'ms' },
+      ttft_p99: { on: false, value: 2, unit: 's' },
+      e2e_p99: { on: false, value: 30, unit: 's' },
+    },
+    sweeps: { batch: true, routing: true },
   })
   const [copied, setCopied] = useState(false)
-  const [log, setLog] = useState('')
-  const [running, setRunning] = useState(false)
+  const set = (patch: Partial<Draft>) => setD((p) => ({ ...p, ...patch }))
+  const setTarget = (k: TargetKey, patch: Partial<Target>) => setD((p) => ({ ...p, slo: { ...p.slo, [k]: { ...p.slo[k], ...patch } } }))
+
   const yaml = buildYaml(d)
+  const name = specName(d)
+  const nameOk = NAME_RE.test(name)
+  const file = `experiments/${name}.yaml`
+  const runs = runCount(d)
+  const multi = shapes(d.gpus).some((s) => s.ni > 1)
+  const model = catalog.models.find((m) => m.name === d.model)
+  const hw = catalog.hardware.find((h) => h.name === d.hardware)
+  const wl = catalog.workloads.find((w) => w.name === d.workload)
 
   const copy = async () => {
     try {
@@ -105,93 +258,98 @@ export function Submit({ catalog, mode }: { catalog: Catalog; mode: Mode }) {
       setCopied(false)
     }
   }
-  const run = async () => {
-    setRunning(true)
-    setLog('')
-    try {
-      // serve_local.validate_scenario reads interactivity_floor.tok_per_s_per_user (nested) but
-      // workload as a flat string. The flat Draft sent `floor`, which the server never read, so
-      // every local run fell back to the default floor (posting 120 came back as 50). Send the
-      // nested floor; keep workload flat to match the server's reader.
-      const body = {
-        model: d.model, hardware: d.hardware, gpu_budget: d.gpu_budget,
-        workload: d.workload,
-        interactivity_floor: { tok_per_s_per_user: d.floor },
-      }
-      const res = await fetch('/api/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      if (!res.ok || !res.body) {
-        setLog(`Request failed: HTTP ${res.status}. Is the local server running (serve_local)?`)
-      } else {
-        const reader = res.body.getReader()
-        const dec = new TextDecoder()
-        for (;;) {
-          const { value, done } = await reader.read()
-          if (done) break
-          setLog((l) => l + dec.decode(value, { stream: true }))
-        }
-      }
-    } catch (e) {
-      setLog(`Could not reach /api/search: ${e instanceof Error ? e.message : String(e)}`)
-    } finally {
-      setRunning(false)
-    }
-  }
   const opts = (xs: { name: string }[]) => xs.map((x) => ({ value: x.name, label: x.name }))
+  const wlOpts = catalog.workloads.map((w) => ({ value: w.name, label: isReplay(w) ? `${w.name} (replay)` : w.name }))
 
   return (
-    <div>
-      <h2 className="viewhead">Submit a scenario</h2>
-      <p className="dek">
-        Build a scenario and {mode === 'local' ? 'run it on this machine, or ' : ''}open a pull request with the generated <span className="mono">scenario.yaml</span>.{' '}
-        {mode === 'pages' && <>This hosted page <b>does not run simulations</b>; CI runs the search after your PR is opened.</>}
-      </p>
-      <div className="formgrid">
-        <label className="field"><span>model</span>
-          <Dropdown ariaLabel="Model" value={d.model} options={opts(catalog.models)} onChange={(v) => setD({ ...d, model: v })} />
-        </label>
-        <label className="field"><span>hardware</span>
-          <Dropdown ariaLabel="Hardware" value={d.hardware} options={opts(catalog.hardware)} onChange={(v) => setD({ ...d, hardware: v })} />
-        </label>
-        <label className="field"><span>workload</span>
-          <Dropdown ariaLabel="Workload" value={d.workload} options={opts(shapes)} onChange={(v) => setD({ ...d, workload: v })} />
-        </label>
-        <label className="field"><span>gpu_budget</span>
-          <NumField ariaLabel="GPU budget" value={d.gpu_budget} integer onCommit={(n) => setD({ ...d, gpu_budget: n })} />
-        </label>
-        <label className="field"><span>floor (tok/s/user)</span>
-          <NumField ariaLabel="Interactivity floor" value={d.floor} onCommit={(n) => setD({ ...d, floor: n })} />
-        </label>
-      </div>
+    <div className="sb">
+      <h2 className="viewhead">Design an experiment</h2>
+      <p className="dek">An experiment is a sweep spec in <span className="mono">experiments/</span>. Merged specs are run by CI and published as reports.</p>
 
-      <div className="tbl-title">scenario.yaml</div>
-      <pre className="yaml" aria-label="Generated scenario.yaml">{yaml}</pre>
-      <div className="actions">
-        <button type="button" className="btn" onClick={copy}>{copied ? 'Copied' : 'Copy YAML'}</button>
-        <a className="btn" href={prLink(d, yaml)} target="_blank" rel="noreferrer">Open prefilled GitHub PR ↗</a>
-        {mode === 'local' && (
-          <button type="button" className="btn primary" disabled={running} onClick={run}>{running ? 'Running…' : 'Run on your machine'}</button>
-        )}
-      </div>
-      <p className="pts-note">Budget <span className="num">{fnum(d.gpu_budget, 0)}</span> GPUs, floor <span className="num">{fnum(d.floor, 0)}</span> tok/s/user, headroom <span className="num">{HEADROOM}</span>.</p>
-      {replayCount > 0 && (
-        <p className="pts-note">
-          The workload list is the catalog's <a href="#/workloads">shape presets</a>. Its{' '}
-          <span className="num">{replayCount}</span> trace-driven{' '}
-          {replayCount === 1 ? 'replay' : 'replays'} {replayCount === 1 ? 'is' : 'are'} not
-          offered here: a replay needs its corpus fetched and digest-checked and a lane count,
-          which this scenario does not express.
-        </p>
-      )}
-
-      {mode === 'local' && log !== '' && <pre className="log" aria-label="Run output">{log}</pre>}
-
-      <div className="tbl-title steps">How to submit</div>
-      <ol className="steps">
-        <li>Choose the model, hardware, workload, GPU budget and interactivity floor above.</li>
-        <li>Click <b>Open prefilled GitHub PR</b> (or copy the YAML into a new file under <span className="mono">scenarios/</span>).</li>
-        <li>Commit the file to a new branch and open a pull request.</li>
-        <li>CI runs the BLIS search and publishes the report; the scenario then appears under Reports.</li>
+      <ol className="sb-how">
+        <li><b>Fill in the form.</b> The spec preview updates as you go.</li>
+        <li><b>Open a pull request.</b> GitHub opens the file prefilled.</li>
+        <li><b>Merge it.</b> CI runs it and a bot PR adds the report.</li>
       </ol>
+
+      <div className="sb-layout">
+        <div className="sb-form">
+          <Section title="Model" sub="The catalog model to serve.">
+            <Dropdown ariaLabel="Model" value={d.model} options={opts(catalog.models)} onChange={(v) => set({ model: v, moe: isMoe(v), context: modelOf(v)?.context ?? null })} />
+            <p className="sb-note">{modelFacts(model)}</p>
+          </Section>
+
+          <Section title="Hardware" sub="Every run uses exactly this many accelerators.">
+            <div className="sb-pair">
+              <Dropdown ariaLabel="Hardware" value={d.hardware} options={opts(catalog.hardware)} onChange={(v) => set({ hardware: v })} />
+              <span className="sb-times">×</span>
+              <NumField ariaLabel="Accelerator budget" value={d.gpus} integer onCommit={(n) => set({ gpus: n })} />
+            </div>
+            <p className="sb-note">{facts([hwFacts(hw), `shapes ${shapes(d.gpus).map((x) => `${x.ni}×TP${x.tp}`).join(', ')}`])}</p>
+          </Section>
+
+          <Section title="Workload" sub="The traffic and the loads to measure at.">
+            <Dropdown ariaLabel="Workload" value={d.workload} options={wlOpts}
+              onChange={(v) => set({ workload: v, replay: isReplay(catalog.workloads.find((w) => w.name === v)) })} />
+            <p className="sb-note">{wlFacts(wl)}</p>
+            <label className="sb-inline"><span>concurrency</span>
+              <LadderField value={d.concurrency} onCommit={(v) => set({ concurrency: v })} />
+            </label>
+          </Section>
+
+          <Section title="Targets" sub="Servable configs must meet every checked target.">
+            {TARGETS.map((t) => {
+              const v = d.slo[t.key]
+              return (
+                <div key={t.key} className={`sb-target${v.on ? '' : ' off'}`}>
+                  <label className="sb-check">
+                    <input type="checkbox" checked={v.on} aria-label={t.label} onChange={(e) => setTarget(t.key, { on: e.target.checked })} />
+                    {t.label} <small>p99</small>
+                  </label>
+                  <NumField ariaLabel={`${t.label} cap`} value={v.value} onCommit={(n) => setTarget(t.key, { value: n })} />
+                  <Dropdown ariaLabel={`${t.label} unit`} value={v.unit} onChange={(u) => setTarget(t.key, { unit: u as Unit })}
+                    options={(['us', 'ms', 's'] as Unit[]).map((u) => ({ value: u, label: u }))} />
+                </div>
+              )
+            })}
+            {d.slo.itl_p99.on && <p className="sb-note">An inter-token cap of {duration(d.slo.itl_p99)} is about <span className="num">{fnum(perUserRate(d.slo.itl_p99), 1)}</span> tok/s per user.</p>}
+          </Section>
+
+          <Section title="Sweeps" sub="Starter arms; edit the YAML to add more.">
+            <label className="sb-check"><input type="checkbox" checked disabled aria-label="Topology sweep" />topology <small>always on, the baseline</small></label>
+            <label className="sb-check"><input type="checkbox" checked={d.sweeps.batch} aria-label="Batch cap sweep" onChange={(e) => set({ sweeps: { ...d.sweeps, batch: e.target.checked } })} />batch cap vs. shape</label>
+            <label className="sb-check"><input type="checkbox" checked={d.sweeps.routing && multi} disabled={!multi} aria-label="Routing sweep" onChange={(e) => set({ sweeps: { ...d.sweeps, routing: e.target.checked } })} />routing policies{!multi && <small>needs more than one instance</small>}</label>
+          </Section>
+
+          <Section title="Name" sub="Also the report's directory.">
+            <input className={`numin${nameOk ? '' : ' bad'}`} aria-label="Spec name" aria-invalid={!nameOk} value={name}
+              onChange={(e) => set({ name: e.target.value === '' ? null : e.target.value })} />
+            {!nameOk && <p className="sb-note warn">Use lowercase letters, digits and dashes (64 at most).</p>}
+            <input className="numin" aria-label="Question" placeholder="The question it answers (optional)" value={d.question} onChange={(e) => set({ question: e.target.value })} />
+          </Section>
+        </div>
+
+        <aside className="sb-preview">
+          <div className="sb-specbar">
+            <span className="mono">{file}</span>
+            <span className="sb-runs"><span className="num">{fnum(runs, 0)}</span> runs</span>
+          </div>
+          <pre className="yaml" aria-label="Generated experiment spec">{yaml}</pre>
+          <div className="actions">
+            <a className={`btn primary${nameOk ? '' : ' off'}`} href={nameOk ? prLink(d, yaml) : undefined} aria-disabled={!nameOk} target="_blank" rel="noreferrer">Open a pull request ↗</a>
+            <button type="button" className="btn" onClick={copy}>{copied ? 'Copied' : 'Copy YAML'}</button>
+          </div>
+          <details className="sb-more">
+            <summary>Check it before you submit</summary>
+            <p>CI runs these on every PR. Aim for under about 3 hours of serial runtime.</p>
+            <pre className="yaml cmd">{`python3 -I scripts/validate_experiment.py ${file}\npython3 -I scripts/run_experiment.py ${file} --dry-run`}</pre>
+            {mode === 'local' && <pre className="yaml cmd">{`python3 -I scripts/run_experiment.py ${file}`}</pre>}
+            <p>
+              Need help with knobs? The <a href={SKILL_DOC} target="_blank" rel="noreferrer"><span className="mono">blis-experiment</span></a> skill drafts a spec from a one-line question; the <a href={SPEC_DOC} target="_blank" rel="noreferrer">spec guide</a> lists every rule.
+            </p>
+          </details>
+        </aside>
+      </div>
     </div>
   )
 }

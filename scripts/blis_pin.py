@@ -421,7 +421,7 @@ def _fmt(v):
 
 def summary(old_root, new_root, ids, failed=()):
     """A markdown before/after table for a regeneration PR body."""
-    rows = ["| report | stack | winner | tok/s/GPU | servable / runs |",
+    rows = ["| report | stack | winner | tok/s/accelerator | servable / runs |",
             "|---|---|---|---|---|"]
     for i in ids:
         old, new = headline(os.path.join(old_root, i)), headline(os.path.join(new_root, i))

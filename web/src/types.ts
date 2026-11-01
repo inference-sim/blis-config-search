@@ -124,7 +124,7 @@ export interface RunRecord {
   /** The scheduler POLICY. Not to be confused with `sched`, the scheduling-delay metric. */
   schedp?: string | null
   admit?: string | null
-  /** Output per GPU, from the unrounded throughput. */
+  /** Output per accelerator, from the unrounded throughput. */
   tpg?: number | null
   e2e?: number | null
   /** Scheduling delay p99 in ms (a metric — see `schedp` for the policy). */

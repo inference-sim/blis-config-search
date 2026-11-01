@@ -27,7 +27,7 @@ font-size:19px;line-height:1.62;text-rendering:optimizeLegibility;
 header{padding:64px 0 10px}
 h1{font-size:46px;line-height:1.1;letter-spacing:-0.019em;margin:0 0 16px;
 font-weight:600}
-.standfirst{font-size:21px;line-height:1.5;color:var(--ink2);max-width:33em;
+.standfirst{font-size:21px;line-height:1.5;color:var(--ink2);
 margin:0 0 6px}
 .meta{font-family:var(--sans);font-size:12.5px;color:var(--ink3);
 border-top:1px solid var(--rule);margin-top:30px;padding-top:11px;
@@ -56,9 +56,9 @@ padding:14px 12px 8px}
 .fig-missing{font-family:var(--sans);font-size:13.5px;color:var(--ink3);
 padding:46px 18px;text-align:center}
 figcaption{font-family:var(--sans);font-size:13.5px;line-height:1.58;
-color:var(--ink2);margin-top:11px;max-width:60em}
+color:var(--ink2);margin-top:11px}
 figcaption b{color:var(--ink)}
-.prose{max-width:34em}
+
 .prose p{margin:0 0 17px}
 .prose p:last-child{margin-bottom:0}
 table{border-collapse:collapse;width:100%;font-family:var(--sans);font-size:13.5px;
@@ -269,7 +269,7 @@ a.gl::after{width:min(84vw,22em)}}
 @media print{a.gl::after,a.gl::before{display:none}
 a.gl{border-bottom:none}}
 .foot{margin-top:58px;padding-top:18px;border-top:1px solid var(--rule);
-font-family:var(--sans);font-size:13px;color:var(--ink2);max-width:52em}
+font-family:var(--sans);font-size:13px;color:var(--ink2)}
 .foot a{color:var(--accent)}
 svg text{font-family:var(--sans)}
 @media (max-width:900px){
@@ -315,8 +315,8 @@ const ax = k => (LEX.axes && LEX.axes[k]) || '';
   // Only surface knobs that actually vary -- a dimension with one value is noise here.
   // epw/dp/a2a are the MoE axes the search now explores (expert-parallel width is derived as
   // tp x dp); they auto-hide on a dense run set, where they are constant.
-  // PROGRESSIVE DISCLOSURE. `primary` is what dominates an LLM serving decision — the GPU count,
-  // how the model is sharded (TP / DP / EP), how many replicas, and the load — so those facets
+  // PROGRESSIVE DISCLOSURE. `primary` is what dominates an LLM serving decision (the accelerator count,
+  // how the model is sharded (TP / DP / EP), how many replicas, and the load), so those facets
   // are always visible. `detail` is the engine and routing knobs: real levers (routing swung
   // throughput 2.3x) but second-order, and showing all of them at once turned the panel into a
   // wall of knobs. They sit behind "more filters".
@@ -407,10 +407,10 @@ const ax = k => (LEX.axes && LEX.axes[k]) || '';
 
   const root=d3.select('#xf');
   root.append('div').attr('class','xf-head')
-    .html('Filter by outcome: brush a range &nbsp;<span>— drag across a chart; click it to clear</span>');
+    .html('Filter by outcome: brush a range &nbsp;<span>(drag across a chart; click it to clear)</span>');
   const histWrap=root.append('div').attr('class','xf-hist');
   root.append('div').attr('class','xf-head')
-    .html('Filter by setting: click a level &nbsp;<span>— counts update against every other filter</span>');
+    .html('Filter by setting: click a level &nbsp;<span>(counts update against every other filter)</span>');
   // Primary facets always; detail facets inside a collapsed block. Groups with no surviving
   // dimension are skipped, so a search that swept no engine knobs shows no "Engine" block (and
   // no disclosure at all).
@@ -577,7 +577,7 @@ const ax = k => (LEX.axes && LEX.axes[k]) || '';
 
   const none=root.append('div').attr('class','xf-none')
     .html('<b>No runs match this combination.</b> These filters span values the search never '
-      +'measured together — the capacity probe visits a different concurrency ladder per topology, '
+      +'measured together: the capacity probe visits a different concurrency ladder per topology, '
       +'so many config×load pairs have no run, and a brushed outcome range excludes runs whose '
       +'metric was never measured. Clear a filter to see data again.');
   // --- hover card + click-to-inspect panel ------------------------------------------------
@@ -603,7 +603,7 @@ const ax = k => (LEX.axes && LEX.axes[k]) || '';
     // r.knobs with exactly the knobs that vary across the set). Without this, two points on the
     // same topology that differ only in routing look identical on hover.
     const KN={route:'Routing',scorers:'Scorers',mnbt:'Batch tokens',mns:'Max seqs',
-              bs:'Block size',gmu:'GPU mem util',schedp:'Scheduler',admit:'Admission',
+              bs:'Block size',gmu:'Accelerator mem util',schedp:'Scheduler',admit:'Admission',
               a2a:'MoE dispatch'};
     const knobs=Object.entries(r.knobs||{}).filter(([k,v])=>v!=null&&KN[k])
       .map(([k,v])=>`<dt>${KN[k]}</dt><dd>${v}</dd>`).join('');
@@ -634,7 +634,7 @@ const ax = k => (LEX.axes && LEX.axes[k]) || '';
     const parallel=dl([
       ['Tensor parallel', r.tp], ['Data parallel', r.dp],
       ['Pipeline parallel', r.pp], ['Expert parallel', r.epw?`width ${r.epw}`:'off'],
-      ['Instances', r.ni], ['GPUs total', fk(r.gpus)],
+      ['Instances', r.ni], ['Accelerators total', fk(r.gpus)],
       ['Nodes', r.nodes], ['Fabric', r.fabric||(r.nodes>1?'ib-400g':'—')],
     ]);
     const engine=dl([

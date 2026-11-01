@@ -528,7 +528,7 @@ def _routing_arm(cfg):
 
 def _series_label(tp, ni, par):
     """e.g. "32x TP4xDP2 + EP". dp is shown only when > 1: a label that hid it made TP1 and
-    TP1xDP8 — different deployments on different GPU counts — read as the same series."""
+    TP1xDP8 (different deployments on different accelerator counts) read as the same series."""
     ep = " + EP" if par.get("enable_expert_parallel") else ""
     dp = par.get("dp", 1) or 1
     shape = f"TP{tp}" + (f"xDP{dp}" if dp > 1 else "")
@@ -594,7 +594,7 @@ def _prose(paras):
 
 def _header(report, scenario, facts):
     title = report.get("title") or f"Serving {facts.get('model') or 'this model'} on " \
-        f"{facts.get('gpu_budget') or '?'}× {facts.get('hardware') or 'GPUs'}"
+        f"{facts.get('gpu_budget') or '?'}× {facts.get('hardware') or 'accelerators'}"
     standfirst = report.get("standfirst") or (
         f"A configuration search over {facts.get('n_configs')} serving shapes and "
         f"{facts.get('n_points')} simulated runs, and what they say about how to run this model.")
@@ -621,7 +621,7 @@ def _hero(report):
 def _section_measurements(report):
     intro = report.get("explore_prose") or [
         "Everything that follows comes from these runs: each is one configuration at one load.",
-        "Click any value to filter — every count, the chart and the table update together."]
+        "Click any value to filter; every count, the chart and the table update together."]
     return (f'<section class="finding" id="explore"><h2><span class="num">1</span>'
             f'The measurements</h2>{_prose(intro)}<div id="xf"></div></section>')
 
@@ -888,7 +888,7 @@ def _footer(scenario, pareto, records, n_malformed=0, runs=None):
     # the document outline, same as the React dashboard's <footer class="sitefoot">. The .foot
     # class (and so every style rule in report/template.html) is unchanged.
     return (f'<footer class="foot"><b>These are simulator predictions</b> from the '
-            f'blis-latency-kernel backend — spot-check against the real llm-d measurements in '
+            f'blis-latency-kernel backend; spot-check against the real llm-d measurements in '
             f'curvebender-tools/reports before acting. Run <code>{esc(run_id)}</code>{stack}. '
             f'Raw per-run ledger, scenario and analysis sit beside this report in the run directory '
             f'({len(records)} runs).{malformed}</footer>')
@@ -952,7 +952,7 @@ def render_card_index(cards):
 def write_one(run_dir, out=None):
     scenario, pareto, runs, report, n_malformed = load_run_dir(run_dir)
     if not runs and not pareto:
-        raise SystemExit(f"{run_dir}: no runs.jsonl or pareto.json — not a config-search run directory")
+        raise SystemExit(f"{run_dir}: no runs.jsonl or pareto.json; not a config-search run directory")
     out = out or os.path.join(run_dir, "index.html")
     with open(out, "w", encoding="utf-8") as f:
         f.write(render_report(scenario, pareto, runs, report, os.path.abspath(run_dir), n_malformed))

@@ -230,8 +230,18 @@ def test_workflows_sane():
     check("head.repo.full_name == github.repository" in preview_if,
           "PR previews are same-repo only (no fork build published)")
     check("umbrella-dir: pr-preview" in ptxt, "PR previews live under pr-preview/, apart from the root")
-    check("wait-for-pages-deployment: true" in ptxt and "pages: read" in ptxt,
+    # The deploy comment is posted by our own step, gated on our own wait (pr-preview-action's
+    # wait fails when a newer gh-pages push supersedes the build), so check that chain.
+    psteps = pdoc["jobs"]["preview"]["steps"]
+    wait = next((st for st in psteps if st.get("id") == "wait-pages"), {})
+    comment = next((st for st in psteps if "sticky-pull-request-comment@" in st.get("uses", "")), {})
+    check("pages/builds" in wait.get("run", "") and "built" in wait.get("run", "")
+          and "steps.wait-pages.outcome == 'success'" in comment.get("if", "")
+          and comment.get("with", {}).get("header") == "pr-preview"
+          and pdoc["jobs"]["preview"]["permissions"].get("pages") == "read",
           "the preview comment waits for the Pages build (and may read its status)")
+    check("github.event.pull_request.number" in str(pdoc["concurrency"]["group"]),
+          "pages runs are grouped per PR, so batch PRs don't cancel each other's previews")
 
     # The deterministic sweeper. Unlike generate-report.yml it needs no approval gate (no LLM in
     # the path), but it must still never write to main or publish: its only output is a bot PR.

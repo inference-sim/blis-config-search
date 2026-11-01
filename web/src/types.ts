@@ -16,9 +16,6 @@ export interface Winner {
   gpus: number | null
   /** The RECOMMENDED load, and always the load whose measurement the figures below come from. */
   c_use: number | null
-  /** The 0.8xC* target, present only when the recommendation backed off below it because that
-   *  load measured under the interactivity floor. */
-  c_use_target?: number | null
   c_star?: number | null
   tps: number
   tps_per_gpu: number
@@ -36,8 +33,6 @@ export interface Finalist {
   gpus: number | null
   /** The RECOMMENDED load, and always the load the figures were measured at. */
   c_use: number | null
-  /** The 0.8xC* target, when the recommendation backed off below it. */
-  c_use_target?: number | null
   tps: number
   tps_per_gpu: number
   per_user: number

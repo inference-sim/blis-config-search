@@ -30,8 +30,8 @@ RUN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 # Validated by form, not an allowlist: BLIS already refused any chip it cannot price, and the
 # value only has to be safe in file names and on the page.
 HARDWARE_RE = re.compile(r"^[a-z][a-z0-9.-]{1,31}$")
-# Copied next to each rendered report so it stays regenerable from the published site.
-REPORT_DATA_FILES = ("scenario.json", "pareto.json", "runs.jsonl", "report.json")
+# Copied next to each rendered report; runs.jsonl (~20 MB each) stays in reports/, unpublished.
+REPORT_DATA_FILES = ("scenario.json", "pareto.json", "report.json")
 # The report is served at data/reports/<run_id>/index.html, three levels below the SPA.
 BACK_LINK = ('<div style="font:600 13px/1.4 system-ui,sans-serif;margin:16px 0 0">'
              '<a href="../../../index.html#/reports" style="color:#1f6e5c;text-decoration:none">'
@@ -160,9 +160,13 @@ def _dump(path, obj):
         json.dump(obj, f, sort_keys=True, separators=(",", ":"))
 
 
+def _within(path, parent):
+    return os.path.commonpath([path, parent]) == parent
+
+
 def build(reports_dir, out_dir):
     """Validate and render every run dir under reports_dir into out_dir; return the rows."""
-    reports_dir, out_dir = os.path.abspath(reports_dir), os.path.abspath(out_dir)
+    reports_dir, out_dir = os.path.realpath(reports_dir), os.path.realpath(out_dir)
     if not os.path.isdir(reports_dir):
         raise SystemExit(f"{reports_dir}: not a directory")
     run_dirs = sorted(os.path.join(reports_dir, d) for d in os.listdir(reports_dir)
@@ -170,6 +174,10 @@ def build(reports_dir, out_dir):
     if not run_dirs:
         raise SystemExit(f"{reports_dir}: no run directories (none has pareto.json/runs.jsonl)")
 
+    # out_dir is wiped, so it must not hold the repo, reports/, or be one of the run dirs.
+    if (_within(os.path.realpath(ROOT), out_dir) or _within(reports_dir, out_dir)
+            or out_dir in run_dirs):
+        raise SystemExit(f"{out_dir}: refusing to wipe the repo, reports/, or a run dir")
     shutil.rmtree(out_dir, ignore_errors=True)
     os.makedirs(out_dir)
     rows = []

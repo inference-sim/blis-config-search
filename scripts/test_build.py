@@ -120,6 +120,28 @@ def test_report_back_link_resolves_on_pages():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_build_refuses_to_wipe_reports():
+    print("test_build_refuses_to_wipe_reports")
+    tmp = tempfile.mkdtemp()
+    try:
+        reports = os.path.join(tmp, "reports")
+        run = os.path.join(reports, "qwen3-14b-h100-chatbot-0004")
+        _mk_run_dir(run, "qwen3-14b-h100-chatbot-0004")
+        for out in (reports, tmp, run, bg.ROOT):
+            try:
+                bg.build(reports, out)
+                check(False, f"--out {out} is refused")
+            except SystemExit:
+                check(True, f"--out {os.path.basename(out)} is refused")
+        check(os.path.isdir(run), "reports/ survives")
+        out = os.path.join(tmp, "site")
+        bg.build(reports, out)
+        check(not os.path.exists(os.path.join(out, "qwen3-14b-h100-chatbot-0004", "runs.jsonl")),
+              "the raw runs.jsonl ledger is not published")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_validation():
     print("test_validation")
     tmp = tempfile.mkdtemp()
@@ -659,6 +681,7 @@ if __name__ == "__main__":
     test_winner_with_a_knob_variant()
     test_winner_mismatch_raises_not_falls_back()
     test_report_back_link_resolves_on_pages()
+    test_build_refuses_to_wipe_reports()
     test_validation()
     test_build_determinism()
     test_catalog_workload_kinds()

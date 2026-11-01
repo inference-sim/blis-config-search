@@ -10,7 +10,8 @@ Reads (read-only, never mutated):
   blis-catalog/networks/*.yaml, devices/storage.yaml              -> fabrics, storage
   blis-registry/coefficients/*.yaml                              -> registry sets
 
-Returns {models, hardware, workloads, fabrics, storage, registry, versions, stack}, where `stack` is the pinned BLIS stack as one root dependency plus the transitives
+Returns {models, hardware, workloads, fabrics, storage, registry, versions, stack}, where `stack`
+is the pinned BLIS stack as one root dependency plus the transitives
 it resolves to (see _stack); `versions` stays a flat map for anything already reading it.
 Pure + deterministic: entries sorted by name, JSON serialized with sort_keys. Never runs
 BLIS. If a sibling repo is absent, its section is empty and `versions` records "absent" so

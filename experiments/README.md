@@ -44,7 +44,7 @@ scenario:                       # shared by EVERY sweep
   hardware: h100                # one GPU type per experiment
   workload: agentx-mvp          # one workload per experiment
   gpus: 32                      # EVERY run uses exactly 32 GPUs
-  slo: {itl_p99: 20ms}          # units are required
+  slo: {itl_p99: 20ms}          # latency caps need units; throughput_per_gpu is a tok/s floor
   concurrency: [4, 8, 16, 32, 64, 128]
 
 sweeps:

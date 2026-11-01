@@ -817,6 +817,17 @@ class QaRegressions(unittest.TestCase):
         self.assertFalse(ok)
         self.assertTrue(any("ttft_p99_ms missing" in v for v in viol))
 
+    def test_experiment_slos_are_read_in_spec_form(self):
+        # An experiment's scenario.json carries the spec's SLOs: duration strings and a tok/s floor.
+        run = {"returncode": 0, "deployment": {"gpus": 2},
+               "metrics": {"itl_p99_ms": 50, "ttft_p99_ms": 300, "tokens_per_sec": 100}}
+        slos = {"itl_p99": "100ms", "ttft_p99": "1s", "throughput_per_gpu": 50}
+        self.assertEqual(report._feasible(run, {"tok_per_s_per_user": 10}, slos), (True, []))
+        ok, viol = report._feasible(run, {}, {"ttft_p99": "200ms", "throughput_per_gpu": 60})
+        self.assertFalse(ok)
+        self.assertIn("throughput_per_gpu = 50.0 < 60", viol)
+        self.assertIn("ttft_p99_ms = 300.0 > 200.0", viol)
+
     def test_g4_aggregate_under_cap_cannot_mask_bad_instance(self):
         # aggregate itl 10 <= 20, but one instance is 50 > 20: must be flagged (the adjudicator's gap)
         run = {"metrics": {"itl_p99_ms": 10},

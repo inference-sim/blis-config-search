@@ -54,6 +54,12 @@ jobs:
       - run: pip install pyyaml
       - uses: actions/setup-node@v7
         with: { node-version: "22" }
+      - name: Clone the pinned catalog + registry
+        # build_catalog.py reads them from ../; without them the Submit pickers and spec-sheets are empty.
+        run: |
+          set -a; . ./pins.env; set +a
+          git clone --branch "$CATALOG_REF" --depth 1 https://github.com/inference-sim/blis-catalog.git ../blis-catalog
+          git clone --branch "$REGISTRY_REF" --depth 1 https://github.com/inference-sim/blis-registry.git ../blis-registry
       - name: Build + stage data, then build the SPA
         working-directory: web
         env:
@@ -73,6 +79,10 @@ jobs:
           missing = [s["run_id"] for s in scen if not os.path.isfile(f"dist/data/reports/{s['run_id']}/index.html")]
           if missing:
               sys.exit("missing reports: " + ", ".join(missing))
+          cat = json.load(open("dist/data/catalog.json"))
+          empty = [k for k in ("models", "hardware", "workloads") if not cat.get(k)]
+          if empty:
+              sys.exit("empty catalog sections: " + ", ".join(empty))
           print(f"ok: {len(scen)} scenarios, every report present")
           PY
       - name: Upload the built site for the deploy jobs

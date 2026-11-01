@@ -85,7 +85,8 @@
       "properties": {
         "itl_p99": { "$ref": "#/$defs/duration", "description": "p99 inter-token latency cap, e.g. 20ms. The interactivity floor: 20ms == 50 tok/s/user." },
         "ttft_p99": { "$ref": "#/$defs/duration", "description": "p99 time-to-first-token cap, e.g. 5s." },
-        "e2e_p99": { "$ref": "#/$defs/duration", "description": "p99 end-to-end request latency cap." }
+        "e2e_p99": { "$ref": "#/$defs/duration", "description": "p99 end-to-end request latency cap." },
+        "throughput_per_gpu": { "type": "number", "exclusiveMinimum": 0, "description": "Floor on output tok/s per accelerator, e.g. 500." }
       }
     },
     "duration": {

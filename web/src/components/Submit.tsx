@@ -27,6 +27,8 @@ export interface Draft {
   gpus: number
   concurrency: number[]
   slo: Record<TargetKey, Target>
+  /** Floor on output tok/s per accelerator. */
+  throughput: { on: boolean; value: number }
   sweeps: { batch: boolean; routing: boolean }
 }
 
@@ -83,7 +85,10 @@ const list = (xs: (number | string | boolean)[]) => `[${xs.join(', ')}]`
 const duration = (t: Target) => `${+t.value.toFixed(3)}${t.unit}`
 
 export function buildYaml(d: Draft): string {
-  const slo = TARGETS.filter((t) => d.slo[t.key].on).map((t) => `${t.key}: ${duration(d.slo[t.key])}`)
+  const slo = [
+    ...TARGETS.filter((t) => d.slo[t.key].on).map((t) => `${t.key}: ${duration(d.slo[t.key])}`),
+    ...(d.throughput.on ? [`throughput_per_gpu: ${+d.throughput.value.toFixed(3)}`] : []),
+  ]
   const lines = [
     `# ${d.question.trim() || 'What question does this experiment answer? (one line, as a # comment)'}`,
     `name: ${specName(d)}`,
@@ -233,6 +238,7 @@ export function Submit({ catalog, mode }: { catalog: Catalog; mode: Mode }) {
       ttft_p99: { on: false, value: 2, unit: 's' },
       e2e_p99: { on: false, value: 30, unit: 's' },
     },
+    throughput: { on: false, value: 500 },
     sweeps: { batch: true, routing: true },
   })
   const [copied, setCopied] = useState(false)
@@ -312,6 +318,14 @@ export function Submit({ catalog, mode }: { catalog: Catalog; mode: Mode }) {
                 </div>
               )
             })}
+            <div className={`sb-target${d.throughput.on ? '' : ' off'}`}>
+              <label className="sb-check">
+                <input type="checkbox" checked={d.throughput.on} aria-label="Throughput" onChange={(e) => set({ throughput: { ...d.throughput, on: e.target.checked } })} />
+                Throughput <small>min</small>
+              </label>
+              <NumField ariaLabel="Throughput floor" value={d.throughput.value} onCommit={(n) => set({ throughput: { ...d.throughput, value: n } })} />
+              <span className="sb-unit">tok/s</span>
+            </div>
             {d.slo.itl_p99.on && <p className="sb-note">An inter-token cap of {duration(d.slo.itl_p99)} is about <span className="num">{fnum(perUserRate(d.slo.itl_p99), 1)}</span> tok/s per user.</p>}
           </Section>
 

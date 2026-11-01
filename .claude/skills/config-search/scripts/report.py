@@ -242,6 +242,24 @@ def _floor_itl_p99_max(floor):
     return None
 
 
+_SPEC_DURATION = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(us|ms|s)$")
+
+
+def _spec_slo_caps(slos, floor_set):
+    """Experiment-spec SLO keys (`itl_p99: '20ms'`) as the `<metric>_ms` caps checked here.
+    A spec's itl_p99 is already enforced, acceptance-aware, as the interactivity floor."""
+    out = {}
+    for k, cap in slos.items():
+        mt = _SPEC_DURATION.match(str(cap).strip()) if isinstance(cap, str) else None
+        if mt and k in ("itl_p99", "ttft_p99", "e2e_p99"):
+            if k == "itl_p99" and floor_set:
+                continue
+            scale = {"us": 0.001, "ms": 1.0, "s": 1000.0}[mt.group(2)]
+            k, cap = f"{k}_ms", float(mt.group(1)) * scale
+        out[k] = cap
+    return out
+
+
 def _feasible(run, floor, slos):
     """(ok, viol[]) -- did this run meet completion + interactivity floor + any SLOs?
     A declared SLO whose metric is absent from BOTH the aggregate and every instance is treated as a
@@ -275,7 +293,17 @@ def _feasible(run, floor, slos):
             # Report the step latency AND the per-token basis, so a drafting violation is legible.
             extra = f" (step itl {itl:.1f} ms)" if basis == "derived-from-acceptance" else ""
             viol.append(f"tok_per_s_per_user = {rate:.1f} < {floor_rate:g}{extra}")
-    for k, cap in (slos or {}).items():
+    slos = dict(slos or {})
+    # Experiment specs write throughput_per_gpu as a floor, not a cap.
+    tput = _as_num(slos.pop("throughput_per_gpu", None))
+    if tput:
+        tps = _as_num(m.get("tokens_per_sec"))
+        gpus = _as_num((run.get("deployment") or {}).get("gpus"))
+        if tps is None or not gpus:
+            viol.append(f"throughput_per_gpu missing (cannot verify SLO >= {tput:g})")
+        elif tps / gpus < tput:
+            viol.append(f"throughput_per_gpu = {tps / gpus:.1f} < {tput:g}")
+    for k, cap in _spec_slo_caps(slos, itl_max is not None).items():
         if cap is None:
             continue
         val, missing = _metric_any(run, k)

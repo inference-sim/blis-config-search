@@ -324,8 +324,8 @@ const ax = k => (LEX.axes && LEX.axes[k]) || '';
   // Only surface knobs that actually vary -- a dimension with one value is noise here.
   // epw/dp/a2a are the MoE axes the search now explores (expert-parallel width is derived as
   // tp x dp); they auto-hide on a dense run set, where they are constant.
-  // PROGRESSIVE DISCLOSURE. `primary` is what dominates an LLM serving decision — the accelerator count,
-  // how the model is sharded (TP / DP / EP), how many replicas, and the load — so those facets
+  // PROGRESSIVE DISCLOSURE. `primary` is what dominates an LLM serving decision (the accelerator count,
+  // how the model is sharded (TP / DP / EP), how many replicas, and the load), so those facets
   // are always visible. `detail` is the engine and routing knobs: real levers (routing swung
   // throughput 2.3x) but second-order, and showing all of them at once turned the panel into a
   // wall of knobs. They sit behind "more filters".

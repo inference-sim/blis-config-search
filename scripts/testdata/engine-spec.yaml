@@ -1,4 +1,4 @@
-# Engine tuning on a fixed topology -- RFC #21's engine-tuning example, verbatim.
+# Test fixture (formerly experiments/glm-5-3-flash-h100-chatbot-engine.yaml): engine tuning, fixed topology.
 #
 # The topology is pinned at 2 x TP8 in both sweeps, so every difference is attributable to
 # the engine knob being swept. These knobs mostly bind DOWNWARD: raising them past the

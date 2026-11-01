@@ -407,13 +407,7 @@ A sweep is colocated **or** disaggregated, never both.
 
 | Spec | Question |
 |---|---|
-| [`deepseek-v4-1-flash-h100-agentx-drafting.yaml`](deepseek-v4-1-flash-h100-agentx-drafting.yaml) | Does drafting pay on an agentic replay, and at what depth? |
-| [`deepseek-v4-1-flash-h200-agentx-routing.yaml`](deepseek-v4-1-flash-h200-agentx-routing.yaml) | Does routing matter more on few big instances or many small ones? |
 | [`kimi-k2-5-h200-multidoc-pd.yaml`](kimi-k2-5-h200-multidoc-pd.yaml) | Colocated vs. disaggregated, and where should the P/D split trigger? |
-| [`glm-5-3-flash-h100-chatbot-engine.yaml`](glm-5-3-flash-h100-chatbot-engine.yaml) | Where do the batching and KV-memory knobs bind? |
-| [`glm-5-3-flash-h100-chatbot-execution.yaml`](glm-5-3-flash-h100-chatbot-execution.yaml) | Which part of the execution layer binds first — graph capture, prefill admission, batch width or KV capacity? |
-| [`qwen3-14b-h100-chatbot-execution.yaml`](qwen3-14b-h100-chatbot-execution.yaml) | The same question on a **dense** model, where the catalog rules out every expert knob and GQA makes KV precision a strong lever |
-| [`qwen3-14b-h100-chatbot-kv-precision.yaml`](qwen3-14b-h100-chatbot-kv-precision.yaml) | Does an fp8 KV cache buy throughput on a dense model? |
 
 [`schema.json`](schema.json) (JSON Schema 2020-12) describes the spec's **structure**, so an
 editor can flag a malformed spec as you type. It is an aid, not the authority:

@@ -1,0 +1,86 @@
+# Best tok/s/GPU for DeepSeek-V4.1-Flash on 32 B200s (4 nodes) under AgentX replay, and which knobs travel across shapes.
+# MoE, 128 experts, top_k 3: dp, EP and all2all_backend are real axes; dspark drafter, K <= 5.
+# B200 is capability family 10, so nvfp4_ds_mla is priced here (needs tp % 8 == 0); every tp x dp fits in 178 GiB.
+# Measured on the pin: tp1 shapes miss 20ms ITL from c=32; 8xTP4 fails worst-instance ITL at c=256, so the ladder stops at 128.
+# Bounded to ~3h serial (~44s/run measured at c=64-128): max_num_seqs never bound below c=256 on the prior run, so it is out.
+# Left out: eplb (within 0.1% elsewhere), P/D (decode-heavy, warm prefix), moe_backend / swa_bounded_replay /
+# async_scheduling (measured inert), engram_config (no measured cost term), block_size (run_blis sets it per hardware).
+
+name: deepseek-v4-1-flash-b200-agentx-4node
+
+scenario:
+  model: deepseek-v4.1-flash
+  hardware: b200
+  workload: agentx-mvp
+  gpus: 32
+  slo: {itl_p99: 20ms}
+  engine:
+    cache_dtype: fp8_ds_mla      # required: this model refuses an unset or auto KV dtype
+    max_model_len: 262144        # required: at the 32k default the replay drops every trace
+  concurrency: [32, 64, 128]     # session lanes
+  replay:
+    corpus: .corpus/traces.jsonl
+    corpus_cache: /tmp/agx-cache-b200
+    grace_period: inf            # the descriptor's 30s marks saturated loads as incomplete
+
+sweeps:
+  - name: topology-ep
+    # Also the default-engine twin for every sweep below.
+    narrative: Mid-width tp4 instances should win at the SLO, and EP should matter little at dp 1 but cost throughput once dp spreads experts wider.
+    num-instances: [2, 4, 8, 16]
+    parallel: {tp: [2, 4, 8], dp: [1, 2], enable_expert_parallel: [true, false]}
+
+  - name: batch-tokens
+    narrative: The per-step token cap should bind harder on four wide instances than on eight narrow ones, since long agentic prompts concentrate per instance.
+    num-instances: [4, 8]
+    parallel: {tp: [8, 4], dp: [1], enable_expert_parallel: [true]}
+    engine:
+      max_num_batched_tokens: [2048, 16384, 32768]
+
+  - name: prefill-chunking
+    narrative: Capping prefill chunks should cost throughput at both widths, more where fewer decodes share each instance's token budget.
+    num-instances: [4, 8]
+    parallel: {tp: [8, 4], dp: [1], enable_expert_parallel: [true]}
+    engine:
+      long_prefill_token_threshold: [2048]
+
+  - name: kv-capacity
+    # nvfp4_ds_mla needs tp divisible by 8, so both shapes are tp >= 8.
+    narrative: nvfp4 KV and a higher memory fraction both buy cache, so on a prefix-heavy replay they should substitute rather than add.
+    num-instances: [2, 4]
+    parallel: {tp: [16, 8], dp: [1], enable_expert_parallel: [true]}
+    engine:
+      cache_dtype: [fp8_ds_mla, nvfp4_ds_mla]
+      gpu_memory_utilization: [0.8, 0.95]
+
+  - name: moe-collective
+    # EP 4 (8xTP4) and EP 16 (2xTP8 dp2); the allgather_reducescatter default is in topology-ep.
+    narrative: A DeepEP backend should beat the allgather default at EP 16, and the gap should shrink or flip at EP 4.
+    num-instances: [8, 2]
+    parallel: {tp: [4, 8], dp: [1, 2], enable_expert_parallel: [true]}
+    engine:
+      all2all_backend: [deepep_high_throughput, deepep_low_latency, deepep_v2, pplx]
+
+  - name: drafting
+    narrative: dspark should raise throughput more on narrow instances, while K=5 may push wide shapes past the 20ms ITL floor.
+    num-instances: [4, 8]
+    parallel: {tp: [8, 4], dp: [1], enable_expert_parallel: [true]}
+    engine:
+      speculative: {method: [dspark], num_spec_tokens: [1, 3, 5]}
+
+  - name: routing-prefix-cache
+    narrative: Prefix-affinity with caching on should lead and random with caching off trail, and the gap should widen from four instances to eight.
+    num-instances: [4, 8]
+    parallel: {tp: [8, 4], dp: [1], enable_expert_parallel: [true]}
+    engine:
+      enable_prefix_caching: [true, false]
+    router:
+      endpoint_picker_config: [random.yaml, load-aware.yaml, queue-kv.yaml, prefix-affinity.yaml]
+
+  - name: cudagraph
+    # Topology-independent per-step cost, so one shape is enough; NONE is a known collapse, not a candidate.
+    narrative: Full capture should edge out the PIECEWISE default by a few percent.
+    num-instances: [8]
+    parallel: {tp: [4], dp: [1], enable_expert_parallel: [true]}
+    engine:
+      cudagraph_mode: [FULL, FULL_DECODE_ONLY, FULL_AND_PIECEWISE]

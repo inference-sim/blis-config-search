@@ -1,0 +1,87 @@
+# Where does GLM-5.3-Flash on 16 H100s bind under chatbot traffic, and does it move with the shape?
+# MoE (288 experts, top_k 8), sparse MLA, fp8 checkpoint: dp/EP and MoE dispatch are real axes.
+# Measured on v0.15.0: only tp x dp >= 8 fits (width 4 refuses on memory), so shapes are 2 x width 8
+# or 1 x width 16; all2all_backend is inert at dp 1; deepep_low_latency is refused at 8192 tokens.
+# The ladder reaches down to c=2 because 2 x TP8 already misses the 20ms ITL floor near c=32.
+# Bounded to ~1400 runs (~3s each through the runner, ~70 min serial).
+# Left out: KV capacity (gmu 0.7 vs 0.95 and cache_dtype measured identical), drafting (engine
+# 0.29.0 refuses glm5_next_mtp), prefix caching (unique prompts), quantization (fp8 checkpoint),
+# scheduling_policy (no priorities), P/D (two instances leave no room for two pools).
+name: glm53flash-h100-chatbot-kernel-0001
+
+scenario:
+  model: glm-5.3-flash
+  hardware: h100
+  workload: chatbot
+  gpus: 16
+  slo: {itl_p99: 20ms}
+  engine: {quantization: fp8, cache_dtype: fp8}
+  concurrency: [2, 8, 16, 64, 256]
+
+sweeps:
+  - name: shape-and-ep
+    narrative: EP should pay most at tp 8 and fade as dp grows, since wider dp already splits the batch and EP adds dispatch on top.
+    num-instances: [1, 2]
+    parallel: {tp: [1, 2, 4, 8, 16], dp: [1, 2, 4, 8, 16], enable_expert_parallel: [false, true]}
+
+  - name: batch-caps-vs-shape
+    # The two ends of the viable range at each instance count: widest tp and widest dp.
+    narrative: The sequence cap should bind well before the token cap on short chatbot prompts, and hardest on one wide instance.
+    num-instances: [1, 2]
+    parallel: {tp: [16, 8, 2, 1], dp: [1, 8], enable_expert_parallel: [true]}
+    engine:
+      max_num_seqs: [16, 32, 64, 256, 1024]
+      max_num_batched_tokens: [2048, 8192, 32768]
+
+  - name: moe-dispatch
+    # dp >= 2 only, since every backend measured byte-identical at dp 1.
+    narrative: DeepEP backends should lose to allgather/pplx at small dp and close the gap as dp widens, where the token cap admits them.
+    num-instances: [1, 2]
+    parallel: {tp: [1, 2, 4, 8], dp: [2, 4, 8, 16], enable_expert_parallel: [true]}
+    engine:
+      all2all_backend: [allgather_reducescatter, deepep_high_throughput, deepep_low_latency, deepep_v2, pplx]
+      max_num_batched_tokens: [2048, 8192]
+
+  - name: eplb-vs-dispatch
+    # tp x dp <= 32 keeps 288 + {0, 32, 64} divisible at every width the validator checks.
+    narrative: Redundant experts should help most at the widest dp, where an uneven expert load stalls the most ranks.
+    num-instances: [1, 2]
+    parallel: {tp: [1, 2, 4], dp: [2, 4, 8], enable_expert_parallel: [true]}
+    engine:
+      all2all_backend: [allgather_reducescatter, deepep_high_throughput]
+      eplb: {enable_eplb: [true], num_redundant_experts: [0, 32, 64]}
+
+  - name: graph-capture
+    narrative: Full graph capture should beat PIECEWISE by a few percent at every shape, and NONE should roughly halve throughput.
+    num-instances: [1, 2]
+    parallel: {tp: [16, 8, 2, 1], dp: [1, 8], enable_expert_parallel: [true]}
+    engine:
+      cudagraph_mode: [NONE, PIECEWISE, FULL, FULL_DECODE_ONLY, FULL_AND_PIECEWISE]
+
+  - name: capture-size-vs-batch
+    # A step wider than the capture size runs eager, so the size only bites once the batch outgrows it.
+    narrative: A small capture size should cost throughput only when max_num_seqs lets the batch grow past it.
+    num-instances: [1, 2]
+    parallel: {tp: [8, 2], dp: [1, 8], enable_expert_parallel: [true]}
+    engine:
+      cudagraph_mode: [PIECEWISE, FULL]
+      max_cudagraph_capture_size: [64, 256, 512]
+      max_num_seqs: [64, 512]
+
+  - name: prefill-admission
+    narrative: Chunking prefills below the 256-token median prompt should cut the ITL tail but cost throughput, most on one wide instance.
+    num-instances: [1, 2]
+    parallel: {tp: [16, 8, 2, 1], dp: [1, 8], enable_expert_parallel: [true]}
+    engine:
+      long_prefill_token_threshold: [256, 1024, 4096]
+      max_num_batched_tokens: [2048, 8192]
+
+  - name: routing
+    # Two instances is the most this budget allows; one row per two-instance shape.
+    narrative: With only two endpoints, routing should move throughput a few percent at most, slightly more when the batch cap binds.
+    num-instances: [2]
+    parallel: {tp: [1, 4, 8], dp: [1, 2, 8], enable_expert_parallel: [true]}
+    engine:
+      max_num_seqs: [64, 1024]
+    router:
+      endpoint_picker_config: [random.yaml, queue.yaml, load-aware.yaml, queue-kv.yaml, prefix-affinity.yaml]

@@ -1,0 +1,90 @@
+# Best tok/s/GPU for DeepSeek-V4.1-Flash on 32 H200s (4 nodes) under AgentX replay, and which knobs travel across shapes.
+# MoE 128 experts top_k 3: dp, EP and all2all_backend are real axes; dspark drafter, K <= 5; family 9, so fp8_ds_mla only.
+# Measured on the pin: 8xTP4 fits only with EP (EP off and gmu 0.7 refused); tp1/tp2 trail tp8 1.6-3x, so topology stops at tp4.
+# 8xTP4 at gmu 0.9 keeps ~4 GiB KV per rank, so gpu_memory_utilization 0.95 is a real lever there, with tp8 as contrast.
+# Routing is crossed with prefix caching here: the separate h200 routing spec was retired into this one.
+# Left out: eplb (-0.02%) and engram_config (byte-identical), both probed; moe_backend, swa_bounded_replay (measured inert);
+# P/D (decode-heavy, warm prefix); block_size (run_blis sets it per hardware).
+
+name: deepseek-v4-1-flash-h200-agentx-4node
+
+scenario:
+  model: deepseek-v4.1-flash
+  hardware: h200
+  workload: agentx-mvp
+  gpus: 32
+  slo: {itl_p99: 20ms}
+  engine:
+    cache_dtype: fp8_ds_mla      # required: this model refuses an unset or auto KV dtype
+    max_model_len: 262144        # required: at the 32k default the replay drops every trace
+  concurrency: [32, 64, 96]  # ITL p99 breaks between 64 and 128 lanes; 128 is past the SLO and costs ~60s/run
+  replay:
+    corpus: .corpus/traces.jsonl
+    corpus_cache: /tmp/agx-cache-h200
+    grace_period: inf            # the descriptor's 30s marks saturated loads as incomplete
+
+sweeps:
+  - name: topology-ep
+    # Default-engine twin for the tp8 rows below; the 8xTP4 twin is the default cell of each cross.
+    narrative: Wide tp8 instances should win at the SLO, and EP should pay more as dp spreads 128 experts over more ranks.
+    num-instances: [1, 2, 4]
+    parallel: {tp: [8, 4], dp: [1, 2, 4], enable_expert_parallel: [true, false]}
+
+  - name: batch-caps
+    narrative: max_num_seqs 16 should bind on 4 instances but not 8, while a larger token budget lifts both until ITL breaks.
+    num-instances: [4, 8]
+    parallel: {tp: [8, 4], dp: [1], enable_expert_parallel: [true]}
+    engine:
+      max_num_seqs: [16, 256]
+      max_num_batched_tokens: [4096, 8192, 16384, 32768]
+
+  - name: prefill-chunking
+    # Defaults (no threshold) are the matching cells of batch-caps.
+    narrative: Capping long prefills should cut ITL p99 enough to push the SLO knee past 96 lanes, at a small cost in raw throughput.
+    num-instances: [4, 8]
+    parallel: {tp: [8, 4], dp: [1], enable_expert_parallel: [true]}
+    engine:
+      long_prefill_token_threshold: [1024, 2048, 4096]
+      max_num_batched_tokens: [8192, 16384]
+
+  - name: moe-collective
+    # Default allgather_reducescatter is the twin in topology-ep / batch-caps; EP widths 32, 8 and 4.
+    narrative: DeepEP low-latency should win at EP width 4-8 and lose to high-throughput at width 32, where dispatch volume dominates.
+    num-instances: [1, 4, 8]
+    parallel: {tp: [8, 4], dp: [4, 1], enable_expert_parallel: [true]}
+    engine:
+      all2all_backend: [deepep_high_throughput, deepep_low_latency, deepep_v2, pplx]
+
+  - name: drafting
+    # K=0 twins are the default cells of topology-ep and batch-caps.
+    narrative: dspark should raise tok/s/GPU at K 3-5 but lift ITL p99 toward the 20ms SLO, so the best K may differ between shapes.
+    num-instances: [4, 8]
+    parallel: {tp: [8, 4], dp: [1], enable_expert_parallel: [true]}
+    engine:
+      speculative: {method: [dspark], num_spec_tokens: [1, 3, 5]}
+
+  - name: routing-prefix-cache
+    # queue.yaml matches the default router, so it doubles as the default-router twin.
+    narrative: prefix-affinity with caching on should win, and the routing spread should widen from 4 to 8 instances.
+    num-instances: [4, 8]
+    parallel: {tp: [8, 4], dp: [1], enable_expert_parallel: [true]}
+    engine:
+      enable_prefix_caching: [true, false]
+    router:
+      endpoint_picker_config: [random.yaml, queue.yaml, load-aware.yaml, queue-kv.yaml, prefix-affinity.yaml]
+
+  - name: kv-headroom
+    # Twins at the 0.9 default are in topology-ep / batch-caps; lower values refuse at tp4.
+    narrative: gmu 0.95 should lift the KV-starved tp4 shapes noticeably and leave tp8 flat.
+    num-instances: [4, 8]
+    parallel: {tp: [8, 4], dp: [1, 2], enable_expert_parallel: [true]}
+    engine:
+      gpu_memory_utilization: [0.95]
+
+  - name: cudagraph
+    # Does not interact with topology, so one shape; PIECEWISE (default) is the topology-ep twin.
+    narrative: FULL and FULL_AND_PIECEWISE should edge out the PIECEWISE default by a few percent, and NONE should collapse.
+    num-instances: [4]
+    parallel: {tp: [8], dp: [1], enable_expert_parallel: [true]}
+    engine:
+      cudagraph_mode: [NONE, FULL, FULL_DECODE_ONLY, FULL_AND_PIECEWISE]

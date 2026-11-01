@@ -58,9 +58,9 @@ jobs:
     outputs:
       moved: ${{ steps.diff.outputs.moved }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install pyyaml
       - name: Did this PR move a pin's value?
@@ -90,8 +90,8 @@ jobs:
     outputs:
       reports: ${{ steps.ids.outputs.reports }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install pyyaml jsonschema
       - name: Clone the pinned simulator, and the modules its go.mod names
@@ -109,8 +109,8 @@ jobs:
               git clone --branch "$ver" --depth 1 "https://github.com/inference-sim/$mod.git" "$RUNNER_TEMP/stack/$mod" ;;
             esac
           done
-      - uses: actions/setup-go@v5
-        with: { go-version-file: upstream/go.mod }
+      - uses: actions/setup-go@v7
+        with: { go-version-file: upstream/go.mod, cache-dependency-path: upstream/go.sum }
       - run: cd upstream && go build -o blis main.go && ./blis --help >/dev/null
       - name: Knob tables vs the new stack
         run: python3 -I scripts/blis_pin.py drift --siblings "$RUNNER_TEMP/stack" --go-mod upstream/go.mod
@@ -128,7 +128,7 @@ jobs:
           python3 -I scripts/test_experiment.py
           python3 -I scripts/validate_experiment.py experiments/
           rm -rf ../blis-vllm ../blis-schemas
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pin-compat-blis
           path: upstream/blis
@@ -150,11 +150,11 @@ jobs:
         report: ${{ fromJSON(needs.build.outputs.reports) }}
     name: smoke ${{ matrix.report.id }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install pyyaml
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: pin-compat-blis, path: .build }
       - name: Clone the pinned catalog + registry
         id: stack
@@ -167,7 +167,7 @@ jobs:
           echo "catalog_ref=$CATALOG_REF" >> "$GITHUB_OUTPUT"
       - name: Restore the replay corpus
         if: matrix.report.replay
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .corpus/traces.jsonl
           key: replay-corpus-${{ steps.stack.outputs.catalog_ref }}
@@ -179,7 +179,7 @@ jobs:
             --corpus .corpus/traces.jsonl --corpus-cache "$RUNNER_TEMP/agx-cache" \
             --max-parallel 2 --timeout "${{ vars.REGEN_RUN_TIMEOUT || '1800' }}" \
             --json "$RUNNER_TEMP/smoke-${{ matrix.report.id }}.json" | tee -a "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: smoke-${{ matrix.report.id }}
@@ -198,10 +198,10 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: smoke-*
           path: ${{ runner.temp }}/smoke

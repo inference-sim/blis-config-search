@@ -45,7 +45,7 @@ jobs:
       contents: write          # commit the generated report back to the PR branch
     steps:
       - name: Check out the PR branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.pr_branch }}
 
@@ -68,13 +68,11 @@ jobs:
           case "$branch" in *..*|/*) echo "unsafe branch name" >&2; exit 1 ;; esac
           echo "submission=$sub" >> "$GITHUB_ENV"
 
-      - uses: actions/setup-go@v5
-        with: { go-version: "1.24" }
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install pyyaml
 
-      - name: Build the pinned BLIS stack
+      - name: Clone the pinned simulator
         run: |
           set -euo pipefail
           # Pins come from pins.env -- the single source of truth, also read by
@@ -84,6 +82,12 @@ jobs:
           # The tag is not immutable upstream; refuse to build a moved tag (same check as SETUP.md).
           test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
             echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
+      - uses: actions/setup-go@v7
+        with: { go-version-file: upstream/go.mod, cache-dependency-path: upstream/go.sum }
+      - name: Build BLIS and clone the rest of the stack
+        run: |
+          set -euo pipefail
+          set -a; . ./pins.env; set +a
           ( cd upstream && go build -o blis main.go )
           git clone --branch "$CATALOG_REF" --depth 1 https://github.com/inference-sim/blis-catalog.git
           git clone --branch "$REGISTRY_REF" --depth 1 https://github.com/inference-sim/blis-registry.git

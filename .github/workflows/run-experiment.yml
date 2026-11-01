@@ -44,7 +44,7 @@ jobs:
     outputs:
       specs: ${{ steps.pick.outputs.specs }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0       # diff against the commit before the push, however far back
 
@@ -97,7 +97,7 @@ jobs:
     env:
       SPEC: ${{ matrix.spec }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Name the report
         id: name
@@ -105,9 +105,7 @@ jobs:
         run: |
           echo "name=$(sed -n 's/^name: *//p' "$SPEC" | head -1)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-go@v5
-        with: { go-version: "1.24" }
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install pyyaml
 
@@ -129,7 +127,7 @@ jobs:
           python3 -I scripts/validate_experiment.py "$SPEC" --catalog "$BLIS_CATALOG"
           python3 -I scripts/run_experiment.py "$SPEC" --dry-run --catalog "$BLIS_CATALOG"
 
-      - name: Build the pinned BLIS stack
+      - name: Clone the pinned simulator
         run: |
           set -euo pipefail
           # pins.env is the single source of truth for which simulator priced these runs; never
@@ -139,6 +137,12 @@ jobs:
           # The tag is not immutable upstream; refuse to build a moved tag (same check as SETUP.md).
           test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
             echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
+      - uses: actions/setup-go@v7
+        with: { go-version-file: upstream/go.mod, cache-dependency-path: upstream/go.sum }
+      - name: Build BLIS and clone the rest of the stack
+        run: |
+          set -euo pipefail
+          set -a; . ./pins.env; set +a
           ( cd upstream && go build -o blis main.go )
           git clone --branch "$REGISTRY_REF" --depth 1 https://github.com/inference-sim/blis-registry.git
           echo "BLIS_REGISTRY=$PWD/blis-registry" >> "$GITHUB_ENV"
@@ -164,7 +168,7 @@ jobs:
       - name: Build the site to validate the new reports
         run: python3 -I scripts/build_gallery.py --no-mock --out /tmp/site-check
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: report-${{ steps.name.outputs.name }}
           path: reports/${{ steps.name.outputs.name }}
@@ -187,7 +191,7 @@ jobs:
     env:
       SPEC: ${{ matrix.spec }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Name the report
         id: name
@@ -196,7 +200,7 @@ jobs:
           echo "name=$(sed -n 's/^name: *//p' "$SPEC" | head -1)" >> "$GITHUB_OUTPUT"
 
       # A pattern, not a name: a failed sweep leaves no artifact, and that must not error here.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: report-${{ steps.name.outputs.name }}
           path: ${{ runner.temp }}/artifacts

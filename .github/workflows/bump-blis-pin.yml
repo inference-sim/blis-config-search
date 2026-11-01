@@ -58,10 +58,10 @@ jobs:
       GH_TOKEN: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
       HAS_BOT_TOKEN: ${{ secrets.PIN_BOT_TOKEN != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install pyyaml jsonschema
 
@@ -121,9 +121,9 @@ jobs:
 
       # The release's own go.mod names its toolchain, so a release that needs a newer Go builds
       # without anyone editing this file.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         if: steps.target.outputs.skip == 'false'
-        with: { go-version-file: upstream/go.mod }
+        with: { go-version-file: upstream/go.mod, cache-dependency-path: upstream/go.sum }
 
       - name: Build the release
         if: steps.target.outputs.skip == 'false'

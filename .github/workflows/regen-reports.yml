@@ -62,9 +62,9 @@ jobs:
       batches: ${{ steps.plan.outputs.batches }}
       blis_ref: ${{ steps.plan.outputs.blis_ref }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install pyyaml
       - name: Did a stack pin move, and what is there to regenerate?
@@ -112,7 +112,7 @@ jobs:
     if: needs.plan.outputs.run == 'true'
     runs-on: ${{ fromJSON(vars.REGEN_RUNS_ON || '"ubuntu-latest"') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Clone the pinned simulator
         run: |
           set -euo pipefail
@@ -121,13 +121,13 @@ jobs:
           # The tag is not immutable upstream; refuse to build a moved tag (same check as SETUP.md).
           test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
             echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
-      - uses: actions/setup-go@v5
-        with: { go-version-file: upstream/go.mod }
+      - uses: actions/setup-go@v7
+        with: { go-version-file: upstream/go.mod, cache-dependency-path: upstream/go.sum }
       - run: cd upstream && go build -o blis main.go
       # Belt and braces for a pins.env that reached main without the pin-compat gate (a direct
       # push, an admin merge): hours of runs on knob tables that do not fit the stack would
       # produce reports that are wrong in ways a reviewer cannot see. Seconds, so always run it.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install pyyaml
       - name: Refuse to regenerate on knob tables that do not fit the stack
@@ -140,7 +140,7 @@ jobs:
             esac
           done
           python3 -I scripts/blis_pin.py drift --siblings "$RUNNER_TEMP/stack" --go-mod upstream/go.mod
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: blis
           path: upstream/blis
@@ -158,11 +158,11 @@ jobs:
         report: ${{ fromJSON(needs.plan.outputs.reports) }}
     name: regen ${{ matrix.report.id }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install pyyaml
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: blis, path: .build }
       - name: Clone the pinned catalog + registry
         id: stack
@@ -179,7 +179,7 @@ jobs:
       # every replay report in the campaign. blis_pin.py digest-checks it either way.
       - name: Restore the replay corpus
         if: matrix.report.replay
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .corpus/traces.jsonl
           key: replay-corpus-${{ steps.stack.outputs.catalog_ref }}
@@ -189,7 +189,7 @@ jobs:
           python3 -I scripts/blis_pin.py regen "${{ matrix.report.id }}" \
             --blis .build/blis --catalog blis-catalog --registry blis-registry \
             --out "$RUNNER_TEMP/regen" --timeout "${{ vars.REGEN_RUN_TIMEOUT || '1800' }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: regen-${{ matrix.report.id }}
           path: ${{ runner.temp }}/regen/${{ matrix.report.id }}
@@ -216,13 +216,13 @@ jobs:
       GH_TOKEN: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
       HAS_BOT_TOKEN: ${{ secrets.PIN_BOT_TOKEN != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install pyyaml
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: regen-*
           path: ${{ runner.temp }}/regen-artifacts

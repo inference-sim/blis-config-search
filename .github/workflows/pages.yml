@@ -48,11 +48,11 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install pyyaml
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: "22" }
       - name: Build + stage data, then build the SPA
         working-directory: web
@@ -76,7 +76,7 @@ jobs:
           print(f"ok: {len(scen)} scenarios, every report present")
           PY
       - name: Upload the built site for the deploy jobs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: site
           path: web/dist
@@ -91,8 +91,8 @@ jobs:
     steps:
       # The deploy action pushes from a git working tree; without a checkout it fails with
       # "fatal: not in a git directory".
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with: { name: site, path: dist }
       - uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445  # v4.9.0
         with:
@@ -120,8 +120,8 @@ jobs:
       pages: read              # poll the Pages build so the comment waits for a live preview
     steps:
       # The preview action reads the checkout for git config, and on `closed` it only removes.
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         if: github.event.action != 'closed'
         with: { name: site, path: dist }
       - uses: rossjrw/pr-preview-action@873417d2df72380da1f3978378fb58560bcde976  # v1.8.2

@@ -1,108 +1,107 @@
 {
   "explore_prose": [
-    "Each row below is one BLIS replay run. The load axis is <b>session-tree lanes</b>, not in-flight requests: one lane drives a whole agent trajectory that fans out into many sub-requests, so a lane is worth far more concurrency than a single chat turn.",
-    "The interactivity floor is the default <b>50 tok/s per user</b> (ITL p99 \u2264 20 ms). That is a <i>chatbot</i> floor, and it is worth saying plainly that it may be the wrong one for an agent: these requests carry 93,189 tokens of context and their p99 time-to-first-token is 9 s, so a user waits seconds before the first token regardless of how fast the stream then runs. It is kept because it discriminates sharply on this workload \u2014 the winner holds 117.4 tok/s/user at 64 lanes and collapses to 5.1 at 128"
-  ],
-  "glossary": [
-    {
-      "def": "One live agent trajectory, not one request.",
-      "id": "g-lane",
-      "long": "An AgentX lane replays a whole recorded coding session: a main turn, its sub-agent groups and their inner requests. One lane therefore puts many requests in flight, which is why the lane ladder is much shorter than a request-concurrency ramp.",
-      "term": "session-tree lane"
-    },
-    {
-      "def": "tp \u00d7 pcp \u00d7 dp \u2014 derived, never declared.",
-      "id": "g-epw",
-      "long": "A width of 1 shards no experts, so it neither saves memory nor costs collectives. This is why adding dp rescues a layout that failed at the same tp.",
-      "term": "expert-parallel width"
-    },
-    {
-      "def": "C* is the highest load meeting the floor; the recommendation is 0.8 \u00d7 C*.",
-      "id": "g-cstar",
-      "long": "The reported figures are measured AT the usable load, not read off a nearby rung of the ladder, so the throughput quoted is the throughput at the load recommended.",
-      "term": "C* and usable load"
-    },
-    {
-      "def": "About 118 input tokens per output token on this corpus.",
-      "id": "g-prefill",
-      "long": "Output tok/s per GPU is the ranking metric but a poor description of the machine's work here: most of each request is reading context, so a low output rate can coexist with very high total token throughput.",
-      "term": "prefill-dominated"
-    }
+    "Every run in this experiment is in the explorer below: filter by outcome to see which settings held the SLOs, or by setting to compare one sweep against another.",
+    "Each sweep's hypothesis was written before the runs, and is quoted beside that sweep's measured result below."
   ],
   "hero": [
     {
       "h": "What was tested",
-      "html": "The 12 highest-ranked of 19 valid expert-parallel and tensor-parallel layouts that fill 32 GPUs, probed up a session-lane ladder and refined one engine knob at a time \u2014 300 runs, 12 candidate topologies, 23 refinement arms, 33 servable finalists, 3 shapes the simulator refused or that missed the floor."
+      "html": "83 configurations over 8 sweeps (topology-ep, batch-caps, prefill-chunking, moe-collective, drafting, routing-prefix-cache, kv-headroom, cudagraph), each at 3 load levels, every run on exactly 32 GPUs."
     },
     {
       "h": "What was found",
-      "html": "This is a <b>prefill-dominated</b> workload: 93,189 input tokens per request against 792 output, about <b>118:1</b>. Output tok/s per GPU reads low by chatbot standards because almost all the work is reading context \u2014 the winner is ingesting roughly 88,550 input tok/s."
+      "html": "<strong>4x TP8 + EP (batch tokens 32,768)</strong>, from the <em>batch-caps</em> sweep, reached 39.84 tok/s/GPU (1275 tok/s across the fleet) at concurrency 96 while holding the scenario's SLOs."
     },
     {
       "h": "What to run",
-      "html": "<b>4x TP8 + EP</b> at 51 concurrent agent sessions (80% of the measured ceiling of 64). The non-EP controls do run on this part; compared at the highest load both arms serve, expert parallelism is worth +3.0% to +16.0%. Where it earns its place is capacity, not per-token speed.",
+      "html": "4x TP8 + EP (batch tokens 32,768) at concurrency 96. 111 of 249 runs held the SLOs.",
       "run": true
     }
   ],
   "meta": [
     "BLIS discrete-event simulation",
-    "blis-latency-kernel v0.5.0",
-    "AgentX MVP replay (393 recorded Claude Code trajectories)",
-    "32\u00d7 H200 \u00b7 4 nodes"
+    "Experiment Spec (RFC #21)",
+    "deterministic sweep \u2014 no LLM in the measurement path",
+    "seed 42"
   ],
-  "recommendation_num": 9,
+  "recommendation_num": 10,
   "recommendation_prose": [
-    "<b>4x TP8 + EP</b> at 51 concurrent agent sessions, on the h200 deployment flags in the table below. That is 752.2 output tok/s across 32 GPUs (23.5 per GPU) at 121.5 tok/s per user and ITL p99 8.2 ms.",
-    "Leave the engine knobs at their defaults. None of the refinements helped, and the routing profiles in particular cost capacity on this traffic.",
-    "These are simulator predictions over a recorded corpus, not a live cluster measurement. The corpus is pinned by sha256, so the traffic is reproducible; the pricing is the blis-latency-kernel cost model and should be spot-checked against real serving data before anyone sizes a cluster from it."
+    "The table below ranks the measured operating points by output tok/s per GPU, the objective this experiment selects on, among runs that held the scenario's SLOs."
   ],
   "sections": [
     {
-      "caption_note": "The winner's ceiling is <b>64 lanes</b>. The recommendation sits at 51, measured directly rather than interpolated.",
-      "figure": "operating_curve",
+      "caption_note": "10 configurations, 30 runs.",
       "num": 2,
       "prose": [
-        "Throughput climbs almost linearly with lanes and then falls off a cliff. 4x TP8 + EP holds 117.4 tok/s per user at 64 lanes, and at 128 lanes per-user rate collapses to 5.1 tok/s while ITL p99 jumps from 8.5 ms to 194 ms.",
-        "The cliff is why the recommendation is 51 lanes and not the ceiling: at the ceiling there is no headroom for a burst, and this workload's bursts are whole agent trajectories waking up at once."
+        "Wide tp8 instances should win at the SLO, and EP should pay more as dp spreads 128 experts over more ranks.",
+        "Measured: best was <strong>4x TP8</strong> at 36.8 tok/s/GPU (concurrency 96)."
       ],
-      "title": "The operating curve, and where it stops"
+      "title": "Sweep: topology-ep"
     },
     {
-      "caption_note": "Both arms of each topology are shown where both were servable.",
-      "figure": "scale_bars",
+      "caption_note": "16 configurations, 48 runs.",
       "num": 3,
       "prose": [
-        "5 of the 7 expert-parallel candidates have their non-EP control in the sweep, and each such pair is run together, so the direction is measured rather than assumed. On H200 the controls <b>do</b> run. Compared at the highest load both arms <i>served</i>, expert parallelism is worth between +3.0% and +16.0% \u2014 modest. Where it earns its place is <i>capacity</i>: it raises the servable ceiling, which is a different claim from being faster per token:",
-        "<ul><li><code>4x TP2xDP4 + EP</code>: +16.0% at a matched 16 lanes (4.8 vs 4.2 tok/s/GPU)</li><li><code>4x TP1xDP8 + EP</code>: +13.3% at a matched 8 lanes (2.0 vs 1.8 tok/s/GPU)</li><li><code>4x TP4xDP2 + EP</code>: +3.5% at a matched 32 lanes (15.2 vs 14.7 tok/s/GPU)</li><li><code>4x TP8 + EP</code>: +3.0% at a matched 64 lanes (28.1 vs 27.3 tok/s/GPU)</li></ul>",
-        "It is worth contrasting that with the same search on a smaller-memory part: on a 79.2 GiB H100 <i>no</i> non-EP control survives at all. The difference is headroom \u2014 with 141.0 GiB per device the weights and a 256k-token KV pool fit without sharding the experts, so here EP is an optimisation rather than a precondition.",
-        "The footprint still binds: 3 shape(s) were refused outright. And the narrow-TP layouts that do survive scale badly, because the expert-parallel width is derived as tp \u00d7 dp \u2014 a width of 1 shards nothing."
+        "max_num_seqs 16 should bind on 4 instances but not 8, while a larger token budget lifts both until ITL breaks.",
+        "Measured: best was <strong>4x TP8 + EP (batch tokens 32,768)</strong> at 39.84 tok/s/GPU (concurrency 96)."
       ],
-      "title": "Expert parallelism helps here \u2014 but it is not what rescues the fit"
+      "title": "Sweep: batch-caps"
     },
     {
-      "caption_note": "Crosses are runs that missed the interactivity floor.",
-      "figure": "tail_scatter",
+      "caption_note": "12 configurations, 36 runs.",
       "num": 4,
       "prose": [
-        "Refinement moves one knob at a time off the winning topology, so any difference is attributable. Nothing improved on the defaults \u2014 these knobs <b>constrain</b>:",
-        "<ul><li><code>batch tokens 2,048</code>: 12.4 tok/s/GPU, -47.2% \u2014 and it halves usable capacity, C* 64 \u2192 32</li><li><code>queue-kv routing</code>: 12.7 tok/s/GPU, -46.0% \u2014 and it halves usable capacity, C* 64 \u2192 32</li><li><code>3 draft tokens</code>: 14.0 tok/s/GPU, -40.4% \u2014 and it halves usable capacity, C* 64 \u2192 32</li><li><code>5 draft tokens</code>: 14.7 tok/s/GPU, -37.4% \u2014 and it halves usable capacity, C* 64 \u2192 32</li><li><code>1 draft token</code>: 16.4 tok/s/GPU, -30.2%</li><li><code>prefix-affinity routing</code>: 22.9 tok/s/GPU, -2.6%</li><li><code>max seqs 64</code>: 23.4 tok/s/GPU, -0.4%</li><li><code>gpu mem util 0.7</code>: 23.5 tok/s/GPU, +0.0%</li></ul>",
-        "The expensive one is <code>batch tokens 2,048</code> at -47.2%. It is not a small scheduling inefficiency: it drops the servable ceiling from 64 lanes to 32. This workload's requests arrive carrying ~93,189 tokens of context, so a prefill-admission cap well below that forces each one to be chunked across many scheduler passes \u2014 the batch limit, not the GPU, becomes what paces the fleet."
+        "Capping long prefills should cut ITL p99 enough to push the SLO knee past 96 lanes, at a small cost in raw throughput.",
+        "Measured: best was <strong>4x TP8 + EP (batch tokens 16,384 \u00b7 prefill chunk 4,096)</strong> at 28.42 tok/s/GPU (concurrency 64)."
       ],
-      "title": "The knobs that bind, and the one that really hurts"
+      "title": "Sweep: prefill-chunking"
     },
     {
+      "caption_note": "12 configurations, 36 runs.",
       "num": 5,
       "prose": [
-        "This model ships its own drafter \u2014 the catalog graph declares a <code>dspark</code> speculator \u2014 so draft depth is a real deployment choice, not an exotic knob. Each depth is run against the no-drafting baseline on the winning topology:",
-        "<ul><li><b>K=1</b>: 16.4 tok/s/GPU, -30.2% against no drafting, acceptance length 1.81</li><li><b>K=3</b>: 14.0 tok/s/GPU, -40.4% against no drafting, acceptance length 2.9, ceiling 32 lanes</li><li><b>K=5</b>: 14.7 tok/s/GPU, -37.4% against no drafting, acceptance length 3.51, ceiling 32 lanes</li></ul>",
-        "Read those percentages carefully: each arm is scored at <i>its own</i> usable load, and drafting moves that load. A depth whose ceiling drops is therefore scored at a lower session count than the baseline, which makes it look worse than it is at any load they share \u2014 the matched-load table below is the comparison that answers \u201cshould I turn this on\u201d. Here the ceiling falls for K=3 (32 lanes against the baseline\u2019s 64), K=5 (32 lanes against the baseline\u2019s 64).",
-        "<b>How to read the per-user rate on these rows.</b> Under drafting the engine reports the inter-token latency of a <i>verification step</i>, and one step emits as many tokens as the target accepts. So the per-user token rate is the acceptance length times 1000/ITL p99, not 1000/ITL p99 \u2014 the naive reading understates a drafting configuration by the whole acceptance factor and can make the fastest configuration measured look like a floor violation. The rows above use the acceptance-scaled rate, and the explorer labels it as derived.",
-        "<b>At matched load</b>, drafting pays at some loads and not others (13 of 25 measured points improve on the baseline) \u2014 and it moves the interactivity cliff, so the two arms' own usable loads are not the same load. Output tok/s at each session count, with the change against no drafting:<table class=\"short\"><thead><tr><th>sessions</th><th class=\"n\">no drafting</th><th class=\"n\">K=1</th><th class=\"n\">K=3</th><th class=\"n\">K=5</th></tr></thead><tbody><tr><td class=\"n\">4</td><td class=\"n\">133.9</td><td class=\"n\">102.4 <span class=\"op-var\">-24%</span></td><td class=\"n\">159.8 <span class=\"op-var\">+19%</span></td><td class=\"n\">168.5 <span class=\"op-var\">+26%</span></td></tr><tr><td class=\"n\">8</td><td class=\"n\">156.4</td><td class=\"n\">145.8 <span class=\"op-var\">-7%</span></td><td class=\"n\">157.3 <span class=\"op-var\">+1%</span></td><td class=\"n\">164.0 <span class=\"op-var\">+5%</span></td></tr><tr><td class=\"n\">16</td><td class=\"n\">233.5</td><td class=\"n\">195.7 <span class=\"op-var\">-16%</span></td><td class=\"n\">236.1 <span class=\"op-var\">+1%</span></td><td class=\"n\">256.2 <span class=\"op-var\">+10%</span></td></tr><tr><td class=\"n\">32</td><td class=\"n\">580.9</td><td class=\"n\">524.9 <span class=\"op-var\">-10%</span></td><td class=\"n\">606.0 <span class=\"op-var\">+4%</span></td><td class=\"n\">634.8 <span class=\"op-var\">+9%</span></td></tr><tr><td class=\"n\">51</td><td class=\"n\">752.2</td><td class=\"n\">694.8 <span class=\"op-var\">-8%</span></td><td class=\"n\">\u2014</td><td class=\"n\">\u2014</td></tr><tr><td class=\"n\">64</td><td class=\"n\">898.5</td><td class=\"n\">805.2 <span class=\"op-var\">-10%</span></td><td class=\"n\">930.2 <span class=\"op-var\">+4%</span></td><td class=\"n\">940.8 <span class=\"op-var\">+5%</span></td></tr><tr><td class=\"n\">128</td><td class=\"n\">1,498.5</td><td class=\"n\">1,367.2 <span class=\"op-var\">-9%</span></td><td class=\"n\">1,561.9 <span class=\"op-var\">+4%</span></td><td class=\"n\">1,559.6 <span class=\"op-var\">+4%</span></td></tr><tr><td class=\"n\">256</td><td class=\"n\">1,298.8</td><td class=\"n\">1,166.1 <span class=\"op-var\">-10%</span></td><td class=\"n\">1,304.2 <span class=\"op-var\">+0%</span></td><td class=\"n\">1,266.0 <span class=\"op-var\">-3%</span></td></tr><tr><td class=\"n\">512</td><td class=\"n\">672.1</td><td class=\"n\">564.7 <span class=\"op-var\">-16%</span></td><td class=\"n\">571.3 <span class=\"op-var\">-15%</span></td><td class=\"n\">606.7 <span class=\"op-var\">-10%</span></td></tr></tbody></table><p>The servable ceiling, however, falls: no drafting holds 64 lanes while K=1 at 64 lanes, K=3 at 32 lanes, K=5 at 32 lanes. Drafting spends decode compute verifying tokens, which is compute the baseline spends on concurrency \u2014 so the knob trades <i>sessions</i> for <i>per-session speed</i>. Set it from which of those you are short of: at a fixed session count below the drafting cliff it is close to free throughput, and above that cliff it costs you the sessions.</p>",
-        "The acceptance lengths are measured, not assumed: they come from <code>inferencex-golden-al (b200)</code> in blis-registry, keyed by this model, drafter, depth, thinking mode and workload category. They were measured on another part and reused here; the profile set states that acceptance depends mostly on the model, drafter and workload rather than the chip, and asks that the reuse be recorded, so it is recorded on every row."
+        "DeepEP low-latency should win at EP width 4-8 and lose to high-throughput at width 32, where dispatch volume dominates.",
+        "Measured: best was <strong>8x TP4 + EP</strong> at 35.49 tok/s/GPU (concurrency 96)."
       ],
-      "title": "Speculative decoding, and what it does to the interactivity number"
+      "title": "Sweep: moe-collective"
+    },
+    {
+      "caption_note": "6 configurations, 18 runs.",
+      "num": 6,
+      "prose": [
+        "dspark should raise tok/s/GPU at K 3-5 but lift ITL p99 toward the 20ms SLO, so the best K may differ between shapes.",
+        "Measured: best was <strong>4x TP8 + EP</strong> at 25.16 tok/s/GPU (concurrency 64)."
+      ],
+      "title": "Sweep: drafting"
+    },
+    {
+      "caption_note": "20 configurations, 60 runs.",
+      "num": 7,
+      "prose": [
+        "prefix-affinity with caching on should win, and the routing spread should widen from 4 to 8 instances.",
+        "Measured: best was <strong>4x TP8 + EP (prefix-affinity routing)</strong> at 38.01 tok/s/GPU (concurrency 96)."
+      ],
+      "title": "Sweep: routing-prefix-cache"
+    },
+    {
+      "caption_note": "3 configurations, 9 runs.",
+      "num": 8,
+      "prose": [
+        "gmu 0.95 should lift the KV-starved tp4 shapes noticeably and leave tp8 flat.",
+        "Measured: best was <strong>8x TP4 + EP</strong> at 36.68 tok/s/GPU (concurrency 96)."
+      ],
+      "title": "Sweep: kv-headroom"
+    },
+    {
+      "caption_note": "4 configurations, 12 runs.",
+      "num": 9,
+      "prose": [
+        "FULL and FULL_AND_PIECEWISE should edge out the PIECEWISE default by a few percent, and NONE should collapse.",
+        "Measured: best was <strong>4x TP8 + EP (graph capture full)</strong> at 38.96 tok/s/GPU (concurrency 96)."
+      ],
+      "title": "Sweep: cudagraph"
     }
   ],
-  "standfirst": "A configuration search over 300 BLIS replay runs on 32\u00d7 H200, driven by the recorded AgentX agentic traffic rather than a synthetic request shape. The winner is <b>4x TP8 + EP</b> at 752.2 output tok/s (23.5 per GPU) while every user still reads at 121.5 tok/s.",
-  "title": "Serving DeepSeek-V4.1-Flash to coding agents on 4 H200 nodes"
+  "standfirst": "A deterministic sweep over inferencex-agentx-mvp traffic, comparing 8 designs on one GPU budget.",
+  "title": "deepseek-v4.1-flash on 32x h200: deepseek-v4-1-flash-h200-agentx-4node"
 }

@@ -4,12 +4,48 @@
     "name": "muse-spark-open-816b-a42b-h100-chatbot-pipeline",
     "sweeps": [
       {
-        "name": "no-pipeline",
-        "narrative": "The no-pipeline control at 16-way tensor parallelism; a pipelined arm has to beat this at the same footprint and load to be worth its boundaries."
+        "name": "pipeline-batch",
+        "narrative": "Pipeline stages only pay once the batch cap is high enough to keep every stage busy, so pp should lose least at large max_num_seqs."
       },
       {
-        "name": "pipelined",
-        "narrative": "Trading tensor width for pipeline stages should help once the batch is full enough to keep every stage busy, and cost more at light load."
+        "name": "dp-batch",
+        "narrative": "Data-parallel attention splits the batch across ranks, so the batch caps should bind later at tp4 dp4 than at tp8 dp2."
+      },
+      {
+        "name": "moe-collective",
+        "narrative": "DeepEP backends should cost more as dp widens, and low-latency should fit only at small step budgets."
+      },
+      {
+        "name": "eplb",
+        "narrative": "Redundant experts should cost a little memory and buy nothing on uniform synthetic routing."
+      },
+      {
+        "name": "kv-capacity-pipeline",
+        "narrative": "Narrower tensor groups hold more weight per rank, so KV headroom should bind on 2-instance and deep-pp shapes, not on tp16."
+      },
+      {
+        "name": "kv-capacity-dp",
+        "narrative": "Data-parallel ranks each replicate attention weights, so fp8 KV and memory utilization should matter more at tp4 dp4."
+      },
+      {
+        "name": "cudagraph-pipeline",
+        "narrative": "Full graph capture should cut per-step launch cost on every cut, but only where the memory it reserves still fits."
+      },
+      {
+        "name": "cudagraph-dp",
+        "narrative": "Graph capture should help the data-parallel shapes as much as the tensor-parallel ones, memory permitting."
+      },
+      {
+        "name": "expert-parallel",
+        "narrative": "Sharding experts should beat replicating them at tp16, and matter less once pipeline stages already split the weights."
+      },
+      {
+        "name": "disaggregated",
+        "narrative": "Splitting prefill from decode should help little on short chatbot prompts, since the KV handoff costs more than the interference it removes."
+      },
+      {
+        "name": "pd-threshold",
+        "narrative": "Disaggregating only prompts above a few hundred tokens should keep short turns local and beat always-split."
       }
     ]
   },
@@ -30,7 +66,7 @@
       "blis": {
         "commit": "762f1605ff27cd825d6b2cb2d9e991cd4b864c91",
         "describe": "v0.15.0",
-        "sha256": "886174373b0f95a812390763b74f21efeaaa97c28394392a605100151a3c256c"
+        "sha256": "49948939a5a58bcb86e034df0a00fa93cf2c636b7a5a3a128a2b4b9764e73a68"
       },
       "catalog": {
         "commit": "b5550f750cb51571498577fbdc1c68f78cda67db",

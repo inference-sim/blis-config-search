@@ -1,0 +1,186 @@
+name: deepseek-v4-1-flash-h100-agentx-4node
+scenario:
+  model: deepseek-v4.1-flash
+  hardware: h100
+  workload: agentx-mvp
+  gpus: 32
+  slo:
+    itl_p99: 20ms
+  engine:
+    cache_dtype: fp8_ds_mla
+    max_model_len: 262144
+  concurrency:
+  - 32
+  - 64
+  - 96
+  - 128
+  replay:
+    corpus: .corpus/traces.jsonl
+    corpus_cache: /tmp/agx-cache-h100
+    grace_period: inf
+sweeps:
+- name: topology
+  narrative: Wide TP8 instances should win at the SLO, since narrow tp pays more per-step
+    latency than the extra replicas buy back.
+  num-instances:
+  - 1
+  - 2
+  - 4
+  parallel:
+    tp:
+    - 8
+    - 4
+    - 2
+    dp:
+    - 1
+    - 2
+    - 4
+    - 8
+    enable_expert_parallel:
+    - true
+- name: ep-off
+  narrative: Replicating all 128 experts should cost KV room and throughput against
+    the EP twins in topology.
+  num-instances:
+  - 2
+  parallel:
+    tp:
+    - 8
+    - 4
+    dp:
+    - 2
+    - 4
+    enable_expert_parallel:
+    - false
+- name: drafting-depth
+  narrative: Deeper dspark drafts should add tok/s, but the 20ms ITL bound should
+    cap K lower on narrow tp than on TP8.
+  num-instances:
+  - 4
+  - 1
+  parallel:
+    tp:
+    - 8
+    - 4
+    - 2
+    dp:
+    - 1
+    - 2
+    - 4
+    enable_expert_parallel:
+    - true
+  engine:
+    speculative:
+      method:
+      - dspark
+      num_spec_tokens:
+      - 1
+      - 2
+      - 3
+      - 5
+- name: batch-caps
+  narrative: max_num_seqs should bind on TP8 ranks and not on TP2, while a small token
+    cap trades throughput for tail ITL on both.
+  num-instances:
+  - 4
+  parallel:
+    tp:
+    - 8
+    - 2
+    dp:
+    - 1
+    - 4
+    enable_expert_parallel:
+    - true
+  engine:
+    max_num_batched_tokens:
+    - 2048
+    - 8192
+    - 32768
+    max_num_seqs:
+    - 32
+    - 256
+- name: moe-collective
+  narrative: Routed all-to-all backends should only pay once EP spans nodes, and hurt
+    on narrow tp where buffers crowd KV.
+  num-instances:
+  - 4
+  - 2
+  - 1
+  parallel:
+    tp:
+    - 2
+    - 8
+    dp:
+    - 4
+    - 2
+    enable_expert_parallel:
+    - true
+  engine:
+    all2all_backend:
+    - deepep_high_throughput
+    - pplx
+    - deepep_v2
+- name: kv-and-engram
+  narrative: Moving Engram tables into HBM should only pay when gmu leaves KV room
+    for them, and cost more on narrow tp.
+  num-instances:
+  - 4
+  parallel:
+    tp:
+    - 8
+    - 2
+    dp:
+    - 1
+    - 4
+    enable_expert_parallel:
+    - true
+  engine:
+    gpu_memory_utilization:
+    - 0.9
+    - 0.95
+    engram_config:
+      cpu_offload:
+      - true
+      - false
+- name: cudagraph
+  narrative: FULL-family capture should beat the PIECEWISE default by a few percent
+    and NONE should collapse.
+  num-instances:
+  - 4
+  parallel:
+    tp:
+    - 8
+    dp:
+    - 1
+    enable_expert_parallel:
+    - true
+  engine:
+    cudagraph_mode:
+    - NONE
+    - FULL
+    - FULL_AND_PIECEWISE
+- name: routing-and-prefix-cache
+  narrative: prefix-affinity should only beat random with caching on, and the gap
+    should widen from 2 to 4 instances.
+  num-instances:
+  - 2
+  - 4
+  parallel:
+    tp:
+    - 8
+    - 2
+    dp:
+    - 2
+    - 4
+    enable_expert_parallel:
+    - true
+  engine:
+    enable_prefix_caching:
+    - true
+    - false
+  router:
+    endpoint_picker_config:
+    - random.yaml
+    - load-aware.yaml
+    - prefix-affinity.yaml

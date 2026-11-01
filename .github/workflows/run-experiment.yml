@@ -192,12 +192,19 @@ jobs:
       SPEC: ${{ matrix.spec }}
     steps:
       - uses: actions/checkout@v7
+        # Branch from current main: a long sweep can outlive workflow edits, and a branch
+        # carrying stale workflow files is refused to GITHUB_TOKEN (no `workflows` scope).
+        with:
+          ref: ${{ github.event.repository.default_branch }}
 
       - name: Name the report
         id: name
-        # The report dir is the spec's name field, which need not match its file name.
+        # The report dir is the spec's name field, read at the swept commit so a mid-sweep
+        # rename or delete on main can't drop the report.
         run: |
-          echo "name=$(sed -n 's/^name: *//p' "$SPEC" | head -1)" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          git fetch -q --depth 1 origin "$GITHUB_SHA"
+          echo "name=$(git show "$GITHUB_SHA:$SPEC" | sed -n 's/^name: *//p' | head -1)" >> "$GITHUB_OUTPUT"
 
       # A pattern, not a name: a failed sweep leaves no artifact, and that must not error here.
       - uses: actions/download-artifact@v8

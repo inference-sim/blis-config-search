@@ -856,12 +856,6 @@ class QaRegressions(unittest.TestCase):
         # ...it is present only as the inert unicode-escaped form
         self.assertIn("\\u003c/script", html)
 
-    def test_f5_card_index_also_escaped(self):
-        card = {"model": "m", "winner": "</script><script>x</script>", "href": "a/index.html",
-                "hw": "8x h100", "workload": "chatbot", "summary": "", "run_id": "r"}
-        html = report.render_card_index([card])
-        self.assertNotIn("</script><script>x", html)
-
     # F1 — a present-but-malformed scenario/pareto must fail loudly, not silently unconstrain
     def test_f1_malformed_scenario_raises_not_silent(self):
         with tempfile.TemporaryDirectory() as d:

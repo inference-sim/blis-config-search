@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import type { Catalog, RunRecord, Scenario, WorkloadEntry } from './types'
-import { facetCounts, filterScenarios, topConfigs, NO_FILTERS, parseRoute, filterRecords, coverageRows, TAB_LABELS } from './lib'
+import { facetCounts, filterScenarios, NO_FILTERS, parseRoute, filterRecords, coverageRows, TAB_LABELS } from './lib'
 import { OBJECTIVE, label as lexLabel, metric } from './lexicon'
 import { ScenarioDetail } from './components/ScenarioDetail'
 import { Reports } from './components/Reports'
@@ -10,11 +10,11 @@ import { Coverage } from './components/Coverage'
 import { Footer } from './components/Footer'
 
 const w = { label: '1x TP8', tp: 8, ni: 1, gpus: 8, c_use: 1, tps: 1, tps_per_gpu: 1, per_user: 1, itl_p99: 1 }
-const mk = (id: string, model: string, hw: string, wl: string, gpu: number, synthetic: boolean, records: RunRecord[] = []): Scenario => ({
-  run_id: id, synthetic, model, hardware: hw, gpu_budget: gpu, workload: wl, isl_osl: 'x', floor: 'f', headroom: null,
-  n_runs: 1, n_servable: 1, generated: '', winner: w, finalists: [], reason: '', records,
+const mk = (id: string, model: string, hw: string, wl: string, gpu: number, records: RunRecord[] = []): Scenario => ({
+  run_id: id, model, hardware: hw, gpu_budget: gpu, workload: wl, caveat: '', floor: 'f', headroom: null,
+  n_runs: 1, n_servable: 1, winner: w, finalists: [], reason: '', records,
 })
-const S = [mk('a', 'm1', 'H100', 'chatbot', 16, false), mk('b', 'm1', 'H200', 'chatbot', 16, true), mk('c', 'm2', 'H100', 'multidoc', 8, true)]
+const S = [mk('a', 'm1', 'H100', 'chatbot', 16), mk('b', 'm1', 'H200', 'chatbot', 16), mk('c', 'm2', 'H100', 'multidoc', 8)]
 
 describe('filters', () => {
   it('filters and gives live facet counts that ignore the facet itself', () => {
@@ -29,9 +29,9 @@ describe('filters', () => {
 describe('#11 coverage view', () => {
   // Two scenarios share one (model, hardware, workload, budget) tuple; a third differs by budget.
   const C = [
-    mk('a', 'm1', 'H100', 'chatbot', 16, false),
-    mk('a2', 'm1', 'H100', 'chatbot', 16, false),
-    mk('c', 'm2', 'H200', 'multidoc', 512, false),
+    mk('a', 'm1', 'H100', 'chatbot', 16),
+    mk('a2', 'm1', 'H100', 'chatbot', 16),
+    mk('c', 'm2', 'H200', 'multidoc', 512),
   ]
 
   it('enumerates one row per searched combination, never an unsearched one', () => {
@@ -53,17 +53,11 @@ describe('#11 coverage view', () => {
     // workload through from the scenario yaml, so two runs of one combination can disagree on
     // case. They are the same searched combination and must not split into two rows.
     const rows = coverageRows([
-      mk('a', 'glm-5.3-flash', 'H100', 'chatbot', 16, false),
-      mk('b', 'GLM-5.3-Flash', 'h100', 'Chatbot', 16, false),
+      mk('a', 'glm-5.3-flash', 'H100', 'chatbot', 16),
+      mk('b', 'GLM-5.3-Flash', 'h100', 'Chatbot', 16),
     ])
     expect(rows).toHaveLength(1)
     expect(rows[0].scenarios.map((s) => s.run_id)).toEqual(['a', 'b'])
-  })
-
-  it('counts real vs synthetic reports per row', () => {
-    const rows = coverageRows([mk('a', 'm1', 'H100', 'chatbot', 16, false), mk('b', 'm1', 'H100', 'chatbot', 16, true)])
-    expect(rows[0].scenarios).toHaveLength(2)
-    expect(rows[0].n_real).toBe(1)
   })
 
   it('links a single-report row straight to its scenario, a multi-report row to the filtered list', () => {
@@ -89,8 +83,8 @@ describe('#11 coverage view', () => {
     // objective the search itself optimises, not print "2 reports" in the config column too.
     const win = (label: string, tpg: number) => ({ ...w, label, name: label, tps_per_gpu: tpg })
     const rows = [
-      { ...mk('old', 'm1', 'H100', 'chatbot', 16, false), winner: win('4x TP4', 40) },
-      { ...mk('new', 'm1', 'H100', 'chatbot', 16, false), winner: win('8x TP2 + EP', 71) },
+      { ...mk('old', 'm1', 'H100', 'chatbot', 16), winner: win('4x TP4', 40) },
+      { ...mk('new', 'm1', 'H100', 'chatbot', 16), winner: win('8x TP2 + EP', 71) },
     ]
     render(<Coverage scenarios={rows} />)
     const tr = document.querySelector('.readout tbody tr') as Element
@@ -178,7 +172,7 @@ describe('#11 coverage view', () => {
       models: [{ name: 'm1' }], hardware: [{ name: 'h100' }], fabrics: [], storage: [], registry: [],
       workloads: [{ name: 'agentx-mvp', kind: 'replay', scenario: 'inferencex-agentx-mvp' }], versions: { 'blis-catalog': '0.5.0' },
     } as unknown as Catalog
-    const rows = [mk('a', 'm1', 'H100', 'chatbot', 16, false), mk('b', 'm9', 'H100', 'inferencex-agentx-mvp', 8, false)]
+    const rows = [mk('a', 'm1', 'H100', 'chatbot', 16), mk('b', 'm9', 'H100', 'inferencex-agentx-mvp', 8)]
     render(<Coverage scenarios={rows} catalog={catalog} />)
     const [a, b] = [...document.querySelectorAll('.readout tbody tr')].map((tr) => [...tr.querySelectorAll('a.catref')].map((x) => x.getAttribute('href')))
     const base = 'https://inference-sim.github.io/blis-catalog/0.5/reference'
@@ -191,29 +185,17 @@ describe('#11 coverage view', () => {
 
   it('links the scenario page to its model, hardware and workload spec sheets', () => {
     const catalog = { models: [{ name: 'm1' }], hardware: [{ name: 'h100' }], workloads: [], fabrics: [], storage: [], registry: [], versions: { 'blis-catalog': '0.5.0' } } as unknown as Catalog
-    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false)]} catalog={catalog} />)
+    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16)]} catalog={catalog} />)
     const base = 'https://inference-sim.github.io/blis-catalog/0.5/reference'
     expect(document.querySelector('.viewhead .specsheet')?.getAttribute('href')).toBe(`${base}/models/m1/`)
     expect([...document.querySelectorAll('.specchips a.catref')].map((x) => x.getAttribute('href'))).toEqual([`${base}/hardware/`, `${base}/workloads/#shapes`])
   })
 
   it('joins the replica count and captions the config with its variant', () => {
-    const s = mk('v', 'm1', 'H100', 'chatbot', 16, false)
+    const s = mk('v', 'm1', 'H100', 'chatbot', 16)
     render(<Coverage scenarios={[{ ...s, winner: { ...s.winner, label: '8x TP4 + EP', variant: 'max seqs 256' } }]} />)
     expect(document.querySelector('.covwin')?.textContent).toBe('8×TP4 + EP')
     expect(document.querySelector('.covvar')?.textContent).toBe('max seqs 256')
-  })
-})
-
-describe('topConfigs', () => {
-  it('uses real scenarios only when any exist', () => {
-    const r = topConfigs(S)
-    expect(r.mockOnly).toBe(false)
-    expect(r.items.map((s) => s.run_id)).toEqual(['a'])
-  })
-  it('falls back to flagged mocks, and to empty', () => {
-    expect(topConfigs(S.slice(1)).mockOnly).toBe(true)
-    expect(topConfigs([])).toEqual({ items: [], mockOnly: false })
   })
 })
 
@@ -239,7 +221,7 @@ describe('winner naming with knob variants', () => {
     ...w, label, variant, name: variant ? `${label} (${variant})` : label, tps_per_gpu: tpg,
   })
   const scen = (): Scenario => ({
-    ...mk('a', 'm1', 'H200', 'multidoc', 64, false),
+    ...mk('a', 'm1', 'H200', 'multidoc', 64),
     winner: wv('64x TP4xDP2 + EP', 'least-loaded routing', 67),
     finalists: [
       wv('64x TP4xDP2 + EP', 'least-loaded routing', 67),
@@ -289,7 +271,7 @@ describe('what to run: operating points', () => {
     ...over,
   })
   const scen = (records: RunRecord[]): Scenario =>
-    ({ ...mk('a', 'kimi-k2.5', 'H200', 'multidoc', 512, false, records) })
+    ({ ...mk('a', 'kimi-k2.5', 'H200', 'multidoc', 512, records) })
 
   it('states the shared ranking objective above the table', () => {
     // 7a's acceptance criterion is "the same, STATED objective". The standalone report prints the
@@ -398,7 +380,7 @@ describe('click a point for its deployment', () => {
     ...over,
   })
   const scen = (records: RunRecord[]): Scenario => ({
-    ...mk('a', 'kimi-k2.5', 'H200', 'multidoc', 512, false, records),
+    ...mk('a', 'kimi-k2.5', 'H200', 'multidoc', 512, records),
   })
   const clickFirstPoint = () => {
     const pt = document.querySelector('svg.chart circle.pt')
@@ -432,8 +414,8 @@ describe('click a point for its deployment', () => {
     // The hoverRec useMemo must sit ABOVE the early return for the empty-records case, or React
     // throws "rendered fewer hooks than expected" when the same component instance re-renders
     // from a populated scenario to an empty one (back/forward, or editing the URL).
-    const withRuns = mk('a', 'kimi-k2.5', 'H200', 'multidoc', 512, false, [rec()])
-    const noRuns = mk('a', 'kimi-k2.5', 'H200', 'multidoc', 512, false, [])
+    const withRuns = mk('a', 'kimi-k2.5', 'H200', 'multidoc', 512, [rec()])
+    const noRuns = mk('a', 'kimi-k2.5', 'H200', 'multidoc', 512, [])
     const { rerender } = render(<ScenarioDetail runId="a" scenarios={[withRuns]} />)
     expect(() => rerender(<ScenarioDetail runId="a" scenarios={[noRuns]} />)).not.toThrow()
     expect(screen.getByText(/no per-run records are available/i)).toBeTruthy()
@@ -659,7 +641,7 @@ describe('Submit experiment spec', () => {
   }
 
   it('emits an experiment spec, not a legacy scenario', () => {
-    render(<Submit catalog={cat()} mode="pages" />)
+    render(<Submit catalog={cat()} />)
     const y = spec()
     expect(y).toContain('name: m1-h100-chatbot-16gpu')
     expect(y).toContain('  gpus: 16')
@@ -672,14 +654,14 @@ describe('Submit experiment spec', () => {
   })
 
   it('keeps every sweep on the GPU budget', () => {
-    render(<Submit catalog={cat()} mode="pages" />)
+    render(<Submit catalog={cat()} />)
     // 16 GPUs: tp [8, 4, 2, 1] x num-instances [2, 4, 8, 16] pair up to exactly 16
     expect(spec()).toContain('num-instances: [2, 4, 8, 16]')
     expect(spec()).toContain('parallel: {tp: [8, 4, 2, 1], enable_expert_parallel: [true]}')
   })
 
   it('lets targets other than inter-token latency be set', () => {
-    render(<Submit catalog={cat()} mode="pages" />)
+    render(<Submit catalog={cat()} />)
     fireEvent.click(screen.getByLabelText('Inter-token latency'))
     fireEvent.click(screen.getByLabelText('Time to first token'))
     fireEvent.change(screen.getByLabelText('Time to first token cap'), { target: { value: '1.5' } })
@@ -689,14 +671,14 @@ describe('Submit experiment spec', () => {
   })
 
   it('adds a throughput floor per accelerator', () => {
-    render(<Submit catalog={cat()} mode="pages" />)
+    render(<Submit catalog={cat()} />)
     fireEvent.click(screen.getByLabelText('Throughput'))
     fireEvent.change(screen.getByLabelText('Throughput floor'), { target: { value: '800' } })
     expect(spec()).toContain('slo: {itl_p99: 20ms, throughput_per_gpu: 800}')
   })
 
   it('offers replays and adds the replay block for one', () => {
-    render(<Submit catalog={cat([wl('chatbot', 'shape'), wl('agentx-mvp', 'replay')])} mode="pages" />)
+    render(<Submit catalog={cat([wl('chatbot', 'shape'), wl('agentx-mvp', 'replay')])} />)
     expect(offered()).toEqual(['chatbot', 'agentx-mvp (replay)'])
     fireEvent.mouseDown(screen.getByText('agentx-mvp (replay)'))
     expect(spec()).toContain('  workload: agentx-mvp')
@@ -705,14 +687,14 @@ describe('Submit experiment spec', () => {
   })
 
   it('defaults to a shape even when a replay sorts first', () => {
-    render(<Submit catalog={cat([wl('agentx-mvp', 'replay'), wl('chatbot', 'shape')])} mode="pages" />)
+    render(<Submit catalog={cat([wl('agentx-mvp', 'replay'), wl('chatbot', 'shape')])} />)
     expect(spec()).toContain('  workload: chatbot')
     expect(spec()).not.toContain('replay:')
     expect(spec()).not.toContain('max_model_len')
   })
 
   it('drops the routing sweep when one instance takes the whole budget', () => {
-    render(<Submit catalog={cat()} mode="pages" />)
+    render(<Submit catalog={cat()} />)
     fireEvent.change(screen.getByLabelText('Accelerator budget'), { target: { value: '8' } })
     // 8 GPUs still allows 2x TP4 etc.; 1 GPU leaves only 1x TP1
     expect(spec()).toContain('name: routing')
@@ -721,7 +703,7 @@ describe('Submit experiment spec', () => {
   })
 
   it('refuses a name the validator would reject', () => {
-    render(<Submit catalog={cat()} mode="pages" />)
+    render(<Submit catalog={cat()} />)
     fireEvent.change(screen.getByLabelText('Spec name'), { target: { value: 'Bad Name' } })
     expect(screen.queryByRole('link', { name: /Open a pull request/ })).toBeNull()
     expect(document.body.textContent).toContain('lowercase letters, digits and dashes')
@@ -736,7 +718,7 @@ describe('Submit numeric inputs', () => {
     fabrics: [], storage: [], registry: [], versions: {},
   }
   const fields = () => {
-    render(<Submit catalog={catalog} mode="pages" />)
+    render(<Submit catalog={catalog} />)
     return { budget: screen.getByLabelText('Accelerator budget') as HTMLInputElement, itl: screen.getByLabelText('Inter-token latency cap') as HTMLInputElement }
   }
   const spec = () => screen.getByLabelText('Generated experiment spec').textContent ?? ''
@@ -773,7 +755,7 @@ describe('Submit numeric inputs', () => {
 
 describe('scenario cards', () => {
   it('lays out cluster and workload on their own labelled rows', () => {
-    render(<Reports scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false)]} params={{}} />)
+    render(<Reports scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16)]} params={{}} />)
     const card = document.querySelector('.card') as Element
     const rows = [...card.querySelectorAll('.specrows > div')].map((d) => d.textContent ?? '')
     expect(rows.some((t) => t.startsWith('Cluster'))).toBe(true)
@@ -783,20 +765,20 @@ describe('scenario cards', () => {
   })
 
   it('shows the cluster as count × hardware', () => {
-    render(<Reports scenarios={[mk('a', 'm1', 'B200', 'chatbot', 32, false)]} params={{}} />)
+    render(<Reports scenarios={[mk('a', 'm1', 'B200', 'chatbot', 32)]} params={{}} />)
     const dd = document.querySelector('.card .specrows > div:first-child dd')
     expect(dd?.textContent).toBe('32 × B200')
   })
 
   it('joins the replica count to the shape and leaves node count off the cluster', () => {
-    const s = mk('a', 'm1', 'B200', 'chatbot', 32, false)
+    const s = mk('a', 'm1', 'B200', 'chatbot', 32)
     render(<Reports scenarios={[{ ...s, winner: { ...s.winner, label: '8x TP4 + EP' } }]} params={{}} />)
     expect(document.querySelector('.card .win')?.textContent).toBe('8×TP4 + EP')
     expect(document.querySelector('.card .specrows dd')?.textContent).not.toMatch(/nodes/)
   })
 
   it('captions the config with its knob variant only, never the replica shape', () => {
-    const s = mk('a', 'm1', 'B200', 'chatbot', 32, false)
+    const s = mk('a', 'm1', 'B200', 'chatbot', 32)
     const withVariant = { ...s, run_id: 'v', winner: { ...s.winner, ni: 8, tp: 4, variant: 'prefix-affinity routing' } }
     const bare = { ...s, run_id: 'b', winner: { ...s.winner, ni: 8, tp: 4, variant: '' } }
     render(<Reports scenarios={[withVariant, bare]} params={{}} />)
@@ -806,25 +788,25 @@ describe('scenario cards', () => {
   })
 
   it('labels each performance number and gives latency its own column', () => {
-    render(<Reports scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false)]} params={{}} />)
+    render(<Reports scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16)]} params={{}} />)
     const labels = [...document.querySelectorAll('.card .perf .l')].map((l) => l.textContent)
     expect(labels).toEqual(['Per accelerator', 'Per user', 'Latency p99'])
   })
 
   it('drops the latency column when the winner has no latency', () => {
-    const s = mk('a', 'm1', 'H100', 'chatbot', 16, false)
+    const s = mk('a', 'm1', 'H100', 'chatbot', 16)
     render(<Reports scenarios={[{ ...s, winner: { ...s.winner, itl_p99: null as unknown as number } }]} params={{}} />)
     expect([...document.querySelectorAll('.card .perf .l')].map((l) => l.textContent)).toEqual(['Per accelerator', 'Per user'])
   })
 
   it('orders the filter rail model, workload, hardware, then budget', () => {
-    render(<Reports scenarios={[mk('a', 'm1', 'B200', 'chatbot', 32, false)]} params={{}} />)
+    render(<Reports scenarios={[mk('a', 'm1', 'B200', 'chatbot', 32)]} params={{}} />)
     const labels = [...document.querySelectorAll('.facetrail .flabel')].map((p) => p.textContent)
     expect(labels).toEqual(['Model', 'Workload', 'Hardware', 'Accelerator budget'])
   })
 
   it('does not show the sweep-size "N/M servable" line on the card', () => {
-    render(<Reports scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false)]} params={{}} />)
+    render(<Reports scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16)]} params={{}} />)
     const card = document.querySelector('.card') as Element
     expect(card.textContent).not.toMatch(/servable/i)
   })
@@ -838,7 +820,7 @@ describe('ScenarioDetail', () => {
   })
   it('renders a single-point scatter without NaN', () => {
     const rec: RunRecord = { id: '1', src: '', conc: 1, tp: 1, dp: 1, ni: 1, gpus: 1, series: 's', route: '', pd: '', mtp: 0, mnbt: null, mns: null, pu: 10, cl: 20, tpg: 20, itl: null, ttft: null, hit: null, p95: null, ok: true, status: 'complete', viol: [] }
-    const S1 = [mk('a', 'm1', 'H100', 'chatbot', 16, false, [rec]), ...S.slice(1)]
+    const S1 = [mk('a', 'm1', 'H100', 'chatbot', 16, [rec]), ...S.slice(1)]
     render(<ScenarioDetail runId="a" scenarios={S1} />)
     expect(screen.getByText(/Only one point/)).toBeTruthy()
     expect(document.body.innerHTML).not.toContain('NaN')
@@ -857,7 +839,7 @@ describe('ScenarioDetail', () => {
   }
 
   it('#8 renders ONE shared series legend for all the charts (not one per chart)', () => {
-    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, twoSeries())]} />)
+    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, twoSeries())]} />)
     // a single legend under the chart grid, not duplicated in each figure
     const legends = document.querySelectorAll('.legend')
     expect(legends.length).toBe(1)
@@ -867,7 +849,7 @@ describe('ScenarioDetail', () => {
   })
 
   it('plots the scatter as tok/s/accelerator (y) against tok/s/user (x)', () => {
-    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, twoSeries())]} />)
+    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, twoSeries())]} />)
     const scatter = [...document.querySelectorAll('svg.chart')]
       .find((s) => s.querySelectorAll('circle.pt').length > 0) as Element
     const axes = [...scatter.querySelectorAll('.axlabel')].map((e) => e.textContent)
@@ -879,7 +861,7 @@ describe('ScenarioDetail', () => {
   })
 
   it('lets the user switch the latency chart between TPOT / TTFT / E2E', () => {
-    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, twoSeries())]} />)
+    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, twoSeries())]} />)
     const picker = document.querySelector('.vc-pick select') as HTMLSelectElement
     expect(picker).toBeTruthy()
     // the options are the three latency metrics; default is TPOT
@@ -894,20 +876,20 @@ describe('ScenarioDetail', () => {
   })
 
   it('#3 shows the interactivity floor as a spec-chip in the header', () => {
-    const s = { ...mk('a', 'm1', 'H100', 'chatbot', 16, false, twoSeries()), floor: '50 tok/s/user' }
+    const s = { ...mk('a', 'm1', 'H100', 'chatbot', 16, twoSeries()), floor: '50 tok/s/user' }
     render(<ScenarioDetail runId="a" scenarios={[s]} />)
     const chip = document.querySelector('.specchips .spec.floor')
     expect(chip?.textContent).toContain('50 tok/s/user')
   })
 
   it('#5 states how finalists were chosen in the briefing', () => {
-    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, twoSeries())]} />)
+    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, twoSeries())]} />)
     expect(screen.getByText(/how these were chosen/i)).toBeTruthy()
     expect(document.querySelector('.dek.method')?.textContent).toMatch(/tok\/s per accelerator/i)
   })
 
   it('#9 header terms open a hover/focus tooltip showing the description', () => {
-    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, twoSeries())]} />)
+    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, twoSeries())]} />)
     const labels = [...document.querySelectorAll('th .hcol')]
     // every column with help is reachable (incl. series/configuration via their aria-label)
     const aria = labels.map((e) => e.getAttribute('aria-label') ?? '')
@@ -926,7 +908,7 @@ describe('ScenarioDetail', () => {
 
   it('makes the full run-log table sortable by any column', () => {
     const recs = twoSeries()  // series A (pu 80/60) and B (pu 70/55), conc 128/256
-    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, recs)]} />)
+    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, recs)]} />)
     const tbl = screen.getByTestId('run-log')
     // configuration column (2nd cell) sorts by series+variant name
     const cfgText = () => [...tbl.querySelectorAll('tbody tr')].map((tr) => tr.querySelectorAll('td')[1].textContent ?? '')
@@ -948,7 +930,7 @@ describe('ScenarioDetail', () => {
       // a failed run must still appear in the run log, with its violation in the status column
       { ...twoSeries()[0], id: 'bad', series: 'C', conc: 512, ok: false, status: 'over', viol: ['itl_p99_ms 45 > 20'] },
     ]
-    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, recs)]} />)
+    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, recs)]} />)
     const tbl = screen.getByTestId('run-log')
     // rich format: the config cell renders deploy flags, not a bare series string
     expect(tbl.querySelector('tbody .op-flags')).toBeTruthy()
@@ -960,7 +942,7 @@ describe('ScenarioDetail', () => {
     // tp is constant (4) across both series; series A vs B differ by dp (2 vs 4) and the ramp
     // varies conc. So "data-parallel" is a searched axis; "tensor-parallel" is not.
     const recs = twoSeries().map((r) => r.series === 'B' ? { ...r, dp: 4 } : r)
-    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, false, recs)]} />)
+    render(<ScenarioDetail runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16, recs)]} />)
     const line = document.querySelector('.axes-searched')?.textContent ?? ''
     expect(line).toMatch(/axes searched/i)
     expect(line).toContain('data-parallel')
@@ -990,7 +972,7 @@ describe('footer pinned-stack disclosure', () => {
   const toggle = () => screen.getByRole('button')
 
   it('shows BLIS alone at rest as a plain pill, with a +N toggle beside it', () => {
-    render(<Footer catalog={cat()} mode="local" hasMock={false} />)
+    render(<Footer catalog={cat()} />)
     expect(pills()).toEqual(['inference-sim v0.12.0'])
     // only the count is clickable, not the BLIS pill
     expect(screen.getAllByRole('button')).toHaveLength(1)
@@ -1000,7 +982,7 @@ describe('footer pinned-stack disclosure', () => {
   })
 
   it('reveals the deps as the same pills when expanded, and collapses again', () => {
-    render(<Footer catalog={cat()} mode="local" hasMock={false} />)
+    render(<Footer catalog={cat()} />)
     fireEvent.click(toggle())
     expect(pills()).toEqual([
       'inference-sim v0.12.0', 'blis-latency-kernel v0.3.0', 'blis-schemas v0.5.0',
@@ -1017,7 +999,7 @@ describe('footer pinned-stack disclosure', () => {
 
   it('surfaces the latency kernel, which the old flat version pills dropped entirely', () => {
     // KERNEL_REF prices every run but was never in `versions`, so it was invisible.
-    render(<Footer catalog={cat()} mode="local" hasMock={false} />)
+    render(<Footer catalog={cat()} />)
     fireEvent.click(toggle())
     expect(document.querySelector('.footstack')?.textContent).toContain('blis-latency-kernel')
   })
@@ -1032,7 +1014,7 @@ describe('footer pinned-stack disclosure', () => {
         ...stack!.deps.slice(1),
       ],
     }
-    render(<Footer catalog={cat({ stack: withVllm })} mode="local" hasMock={false} />)
+    render(<Footer catalog={cat({ stack: withVllm })} />)
     expect(toggle().textContent).toBe('+5 more')
     fireEvent.click(toggle())
     const names = [...document.querySelectorAll('.footstack .pill .pk')].map((p) => p.textContent)
@@ -1043,7 +1025,7 @@ describe('footer pinned-stack disclosure', () => {
 
   it('shows only the pinned simulator version, with older ones in the tooltip', () => {
     const multi: Catalog['stack'] = { root: { name: 'inference-sim', version: 'v0.15.0, v0.12.0', note: 'prices every run' }, deps: stack!.deps }
-    render(<Footer catalog={cat({ stack: multi })} mode="local" hasMock={false} />)
+    render(<Footer catalog={cat({ stack: multi })} />)
     const root = document.querySelector('.footstack .pill') as Element
     expect(root.textContent).toContain('v0.15.0')
     expect(root.textContent).not.toContain('v0.12.0')
@@ -1051,15 +1033,9 @@ describe('footer pinned-stack disclosure', () => {
   })
 
   it('shows no toggle when the stack somehow has none', () => {
-    render(<Footer catalog={cat({ stack: { root: stack!.root, deps: [] } })} mode="local" hasMock={false} />)
+    render(<Footer catalog={cat({ stack: { root: stack!.root, deps: [] } })} />)
     expect(screen.queryByRole('button')).toBeNull()
     expect(pills()).toEqual(['inference-sim v0.12.0'])
   })
 
-  it('falls back to flat pills for a catalog.js generated before `stack` existed', () => {
-    render(<Footer catalog={cat({ stack: undefined })} mode="local" hasMock={false} />)
-    expect(screen.queryByRole('button')).toBeNull()
-    const pills = [...document.querySelectorAll('.footvers .pill')].map((p) => p.textContent?.trim())
-    expect(pills).toEqual(['blis-catalog 0.4.0', 'blis-registry v0.2.0', 'inference-sim v0.12.0'])
-  })
 })

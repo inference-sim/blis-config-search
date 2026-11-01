@@ -16,7 +16,6 @@ Scripts are always invoked with `-I`.
 ```bash
 # Python tests (hermetic: no BLIS, no network) — same set CI runs in checks.yml
 python3 -I scripts/test_build.py
-python3 -I scripts/test_backend.py
 python3 -I scripts/test_experiment.py
 python3 -I scripts/test_report.py
 python3 -I scripts/test_run_blis.py
@@ -31,12 +30,12 @@ python3 -I scripts/validate_experiment.py experiments/<name>.yaml   # or experim
 python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run
 
 # Site data + web app
-python3 -I scripts/build_gallery.py [--mode local] [--no-mock]      # reports/ -> site/
+python3 -I scripts/build_gallery.py                                 # reports/ -> site/
 cd web && npm ci && npm run dev | build | test | typecheck
 ```
 
 `npm run dev/build` first runs `stage:data`, which calls `build_gallery.py` and copies `site/`
-into `web/public/data/`. Env: `SITE_MODE=local`, `NO_MOCK=1`, `REUSE_SITE=1`.
+into `web/public/data/`. `REUSE_SITE=1` skips the rebuild.
 
 ## Architecture
 

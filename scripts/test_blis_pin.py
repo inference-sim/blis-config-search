@@ -224,11 +224,10 @@ def test_summary_table():
             d = os.path.join(root, rid)
             os.makedirs(d)
             json.dump({"pinned_stack": {"blis": blis}}, open(os.path.join(d, "scenario.json"), "w"))
-            json.dump({"winner": {"chosen": chosen},
-                       "finalists": [{"at_c_use": {"tokens_per_sec_per_gpu": tpg}}]},
-                      open(os.path.join(d, "pareto.json"), "w"))
-            json.dump({"n_runs": runs, "n_servable": servable},
-                      open(os.path.join(d, "gallery.json"), "w"))
+            json.dump({"winner": {"chosen": chosen}}, open(os.path.join(d, "pareto.json"), "w"))
+            json.dump({"totals": {"runs": runs, "servable": servable},
+                       "best_overall": {"tokens_per_sec_per_gpu": tpg}},
+                      open(os.path.join(d, "experiment.json"), "w"))
         put(old, "r1", "v1.0.0", "4x TP8", 20.0, 100, 50)
         put(new, "r1", "v2.0.0", "4x TP8", 22.5, 100, 50)
         put(old, "r2", "v1.0.0", "8x TP4", 10.0, 80, 40)

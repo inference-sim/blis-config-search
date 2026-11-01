@@ -29,7 +29,6 @@ on:
     paths:
       - "web/**"
       - "reports/**"
-      - "gallery/**"
       - "scripts/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
@@ -62,8 +61,6 @@ jobs:
           git clone --branch "$REGISTRY_REF" --depth 1 https://github.com/inference-sim/blis-registry.git ../blis-registry
       - name: Build + stage data, then build the SPA
         working-directory: web
-        env:
-          NO_MOCK: ${{ github.ref == 'refs/heads/main' && '1' || '0' }}  # production (main) hides mock scenarios
         run: |
           npm ci
           npm run build   # prebuild runs stage:data (build_gallery.py -> site/ -> public/data/)

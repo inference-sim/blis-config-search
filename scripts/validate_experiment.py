@@ -467,13 +467,6 @@ def _check_knob_names(block, where, vocabulary, kind, errs, source, skip=()):
                         f"{_suggest(key, vocabulary)}")
 
 
-def _grid_size(lists):
-    n = 1
-    for values in lists:
-        n *= max(1, len(values))
-    return n
-
-
 def _parallel_combos(parallel):
     """Every (tp, pp, dp) combination a `parallel:` block expands to, as footprints.
 

@@ -989,21 +989,14 @@ def _blis_pin_warning(blis, catalog, registry):
         return ""
 
 
-SEARCH_ONLY_FILES = ("gallery.json",)
-
-
 def _write_run_dir(out_dir, spec, report, runs):
-    """Write reports/<name>/ -- the run directory the report and gallery read.
+    """Write reports/<name>/ -- the run directory the report and site read.
 
     `spec.yaml` is copied in verbatim: the report states the experiment's narrative beside its
     measured results, and a run directory that carries its own spec can be re-rendered (and
     re-checked against the numbers) without the repo it came from.
     """
     os.makedirs(out_dir, exist_ok=True)
-    # gallery.json was the retired search runner's sidecar; never let one outlive a re-sweep.
-    for stale in SEARCH_ONLY_FILES:
-        if os.path.isfile(os.path.join(out_dir, stale)):
-            os.remove(os.path.join(out_dir, stale))
     with open(os.path.join(out_dir, "runs.jsonl"), "w", encoding="utf-8") as f:
         for rec in runs:
             f.write(json.dumps(rec, sort_keys=True) + "\n")

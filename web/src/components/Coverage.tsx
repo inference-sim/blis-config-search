@@ -2,7 +2,6 @@ import type { ReactNode } from 'react'
 import type { Catalog, Scenario } from '../types'
 import { SPEC_DOC, catalogDoc, catalogIndex, configLabel, coverageHref, coverageRows, dash, fnum, type CoverageRow } from '../lib'
 import { CatalogTable, type Col } from './CatalogTable'
-import { MockBadge } from './Reports'
 
 /** The winner of the report this row recommends; `coverageRows` already resolved which. */
 const bestWinner = (r: CoverageRow) => r.best?.winner ?? null
@@ -61,7 +60,6 @@ export function Coverage({ scenarios, catalog }: { scenarios: Scenario[]; catalo
       render: (r) => (
         <a href={coverageHref(r)}>
           {r.scenarios.length === 1 ? 'open report' : `${r.scenarios.length} reports`}
-          {r.n_real === 0 && <> <MockBadge /></>}
         </a>
       ),
     },

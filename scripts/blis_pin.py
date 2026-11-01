@@ -340,20 +340,12 @@ def headline(run_dir):
         return None
     pareto = _load_json(os.path.join(run_dir, "pareto.json"), {}) or {}
     win = pareto.get("winner") or {}
-    runs, servable = 0, None
-    exp = _load_json(os.path.join(run_dir, "experiment.json"))
-    gal = _load_json(os.path.join(run_dir, "gallery.json"), {}) or {}
-    if exp:
-        runs, servable = exp["totals"]["runs"], exp["totals"]["servable"]
-        best = exp.get("best_overall") or {}
-        tpg = best.get("tokens_per_sec_per_gpu")
-    else:
-        runs, servable = gal.get("n_runs"), gal.get("n_servable")
-        fin = (pareto.get("finalists") or [{}])[0]
-        tpg = (fin.get("at_c_use") or {}).get("tokens_per_sec_per_gpu")
+    exp = _load_json(os.path.join(run_dir, "experiment.json"), {}) or {}
+    totals = exp.get("totals") or {}
     return {"blis": (scen.get("pinned_stack") or {}).get("blis"),
-            "winner": win.get("chosen") or win.get("label") or "none", "tok_s_gpu": tpg,
-            "runs": runs, "servable": servable}
+            "winner": win.get("chosen") or win.get("label") or "none",
+            "tok_s_gpu": (exp.get("best_overall") or {}).get("tokens_per_sec_per_gpu"),
+            "runs": totals.get("runs"), "servable": totals.get("servable")}
 
 
 def _fmt(v):

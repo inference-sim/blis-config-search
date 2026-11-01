@@ -1886,21 +1886,6 @@ class DryRunPlan(unittest.TestCase):
                     f"out_dir {'link' if out_dir == link else 'real'}")
                 self.assertEqual(["--seed", "42"], rec["cmd"][4:])
 
-    def test_sweep_drops_a_replaced_search_reports_sidecar(self):
-        """A re-sweep over a dir holding the retired search sidecar removes gallery.json."""
-        with tempfile.TemporaryDirectory() as d:
-            with open(os.path.join(d, "gallery.json"), "w") as f:
-                f.write("{}")
-            orig = (E._scenario_json, E._pareto_json, E._report_json)
-            E._scenario_json = E._pareto_json = lambda *a: {}
-            E._report_json = lambda *a: {}
-            try:
-                E._write_run_dir(d, {"name": "x"}, {}, [])
-            finally:
-                E._scenario_json, E._pareto_json, E._report_json = orig
-            self.assertFalse(os.path.exists(os.path.join(d, "gallery.json")))
-            self.assertTrue(os.path.exists(os.path.join(d, "experiment.json")))
-
     def test_relativize_tolerates_a_row_with_no_command(self):
         rec = {"cmd": None}
         E._relativize_cmd(rec, "/tmp/out")

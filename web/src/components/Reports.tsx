@@ -1,5 +1,5 @@
 import type { Scenario } from '../types'
-import { canonFilters, configLabel, facetCounts, filterScenarios, finite, fnum, reportsHash, scenarioHash, workloadShape, type FilterKey, type Filters } from '../lib'
+import { canonFilters, configLabel, facetCounts, filterScenarios, finite, fnum, reportsHash, scenarioHash, type FilterKey, type Filters } from '../lib'
 import { navigate } from '../route'
 
 export function filtersFromParams(p: Record<string, string>): Filters {
@@ -29,13 +29,12 @@ export function Metrics({ s }: { s: Scenario }) {
 
 function ScenarioCard({ s }: { s: Scenario }) {
   const w = s.winner
-  const shape = workloadShape(s.isl_osl)
   return (
-    <a className={`card${s.synthetic ? ' is-mock' : ''}`} href={scenarioHash(s.run_id)}>
-      <div className="cardhead"><h3>{s.model}</h3>{s.synthetic && <MockBadge />}{!s.synthetic && s.caveat && <CaveatBadge caveat={s.caveat} />}</div>
+    <a className="card" href={scenarioHash(s.run_id)}>
+      <div className="cardhead"><h3>{s.model}</h3>{s.caveat && <CaveatBadge caveat={s.caveat} />}</div>
       <dl className="specrows">
         <div><dt>Cluster</dt><dd><span className="num">{s.gpu_budget}</span> × {s.hardware}</dd></div>
-        <div><dt>Workload</dt><dd>{s.workload}{shape && <span className="dim shape">{shape}</span>}</dd></div>
+        <div><dt>Workload</dt><dd>{s.workload}</dd></div>
       </dl>
       <div className="cardsec">
         <div className="winlbl">#1 config</div>
@@ -53,13 +52,7 @@ function ScenarioCard({ s }: { s: Scenario }) {
   )
 }
 
-export function MockBadge() {
-  return <span className="mock" title="Synthetic placeholder scenario, not a real simulation run">mock</span>
-}
-
-/** Flags a scenario whose runs are real BLIS output but do not measure what the scenario says
- *  they measure (e.g. a workload label the runs were not actually priced on). Distinct from
- *  `mock`, which marks data that is not a simulation at all. */
+/** Flags a scenario whose run ledger mixes seeds or stacks. */
 export function CaveatBadge({ caveat }: { caveat: string }) {
   return <span className="caveat" title={caveat}>caveat</span>
 }
@@ -131,11 +124,8 @@ export function Reports({ scenarios, params }: { scenarios: Scenario[]; params: 
         </main>
       </div>
 
-      {filtered.some((s) => s.synthetic) && (
-        <p className="listnote">Cards marked <MockBadge /> are illustrative placeholder scenarios, not BLIS output. Open a scenario for its recommended configs and interactive Pareto charts.</p>
-      )}
-      {filtered.some((s) => !s.synthetic && s.caveat) && (
-        <p className="listnote">Cards marked <span className="caveat">caveat</span> hold real BLIS runs that do not measure quite what the scenario claims. Open the scenario to read the caveat before deploying from its numbers.</p>
+      {filtered.some((s) => s.caveat) && (
+        <p className="listnote">Cards marked <span className="caveat">caveat</span> mix runs from different seeds or stacks. Open the scenario to read why before comparing its numbers.</p>
       )}
     </div>
   )

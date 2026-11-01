@@ -164,7 +164,7 @@ jobs:
             --out reports/ --timeout "${{ github.event.inputs.timeout || '600' }}"
 
       - name: Build the site to validate the new reports
-        run: python3 -I scripts/build_gallery.py --no-mock --out /tmp/site-check
+        run: python3 -I scripts/build_gallery.py --out /tmp/site-check
 
       - uses: actions/upload-artifact@v7
         with:

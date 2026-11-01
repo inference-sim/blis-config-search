@@ -249,7 +249,7 @@ jobs:
           { echo "ok=$ok"; echo "failed=$failed"; } >> "$GITHUB_OUTPUT"
           [ -n "$ok" ] || { echo "::error::no report in batch ${{ matrix.batch.name }} regenerated"; exit 1; }
       - name: Build the site to validate the regenerated reports
-        run: python3 -I scripts/build_gallery.py --no-mock --out /tmp/site-check
+        run: python3 -I scripts/build_gallery.py --out /tmp/site-check
       - name: Open the batch PR
         env:
           OK: ${{ steps.swap.outputs.ok }}

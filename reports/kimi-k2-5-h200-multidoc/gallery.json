@@ -1,8 +1,0 @@
-{
-  "generated": "2026-11-01",
-  "isl_osl": "",
-  "n_runs": 303,
-  "n_servable": 240,
-  "reason": "64x TP8 + EP with prefix-affinity routing gives the most tok/s/GPU (33.7 tok/s/GPU, 17233.7 tok/s fleet) while holding the 50 tok/s/user floor; usable load c=205 (C*=256, headroom 0.8).",
-  "synthetic": false
-}

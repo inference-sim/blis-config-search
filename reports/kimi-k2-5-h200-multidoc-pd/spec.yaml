@@ -1,0 +1,167 @@
+name: kimi-k2-5-h200-multidoc-pd
+scenario:
+  model: kimi-k2.5
+  hardware: h200
+  workload: multidoc
+  gpus: 64
+  slo:
+    itl_p99: 20ms
+    ttft_p99: 5s
+  concurrency:
+  - 8
+  - 16
+  - 32
+  - 64
+  - 128
+sweeps:
+- name: colocated
+  narrative: The colocated control should hold ITL only with a chunked-prefill cap,
+    and the wide-dp shapes should give the most tokens per GPU.
+  num-instances:
+  - 4
+  - 8
+  parallel:
+    tp:
+    - 2
+    - 4
+    - 8
+    - 16
+    dp:
+    - 1
+    - 2
+    - 4
+    enable_expert_parallel:
+    - true
+  engine:
+    max_num_batched_tokens:
+    - 8192
+    - 32768
+    long_prefill_token_threshold:
+    - 0
+    - 1024
+    - 4096
+- name: pd-dp1
+  narrative: Prefill-heavy ratios should win on 10k prompts, and a threshold near
+    the median prompt should beat splitting every request.
+  prefill-instances:
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  decode-instances:
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  prefill:
+    parallel:
+      tp:
+      - 8
+      - 16
+      enable_expert_parallel:
+      - true
+    engine:
+      max_num_batched_tokens:
+      - 8192
+      - 32768
+  decode:
+    parallel:
+      tp:
+      - 8
+      - 16
+      enable_expert_parallel:
+      - true
+    engine:
+      long_prefill_token_threshold:
+      - 0
+      - 1024
+  router: &id001
+    endpoint_picker_config:
+    - pd-prefix.yaml
+    plugins:
+      prefix-based-pd-decider:
+        parameters:
+          nonCachedTokens:
+          - 256
+          - 10240
+          - 12288
+- name: pd-dp2
+  narrative: Data-parallel pools should shift the best ratio toward decode, since
+    dp2 attention packs more decodes per GPU than tp8.
+  prefill-instances:
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  decode-instances:
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  prefill:
+    parallel:
+      tp:
+      - 4
+      - 8
+      dp:
+      - 2
+      enable_expert_parallel:
+      - true
+    engine:
+      max_num_batched_tokens:
+      - 8192
+      - 32768
+  decode:
+    parallel:
+      tp:
+      - 4
+      - 8
+      dp:
+      - 2
+      enable_expert_parallel:
+      - true
+    engine:
+      long_prefill_token_threshold:
+      - 0
+      - 1024
+  router: *id001
+- name: pd-always
+  narrative: Splitting every request should cost ITL headroom against the threshold
+    arms, because each handoff stalls a decode slot.
+  prefill-instances:
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  decode-instances:
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  prefill:
+    parallel:
+      tp:
+      - 8
+      - 16
+      enable_expert_parallel:
+      - true
+    engine:
+      max_num_batched_tokens:
+      - 8192
+      - 32768
+  decode:
+    parallel:
+      tp:
+      - 8
+      - 16
+      enable_expert_parallel:
+      - true
+  router:
+    endpoint_picker_config:
+    - pd-always.yaml

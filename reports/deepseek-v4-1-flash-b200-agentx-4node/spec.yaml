@@ -1,0 +1,179 @@
+name: deepseek-v4-1-flash-b200-agentx-4node
+scenario:
+  model: deepseek-v4.1-flash
+  hardware: b200
+  workload: agentx-mvp
+  gpus: 32
+  slo:
+    itl_p99: 20ms
+  engine:
+    cache_dtype: fp8_ds_mla
+    max_model_len: 262144
+  concurrency:
+  - 32
+  - 64
+  - 128
+  replay:
+    corpus: .corpus/traces.jsonl
+    corpus_cache: /tmp/agx-cache-b200
+    grace_period: inf
+sweeps:
+- name: topology-ep
+  narrative: Mid-width tp4 instances should win at the SLO, and EP should matter little
+    at dp 1 but cost throughput once dp spreads experts wider.
+  num-instances:
+  - 2
+  - 4
+  - 8
+  - 16
+  parallel:
+    tp:
+    - 2
+    - 4
+    - 8
+    dp:
+    - 1
+    - 2
+    enable_expert_parallel:
+    - true
+    - false
+- name: batch-tokens
+  narrative: The per-step token cap should bind harder on four wide instances than
+    on eight narrow ones, since long agentic prompts concentrate per instance.
+  num-instances:
+  - 4
+  - 8
+  parallel:
+    tp:
+    - 8
+    - 4
+    dp:
+    - 1
+    enable_expert_parallel:
+    - true
+  engine:
+    max_num_batched_tokens:
+    - 2048
+    - 16384
+    - 32768
+- name: prefill-chunking
+  narrative: Capping prefill chunks should cost throughput at both widths, more where
+    fewer decodes share each instance's token budget.
+  num-instances:
+  - 4
+  - 8
+  parallel:
+    tp:
+    - 8
+    - 4
+    dp:
+    - 1
+    enable_expert_parallel:
+    - true
+  engine:
+    long_prefill_token_threshold:
+    - 2048
+- name: kv-capacity
+  narrative: nvfp4 KV and a higher memory fraction both buy cache, so on a prefix-heavy
+    replay they should substitute rather than add.
+  num-instances:
+  - 2
+  - 4
+  parallel:
+    tp:
+    - 16
+    - 8
+    dp:
+    - 1
+    enable_expert_parallel:
+    - true
+  engine:
+    cache_dtype:
+    - fp8_ds_mla
+    - nvfp4_ds_mla
+    gpu_memory_utilization:
+    - 0.8
+    - 0.95
+- name: moe-collective
+  narrative: A DeepEP backend should beat the allgather default at EP 16, and the
+    gap should shrink or flip at EP 4.
+  num-instances:
+  - 8
+  - 2
+  parallel:
+    tp:
+    - 4
+    - 8
+    dp:
+    - 1
+    - 2
+    enable_expert_parallel:
+    - true
+  engine:
+    all2all_backend:
+    - deepep_high_throughput
+    - deepep_low_latency
+    - deepep_v2
+    - pplx
+- name: drafting
+  narrative: dspark should raise throughput more on narrow instances, while K=5 may
+    push wide shapes past the 20ms ITL floor.
+  num-instances:
+  - 4
+  - 8
+  parallel:
+    tp:
+    - 8
+    - 4
+    dp:
+    - 1
+    enable_expert_parallel:
+    - true
+  engine:
+    speculative:
+      method:
+      - dspark
+      num_spec_tokens:
+      - 1
+      - 3
+      - 5
+- name: routing-prefix-cache
+  narrative: Prefix-affinity with caching on should lead and random with caching off
+    trail, and the gap should widen from four instances to eight.
+  num-instances:
+  - 4
+  - 8
+  parallel:
+    tp:
+    - 8
+    - 4
+    dp:
+    - 1
+    enable_expert_parallel:
+    - true
+  engine:
+    enable_prefix_caching:
+    - true
+    - false
+  router:
+    endpoint_picker_config:
+    - random.yaml
+    - load-aware.yaml
+    - queue-kv.yaml
+    - prefix-affinity.yaml
+- name: cudagraph
+  narrative: Full capture should edge out the PIECEWISE default by a few percent.
+  num-instances:
+  - 8
+  parallel:
+    tp:
+    - 4
+    dp:
+    - 1
+    enable_expert_parallel:
+    - true
+  engine:
+    cudagraph_mode:
+    - FULL
+    - FULL_DECODE_ONLY
+    - FULL_AND_PIECEWISE

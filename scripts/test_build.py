@@ -503,7 +503,7 @@ def test_pins_are_the_single_source_of_the_sim_version():
     check(clone_at != -1 and validate_at != -1 and clone_at < validate_at,
           "run-experiment.yml must clone blis-catalog BEFORE validating, so the "
           "model/hardware/workload existence check can run")
-    check('validate_experiment.py "$spec" --catalog' in exp_wf,
+    check('validate_experiment.py "$SPEC" --catalog' in exp_wf,
           "run-experiment.yml should validate WITH --catalog, or the existence check no-ops")
 
     # The schema/validator agreement tests SKIP when jsonschema is absent, so the job that runs

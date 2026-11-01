@@ -324,7 +324,7 @@ export function Submit({ catalog, mode }: { catalog: Catalog; mode: Mode }) {
                 Throughput <small>min</small>
               </label>
               <NumField ariaLabel="Throughput floor" value={d.throughput.value} onCommit={(n) => set({ throughput: { ...d.throughput, value: n } })} />
-              <span className="sb-unit">tok/s/accel</span>
+              <span className="sb-unit">tok/s</span>
             </div>
             {d.slo.itl_p99.on && <p className="sb-note">An inter-token cap of {duration(d.slo.itl_p99)} is about <span className="num">{fnum(perUserRate(d.slo.itl_p99), 1)}</span> tok/s per user.</p>}
           </Section>

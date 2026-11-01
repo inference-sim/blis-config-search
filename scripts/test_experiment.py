@@ -1585,6 +1585,9 @@ class SloHandling(unittest.TestCase):
         ok, why = E.servable(self.rec(), {"throughput_per_gpu": 60.0}, gpus=2)
         self.assertFalse(ok)
         self.assertIn("throughput_per_gpu 50.0", why)
+        ok, why = E.servable(self.rec(), {"throughput_per_gpu": 1.0})
+        self.assertFalse(ok)
+        self.assertIn("GPU count is unknown", why)
 
     def test_failed_run_is_not_servable(self):
         ok, why = E.servable(self.rec(returncode=1, error="boom"), {"itl_p99": 20.0})

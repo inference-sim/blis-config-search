@@ -85,7 +85,7 @@ jobs:
       matrix:
         spec: ${{ fromJSON(needs.plan.outputs.specs) }}
     name: sweep ${{ matrix.spec }}
-    # Specs run side by side; only two sweeps of the same spec would race on its bot branch.
+    # Specs run side by side; repeat runs of one spec queue instead of doubling the BLIS cost.
     concurrency:
       group: run-experiment-${{ matrix.spec }}
       cancel-in-progress: false
@@ -169,7 +169,7 @@ jobs:
   pr:
     needs: [plan, sweep]
     # The big runner's image has no gh, so the PR is opened here; one leg per spec that finished.
-    if: always() && needs.plan.outputs.specs != '[]'
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.specs != '[]' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

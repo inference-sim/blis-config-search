@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # lexicon.py -- the shared vocabulary both report surfaces read.
 #
-# config-search renders the same runs twice: the standalone HTML report (report.py + figures.py)
+# The site renders the same runs twice: the standalone HTML report (report.py + figures.py)
 # and the React dashboard (web/src). They had grown two vocabularies for one set of numbers and,
 # worse, two ranking objectives for "What to run" -- the report ranked operating points by
 # per-user rate while the dashboard ranked them by tok/s per GPU, so at high load the two tables

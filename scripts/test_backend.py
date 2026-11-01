@@ -3,16 +3,12 @@
 
     python3 -I scripts/test_backend.py
 
-Covers serve_local (path-traversal guard) and run_submission (validation, unsafe-path refusal, no-runner loud failure). These
+Covers serve_local (path-traversal guard) and the workflows' safety properties. These
 are the non-build backend pieces; the build/catalog are covered by test_build.py.
 """
 import importlib.util
-import json
 import os
-import shutil
-import subprocess
 import sys
-import tempfile
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 
@@ -58,104 +54,9 @@ def test_serve_local():
     check(contained("/reports/x.html"), "normal path stays contained")
 
 
-def test_run_submission():
-    print("test_run_submission")
-    path = os.path.join(ROOT, "scripts", "run_submission.py")
-    m = _load("run_submission", path)
-
-    errs, parsed = m.validate({"model": "qwen3-14b", "hardware": "h100",
-                               "workload": {"preset": "chatbot"}, "gpu_budget": 8})
-    check(errs == [], "valid submission validates")
-    check(parsed == ("qwen3-14b", "h100", "chatbot", 8), "fields parsed")
-
-    errs2, _ = m.validate({"model": "", "hardware": "zzz",
-                           "workload": {"preset": "agentic"}, "gpu_budget": 99999999})
-    check(len(errs2) >= 3, "invalid submission reports multiple errors")
-
-    # a bare-number interactivity_floor (what the old Submit form emitted) must be rejected here
-    # with a clear message, not crash the pipeline with AttributeError downstream.
-    errs3, _ = m.validate({"model": "qwen3-14b", "hardware": "h100",
-                           "workload": {"preset": "chatbot"}, "gpu_budget": 8,
-                           "interactivity_floor": 50})
-    check(any("mapping" in e for e in errs3), "bare-number interactivity_floor is rejected")
-    # the nested shape still validates cleanly
-    errs4, _ = m.validate({"model": "qwen3-14b", "hardware": "h100",
-                           "workload": {"preset": "chatbot"}, "gpu_budget": 8,
-                           "interactivity_floor": {"tok_per_s_per_user": 50}})
-    check(errs4 == [], "nested interactivity_floor validates")
-
-    # Workload names come from the catalog, not a hardcoded list: a preset added upstream must
-    # validate with no edit here, and a trace-driven replay must be REFUSED, because
-    # `blis run --workload` loads the name with LoadWorkload, which rejects a replay file.
-    cat = tempfile.mkdtemp()
-    try:
-        wdir = os.path.join(cat, "workloads")
-        os.makedirs(wdir)
-        for name in ("chatbot", "sharegpt"):
-            with open(os.path.join(wdir, f"{name}.yaml"), "w", encoding="utf-8") as f:
-                f.write("prefix_tokens: 0\nprompt: {tokens: 8}\noutput: {tokens: 8}\n")
-        with open(os.path.join(wdir, "agentx-mvp.yaml"), "w", encoding="utf-8") as f:
-            f.write("replay:\n  scenario: inferencex-agentx-mvp\n  harness_version: 0.12.0\n")
-
-        base = {"model": "qwen3-14b", "hardware": "h100", "gpu_budget": 8}
-        errs5, _ = m.validate({**base, "workload": {"preset": "sharegpt"}}, cat)
-        check(errs5 == [], "a shape preset from the catalog validates without a code edit")
-
-        errs6, _ = m.validate({**base, "workload": {"preset": "agentx-mvp"}}, cat)
-        check(any("replay" in e for e in errs6),
-              "a trace-driven replay is refused, since BLIS cannot run it as a preset")
-
-        errs7, _ = m.validate({**base, "workload": {"preset": "nope"}}, cat)
-        check(any("sharegpt" in e for e in errs7),
-              "an unknown workload names the catalog's actual presets")
-    finally:
-        shutil.rmtree(cat)
-
-    # with no catalog path, the four long-standing presets remain the floor — an unstaged
-    # checkout must not start accepting arbitrary workload names
-    errs8, _ = m.validate({"model": "qwen3-14b", "hardware": "h100",
-                           "workload": {"preset": "multidoc"}, "gpu_budget": 8})
-    check(errs8 == [], "base presets validate with no catalog supplied")
-    errs9, _ = m.validate({"model": "qwen3-14b", "hardware": "h100",
-                           "workload": {"preset": "sharegpt"}, "gpu_budget": 8})
-    check(any("unknown workload" in e for e in errs9),
-          "with no catalog, a name outside the base presets is still rejected")
-
-    # end-to-end CLI behavior: no runner -> loud non-zero exit, no fabricated report
-    tmp = tempfile.mkdtemp()
-    sub = os.path.join(ROOT, "submissions", "_test_backend_tmp.yaml")
-    os.makedirs(os.path.dirname(sub), exist_ok=True)
-    with open(sub, "w") as f:
-        f.write("model: qwen3-14b\nhardware: h100\ngpu_budget: 8\nworkload:\n  preset: chatbot\n")
-    try:
-        r = subprocess.run([sys.executable, "-I", path, "--submission",
-                            os.path.relpath(sub, ROOT), "--out", tmp],
-                           cwd=ROOT, capture_output=True, text=True)
-        check(r.returncode != 0, "no-runner run exits non-zero (loud failure)")
-        check("runner" in (r.stdout + r.stderr).lower(), "no-runner message mentions runner")
-        check(not os.listdir(tmp), "no report fabricated when runner absent")
-
-        # unsafe submission path refused
-        r2 = subprocess.run([sys.executable, "-I", path, "--submission", "../etc/passwd"],
-                           cwd=ROOT, capture_output=True, text=True)
-        check(r2.returncode != 0, "unsafe submission path refused")
-    finally:
-        os.remove(sub)
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
 def test_workflows_sane():
     print("test_workflows_sane")
     import yaml as _yaml
-    gr = os.path.join(ROOT, ".github", "workflows", "generate-report.yml")
-    txt = open(gr).read()
-    doc = _yaml.safe_load(txt)
-    check(doc is not None, "generate-report.yml parses")
-    # the gate: it must refuse committing to a protected branch and be manually dispatched
-    check("workflow_dispatch" in txt, "generate-report is manually dispatched (not auto on PR)")
-    check("report-generation" in txt, "uses the protected environment")
-    check("pr_branch must be" in txt or "not '$branch'" in txt, "refuses main as pr_branch")
-
     pg = os.path.join(ROOT, ".github", "workflows", "pages.yml")
     ptxt = open(pg).read()
     check(_yaml.safe_load(ptxt) is not None, "pages.yml parses")
@@ -187,8 +88,8 @@ def test_workflows_sane():
     check("github.event.pull_request.number" in str(pdoc["concurrency"]["group"]),
           "pages runs are grouped per PR, so batch PRs don't cancel each other's previews")
 
-    # The deterministic sweeper. Unlike generate-report.yml it needs no approval gate (no LLM in
-    # the path), but it must still never write to main or publish: its only output is a bot PR.
+    # The deterministic sweeper needs no approval gate (no LLM in the path), but it must still
+    # never write to main or publish: its only output is a bot PR.
     rx = os.path.join(ROOT, ".github", "workflows", "run-experiment.yml")
     rtxt = open(rx).read()
     check(_yaml.safe_load(rtxt) is not None, "run-experiment.yml parses")
@@ -211,7 +112,6 @@ def test_workflows_sane():
 
 if __name__ == "__main__":
     test_serve_local()
-    test_run_submission()
     test_workflows_sane()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

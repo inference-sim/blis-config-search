@@ -1,12 +1,12 @@
 # blis-config-search
 
-Config search wrappers over the BLIS backend.
+Deterministic BLIS experiment sweeps, and the site that publishes their reports.
 
-- **`.claude/skills/config-search/`** — the skill: drives BLIS to find Pareto-optimal serving
-  configs for a model + GPU budget + workload, and renders each run directory into a
-  self-contained HTML report (`report.py`).
+- **`scripts/`**: the sweeper (`run_experiment.py`), its BLIS runner (`run_blis.py`), and the
+  report renderer (`report.py`, with assets in `report/`). See [`SETUP.md`](SETUP.md) to run a
+  sweep locally.
 - **`web/`** — the webpage: a Vite + React + TypeScript SPA (spec-sheet design matching
-  `../accuracy-dashboard`) surfacing the reports, a Coverage view of every searched
+  `../accuracy-dashboard`) surfacing the reports, a Coverage view of every swept
   model × GPU × workload × budget combination, linking out to blis-catalog for spec sheets.
   Static, light-theme, serves on GitHub Pages with no server. See
   [`web/README.md`](web/README.md): `cd web && npm ci && npm run build`.
@@ -46,7 +46,3 @@ python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run   # check
 and open a PR. CI validates it (no secrets, safe for forks); after merge the sweeper runs and a
 bot PR adds `reports/<name>/`. See [`experiments/README.md`](experiments/README.md) for the full
 format.
-
-> The older **`submissions/`** path (one Scenario → an LLM-driven config *search*) still works and
-> its reports are unchanged. New work should prefer `experiments/`, which answers a stated
-> question and needs no model at measurement time.

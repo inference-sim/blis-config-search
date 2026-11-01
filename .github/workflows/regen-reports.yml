@@ -8,7 +8,7 @@ name: regen-reports
 #
 #   push to main moving pins.env -- normally the merge of a pin PR that pin-compat.yml passed, so
 #   any code changes the release needed are already on main
-#     -> plan     classify every reports/<id>/ (experiment spec | submission | orphan), batch by model
+#     -> plan     classify every reports/<id>/ (experiment spec | orphan), batch by model
 #     -> build    the pinned simulator, once, shared by every report job; re-checks `drift` so a
 #                 pin that skipped the gate cannot start a campaign
 #     -> regen    ONE JOB PER REPORT (matrix): a report is hours of BLIS, so each gets its own
@@ -16,9 +16,8 @@ name: regen-reports
 #     -> pr       ONE PR PER BATCH, with a before/after table; a failed report is listed in its
 #                 batch's PR as "not regenerated" rather than silently left stale
 #
-# Like run-experiment.yml it needs no approval gate and no secrets: both runners
-# (run_experiment.py, run_search.py) are LLM-free and deterministic at a fixed seed, and nothing
-# publishes until a human merges a batch PR.
+# Like run-experiment.yml it needs no approval gate and no secrets: the sweeper is LLM-free and
+# deterministic at a fixed seed, and nothing publishes until a human merges a batch PR.
 #
 # Sizing, via repository VARIABLES (Settings -> Secrets and variables -> Actions -> Variables):
 #   REGEN_RUNS_ON          JSON runner label(s), default "ubuntu-latest". The 64-GPU AgentX replays
@@ -101,7 +100,7 @@ jobs:
           for b in plan["batches"]:
               print(f"batch {b['name']}: {', '.join(b['ids'])}")
           for o in plan["orphans"]:
-              print(f"::warning::{o['id']} has no spec or submission to regenerate from; "
+              print(f"::warning::{o['id']} has no experiment spec to regenerate from; "
                     f"it keeps its old stack label until handled by hand")
           PY
           set -a; . ./pins.env; set +a
@@ -249,14 +248,6 @@ jobs:
           echo "regenerated: ${ok:-none}; failed: ${failed:-none}"
           { echo "ok=$ok"; echo "failed=$failed"; } >> "$GITHUB_OUTPUT"
           [ -n "$ok" ] || { echo "::error::no report in batch ${{ matrix.batch.name }} regenerated"; exit 1; }
-          # The AgentX narratives quote their 4node/8node and h100 siblings, so they are written
-          # only now, with the whole batch side by side in reports/ (as regen_agentx.sh does).
-          for id in $ok; do
-            # An experiment dir writes its own report.json; the AgentX writer reads search output only.
-            if [ -f "$RUNNER_TEMP/old-reports/$id/report.json" ] && [ ! -f "reports/$id/experiment.json" ]; then
-              python3 -I scripts/write_agentx_report.py "reports/$id"
-            fi
-          done
       - name: Build the site to validate the regenerated reports
         run: python3 -I scripts/build_gallery.py --no-mock --out /tmp/site-check
       - name: Open the batch PR
@@ -280,7 +271,7 @@ jobs:
                    --new reports --failed "$(echo $FAILED | tr ' ' ',')" $OK $FAILED)"
           git commit -m "Regenerate the $BATCH reports against inference-sim $BLIS_REF
 
-          Produced by regen-reports.yml from each report's own spec or submission, after the pin
+          Produced by regen-reports.yml from each report's own experiment spec, after the pin
           move merged in ${GITHUB_SHA::10}. No LLM in this path."
           git push origin "$branch"
           cat > /tmp/body.md <<EOF
@@ -289,8 +280,8 @@ jobs:
 
           $table
 
-          Each report was re-run from its own source — its experiment spec or its submission — at
-          its recorded seed, by the deterministic runners (no LLM). The directory is replaced whole,
+          Each report was re-run from its own experiment spec at its recorded seed, by the
+          deterministic sweeper (no LLM). The directory is replaced whole,
           so nothing from the old run survives beside the new one.
 
           **Review the movement, not just the totals:** a changed winner or a large tok/s/GPU swing is

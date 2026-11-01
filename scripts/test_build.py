@@ -377,7 +377,7 @@ def test_pins_are_the_single_source_of_the_sim_version():
     Three surfaces have to agree, or the site publishes a version that no run was made with:
       * pins.env            -- BLIS_REF / BLIS_SHA (read by build_catalog + the workflow)
       * SETUP.md            -- what a human clones by hand
-      * generate-report.yml -- what CI clones; it must source pins.env, not hard-code a ref
+      * run-experiment.yml  -- what CI clones; it must source pins.env, not hard-code a ref
 
     The regression this guards: `versions["inference-sim"]` used to be a `git describe` of an
     ambient ../inference-sim checkout. Nothing is ingested from that repo, so the pill published
@@ -442,24 +442,19 @@ def test_pins_are_the_single_source_of_the_sim_version():
         shutil.rmtree(tmp)
 
     # SETUP.md documents the same pin a human would clone
-    with open(os.path.join(ROOT, ".claude", "skills", "config-search", "SETUP.md")) as f:
+    with open(os.path.join(ROOT, "SETUP.md")) as f:
         setup = f.read()
     check(f"--branch {ref} " in setup, f"SETUP.md should clone {ref}")
     check(sha in setup, f"SETUP.md should verify the pinned sha {sha[:7]}")
 
-    # CI must read pins.env rather than carry its own copy of the refs
-    with open(os.path.join(ROOT, ".github", "workflows", "generate-report.yml")) as f:
-        wf = f.read()
-    check(". ./pins.env" in wf, "generate-report.yml should source pins.env")
-    for key in ("BLIS_REF", "CATALOG_REF", "REGISTRY_REF"):
-        check(f'"${key}"' in wf, f"the workflow should take {key} from pins.env")
-    check(f"--branch {ref} " not in wf,
-          "generate-report.yml hard-codes the sim ref; source it from pins.env instead")
-
-    # The workflow that sweeps merged experiment specs clones the same three pins.
+    # CI must read pins.env rather than carry its own copy of the refs.
     with open(os.path.join(ROOT, ".github", "workflows", "run-experiment.yml")) as f:
         exp_wf = f.read()
     check(". ./pins.env" in exp_wf, "run-experiment.yml should source pins.env")
+    for key in ("BLIS_REF", "CATALOG_REF", "REGISTRY_REF"):
+        check(f'"${key}"' in exp_wf, f"run-experiment.yml should take {key} from pins.env")
+    check(f"--branch {ref} " not in exp_wf,
+          "run-experiment.yml hard-codes the sim ref; source it from pins.env instead")
     # It must CHECK the sha, by reading it from pins.env -- a literal sha here would be a second
     # copy of the pin, which is the drift pins.env exists to prevent.
     check("$BLIS_SHA" in exp_wf, "run-experiment.yml should verify BLIS_SHA from pins.env")
@@ -471,9 +466,7 @@ def test_pins_are_the_single_source_of_the_sim_version():
     # nothing in the output to say so. CI still refuses outright (it verifies on clone, above);
     # the runner WARNS, because testing against an unreleased simulator is a legitimate thing to
     # do locally and is how a pin bump gets evaluated at all.
-    import run_search
-    for fn in ("blis_pin_warning", "_blis_source_commit"):
-        check(hasattr(run_search, fn), f"run_search should define {fn} (the runner-side pin check)")
+    import run_experiment
     # The check compares a COMMIT to BLIS_SHA. It must not compare the binary digest: the same
     # tag builds to different bytes per toolchain, so a digest pin would fire on honest builds
     # (v0.12.0 is recorded with two different digests across the committed reports alone).
@@ -481,18 +474,13 @@ def test_pins_are_the_single_source_of_the_sim_version():
         pins_txt = f.read()
     check("BLIS_DIGEST" not in pins_txt and "BLIS_SHA256" not in pins_txt,
           "pins.env must not pin a binary DIGEST: it is build-dependent, so it would be wrong "
-          "for every contributor but the one who wrote it (see test_search's pin tests)")
+          "for every contributor but the one who wrote it (see test_experiment's PinCheck)")
     on_pin = {"blis": ref, "resolved": {"blis": {"sha256": "ab" * 32, "commit": sha}}}
-    check(run_search.blis_pin_warning(on_pin, pins) == "",
+    check(run_experiment.blis_pin_warning(on_pin, pins) == "",
           "a binary built from the pinned commit must not warn")
     off = {"blis": ref, "resolved": {"blis": {"sha256": "ab" * 32, "commit": "c" * 40}}}
-    check(bool(run_search.blis_pin_warning(off, pins)),
+    check(bool(run_experiment.blis_pin_warning(off, pins)),
           "a binary built from another commit must warn")
-    # Both runners must apply it; the sweeper is the one that was missing it.
-    with open(os.path.join(ROOT, "scripts", "run_experiment.py")) as f:
-        exp_py = f.read()
-    check("_blis_pin_warning" in exp_py,
-          "run_experiment.py should warn when an off-pin simulator prices a sweep (#23)")
 
     # The catalog must be cloned BEFORE the validate step, or the existence check on
     # scenario.model/hardware/workload silently no-ops and a typo'd identifier still reaches the
@@ -526,7 +514,7 @@ def test_pins_are_the_single_source_of_the_sim_version():
 
     # GUIDANCE must not restate a superseded version. A doc that tells a contributor to clone a
     # ref the stack no longer uses is worse than one saying nothing: SETUP.md was correct at
-    # v0.12.0 while the skill's README and SKILL.md still read "build v0.10.0 ... catalog 0.2.1",
+    # v0.12.0 while two other docs still read "build v0.10.0 ... catalog 0.2.1",
     # and nothing failed, because only SETUP.md was checked (qa-review on #22, F2/F3).
     #
     # Historical statements are legitimate and stay: a dated measurement, a "removed in vX" note,
@@ -534,8 +522,7 @@ def test_pins_are_the_single_source_of_the_sim_version():
     # version they name is one pins.env actually pins.
     pinned_refs = {pins.get(k) for k in ("BLIS_REF", "CATALOG_REF", "REGISTRY_REF", "KERNEL_REF")}
     superseded = {"v0.10.0", "0.2.1", "v0.1.1"} - pinned_refs
-    for rel in (os.path.join(".claude", "skills", "config-search", "README.md"),
-                os.path.join("experiments", "README.md"),
+    for rel in ("README.md", os.path.join("experiments", "README.md"),
                 os.path.join(".claude", "skills", "blis-experiment", "SKILL.md")):
         path = os.path.join(ROOT, rel)
         if not os.path.exists(path):
@@ -548,20 +535,19 @@ def test_pins_are_the_single_source_of_the_sim_version():
 
 
 def test_lexicon_mirror_is_in_sync():
-    """The shared report vocabulary (issue #13) lives in the skill at
-    .claude/skills/config-search/report/lexicon.json; web/src/lexicon.json is a byte-identical
-    mirror, because Vite cannot import out of the read-only skill dir. A mirror that drifts is
-    worse than no sharing at all -- it looks shared and is not -- so the build fails on it."""
+    """The shared report vocabulary (issue #13) lives at report/lexicon.json; web/src/lexicon.json
+    is a byte-identical mirror, because Vite cannot import from outside web/. A mirror that drifts
+    is worse than no sharing at all -- it looks shared and is not -- so the build fails on it."""
     print("test_lexicon_mirror_is_in_sync")
-    canon = os.path.join(ROOT, ".claude", "skills", "config-search", "report", "lexicon.json")
+    canon = os.path.join(ROOT, "report", "lexicon.json")
     mirror = os.path.join(ROOT, "web", "src", "lexicon.json")
-    check(os.path.exists(canon), "skill lexicon.json is missing")
+    check(os.path.exists(canon), "report/lexicon.json is missing")
     if not os.path.exists(mirror):
-        check(False, "web/src/lexicon.json is missing (copy the skill's lexicon.json over it)")
+        check(False, "web/src/lexicon.json is missing (copy report/lexicon.json over it)")
         return
     with open(canon, "rb") as a, open(mirror, "rb") as b:
         ca, cb = a.read(), b.read()
-    check(ca == cb, "web/src/lexicon.json has drifted from the skill's report/lexicon.json; "
+    check(ca == cb, "web/src/lexicon.json has drifted from report/lexicon.json; "
                     "copy the canonical file over it")
     lex = json.loads(ca)
     # the dashboard and the report both key off these, so a rename here must be deliberate

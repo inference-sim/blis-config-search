@@ -29,13 +29,10 @@ only honest fix is to re-run each report from its source -- never to relabel it.
 What "its source" is, per report directory (the `kind` in a plan):
   * experiment -- the dir has experiment.json, so run_experiment.py swept a spec. The spec is
     experiments/<name>.yaml, falling back to the spec.yaml the run dir carries.
-  * submission -- submissions/<run_id>.yaml exists, so run_search.py searched it. An AgentX
-    replay dir also carried a report.json, which write_agentx_report.py re-derives from the data
-    -- once the whole batch is in reports/, since it reads sibling runs (regen-reports.yml `pr`).
-  * orphan     -- neither. It cannot be regenerated, so the plan lists it for a human instead of
-    guessing; a PR that silently skipped it would leave one stale report looking current.
+  * orphan     -- anything else. It cannot be regenerated, so the plan lists it for a human
+    instead of guessing; a PR that silently skipped it would leave one stale report looking current.
 
-Nothing here uses an LLM: both runners are deterministic at a fixed seed, which is what lets the
+Nothing here uses an LLM: the sweeper is deterministic at a fixed seed, which is what lets the
 regeneration run unattended and still be reviewed as a plain diff of numbers.
 """
 import argparse
@@ -48,12 +45,10 @@ import sys
 import urllib.request
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-SKILL = os.path.join(ROOT, ".claude", "skills", "config-search", "scripts")
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
-sys.path.insert(0, SKILL)
 
 PINS = os.path.join(ROOT, "pins.env")
-SETUP = os.path.join(ROOT, ".claude", "skills", "config-search", "SETUP.md")
+SETUP = os.path.join(ROOT, "SETUP.md")
 UPSTREAM = "inference-sim/inference-sim"
 TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 # The keys whose VALUE says which stack priced a report. A comment-only edit to pins.env moves
@@ -223,7 +218,7 @@ def _load_json(path, default=None):
 
 
 def classify(run_id, root=ROOT):
-    """How to regenerate reports/<run_id>/ -- see the module docstring for the three kinds."""
+    """How to regenerate reports/<run_id>/ -- see the module docstring for the two kinds."""
     rdir = os.path.join(root, "reports", run_id)
     scen = _load_json(os.path.join(rdir, "scenario.json"), {}) or {}
     entry = {"id": run_id, "model": scen.get("model") or "unknown",
@@ -242,13 +237,6 @@ def classify(run_id, root=ROOT):
             entry.update(kind="experiment", source=src,
                          replay=bool((spec.get("scenario") or {}).get("replay")))
             return entry
-    sub = os.path.join("submissions", run_id + ".yaml")
-    if os.path.isfile(os.path.join(root, sub)):
-        wl = (_load_yaml(os.path.join(root, sub)).get("workload") or {})
-        entry.update(kind="submission", source=sub,
-                     replay=isinstance(wl, dict) and bool(wl.get("replay")),
-                     narrative=os.path.isfile(os.path.join(rdir, "report.json")))
-        return entry
     entry.update(kind="orphan", source=None)
     return entry
 
@@ -309,42 +297,7 @@ def _run(cmd):
     subprocess.run(cmd, check=True, cwd=ROOT)
 
 
-def _replay_descriptor(catalog, harness_scenario):
-    """The catalog workload whose replay block names `harness_scenario` (a submission states the
-    harness scenario, a spec the catalog workload name; this maps the former to the latter)."""
-    wdir = os.path.join(catalog, "workloads")
-    for name in sorted(os.listdir(wdir)):
-        if name.endswith(".yaml"):
-            rep = (_load_yaml(os.path.join(wdir, name)).get("replay") or {})
-            if rep.get("scenario") == harness_scenario:
-                return rep
-    raise SystemExit(f"catalog has no replay workload for scenario {harness_scenario!r}")
-
-
-def fetch_submission_corpus(sub_path, catalog, dest):
-    """Fetch + digest-check the corpus a REPLAY submission names, via the catalog descriptor.
-
-    The submission's own corpus_sha256 must match the catalog's: if the catalog pin moved the
-    corpus, the submission describes traffic the new stack no longer replays, and regenerating it
-    would silently swap the workload under an unchanged report title."""
-    import fetch_corpus
-    rep = (_load_yaml(sub_path).get("workload") or {}).get("replay") or {}
-    desc = _replay_descriptor(catalog, rep.get("scenario"))
-    corpus = desc.get("corpus") or {}
-    src = corpus.get("source") or {}
-    want = corpus.get("sha256")
-    if rep.get("corpus_sha256") and rep["corpus_sha256"] != want:
-        raise SystemExit(f"{sub_path} pins corpus {rep['corpus_sha256'][:12]} but the catalog now "
-                         f"names {str(want)[:12]}; update the submission deliberately first")
-    url = fetch_corpus.HF_URL.format(dataset=src.get("huggingface"), revision=src.get("revision"),
-                                     path=src.get("file", "traces.jsonl"))
-    fetch_corpus.fetch(dest, url, want, token=os.environ.get("HF_TOKEN"))
-    return dest
-
-
-def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1,
-          corpus=os.path.join(ROOT, ".corpus", "traces.jsonl"),
-          corpus_cache="/tmp/agx-cache"):
+def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1):
     """Regenerate ONE report into <out>/<run_id>/ from its source, at the pins on disk.
 
     Writes into a fresh `out` rather than over reports/: the caller swaps the directory in whole,
@@ -352,28 +305,16 @@ def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1,
     e = classify(run_id)
     py = sys.executable
     os.makedirs(out, exist_ok=True)
-    if e["kind"] == "experiment":
-        spec = e["source"]
-        _run([py, "-I", "scripts/validate_experiment.py", spec, "--catalog", catalog])
-        if e["replay"]:
-            _run([py, "-I", "scripts/fetch_corpus.py", spec, "--catalog", catalog])
-        _run([py, "-I", "scripts/run_experiment.py", spec, "--blis", blis, "--catalog", catalog,
-              "--registry", registry, "--out", out, "--timeout", str(timeout),
-              "--max-parallel", str(max_parallel)])
-        shutil.rmtree(os.path.join(out, run_id, "scenarios"), ignore_errors=True)
-    elif e["kind"] == "submission":
-        cmd = [py, "-I", "scripts/run_search.py", "--submission", e["source"], "--blis", blis,
-               "--catalog", catalog, "--registry", registry, "--out", out,
-               "--run-timeout", str(timeout), "--max-parallel", str(max_parallel)]
-        if e["replay"]:
-            fetch_submission_corpus(os.path.join(ROOT, e["source"]), catalog, corpus)
-            cmd += ["--corpus", corpus, "--corpus-cache", corpus_cache]
-        _run(cmd)
-        # No narrative here: write_agentx_report.py reads the 4node/8node and h100 siblings, which
-        # only sit beside this run once the batch is swapped into reports/ (regen-reports.yml `pr`).
-    else:
-        raise SystemExit(f"{run_id} has no source to regenerate from (no experiment spec, no "
-                         f"submissions/{run_id}.yaml)")
+    if e["kind"] != "experiment":
+        raise SystemExit(f"{run_id} has no experiment spec to regenerate from")
+    spec = e["source"]
+    _run([py, "-I", "scripts/validate_experiment.py", spec, "--catalog", catalog])
+    if e["replay"]:
+        _run([py, "-I", "scripts/fetch_corpus.py", spec, "--catalog", catalog])
+    _run([py, "-I", "scripts/run_experiment.py", spec, "--blis", blis, "--catalog", catalog,
+          "--registry", registry, "--out", out, "--timeout", str(timeout),
+          "--max-parallel", str(max_parallel)])
+    shutil.rmtree(os.path.join(out, run_id, "scenarios"), ignore_errors=True)
     _check_coherent(os.path.join(out, run_id))
     return os.path.join(out, run_id)
 
@@ -468,8 +409,8 @@ SHAPE_KEYS = ("tp", "dp", "pp", "dp_local", "pcp", "dcp", "enable_expert_paralle
               "num_instances", "concurrency")
 # Selectors that ride along with a drafting knob; they are not a knob of their own.
 RIDERS = ("speculative_category", "speculative_thinking")
-# A knob "moved" the old numbers when it changed throughput by more than this (run_search's tie
-# tolerance: anything closer is modelling noise, not an effect a report would claim).
+# A knob "moved" the old numbers when it changed throughput by more than this; anything closer is
+# modeling noise, not an effect a report would claim.
 MOVED = 0.005
 SMOKE_PAIRS = 6
 
@@ -549,26 +490,18 @@ def _run_context(entry, root, catalog, corpus, corpus_cache):
     """(model, hardware, engine_version, workload, seed, replay, nreq_of) for a report's source,
     built the way its runner builds them, so a smoke run is a run the regeneration would make."""
     import run_experiment
-    import run_search
-    src = _load_yaml(os.path.join(root, entry["source"]))
+    sc = _load_yaml(os.path.join(root, entry["source"]))["scenario"]
     local = {"corpus": os.path.abspath(corpus)} if corpus else {}
     if corpus and corpus_cache:
         local["corpus_cache"] = os.path.abspath(corpus_cache)
-    if entry["kind"] == "experiment":
-        sc = src["scenario"]
-        replay = None
-        if entry["replay"]:
-            replay = run_experiment.resolve_replay(sc["workload"], catalog,
-                                                   dict(sc.get("replay") or {}, **local))
-            replay = {k: v for k, v in replay.items() if k != "_overrides"}
-        return (sc["model"], sc["hardware"], sc.get("engine_version", "0.29.0"), sc["workload"],
-                int(sc.get("seed", 42)), replay,
-                (lambda c: None) if replay else (lambda c: max(80, c * 4)))
-    wl = src.get("workload") or {}
-    replay = dict(wl["replay"], **local) if isinstance(wl, dict) and wl.get("replay") else None
-    return (src["model"], src["hardware"], src.get("engine_version", "0.29.0"),
-            wl.get("preset") if isinstance(wl, dict) else wl, run_search.scenario_seed(src),
-            replay, (lambda c: None) if replay else (lambda c: run_search.requests_for(c, 80)))
+    replay = None
+    if entry["replay"]:
+        replay = run_experiment.resolve_replay(sc["workload"], catalog,
+                                               dict(sc.get("replay") or {}, **local))
+        replay = {k: v for k, v in replay.items() if k != "_overrides"}
+    return (sc["model"], sc["hardware"], sc.get("engine_version", "0.29.0"), sc["workload"],
+            int(sc.get("seed", 42)), replay,
+            (lambda c: None) if replay else (lambda c: max(80, c * 4)))
 
 
 def _same_measurement(a, b):
@@ -581,8 +514,6 @@ def ensure_corpus(entry, catalog, dest, root=ROOT):
     """Fetch + digest-check a replay report's corpus to `dest` unless it is already there."""
     import fetch_corpus
     import run_experiment
-    if entry["kind"] == "submission":
-        return fetch_submission_corpus(os.path.join(root, entry["source"]), catalog, dest)
     wl = (_load_yaml(os.path.join(root, entry["source"])).get("scenario") or {}).get("workload")
     corpus = (run_experiment.replay_descriptor(wl, catalog) or {}).get("corpus") or {}
     src = corpus.get("source") or {}

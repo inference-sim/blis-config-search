@@ -16,7 +16,6 @@ import unittest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
-sys.path.insert(0, os.path.join(ROOT, ".claude", "skills", "config-search", "scripts"))
 
 try:
     import yaml
@@ -1663,12 +1662,7 @@ class SloHandling(unittest.TestCase):
 
     def test_the_sweeper_and_the_report_agree_on_every_declared_slo(self):
         """The guarantee itself: no run may be servable here and infeasible in the report."""
-        import importlib.util
-        spec_ = importlib.util.spec_from_file_location(
-            "_rep", os.path.join(ROOT, ".claude", "skills", "config-search", "scripts",
-                                 "report.py"))
-        rep = importlib.util.module_from_spec(spec_)
-        spec_.loader.exec_module(rep)
+        import report as rep
         slos = {"ttft_p99_ms": 10000.0, "e2e_p99_ms": 20000.0}
         rec = self.rec(metrics={"tokens_per_sec": 100.0, "itl_p99_ms": 10.0,
                                 "ttft_p99_ms": 9981.2, "e2e_p99_ms": 15000.0},
@@ -1893,7 +1887,7 @@ class DryRunPlan(unittest.TestCase):
                 self.assertEqual(["--seed", "42"], rec["cmd"][4:])
 
     def test_sweep_drops_a_replaced_search_reports_sidecar(self):
-        """A spec named after a config-search report overwrites its dir; gallery.json must go."""
+        """A re-sweep over a dir holding the retired search sidecar removes gallery.json."""
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, "gallery.json"), "w") as f:
                 f.write("{}")
@@ -2051,6 +2045,79 @@ class DryRunPlan(unittest.TestCase):
             "tokens_per_sec": 100.0, "tokens_per_sec_per_gpu": 10.0}}
         out = E._pareto_json(report)
         self.assertEqual("2x TP8 (max seqs 64)", out["winner"]["chosen"])
+
+
+class PinCheck(unittest.TestCase):
+    """An off-pin simulator is reported by SOURCE commit, never by binary digest (#23)."""
+    PINS = {"BLIS_SHA": "f2ba6bb1c189ed5a56933cfa3d0927eae3836ee9"}
+
+    def stack(self, commit=None, describe=None, sha256="ab" * 32):
+        blis = {"sha256": sha256}
+        if commit:
+            blis["commit"] = commit
+        if describe:
+            blis["describe"] = describe
+        return {"blis": "v0.14.0", "resolved": {"blis": blis}}
+
+    def test_on_pin_is_silent(self):
+        st = self.stack(self.PINS["BLIS_SHA"], "v0.14.0")
+        self.assertEqual("", E.blis_pin_warning(st, self.PINS))
+
+    def test_off_pin_names_both_commits(self):
+        w = E.blis_pin_warning(self.stack("f199223d701d96dddeb1c314509bed003515b599", "v0.12.0"),
+                               self.PINS)
+        for part in ("f2ba6bb1c189", "f199223d701d", "v0.12.0"):
+            self.assertIn(part, w)
+
+    def test_another_build_of_the_pinned_commit_is_not_drift(self):
+        st = self.stack(self.PINS["BLIS_SHA"], "v0.14.0", sha256="1feaa390a486" + "0" * 52)
+        self.assertEqual("", E.blis_pin_warning(st, self.PINS))
+
+    def test_dirty_checkout_at_the_pin_warns(self):
+        st = self.stack(self.PINS["BLIS_SHA"], "v0.14.0-dirty")
+        self.assertIn("UNCOMMITTED", E.blis_pin_warning(st, self.PINS))
+
+    def test_unverifiable_binary_is_silent(self):
+        for st in (self.stack(), {"blis": "v0.14.0"}, {"blis": "v0.14.0", "resolved": {}}):
+            self.assertEqual("", E.blis_pin_warning(st, self.PINS))
+        self.assertEqual("", E.blis_pin_warning(self.stack("c" * 40), {}))
+
+    def test_source_commit_needs_the_simulators_own_tree(self):
+        import shutil
+        import subprocess
+        d = tempfile.mkdtemp()
+        try:
+            subprocess.run(["git", "init", "-q"], cwd=d, check=True)
+            subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                            "commit", "-q", "--allow-empty", "-m", "x"], cwd=d, check=True)
+            fake = os.path.join(d, "blis")
+            with open(fake, "wb") as f:
+                f.write(b"not the simulator")
+            self.assertIsNone(E._blis_source_commit(fake)[1], "no main.go: not the simulator")
+            open(os.path.join(d, "main.go"), "w").close()
+            self.assertEqual(40, len(E._blis_source_commit(fake)[1] or ""))
+            blis = E._pinned_stack(fake, None, None)["resolved"]["blis"]
+            self.assertTrue(blis.get("sha256") and blis.get("commit"))
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_pinned_stack_invents_nothing_when_nothing_is_on_disk(self):
+        ps = E._pinned_stack(None, None, None)
+        self.assertIn("blis", ps)
+        self.assertNotIn("resolved", ps)
+
+
+class ProvenanceSplit(unittest.TestCase):
+    """A ledger whose rows span seeds or stacks is flagged, not rendered as one comparison."""
+
+    def test_split_is_detected(self):
+        import report
+        seeds = [{"cmd": ["blis", "run", "--seed", "0"]}, {"cmd": ["blis", "run", "--seed", "42"]}]
+        self.assertIn("2 seeds", report.provenance_split(seeds))
+        one = [{"cmd": ["blis", "run", "--seed", "42"]}] * 2
+        self.assertEqual("", report.provenance_split(one))
+        stacks = [{"pinned_stack": {"registry": "v0.1.1"}}, {"pinned_stack": {"registry": "v0.2.0"}}]
+        self.assertIn("distinct resolved stacks", report.provenance_split(stacks))
 
 
 def main():

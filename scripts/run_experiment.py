@@ -16,7 +16,7 @@ is mechanical. Given one spec this script
   5. picks the best config per sweep and overall (most output tok/s per GPU that holds the SLO),
   6. writes reports/<name>/ in the run-directory format report.py and build_gallery.py read.
 
-DETERMINISM IS THE POINT, and it is stronger here than in the agentic search: the grid is a pure
+DETERMINISM IS THE POINT: the grid is a pure
 function of the spec, the filter is arithmetic, the order is sorted, and the winner is chosen by
 an executable rule rather than a judgement. The same spec and the same pins give the same
 report.json -- which is why CI can run this on a merge and publish the result unattended. The
@@ -45,8 +45,6 @@ except ImportError:
     raise SystemExit("PyYAML required: pip install pyyaml")
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-SKILL = os.path.join(ROOT, ".claude", "skills", "config-search", "scripts")
-sys.path.insert(0, SKILL)
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import run_blis            # noqa: E402
 import topologies          # noqa: E402
@@ -555,13 +553,11 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
 
     # Which simulator is about to price this sweep. Only the CI workflows verified BLIS_SHA, so a
     # contributor sweeping locally against an off-pin binary got real-looking numbers with no
-    # warning anywhere in the output (#23). Warned, not refused: see run_search.blis_pin_warning.
+    # warning anywhere in the output (#23). Warned, not refused: see blis_pin_warning.
     # Skipped on a dry run, which prices nothing.
     if not dry_run:
         warn = _blis_pin_warning(blis, catalog, registry)
-        # NOT gated on `verbose`: run_search.py's equivalent is unconditional, and a quiet
-        # invocation is exactly the one that would publish off-pin numbers with no warning
-        # anywhere in the output -- the failure #23 is about.
+        # Not gated on `verbose`: a quiet run is exactly the one that would publish off-pin numbers.
         if warn:
             print(f"WARNING: {warn}\n         Every number in this report is priced by that "
                   f"binary, and scenario.json records its digest.", file=sys.stderr, flush=True)
@@ -892,28 +888,103 @@ def _workload_entry(workload, catalog):
     return next((w for w in cat.get("workloads", []) if w.get("name") == workload), None)
 
 
-def _pinned_stack(blis, catalog, registry):
-    """What priced these runs: the intended pins plus the commits/digest that actually ran."""
+def _git_identity(path):
+    """(describe, commit) of a git checkout, or (None, None) when it is not one."""
+    import subprocess
+
+    def q(*args):
+        try:
+            out = subprocess.run(args, cwd=path, capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return (out.stdout or "").strip() or None if out.returncode == 0 else None
+    if not (path and os.path.isdir(path)):
+        return None, None
+    return q("git", "describe", "--tags", "--always", "--dirty"), q("git", "rev-parse", "HEAD")
+
+
+def _file_digest(path):
+    """sha256 of a file, or None. The simulator has no version command, so this identifies the build."""
+    if not (path and os.path.isfile(path)):
+        return None
+    h = hashlib.sha256()
     try:
-        import run_search
-        return run_search._pinned_stack(blis, catalog, registry)
-    except Exception:
-        pins = build_catalog.read_pins()
-        return {"blis": pins.get("BLIS_REF", "unpinned"),
-                "catalog": pins.get("CATALOG_REF", "unpinned"),
-                "registry": pins.get("REGISTRY_REF", "unpinned")}
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+    except OSError:
+        return None
+    return h.hexdigest()
+
+
+def _blis_source_commit(blis):
+    """(describe, commit) of the checkout the binary was built in, or (None, None).
+
+    Only a binary sitting in the simulator's own tree (main.go beside it) counts: one copied into
+    another repo must not borrow that repo's commit.
+    """
+    if not (blis and os.path.isfile(blis)):
+        return None, None
+    src = os.path.dirname(os.path.abspath(blis))
+    if not os.path.isfile(os.path.join(src, "main.go")):
+        return None, None
+    desc, commit = _git_identity(src)
+    return (desc, commit) if commit else (None, None)
+
+
+def _pinned_stack(blis, catalog, registry):
+    """What priced these runs: the pins.env refs, plus the commits and binary digest that ran."""
+    pins = build_catalog.read_pins()
+    out = {"blis": pins.get("BLIS_REF", "unpinned"),
+           "kernel": pins.get("KERNEL_REF", "unpinned"),
+           "catalog": pins.get("CATALOG_REF", "unpinned"),
+           "registry": pins.get("REGISTRY_REF", "unpinned")}
+    resolved = {}
+    for name, path in (("catalog", catalog), ("registry", registry)):
+        desc, commit = _git_identity(path)
+        if desc or commit:
+            resolved[name] = {"describe": desc, "commit": commit}
+    digest = _file_digest(blis)
+    if digest:
+        resolved["blis"] = {"sha256": digest}
+        desc, commit = _blis_source_commit(blis)
+        if commit:
+            resolved["blis"]["commit"] = commit
+        if desc:
+            resolved["blis"]["describe"] = desc
+    if resolved:
+        out["resolved"] = resolved
+    return out
+
+
+def blis_pin_warning(stack, pins=None):
+    """How the simulator that ran differs from BLIS_SHA, or "" when it agrees or cannot be told.
+
+    Compares the SOURCE commit, never the binary digest: one tag builds to different bytes per
+    toolchain. A warning, not a refusal, so a local sweep can still test an unreleased simulator;
+    CI refuses outright by checking BLIS_SHA on clone (#23).
+    """
+    blis = ((stack or {}).get("resolved") or {}).get("blis") or {}
+    want = (pins if pins is not None else build_catalog.read_pins()).get("BLIS_SHA")
+    got = blis.get("commit")
+    if not want or not got:
+        return ""
+    desc = blis.get("describe") or ""
+    ref = (stack or {}).get("blis") or "the pinned ref"
+    if got == want:
+        if desc.endswith("-dirty"):
+            return (f"blis: the binary was built from the pinned {ref} ({want[:12]}) with "
+                    f"UNCOMMITTED changes in its checkout, so it is not the pinned simulator")
+        return ""
+    at = f" ({desc})" if desc and desc != got else ""
+    return (f"blis: pins.env pins {ref} at {want[:12]}, but the binary was built from "
+            f"{got[:12]}{at}")
 
 
 def _blis_pin_warning(blis, catalog, registry):
-    """How the simulator about to run differs from BLIS_SHA, or "" when it agrees/cannot be told.
-
-    Delegates to run_search so the two runners apply ONE rule; an import failure is silent for
-    the same reason _pinned_stack's is -- a provenance note must never be what breaks a sweep.
-    """
+    """blis_pin_warning for the binary about to run; never the thing that breaks a sweep."""
     try:
-        import run_search
-        return run_search.blis_pin_warning(
-            run_search._pinned_stack(blis, catalog, registry))
+        return blis_pin_warning(_pinned_stack(blis, catalog, registry))
     except Exception:
         return ""
 
@@ -929,7 +1000,7 @@ def _write_run_dir(out_dir, spec, report, runs):
     re-checked against the numbers) without the repo it came from.
     """
     os.makedirs(out_dir, exist_ok=True)
-    # A sweep can replace a config-search report of the same name; its sidecar would outlive it.
+    # gallery.json was the retired search runner's sidecar; never let one outlive a re-sweep.
     for stale in SEARCH_ONLY_FILES:
         if os.path.isfile(os.path.join(out_dir, stale)):
             os.remove(os.path.join(out_dir, stale))

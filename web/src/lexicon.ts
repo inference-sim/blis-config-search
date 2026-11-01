@@ -1,14 +1,14 @@
-// The shared vocabulary of the config-search report surfaces, typed for the dashboard.
+// The shared vocabulary of the report surfaces, typed for the dashboard.
 //
-// config-search renders the same runs twice: this React dashboard and the standalone HTML report
-// (.claude/skills/config-search/scripts/report.py). They had grown two vocabularies for one set
+// The site renders the same runs twice: this React dashboard and the standalone HTML report
+// (scripts/report.py). They had grown two vocabularies for one set
 // of numbers and, worse, two ranking objectives for "What to run" — the report ranked operating
 // points by per-user rate while this app ranked them by tok/s/accelerator, so at high load the two tables
 // recommended DIFFERENT configurations for one scenario (issue #13).
 //
 // Both surfaces now read their labels, captions and ranking objective from one JSON file. The
-// canonical copy is .claude/skills/config-search/report/lexicon.json; `lexicon.json` beside this
-// file is a byte-identical mirror, because Vite cannot import out of the read-only skill dir.
+// canonical copy is report/lexicon.json; `lexicon.json` beside this file is a byte-identical
+// mirror, because Vite cannot import from outside web/.
 // scripts/test_build.py fails the build if the two drift.
 import raw from './lexicon.json'
 import type { RunRecord } from './types'

@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-# report.py -- the report half of config-search: a PURE run-dir -> index.html transform.
+# report.py -- a PURE run-dir -> index.html transform for one report.
 #
 #   python3 -I scripts/report.py <run-dir>            # -> <run-dir>/index.html
 #   python3 -I scripts/report.py <run-dir> --out p    # -> p
 #   python3 -I scripts/report.py <parent-of-run-dirs> # -> each child's index.html + a card index
 #
-# It reads the run directory the search engine writes and renders a magazine-style analytical report
+# It reads the run directory run_experiment.py writes and renders a magazine-style analytical report
 # modeled on the CurveBender "glm53flash" format: a numbered-finding narrative, pre-rendered inline-SVG
 # figures (figures.py), a client-side crossfilter explorer over every run, and a glossary.
 #
-# Inputs (all optional-tolerant -- three of four are brain-authored "convention, loose on purpose"):
+# Inputs (all optional-tolerant; report/schema.md documents report.json):
 #   scenario.json  resolved Scenario (model/hw/budget/workload/floor/headroom/pinned_stack)
 #   pareto.json    finalists / dropped / winner (the analysis artifact)
 #   runs.jsonl     one row per blis run (the raw ledger) -> RECORDS + figures
-#   report.json    the brain-authored NARRATIVE (standfirst, hero, sections, glossary, operating pts).
+#   report.json    the NARRATIVE (standfirst, hero, sections, glossary, operating pts).
 #                  Absent -> the report still renders header + explorer + an auto operating table.
 #
 # It NEVER runs BLIS and makes no subprocess / network calls at GENERATION time. The rendered page is
@@ -980,7 +980,7 @@ def render_card_index(cards):
 def write_one(run_dir, out=None):
     scenario, pareto, runs, report, n_malformed = load_run_dir(run_dir)
     if not runs and not pareto:
-        raise SystemExit(f"{run_dir}: no runs.jsonl or pareto.json; not a config-search run directory")
+        raise SystemExit(f"{run_dir}: no runs.jsonl or pareto.json; not a run directory")
     out = out or os.path.join(run_dir, "index.html")
     with open(out, "w", encoding="utf-8") as f:
         f.write(render_report(scenario, pareto, runs, report, os.path.abspath(run_dir), n_malformed))
@@ -1005,7 +1005,7 @@ def write_tree(parent):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="config-search HTML report (run-dir -> index.html); never runs BLIS")
+        description="HTML report (run-dir -> index.html); never runs BLIS")
     ap.add_argument("path", help="a run directory, or a parent of several run directories")
     ap.add_argument("--out", help="output HTML path (single run dir only; default <run-dir>/index.html)")
     args = ap.parse_args(argv)

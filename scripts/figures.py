@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# figures.py -- deterministic inline-SVG figure builders for the config-search report.
+# figures.py -- deterministic inline-SVG figure builders for the HTML report.
 #
 # Each builder takes the flat RECORDS list (see report.build_records) + options and returns an
 # <svg> string, sized like the reference "glm53flash" report and themed entirely through the

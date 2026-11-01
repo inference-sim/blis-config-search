@@ -168,14 +168,14 @@ jobs:
                 "`.claude/skills/blis-experiment/references/knobs.md`).\n"
                 "- [ ] `CATALOG_REF` / `REGISTRY_REF`: does this release need newer ones? The bot "
                 "does not guess; move them here if so (the gate re-runs).\n"
-                "- [ ] Any submission or spec that must change to keep running (a field the new "
-                "stack refuses) is changed here, with the reason in its # comment.\n")
+                "- [ ] Any spec that must change to keep running (a field the new stack "
+                "refuses) is changed here, with the reason in its # comment.\n")
           print(f"**On merge**, `regen-reports.yml` regenerates all {len(plan['reports'])} committed "
                 f"report(s) against the new stack and opens one PR per batch:\n")
           for b in plan["batches"]:
               print(f"- `{b['name']}`: " + ", ".join(f"`{i}`" for i in b["ids"]))
           if plan["orphans"]:
-              print("\n**Cannot be regenerated** (no spec or submission to run from), so they will "
+              print("\n**Cannot be regenerated** (no experiment spec to run from), so they will "
                     "keep the old stack label until handled by hand: "
                     + ", ".join(f"`{o['id']}`" for o in plan["orphans"]))
           if rel["tag"] == tag and rel.get("body"):
@@ -187,7 +187,7 @@ jobs:
           git config user.email "bot@users.noreply.github.com"
           if [ "${{ steps.target.outputs.exists }}" != true ]; then
             git checkout -b "$branch"
-            git add pins.env .claude/skills/config-search/SETUP.md
+            git add pins.env SETUP.md
             git commit -m "Bump the pinned inference-sim to $tag
 
           Opened by bump-blis-pin.yml as a draft. Code changes the release needs go on this

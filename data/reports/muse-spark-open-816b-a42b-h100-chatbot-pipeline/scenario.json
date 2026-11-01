@@ -1,0 +1,53 @@
+{
+  "experiment": {
+    "description": "",
+    "name": "muse-spark-open-816b-a42b-h100-chatbot-pipeline",
+    "sweeps": [
+      {
+        "name": "no-pipeline",
+        "narrative": "The no-pipeline control at 16-way tensor parallelism; a pipelined arm has to beat this at the same footprint and load to be worth its boundaries."
+      },
+      {
+        "name": "pipelined",
+        "narrative": "Trading tensor width for pipeline stages should help once the batch is full enough to keep every stage busy, and cost more at light load."
+      }
+    ]
+  },
+  "gpu_budget": 16,
+  "hardware": "h100",
+  "headroom": 1.0,
+  "interactivity_floor": {
+    "tok_per_s_per_user": 10.0
+  },
+  "model": "muse-spark-open-816b-a42b-nvfp4",
+  "objective": "max output tok/s per GPU subject to the scenario's SLOs",
+  "pinned_stack": {
+    "blis": "v0.15.0",
+    "catalog": "0.5.0",
+    "kernel": "v0.5.0",
+    "registry": "v0.3.0",
+    "resolved": {
+      "blis": {
+        "commit": "762f1605ff27cd825d6b2cb2d9e991cd4b864c91",
+        "describe": "v0.15.0",
+        "sha256": "886174373b0f95a812390763b74f21efeaaa97c28394392a605100151a3c256c"
+      },
+      "catalog": {
+        "commit": "b5550f750cb51571498577fbdc1c68f78cda67db",
+        "describe": "0.5.0"
+      },
+      "registry": {
+        "commit": "96bead697172ab7f2cf8346e04e65b837014d867",
+        "describe": "v0.3.0"
+      }
+    }
+  },
+  "run_id": "muse-spark-open-816b-a42b-h100-chatbot-pipeline",
+  "seed": 42,
+  "slos": {
+    "itl_p99": "100ms"
+  },
+  "workload": {
+    "preset": "chatbot"
+  }
+}

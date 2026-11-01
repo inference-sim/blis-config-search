@@ -37,7 +37,7 @@ You do not run BLIS yourself, and you never commit results by hand.
 ## The format
 
 ```yaml
-name: deepseek-v4-1-flash-h100-agentx-drafting   # also the reports/<name>/ directory
+name: deepseek-v4-1-flash-h100-agentx-4node   # also the reports/<name>/ directory
 
 scenario:                       # shared by EVERY sweep
   model: deepseek-v4.1-flash    # a blis-catalog short-name
@@ -403,7 +403,7 @@ BLIS imposes real constraints on P/D, all checked before any run:
 
 A sweep is colocated **or** disaggregated, never both.
 
-## The committed examples
+## A worked P/D example
 
 | Spec | Question |
 |---|---|

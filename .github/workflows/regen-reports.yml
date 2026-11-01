@@ -252,7 +252,8 @@ jobs:
           # The AgentX narratives quote their 4node/8node and h100 siblings, so they are written
           # only now, with the whole batch side by side in reports/ (as regen_agentx.sh does).
           for id in $ok; do
-            if [ -f "$RUNNER_TEMP/old-reports/$id/report.json" ]; then
+            # An experiment dir writes its own report.json; the AgentX writer reads search output only.
+            if [ -f "$RUNNER_TEMP/old-reports/$id/report.json" ] && [ ! -f "reports/$id/experiment.json" ]; then
               python3 -I scripts/write_agentx_report.py "reports/$id"
             fi
           done

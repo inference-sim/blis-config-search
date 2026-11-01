@@ -79,13 +79,19 @@ jobs:
             # not silently re-run every campaign in the repo.
             specs="$(git diff --name-only --diff-filter=d HEAD^ HEAD -- 'experiments/*.yaml' || true)"
           fi
+          # Several specs in one push would share one 350-minute job; dispatch each instead.
+          if [ -z "$requested" ] && [ "$(echo "$specs" | grep -c .)" -gt 1 ]; then
+            echo "::warning::this push changed several specs; run each with workflow_dispatch:"
+            echo "$specs" | sed 's/^/  gh workflow run run-experiment.yml -f spec=/'
+            specs=""
+          fi
           if [ -z "$specs" ]; then
             echo "no experiment specs to run"
             echo "specs=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "will run:"; echo "$specs"
-          # Newline-delimited through the output file so a multi-spec push works.
+          # Newline-delimited through the output file, one spec per line.
           {
             echo "specs<<EOF"
             echo "$specs"

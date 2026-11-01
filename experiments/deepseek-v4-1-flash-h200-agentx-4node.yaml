@@ -2,7 +2,7 @@
 # MoE 128 experts top_k 3: dp, EP and all2all_backend are real axes; dspark drafter, K <= 5; family 9, so fp8_ds_mla only.
 # Measured on the pin: 8xTP4 fits only with EP (EP off and gmu 0.7 refused); tp1/tp2 trail tp8 1.6-3x, so topology stops at tp4.
 # 8xTP4 at gmu 0.9 keeps ~4 GiB KV per rank, so gpu_memory_utilization 0.95 is a real lever there, with tp8 as contrast.
-# Routing is crossed with prefix caching here: the separate h200 routing spec was retired into this one.
+# Routing is crossed with prefix caching here.
 # Left out: eplb (-0.02%) and engram_config (byte-identical), both probed; moe_backend, swa_bounded_replay (measured inert);
 # P/D (decode-heavy, warm prefix); block_size (run_blis sets it per hardware).
 

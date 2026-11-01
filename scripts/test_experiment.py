@@ -316,6 +316,14 @@ class ValidatorRejects(unittest.TestCase):
         bad["scenario"]["slo"] = {"p99": "20ms"}
         self.assertTrue(any("unknown SLO" in e for e in self.errs(bad)))
 
+    def test_throughput_slo_is_a_positive_number(self):
+        ok = spec()
+        ok["scenario"]["slo"] = {"throughput_per_gpu": 500}
+        self.assertFalse([e for e in self.errs(ok) if "slo" in e])
+        bad = spec()
+        bad["scenario"]["slo"] = {"throughput_per_gpu": "500ms"}
+        self.assertTrue(any("positive tok/s" in e for e in self.errs(bad)))
+
     def test_descending_concurrency_is_refused(self):
         bad = spec()
         bad["scenario"]["concurrency"] = [8, 2]
@@ -1566,6 +1574,17 @@ class SloHandling(unittest.TestCase):
                 "deployment": {}}
         base.update(over)
         return base
+
+    def test_slo_limits_keeps_the_throughput_floor(self):
+        self.assertEqual({"itl_p99": 20.0, "throughput_per_gpu": 500.0},
+                         E.slo_limits({"itl_p99": "20ms", "throughput_per_gpu": 500}))
+
+    def test_throughput_floor_is_judged_per_gpu(self):
+        # 100 tok/s across 2 GPUs is 50 per GPU.
+        self.assertTrue(E.servable(self.rec(), {"throughput_per_gpu": 50.0}, gpus=2)[0])
+        ok, why = E.servable(self.rec(), {"throughput_per_gpu": 60.0}, gpus=2)
+        self.assertFalse(ok)
+        self.assertIn("throughput_per_gpu 50.0", why)
 
     def test_failed_run_is_not_servable(self):
         ok, why = E.servable(self.rec(returncode=1, error="boom"), {"itl_p99": 20.0})

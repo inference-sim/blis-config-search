@@ -422,9 +422,12 @@ def sweep_baseline(cands):
 
 
 def slo_limits(slo):
-    """The spec's SLO as milliseconds: {metric: cap_ms}. Durations carry their unit (see #21)."""
+    """The spec's SLO as {metric: cap_ms}; throughput_per_gpu passes through as a tok/s floor."""
     out = {}
     for key, raw in (slo or {}).items():
+        if key == "throughput_per_gpu":
+            out[key] = float(raw)
+            continue
         ms = validator.parse_duration_ms(raw)
         if ms is not None:
             out[key] = ms
@@ -441,7 +444,7 @@ def floor_rate_from(slo_ms):
     return (1000.0 / itl) if itl else None
 
 
-def servable(rec, slo_ms):
+def servable(rec, slo_ms, gpus=None):
     """(ok, why_not) for one run against the spec's SLOs.
 
     Uses run_blis.per_user_rate / worst_itl_p99 -- the acceptance-aware, worst-instance basis the
@@ -455,6 +458,13 @@ def servable(rec, slo_ms):
     m = rec.get("metrics") or {}
     if not m.get("tokens_per_sec"):
         return False, "no throughput reported"
+    floor = (slo_ms or {}).get("throughput_per_gpu")
+    if floor:
+        if not gpus:
+            return False, "throughput_per_gpu SLO declared but the GPU count is unknown"
+        per_gpu = m["tokens_per_sec"] / gpus
+        if per_gpu < floor:
+            return False, f"throughput_per_gpu {per_gpu:.1f} tok/s < {floor:g} tok/s"
     itl_cap = (slo_ms or {}).get("itl_p99")
     if itl_cap:
         worst, missing = run_blis.worst_itl_p99(rec)
@@ -639,7 +649,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                                            if k != "_overrides"} if replay else None)
             rec["sweep"] = sname
             _relativize_cmd(rec, out_dir)
-            ok, why = servable(rec, slo_ms)
+            ok, why = servable(rec, slo_ms, gpus)
             row = run_row(rec, cfg, label, variant, sname, c, gpus)
             # The resolved config travels with the row so pareto.json's finalists can carry
             # it: build_gallery reads `finalist.config.tp` / `.num_instances` for the winner

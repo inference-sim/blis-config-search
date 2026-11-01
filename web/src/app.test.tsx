@@ -688,6 +688,13 @@ describe('Submit experiment spec', () => {
     expect(spec()).not.toContain('slo:')
   })
 
+  it('adds a throughput floor per accelerator', () => {
+    render(<Submit catalog={cat()} mode="pages" />)
+    fireEvent.click(screen.getByLabelText('Throughput'))
+    fireEvent.change(screen.getByLabelText('Throughput floor'), { target: { value: '800' } })
+    expect(spec()).toContain('slo: {itl_p99: 20ms, throughput_per_gpu: 800}')
+  })
+
   it('offers replays and adds the replay block for one', () => {
     render(<Submit catalog={cat([wl('chatbot', 'shape'), wl('agentx-mvp', 'replay')])} mode="pages" />)
     expect(offered()).toEqual(['chatbot', 'agentx-mvp (replay)'])

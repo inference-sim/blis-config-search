@@ -1009,11 +1009,15 @@ def validate(spec, routing_dir=ROUTING_DIR, vocabulary=None, catalog=None):
             if not isinstance(slo, dict) or not slo:
                 errs.append("scenario.slo: must be a non-empty mapping, e.g. {itl_p99: 20ms}")
             else:
-                known_slo = {"itl_p99", "ttft_p99", "e2e_p99"}
+                known_slo = {"itl_p99", "ttft_p99", "e2e_p99", "throughput_per_gpu"}
                 for key, val in slo.items():
                     if key not in known_slo:
                         errs.append(f"scenario.slo.{key}: unknown SLO "
                                     f"(allowed: {', '.join(sorted(known_slo))})")
+                    elif key == "throughput_per_gpu":
+                        if isinstance(val, bool) or not isinstance(val, (int, float)) or val <= 0:
+                            errs.append(f"scenario.slo.{key}: {val!r} must be a positive "
+                                        f"tok/s per accelerator, e.g. 500")
                     elif parse_duration_ms(val) is None:
                         errs.append(f"scenario.slo.{key}: {val!r} needs an explicit unit "
                                     f"(e.g. 20ms, 5s) -- a bare number is ambiguous")

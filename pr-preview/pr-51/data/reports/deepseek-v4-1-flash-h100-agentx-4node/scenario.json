@@ -1,13 +1,50 @@
 {
+  "experiment": {
+    "description": "",
+    "name": "deepseek-v4-1-flash-h100-agentx-4node",
+    "sweeps": [
+      {
+        "name": "topology",
+        "narrative": "Wide TP8 instances should win at the SLO, since narrow tp pays more per-step latency than the extra replicas buy back."
+      },
+      {
+        "name": "ep-off",
+        "narrative": "Replicating all 128 experts should cost KV room and throughput against the EP twins in topology."
+      },
+      {
+        "name": "drafting-depth",
+        "narrative": "Deeper dspark drafts should add tok/s, but the 20ms ITL bound should cap K lower on narrow tp than on TP8."
+      },
+      {
+        "name": "batch-caps",
+        "narrative": "max_num_seqs should bind on TP8 ranks and not on TP2, while a small token cap trades throughput for tail ITL on both."
+      },
+      {
+        "name": "moe-collective",
+        "narrative": "Routed all-to-all backends should only pay once EP spans nodes, and hurt on narrow tp where buffers crowd KV."
+      },
+      {
+        "name": "kv-and-engram",
+        "narrative": "Moving Engram tables into HBM should only pay when gmu leaves KV room for them, and cost more on narrow tp."
+      },
+      {
+        "name": "cudagraph",
+        "narrative": "FULL-family capture should beat the PIECEWISE default by a few percent and NONE should collapse."
+      },
+      {
+        "name": "routing-and-prefix-cache",
+        "narrative": "prefix-affinity should only beat random with caching on, and the gap should widen from 2 to 4 instances."
+      }
+    ]
+  },
   "gpu_budget": 32,
   "hardware": "h100",
-  "headroom": 0.8,
+  "headroom": 1.0,
   "interactivity_floor": {
-    "itl_p99_ms_max": 20.0,
     "tok_per_s_per_user": 50.0
   },
   "model": "deepseek-v4.1-flash",
-  "objective": "dual-pareto",
+  "objective": "max output tok/s per GPU subject to the scenario's SLOs",
   "pinned_stack": {
     "blis": "v0.15.0",
     "catalog": "0.5.0",
@@ -15,7 +52,9 @@
     "registry": "v0.3.0",
     "resolved": {
       "blis": {
-        "sha256": "46bf00c739eafba4cdb347d4bfdd30bd63e815acaff1525c291b5b8ea947b197"
+        "commit": "762f1605ff27cd825d6b2cb2d9e991cd4b864c91",
+        "describe": "v0.15.0",
+        "sha256": "49948939a5a58bcb86e034df0a00fa93cf2c636b7a5a3a128a2b4b9764e73a68"
       },
       "catalog": {
         "commit": "b5550f750cb51571498577fbdc1c68f78cda67db",
@@ -29,32 +68,26 @@
   },
   "run_id": "deepseek-v4-1-flash-h100-agentx-4node",
   "seed": 42,
-  "topology_coverage": {
-    "footprint_caps_attempted": [
-      8
-    ],
-    "max_candidates": 12,
-    "omitted": [
-      "8x TP2xDP2",
-      "8x TP1xDP4",
-      "16x TP2 + EP",
-      "16x TP1xDP2 + EP",
-      "16x TP2",
-      "16x TP1xDP2",
-      "32x TP1"
-    ],
-    "probed": 12,
-    "valid_layouts": 19
+  "slos": {
+    "itl_p99": "20ms"
   },
   "workload": {
     "replay": {
+      "_overrides": {
+        "grace_period": {
+          "catalog": "30s",
+          "spec": "inf"
+        }
+      },
       "benchmark_duration": "900s",
-      "corpus": "/home/runner/_work/blis-config-search/blis-config-search/.corpus/traces.jsonl",
-      "corpus_cache": "/tmp/agx-cache",
+      "category": "coding",
+      "corpus": ".corpus/traces.jsonl",
+      "corpus_cache": "/tmp/agx-cache-h100",
       "corpus_sha256": "e39cd2ff3eba21d4a3664be51da743ac3d2149a1933898cafc7bfeac8147eeef",
       "grace_period": "inf",
       "max_context_length": "max_model_len",
-      "scenario": "inferencex-agentx-mvp"
+      "scenario": "inferencex-agentx-mvp",
+      "thinking": "on"
     }
   }
 }

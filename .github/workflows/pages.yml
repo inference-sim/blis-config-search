@@ -38,12 +38,7 @@ permissions:
   contents: read
 
 concurrency:
-  # One group per PR (and one for main), NOT one shared group: GitHub keeps at most one pending
-  # run per group and cancels the older pending run when a newer one arrives, so a single
-  # shared group silently cancelled previews whenever 3+ PRs pushed at once (e.g. a regen batch).
-  # Runs for the same PR still queue in order. Runs for different PRs may push gh-pages
-  # concurrently; each touches only its own pr-preview/pr-<N>/ folder, so a rejected
-  # (non-fast-forward) push is the worst case. Re-run the job if that ever happens.
+  # Per PR, not shared: a group keeps one pending run and cancels older ones, which dropped batch previews.
   group: pages-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
@@ -106,6 +101,8 @@ jobs:
           # Keep the open PRs' previews when the live root is replaced.
           clean-exclude: pr-preview/
           commit-message: "Deploy main @ ${{ github.sha }}"
+          # Rebase on a concurrent preview push instead of force-pushing over it (default is force).
+          force: false
 
   preview:
     # Same-repo PRs only: a fork's token cannot write gh-pages (see the header).
@@ -135,10 +132,7 @@ jobs:
           umbrella-dir: pr-preview
           action: auto           # deploy on open/sync, remove on close
           qr-code: "false"
-          # The action's own wait fails when the Pages build of the preview commit is superseded:
-          # GitHub drops a build as `errored` (0s) when a newer gh-pages push lands mid-build, which
-          # happens whenever main or another PR deploys at the same time. So the wait and the
-          # deploy comment are done by the steps below; the action still posts the removal comment.
+          # Its wait fails when a newer gh-pages push supersedes the build, so the steps below wait and comment.
           wait-for-pages-deployment: false
           comment: ${{ github.event.action == 'closed' }}
       - name: Wait until Pages serves the preview commit (or a later one)
@@ -149,25 +143,32 @@ jobs:
           REPO: ${{ github.repository }}
           SHA: ${{ steps.pr-preview.outputs.deployed-commit-sha }}
         run: |
-          # Any later gh-pages commit still contains this preview folder (previews only ever add
-          # or remove their own pr-<N>/ and the main deploy keeps pr-preview/), so a `built`
-          # build of SHA or of any descendant means the preview is live.
-          contains() {  # does gh-pages commit $1 contain $SHA?
+          # A built Pages build of $SHA or any later gh-pages commit means the preview is live.
+          contains() {  # does gh-pages commit $1 contain $SHA? (API errors are shown, not hidden)
             [ "$1" = "$SHA" ] && return 0
-            st=$(gh api "repos/$REPO/compare/$SHA...$1" --jq .status 2>/dev/null) || return 1
+            st=$(gh api "repos/$REPO/compare/$SHA...$1" --jq .status) || return 1
             [ "$st" = ahead ] || [ "$st" = identical ]
           }
+          since=$(gh api "repos/$REPO/commits/$SHA" --jq .commit.committer.date)
           deadline=$((SECONDS + 1800)); tip_errored_polls=0
           while [ $SECONDS -lt $deadline ]; do
-            builds=$(gh api "repos/$REPO/pages/builds?per_page=30" --jq '.[] | "\(.commit) \(.status)"')
+            # Newest first, and only builds started after $SHA was pushed: older ones can't contain it.
+            builds=$(gh api "repos/$REPO/pages/builds?per_page=30" |
+              jq -r --arg since "$since" '.[] | select(.created_at >= $since) | "\(.commit) \(.status)"')
             while read -r commit status; do
+              [ -n "$commit" ] || continue
               if [ "$status" = built ] && contains "$commit"; then
                 echo "Pages build of $commit is built (contains $SHA)"; exit 0
               fi
+              [ "$commit" = "$SHA" ] && break  # nothing older than $SHA's own build can contain it
             done <<< "$builds"
-            # Fail fast only on a real error: the build of the CURRENT gh-pages tip errored and
-            # no newer push has superseded it for a couple of polls.
             tip=$(gh api repos/$REPO/branches/gh-pages --jq .commit.sha)
+            # Fail fast if the preview was overwritten; an API error just means poll again.
+            rel=$([ "$tip" = "$SHA" ] && echo identical || gh api "repos/$REPO/compare/$SHA...$tip" --jq .status || true)
+            if [ "$rel" = diverged ] || [ "$rel" = behind ]; then
+              echo "::error::gh-pages tip $tip no longer contains preview commit $SHA"; exit 1
+            fi
+            # Fail fast on a real error: the current tip's build errored and nothing has superseded it.
             if grep -q "^$tip errored$" <<< "$builds"; then
               tip_errored_polls=$((tip_errored_polls + 1))
               if [ $tip_errored_polls -ge 3 ]; then

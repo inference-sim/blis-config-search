@@ -223,6 +223,10 @@ def test_workflows_sane():
     deploy_if = pdoc["jobs"]["deploy"]["if"]
     check("refs/heads/main" in deploy_if and "push" in deploy_if, "live publish gated to main pushes")
     check("clean-exclude: pr-preview/" in ptxt, "live publish keeps the PR previews")
+    main_push = next(st for st in pdoc["jobs"]["deploy"]["steps"]
+                     if "github-pages-deploy-action@" in st.get("uses", ""))
+    check(main_push["with"].get("force") is False,
+          "live publish rebases instead of force-pushing over a concurrent preview")
     deploy_uses = [st.get("uses", "") for st in pdoc["jobs"]["deploy"]["steps"]]
     check(any(u.startswith("actions/checkout@") for u in deploy_uses),
           "live publish checks out the repo (the deploy action needs a git working tree)")

@@ -28,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       spec:
-        description: "experiments/<name>.yaml to run (blank = every spec the last commit changed)"
+        description: "experiments/<name>.yaml to run (blank = every spec the push changed)"
         required: false
       timeout:
         description: "per-BLIS-run timeout in seconds"
@@ -46,12 +46,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2       # need the previous commit to diff which specs changed
+          fetch-depth: 0       # diff against the commit before the push, however far back
 
       - name: Decide which specs to run
         id: pick
         env:
           REQUESTED: ${{ github.event.inputs.spec }}
+          BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
           if [ -n "$REQUESTED" ]; then
@@ -63,8 +64,10 @@ jobs:
             test -f "$REQUESTED" || { echo "no such spec: $REQUESTED" >&2; exit 1; }
             specs="$REQUESTED"
           else
-            # Only the specs this push touched, so a README edit re-runs nothing.
-            specs="$(git diff --name-only --diff-filter=d HEAD^ HEAD -- 'experiments/*.yaml' || true)"
+            # Only the specs this push touched (all its commits, not just the last one).
+            old=HEAD^
+            if [ -n "${BEFORE:-}" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then old="$BEFORE"; fi
+            specs="$(git diff --name-only --diff-filter=d "$old" HEAD -- 'experiments/*.yaml' || true)"
           fi
           echo "will run:"; echo "${specs:-none}"
           # JSON list for the sweep matrix: one job (runner, timeout, PR) per spec.
@@ -86,13 +89,16 @@ jobs:
     concurrency:
       group: run-experiment-${{ matrix.spec }}
       cancel-in-progress: false
-    permissions:
-      contents: write          # push the bot branch
-      pull-requests: write     # open the follow-up PR
     env:
       SPEC: ${{ matrix.spec }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Name the report
+        id: name
+        # The report dir is the spec's name field, which need not match its file name.
+        run: |
+          echo "name=$(sed -n 's/^name: *//p' "$SPEC" | head -1)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-go@v5
         with: { go-version: "1.24" }
@@ -153,12 +159,65 @@ jobs:
       - name: Build the site to validate the new reports
         run: python3 -I scripts/build_gallery.py --no-mock --out /tmp/site-check
 
-      - name: Open the follow-up PR
+      - uses: actions/upload-artifact@v4
+        with:
+          name: report-${{ steps.name.outputs.name }}
+          path: reports/${{ steps.name.outputs.name }}
+          retention-days: 14
+          if-no-files-found: error
+
+  pr:
+    needs: [plan, sweep]
+    # The big runner's image has no gh, so the PR is opened here; one leg per spec that finished.
+    if: always() && needs.plan.outputs.specs != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        spec: ${{ fromJSON(needs.plan.outputs.specs) }}
+    name: pr ${{ matrix.spec }}
+    permissions:
+      contents: write          # push the bot branch
+      pull-requests: write     # open the follow-up PR
+    env:
+      SPEC: ${{ matrix.spec }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Name the report
+        id: name
+        # The report dir is the spec's name field, which need not match its file name.
+        run: |
+          echo "name=$(sed -n 's/^name: *//p' "$SPEC" | head -1)" >> "$GITHUB_OUTPUT"
+
+      # A pattern, not a name: a failed sweep leaves no artifact, and that must not error here.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: report-${{ steps.name.outputs.name }}
+          path: ${{ runner.temp }}/artifacts
+
+      - name: Swap the new report in
+        id: swap
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NAME: ${{ steps.name.outputs.name }}
         run: |
           set -euo pipefail
-          names="$(basename "$SPEC" .yaml)"
+          art="$RUNNER_TEMP/artifacts/report-$NAME"
+          if [ ! -d "$art" ]; then
+            echo "::warning::no report for $SPEC (its sweep failed or was canceled)"
+            echo "ok=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          rm -rf "reports/$NAME"
+          cp -r "$art" "reports/$NAME"
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
+      - name: Open the follow-up PR
+        if: steps.swap.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          names: ${{ steps.name.outputs.name }}
+        run: |
+          set -euo pipefail
           # One branch per spec, so parallel matrix jobs never push to the same ref.
           branch="experiment-report/${GITHUB_SHA::10}-$names"
           git config user.name  "blis-config-search-bot"

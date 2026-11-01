@@ -42,8 +42,8 @@ concurrency:
   # run per group and cancels the older pending run when a newer one arrives, so a single
   # shared group silently cancelled previews whenever 3+ PRs pushed at once (e.g. a regen batch).
   # Runs for the same PR still queue in order. Runs for different PRs may push gh-pages
-  # concurrently; each touches only its own pr-preview/pr-<N>/ folder, and the deploy action
-  # (JamesIves, also used inside pr-preview-action) rebases and retries a rejected push.
+  # concurrently; each touches only its own pr-preview/pr-<N>/ folder, so a rejected
+  # (non-fast-forward) push is the worst case. Re-run the job if that ever happens.
   group: pages-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 

@@ -128,13 +128,66 @@ jobs:
         if: github.event.action != 'closed'
         with: { name: site, path: dist }
       - uses: rossjrw/pr-preview-action@873417d2df72380da1f3978378fb58560bcde976  # v1.8.2
+        id: pr-preview
         with:
           source-dir: dist
           preview-branch: gh-pages
           umbrella-dir: pr-preview
           action: auto           # deploy on open/sync, remove on close
           qr-code: "false"
-          # Comment only once GitHub's Pages build of the preview commit reports `built`, so the
-          # link is never posted while it still 404s. A failed or timed-out Pages build fails
-          # this job and posts no comment.
-          wait-for-pages-deployment: true
+          # The action's own wait fails when the Pages build of the preview commit is superseded:
+          # GitHub drops a build as `errored` (0s) when a newer gh-pages push lands mid-build, which
+          # happens whenever main or another PR deploys at the same time. So the wait and the
+          # deploy comment are done by the steps below; the action still posts the removal comment.
+          wait-for-pages-deployment: false
+          comment: ${{ github.event.action == 'closed' }}
+      - name: Wait until Pages serves the preview commit (or a later one)
+        id: wait-pages
+        if: github.event.action != 'closed' && steps.pr-preview.outputs.deployed-commit-sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ steps.pr-preview.outputs.deployed-commit-sha }}
+        run: |
+          # Any later gh-pages commit still contains this preview folder (previews only ever add
+          # or remove their own pr-<N>/ and the main deploy keeps pr-preview/), so a `built`
+          # build of SHA or of any descendant means the preview is live.
+          contains() {  # does gh-pages commit $1 contain $SHA?
+            [ "$1" = "$SHA" ] && return 0
+            st=$(gh api "repos/$REPO/compare/$SHA...$1" --jq .status 2>/dev/null) || return 1
+            [ "$st" = ahead ] || [ "$st" = identical ]
+          }
+          deadline=$((SECONDS + 1800)); tip_errored_polls=0
+          while [ $SECONDS -lt $deadline ]; do
+            builds=$(gh api "repos/$REPO/pages/builds?per_page=30" --jq '.[] | "\(.commit) \(.status)"')
+            while read -r commit status; do
+              if [ "$status" = built ] && contains "$commit"; then
+                echo "Pages build of $commit is built (contains $SHA)"; exit 0
+              fi
+            done <<< "$builds"
+            # Fail fast only on a real error: the build of the CURRENT gh-pages tip errored and
+            # no newer push has superseded it for a couple of polls.
+            tip=$(gh api repos/$REPO/branches/gh-pages --jq .commit.sha)
+            if grep -q "^$tip errored$" <<< "$builds"; then
+              tip_errored_polls=$((tip_errored_polls + 1))
+              if [ $tip_errored_polls -ge 3 ]; then
+                echo "::error::Pages build of gh-pages tip $tip errored"; exit 1
+              fi
+            else
+              tip_errored_polls=0
+            fi
+            echo "Waiting for a built Pages build containing $SHA (tip $tip)..."
+            sleep 10
+          done
+          echo "::error::Timed out waiting for the Pages build of $SHA"; exit 1
+      - name: Post the sticky preview comment
+        if: steps.wait-pages.outcome == 'success'
+        # Same action + header that pr-preview-action uses, so it updates the existing comment.
+        uses: marocchino/sticky-pull-request-comment@67d0dec7b07ed060a405f9b2a64b8ab319fdd7db  # v2.9.2
+        with:
+          header: pr-preview
+          message: |
+            [PR Preview Action](https://github.com/rossjrw/pr-preview-action) ${{ steps.pr-preview.outputs.action-version }}
+            :---:
+            :rocket: View preview at ${{ steps.pr-preview.outputs.preview-url }}
+            <h6>Built to branch [`gh-pages`](${{ github.server_url }}/${{ github.repository }}/tree/gh-pages) at ${{ steps.pr-preview.outputs.action-start-time }}; the Pages deployment is live.</h6>

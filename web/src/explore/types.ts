@@ -41,6 +41,8 @@ export interface ExploreData {
   totals: { configs?: number; runs?: number; servable?: number }
   sweeps: Sweep[]
   keys: string[]
+  /** The value each knob ran at when a run left it unset, where the report knows it. */
+  defaults?: Record<string, Scalar | object>
   metrics: MetricKey[]
   rows: Scalar[][]
   /** Distinct variant captions, and each row's index into them. */
@@ -49,6 +51,8 @@ export interface ExploreData {
   routers: Record<string, Router>
   /** The spec.yaml this report was swept from, as written. */
   spec_yaml: string
+  /** The stack that priced the report and a script installing it; null for a ledger with no pinned_stack. */
+  setup?: Setup | null
 }
 
 /** One run, unpacked. Knob values sit under their raw spec keys (tp, prefill_tp, router_config…). */
@@ -57,6 +61,8 @@ export interface Run {
   sweep: string
   conc: number
   knobs: Record<string, Scalar>
+  /** The report's defaults, shared by every run: what an unset knob ran at. */
+  defaults: Record<string, Scalar | object>
   tpg: number | null
   cl: number | null
   pu: number | null
@@ -70,4 +76,16 @@ export interface Run {
   variant: string
   /** Identity of the config across loads: every knob value. */
   cfg: string
+}
+
+export interface Setup {
+  stack: { name: string; repo: string; ref: string; commit: string | null }[]
+  script: string
+  /** Reproduces the whole sweep locally from the report's committed spec. */
+  sweep: string
+  /** Today's pins.env would sweep a different stack than the one recorded. */
+  pins_moved?: boolean
+  runs?: number | null
+  /** Serial BLIS hours the original sweep took. */
+  hours?: number | null
 }

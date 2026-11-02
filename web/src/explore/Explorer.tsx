@@ -8,6 +8,7 @@ import { Controls, TopConfigs } from './TopConfigs'
 import { OverviewSection } from './Overview'
 import { EngineSection, RoutingSection, TopologySection } from './Sections'
 import { RunsTable } from './RunsTable'
+import { OpenSetup, SetupButton, useSetupDialog } from './SetupDialog'
 import { METRIC, SLO_OF, TOPO_FIELDS, bareKey, layerOf, poolOf, sortValues } from './model'
 import { catalogDoc } from '../lib'
 import { reportHref } from '../load'
@@ -33,6 +34,7 @@ export function ScenarioPage({ runId, scenarios, catalog, load = loadExplore }: 
 }) {
   const s = scenarios.find((x) => x.run_id === runId)
   const [data, setData] = useState<ExploreData | null>(null)
+  const setup = useSetupDialog(data?.setup)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     let live = true
@@ -44,11 +46,14 @@ export function ScenarioPage({ runId, scenarios, catalog, load = loadExplore }: 
   if (!s) return <div><p className="crumb"><a href="#/reports">← all reports</a></p><div className="empty">Unknown scenario <span className="mono">{runId}</span>.</div></div>
   const modelDoc = catalogDoc(catalog, 'model', s.model)
   return (
+    <OpenSetup.Provider value={setup.open}>
     <div className="xf">
+      {setup.dialog}
       <p className="crumb"><a href="#/reports">← all reports</a></p>
       <h2 className="viewhead">{s.model} on {s.gpu_budget} × {s.hardware}, {s.workload}
         {modelDoc && <a className="specsheet" href={modelDoc} target="_blank" rel="noreferrer">model spec sheet ↗</a>}
-        {s.caveat && <CaveatBadge caveat={s.caveat} />}</h2>
+        {s.caveat && <CaveatBadge caveat={s.caveat} />}
+        <span className="xf-repro"><SetupButton>Reproduce</SetupButton></span></h2>
       <div className="specchips">
         <CatRef href={catalogDoc(catalog, 'hardware', s.hardware)}>{s.hardware}</CatRef>
         <span className="spec">{s.gpu_budget} accelerators</span>
@@ -64,6 +69,7 @@ export function ScenarioPage({ runId, scenarios, catalog, load = loadExplore }: 
       {!data && !error && <div className="loading">Loading runs…</div>}
       {data && <Body data={data} />}
     </div>
+    </OpenSetup.Provider>
   )
 }
 

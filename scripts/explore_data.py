@@ -10,11 +10,34 @@ parsed here into the plugin chain the page draws, so the page needs no YAML pars
 import json
 import os
 import re
+import shlex
 import sys
 
 import yaml
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import build_catalog  # noqa: E402
+import run_blis  # noqa: E402
+
+# What the engine does with a knob a run leaves unset and the ledger does not record
+# (blis-vllm rules/engineconfig/engine.go and rules/v0_32/pack.go at the pinned stack).
+ENGINE_UNSET = {
+    "all2all_backend": "allgather_reducescatter",
+    "enable_prefix_caching": True,
+    "long_prefill_token_threshold": 0,
+    "cache_dtype": "auto",
+    "quantization": "checkpoint",
+    "max_cudagraph_capture_size": "auto",
+    "eplb": "off",
+    "engram_config": {"cpu_offload": True},
+    "num_speculative_tokens": 0,
+    "speculative_method": "off",
+}
+TOPOLOGY_KEY = re.compile(r"^((prefill|decode)_)?(tp|dp|pp|enable_expert_parallel|instances|num_instances)$|^router_config$")
+# Knobs the scenario stores under another name.
+NESTED = {"speculative_method": ("speculative", "method"),
+          "num_speculative_tokens": ("speculative", "num_spec_tokens")}
 # One summary per base routing file; a generated arm says which parameter it overrides.
 ROUTER_SUMMARY = {
     "random": "Spreads requests at random; the baseline every scorer has to beat.",
@@ -117,6 +140,140 @@ def _router_entry(path, run_dir):
     }
 
 
+def _resolved(dep, key):
+    """The value a recorded deployment ran `key` at, or None when it does not state one."""
+    m = re.match(r"(prefill|decode)_(.+)$", key)
+    par, eng = dep.get("parallel") or {}, dep.get("engine") or {}
+    if m:
+        pool = ((par.get("pd") or {}).get(m.group(1))) or {}
+        key, par, eng = m.group(2), pool.get("parallel") or {}, pool.get("engine") or {}
+    if key in NESTED:
+        block, field = NESTED[key]
+        return (eng.get(block) or {}).get(field)
+    return eng[key] if key in eng else par.get(key)
+
+
+def defaults(run_dir, keys):
+    """For each knob, the value a run that left it unset actually used.
+
+    Read from the deployments BLIS priced when they agree, else the engine's own default, so the
+    page can say "8192 (default)" instead of a bare "default".
+    """
+    seen = {k: set() for k in keys}
+    path = os.path.join(run_dir, "runs.jsonl")
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                rec = json.loads(line)
+                dep, cfg = rec.get("deployment"), rec.get("config") or {}
+                if not dep:
+                    continue
+                for k in keys:
+                    if cfg.get(k) is None and (v := _resolved(dep, k)) is not None:
+                        seen[k].add(json.dumps(v, sort_keys=True))
+    out = {}
+    for k in keys:
+        bare = re.sub(r"^(prefill|decode)_", "", k)
+        if len(seen[k]) == 1:
+            out[k] = json.loads(next(iter(seen[k])))
+        elif not seen[k] and bare in ENGINE_UNSET:
+            out[k] = ENGINE_UNSET[bare]
+    return out
+
+
+GH = "https://github.com/inference-sim"
+_PINS = build_catalog.read_pins()
+CATALOG_DIR = os.path.join(ROOT, os.pardir, "blis-catalog")
+
+
+def _clone(repo, ref, commit, dest, *then):
+    """Shallow-clone `ref`, then run `then` only if the tag still points at the recorded commit.
+
+    One && chain, not `exit`: the script is pasted into an interactive shell, which must stay open.
+    """
+    steps = [f"git clone --branch {ref} --depth 1 {GH}/{repo}.git {dest}"]
+    if commit:
+        steps.append(f'{{ test "$(git -C {dest} rev-parse HEAD)" = {commit} || '
+                     f'{{ echo "{dest}: {ref} moved off {commit[:8]}, stopping" >&2; false; }}; }}')
+    return [" && \\\n  ".join([*steps, *then])]
+
+
+def _corpus(workload):
+    """(file, URL, sha256) of a replay workload's corpus, from the catalog checkout; None if unknown."""
+    path = os.path.join(CATALOG_DIR, "workloads", f"{workload}.yaml")
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        corpus = ((yaml.safe_load(f) or {}).get("replay") or {}).get("corpus") or {}
+    src = corpus.get("source") or {}
+    if not (src.get("huggingface") and src.get("revision") and src.get("file")):
+        return None
+    url = f"https://huggingface.co/datasets/{src['huggingface']}/resolve/{src['revision']}/{src['file']}"
+    return src["file"], url, corpus.get("sha256")
+
+
+def _wall_hours(run_dir):
+    """Serial BLIS time the sweep took, summed from its ledger; None when not recorded."""
+    path = os.path.join(run_dir, "runs.jsonl")
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        total = sum(json.loads(l).get("wall_s") or 0 for l in f)
+    return round(total / 3600, 1) if total else None
+
+
+def setup(exp, run_dir=None):
+    """The stack that priced this report, a script installing it, and how to reproduce the sweep locally."""
+    ps = exp.get("pinned_stack") or {}
+    res = ps.get("resolved") or {}
+    commit = lambda k: (res.get(k) or {}).get("commit")
+    if not ps.get("blis"):
+        return None
+    sh = ["# the stack that priced this report (needs git and Go)"]
+    sh += _clone("inference-sim", ps["blis"], commit("blis"), "inference-sim",
+                 "(cd inference-sim && go build -o blis main.go)", 'export PATH="$PWD/inference-sim:$PATH"')
+    sh.append("")
+    for key, repo, env in (("catalog", "blis-catalog", "BLIS_CATALOG"), ("registry", "blis-registry", "BLIS_REGISTRY")):
+        if ps.get(key):
+            sh += _clone(repo, ps[key], commit(key), repo, f'export {env}="$PWD/{repo}"') + [""]
+    sh += ["# the commands run from this repo: router configs live here, scenarios/ is where you save each scenario",
+           f"git clone --depth 1 {GH}/blis-config-search.git && cd blis-config-search && mkdir -p scenarios"]
+    replay = (exp.get("scenario") or {}).get("replay") or {}
+    if replay.get("corpus"):
+        got = _corpus((exp.get("scenario") or {}).get("workload") or "")
+        dest, sha = replay["corpus"], replay.get("corpus_sha256")
+        sh += ["", "# the replay corpus (not vendored anywhere; checked against its digest)",
+               f"mkdir -p {shlex.quote(os.path.dirname(dest) or '.')}"]
+        sh += [f"curl -L -o {shlex.quote(dest)} {got[1]}"] if got else [f"# fetch the corpus to {dest} (see SETUP.md)"]
+        if sha:
+            sh.append(f'echo "{sha}  {dest}" | shasum -a 256 -c')
+    rid = exp.get("name") or ""
+    spec = f"reports/{rid}/spec.yaml"
+    # writes to repro/, never reports/: reproducing locally does not touch the published report
+    sweep = ["# in the blis-config-search checkout, after the install script",
+             "python3 -m venv .venv && . .venv/bin/activate && pip install pyyaml",
+             f'python3 -I scripts/run_experiment.py {spec} --dry-run --catalog "$BLIS_CATALOG"',
+             f"python3 -I scripts/run_experiment.py {spec} \\",
+             '  --blis "$(command -v blis)" --catalog "$BLIS_CATALOG" --registry "$BLIS_REGISTRY" \\',
+             "  --out repro/"]
+    stack = [{"name": "BLIS", "repo": "inference-sim", "ref": ps["blis"], "commit": commit("blis")},
+             *[{"name": n, "repo": r, "ref": ps[k], "commit": commit(k)}
+               for k, n, r in (("catalog", "catalog", "blis-catalog"), ("registry", "registry", "blis-registry"))
+               if ps.get(k)]]
+    # compiled into BLIS; a ledger from before the router was recorded takes the pin of the same BLIS release
+    router = ps.get("router") or (_PINS.get("ROUTER_REF") if _PINS.get("BLIS_REF") == ps["blis"] else None)
+    for name, repo, ref in (("latency kernel", "blis-latency-kernel", ps.get("kernel")),
+                            ("router", "llm-d-router", router)):
+        if ref and ref != "unpinned":
+            stack.append({"name": name, "repo": repo, "ref": ref, "commit": None})
+    # a fresh checkout sweeps at today's pins.env; ledgers from before #57 record no engine (0.29.0)
+    then = (ps["blis"], ps.get("catalog"), ps.get("registry"), ps.get("engine_version") or "0.29.0")
+    now = (_PINS.get("BLIS_REF"), _PINS.get("CATALOG_REF"), _PINS.get("REGISTRY_REF"), run_blis.pinned_engine_version())
+    return {"stack": stack, "script": "\n".join(sh) + "\n", "sweep": "\n".join(sweep) + "\n",
+            "pins_moved": then != now,
+            "runs": (exp.get("totals") or {}).get("runs"), "hours": _wall_hours(run_dir) if run_dir else None}
+
+
 def build(run_dir):
     """The explorer data for one run dir, or None when it has no sweeps to explore."""
     path = os.path.join(run_dir, "experiment.json")
@@ -167,6 +324,8 @@ def build(run_dir):
         "totals": exp.get("totals") or {},
         "sweeps": sweeps,
         "keys": keys,
+        # topology keys already have fixed defaults on the page (dp 1, pp 1, EP off)
+        "defaults": defaults(run_dir, [k for k in keys if not TOPOLOGY_KEY.match(k)]),
         "metrics": [short for short, _ in METRICS],
         "rows": rows,
         # the dashboard's caption for each row, as an index into one list of distinct strings
@@ -174,6 +333,7 @@ def build(run_dir):
         "variant": [variants[r.get("variant") or ""] for _, r in rows_in],
         "routers": routers,
         "spec_yaml": spec_text,
+        "setup": setup(exp, run_dir),
     }
 
 
@@ -185,11 +345,75 @@ def _match_key(sweep, conc, cfg, drop):
     return (sweep, conc, json.dumps(cfg, sort_keys=True))
 
 
-def commands(run_dir):
-    """Each explore row's recorded `blis run` line and the deployment it priced, in row order.
+# Flags dropped from the shown command: inert for a rerun (LoRA defaults are compiled in, the
+# corpus cache changes no output) or a label BLIS ignores under --concurrency (WORKLOAD_IGNORED).
+INERT_FLAGS = {"--defaults-filepath", "--corpus-cache", "--workload"}
 
-    The per-run scenario YAMLs are regenerated, not committed, so the deployment block (what the
-    scenario file held) ships beside the command. None for a row runs.jsonl has no record of.
+
+def _scenario(run_dir, exp, dep):
+    """(file name, YAML) of the scenario a run read, regenerated from its recorded deployment.
+
+    Only returned when it hashes to the recorded file name, so it is byte-for-byte what BLIS got;
+    the router path is rewritten relative to a `scenarios/` dir at the repo root.
+    """
+    sc = exp.get("scenario") or {}
+    model, hw, name = sc.get("model"), sc.get("hardware"), dep.get("scenario")
+    if not (model and hw and name):
+        return None
+    router = dep.get("router") or {}
+    # the version a ledger recorded, else the pre-#57 default every older ledger was swept with
+    recorded = (exp.get("pinned_stack") or {}).get("engine_version")
+    for ev in dict.fromkeys([v for v in (recorded, sc.get("engine_version"), "0.29.0") if v]):
+        if run_blis.scenario_name(model, hw, ev, dep["parallel"], dep["engine"], dep["num_instances"],
+                                  router=router) + ".yaml" != name:
+            continue
+        shown = {}
+        if router.get("router_config"):
+            rc = router["router_config"]
+            local = os.path.join("reports", exp["name"], "routing", os.path.basename(rc))
+            # a generated override arm lives in the report; a stock arm (no overrides) in routing/
+            rel = local if os.path.exists(os.path.join(ROOT, local)) else os.path.join("routing", os.path.basename(rc))
+            shown = {"router_config": "__ROUTER__"}
+        text = run_blis.scenario_yaml(model, hw, ev, json.loads(json.dumps(dep["parallel"])),
+                                      dict(dep["engine"]), name[:-5], dep["num_instances"],
+                                      run_blis.DEFAULT_FABRIC, shown or None)
+        if shown:
+            text = text.replace(json.dumps(os.path.abspath("__ROUTER__")), json.dumps("../" + rel))
+        return name, text
+    return None
+
+
+def _recipe(cmd, workload):
+    """The recorded command made portable: env-var roots, a repo-relative scenarios dir, one flag per line."""
+    args, i, lines = [str(a) for a in cmd], 2, []
+    while i < len(args):
+        flag = args[i]
+        # assumes no BLIS flag takes a "--"-prefixed value; such a value would be read as the next flag
+        val = args[i + 1] if i + 1 < len(args) and not args[i + 1].startswith("--") else None
+        i += 2 if val is not None else 1
+        if flag in INERT_FLAGS:
+            continue
+        if flag == "--registry":
+            val = '"$BLIS_REGISTRY"'
+        elif flag == "--catalog":
+            val = '"$BLIS_CATALOG"'
+        elif flag == "--scenarios":
+            val = "scenarios"
+        elif val is not None:
+            val = shlex.quote(val)
+        lines.append(flag if val is None else f"{flag} {val}")
+    head = f"blis {args[1]}"
+    note = (f"# workload: the {workload} preset, passed as its token shape below"
+            if workload and args[1] == "run" else "")
+    return "\n".join(filter(None, [note, " \\\n  ".join([head, *lines])]))
+
+
+def commands(run_dir):
+    """Each explore row's reproducible command, plus the scenario files those commands read.
+
+    {"scenarios": {file name: YAML}, "runs": [[command, scenario file name, deployment] | None]}
+    in explore row order. The scenario YAMLs are not committed, so they are regenerated here and
+    shared across the rows (one per deployment, not per load). None for a row with no record.
     """
     with open(os.path.join(run_dir, "experiment.json"), encoding="utf-8") as f:
         exp = json.load(f)
@@ -201,7 +425,8 @@ def commands(run_dir):
                 rec = json.loads(line)
                 cfg = {k: v for k, v in rec["config"].items() if k != "concurrency"}
                 by_key[_match_key(rec.get("sweep"), rec["concurrency"], cfg, ())] = rec
-    out = []
+    out, scenarios = [], {}
+    workload = (exp.get("scenario") or {}).get("workload")
     for s in exp.get("sweeps") or []:
         for r in s["rows"]:
             cfg = {k: v for k, v in r["config"].items() if k != "concurrency"}
@@ -209,8 +434,18 @@ def commands(run_dir):
             if rec is None:
                 # experiment.json also gives P/D rows the shared tp/num_instances runs.jsonl leaves out
                 rec = by_key.get(_match_key(s["name"], r["concurrency"], cfg, ("tp", "num_instances")))
-            out.append([" ".join(rec["cmd"]), rec.get("deployment")] if rec and rec.get("cmd") else None)
-    return out
+            if not (rec and rec.get("cmd")):
+                out.append(None)
+                continue
+            dep = rec.get("deployment") or {}
+            name = dep.get("scenario")
+            if name and name not in scenarios:
+                got = _scenario(run_dir, exp, dep) if dep.get("parallel") is not None else None
+                scenarios[name] = got[1] if got else None
+            # the deployment ships only when its scenario could not be regenerated exactly
+            out.append([_recipe(rec["cmd"], workload), name,
+                        None if scenarios.get(name) else dep or None])
+    return {"scenarios": {k: v for k, v in scenarios.items() if v}, "runs": out}
 
 
 if __name__ == "__main__":

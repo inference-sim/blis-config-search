@@ -1227,6 +1227,15 @@ pools:
 """
 
 
+def scenario_name(model, hardware, engine_version, parallel, engine, num_instances=1,
+                  fabric=DEFAULT_FABRIC, router=None):
+    """The hashed file name (no .yaml) of a deployment's scenario; the router is part of the key
+    because two routing arms differ ONLY in their `router:` block."""
+    key = json.dumps([model, hardware, engine_version, parallel, engine, num_instances, fabric,
+                      router or {}], sort_keys=True)
+    return f"{model}-{hardware}-{hashlib.sha1(key.encode()).hexdigest()[:10]}"
+
+
 def write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine, num_instances=1,
                    fabric=DEFAULT_FABRIC, router=None):
     """Write a scenario ATOMICALLY (temp + os.replace) so concurrent pool workers never read a
@@ -1235,11 +1244,7 @@ def write_scenario(scenarios_dir, model, hardware, engine_version, parallel, eng
     `num_instances` participates in the hash because it sets the pool's node count — two runs
     that differ only in instance count need DIFFERENT scenario files, or the second reuses a
     pool too small for it and BLIS refuses the run."""
-    # The router config is part of the key: two routing arms differ ONLY in their `router:` block,
-    # so sharing one scenario file would silently run the second arm with the first arm's router.
-    key = json.dumps([model, hardware, engine_version, parallel, engine, num_instances, fabric,
-                      router or {}], sort_keys=True)
-    name = f"{model}-{hardware}-{hashlib.sha1(key.encode()).hexdigest()[:10]}"
+    name = scenario_name(model, hardware, engine_version, parallel, engine, num_instances, fabric, router)
     os.makedirs(scenarios_dir, exist_ok=True)
     path = os.path.join(scenarios_dir, name + ".yaml")
     if not os.path.exists(path):

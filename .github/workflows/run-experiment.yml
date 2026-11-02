@@ -205,10 +205,11 @@ jobs:
           echo "name=$(git show "$GITHUB_SHA:$SPEC" | sed -n 's/^name: *//p' | head -1)" >> "$GITHUB_OUTPUT"
 
       # A pattern, not a name: a failed sweep leaves no artifact, and that must not error here.
+      # v8 extracts a lone match straight into `path`, so name the report's own dir there.
       - uses: actions/download-artifact@v8
         with:
           pattern: report-${{ steps.name.outputs.name }}
-          path: ${{ runner.temp }}/artifacts
+          path: ${{ runner.temp }}/artifacts/report-${{ steps.name.outputs.name }}
 
       - name: Swap the new report in
         id: swap
@@ -217,7 +218,7 @@ jobs:
         run: |
           set -euo pipefail
           art="$RUNNER_TEMP/artifacts/report-$NAME"
-          if [ ! -d "$art" ]; then
+          if [ ! -f "$art/report.json" ]; then
             echo "::warning::no report for $SPEC (its sweep failed or was canceled)"
             echo "ok=false" >> "$GITHUB_OUTPUT"; exit 0
           fi

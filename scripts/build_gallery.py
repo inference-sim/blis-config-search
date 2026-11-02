@@ -6,7 +6,9 @@
 
 A pure transform (it never runs BLIS) that writes:
 
-    <out>/scenarios.json        one row per report, with its run records inlined
+    <out>/scenarios.json        one row per report (the cards and the coverage table)
+    <out>/<run_id>/explore.json the explorer's runs, sweeps and router chains (explore_data.py)
+    <out>/<run_id>/commands.json each run's `blis run` line and deployment, in explore row order
     <out>/catalog.json          the model / GPU / workload spec-sheets (build_catalog.py)
     <out>/<run_id>/index.html   the standalone report (report.py), plus its data files
 
@@ -24,6 +26,7 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_catalog  # noqa: E402
+import explore_data  # noqa: E402
 import report as report_py  # noqa: E402
 
 RUN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -135,7 +138,6 @@ def validate_and_project(run_dir):
         "finalists": finalists,
         "reason": str(win.get("reason", "")),
         "caveat": f"Provenance: {split}." if split else "",
-        "records": report_py.build_records(runs, scenario) if runs else [],
     }
 
 
@@ -150,6 +152,11 @@ def _write_report(run_dir, dest):
     html = html.replace(anchor, anchor + BACK_LINK, 1)
     with open(path, "w", encoding="utf-8") as f:
         f.write(html)
+    explore = explore_data.build(run_dir)
+    if explore:
+        _dump(os.path.join(dest, "explore.json"), explore)
+        # fetched only when a run's command is opened; kept out of explore.json to keep it small
+        _dump(os.path.join(dest, "commands.json"), explore_data.commands(run_dir))
     for fn in REPORT_DATA_FILES:
         if os.path.exists(os.path.join(run_dir, fn)):
             shutil.copyfile(os.path.join(run_dir, fn), os.path.join(dest, fn))

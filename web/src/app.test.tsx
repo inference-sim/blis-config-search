@@ -77,7 +77,8 @@ describe('#11 coverage view', () => {
   it('shows the recommended config inline, so the table answers "what should I run?"', () => {
     render(<Coverage scenarios={C} />)
     // the winner is the payload a reader came for; every row states one
-    expect(document.querySelector('.readout tbody')?.textContent).toContain('1×TP8')
+    // a single instance drops the brackets and the "×1": "1x TP8" renders as just "TP8"
+    expect(document.querySelector('.readout tbody .covwin')?.textContent).toBe('TP8')
     expect(document.querySelectorAll('.readout tbody .covwin')).toHaveLength(2)
   })
 
@@ -91,7 +92,7 @@ describe('#11 coverage view', () => {
     ]
     render(<Coverage scenarios={rows} />)
     const tr = document.querySelector('.readout tbody tr') as Element
-    expect(tr.querySelector('.covwin')?.textContent).toBe('8×TP2 + EP')
+    expect(tr.querySelector('.covwin')?.textContent).toBe('[TP2 + EP]×8')
     expect(tr.textContent).toContain('71')
     // the count still lives in the report column, where it belongs
     expect(tr.querySelector('td:last-child a')?.textContent).toContain('2 reports')
@@ -190,14 +191,14 @@ describe('#11 coverage view', () => {
     const catalog = { models: [{ name: 'm1' }], hardware: [{ name: 'h100' }], workloads: [], fabrics: [], storage: [], registry: [], versions: { 'blis-catalog': '0.5.0' } } as unknown as Catalog
     render(<ScenarioPage runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16)]} catalog={catalog} load={() => new Promise(() => {})} />)
     const base = 'https://inference-sim.github.io/blis-catalog/0.5/reference'
-    expect(document.querySelector('.viewhead .specsheet')?.getAttribute('href')).toBe(`${base}/models/m1/`)
-    expect([...document.querySelectorAll('.specchips a.catref')].map((x) => x.getAttribute('href'))).toEqual([`${base}/hardware/`, `${base}/workloads/#shapes`])
+    // model, hardware and workload are all chips in the specchips row, each linking to its spec sheet
+    expect([...document.querySelectorAll('.specchips a.catref')].map((x) => x.getAttribute('href'))).toEqual([`${base}/models/m1/`, `${base}/hardware/`, `${base}/workloads/#shapes`])
   })
 
   it('joins the replica count and captions the config with its variant', () => {
     const s = mk('v', 'm1', 'H100', 'chatbot', 16)
     render(<Coverage scenarios={[{ ...s, winner: { ...s.winner, label: '8x TP4 + EP', variant: 'max seqs 256' } }]} />)
-    expect(document.querySelector('.covwin')?.textContent).toBe('8×TP4 + EP')
+    expect(document.querySelector('.covwin')?.textContent).toBe('[TP4 + EP]×8')
     expect(document.querySelector('.covvar')?.textContent).toBe('max seqs 256')
   })
 })
@@ -209,7 +210,7 @@ describe('report explorer page', () => {
   it('loads the report and leads with the top configs, ties folded into one card', async () => {
     page()
     await waitFor(() => expect(cards().length).toBeGreaterThan(0))
-    expect(cards()[0].querySelector('.win')?.textContent).toBe('8×TP4xDP2')
+    expect(cards()[0].querySelector('.win')?.textContent).toBe('[TP4xDP2]×8')
     expect(cards()[0].textContent).toMatch(/same result with 1 other config/)
     expect(document.querySelector('.xf-speclink')?.getAttribute('href')).toMatch(/experiments\/a\.yaml$/)
   })
@@ -229,7 +230,7 @@ describe('report explorer page', () => {
     page()
     await waitFor(() => expect(cards().length).toBeGreaterThan(0))
     fireEvent.click(screen.getByRole('button', { name: 'TTFT p99' }))
-    expect(cards()[0].querySelector('.win')?.textContent).toBe('8×TP8')
+    expect(cards()[0].querySelector('.win')?.textContent).toBe('[TP8]×8')
     expect(screen.getByText(/TTFT p99 at each of the spec’s loads/)).toBeTruthy()
   })
 
@@ -600,7 +601,7 @@ describe('scenario cards', () => {
   it('joins the replica count to the shape and leaves node count off the cluster', () => {
     const s = mk('a', 'm1', 'B200', 'chatbot', 32)
     render(<Reports scenarios={[{ ...s, winner: { ...s.winner, label: '8x TP4 + EP' } }]} params={{}} />)
-    expect(document.querySelector('.card .win')?.textContent).toBe('8×TP4 + EP')
+    expect(document.querySelector('.card .win')?.textContent).toBe('[TP4 + EP]×8')
     expect(document.querySelector('.card .specrows dd')?.textContent).not.toMatch(/nodes/)
   })
 

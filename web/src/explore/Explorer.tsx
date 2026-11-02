@@ -11,7 +11,6 @@ import { RunsTable } from './RunsTable'
 import { OpenSetup, SetupButton, useSetupDialog } from './SetupDialog'
 import { METRIC, SLO_OF, TOPO_FIELDS, bareKey, layerOf, poolOf, sortValues } from './model'
 import { catalogDoc } from '../lib'
-import { reportHref } from '../load'
 import { CatRef } from '../components/Coverage'
 import { CaveatBadge } from '../components/Reports'
 
@@ -50,19 +49,15 @@ export function ScenarioPage({ runId, scenarios, catalog, load = loadExplore }: 
     <div className="xf">
       {setup.dialog}
       <p className="crumb"><a href="#/reports">← all reports</a></p>
-      <h2 className="viewhead">{s.model} on {s.gpu_budget} × {s.hardware}, {s.workload}
-        {modelDoc && <a className="specsheet" href={modelDoc} target="_blank" rel="noreferrer">model spec sheet ↗</a>}
+      <h2 className="viewhead"><span>{s.model} on {s.gpu_budget} × {s.hardware}, {s.workload}</span>
         {s.caveat && <CaveatBadge caveat={s.caveat} />}
         <span className="xf-repro"><SetupButton>Reproduce</SetupButton></span></h2>
       <div className="specchips">
-        <CatRef href={catalogDoc(catalog, 'hardware', s.hardware)}>{s.hardware}</CatRef>
-        <span className="spec">{s.gpu_budget} accelerators</span>
+        <CatRef href={modelDoc}>{s.model}</CatRef>
+        <CatRef href={catalogDoc(catalog, 'hardware', s.hardware)}>{s.gpu_budget} {s.hardware}</CatRef>
         <CatRef href={catalogDoc(catalog, 'workload', s.workload)}>{s.workload}</CatRef>
         {data && Object.entries(data.slo).map(([k, v]) => <span key={k} className="spec floor" title={`From the spec's scenario.slo (${k}); a run is servable only if it meets every SLO.`}>SLO {sloLabel(k)} ≤ {v}</span>)}
-        {data && <span className="spec">sessions {data.concurrency.join(' · ')}</span>}
-        {data && <span className="spec">{(data.totals.runs ?? 0).toLocaleString('en-US')} runs · {(data.totals.servable ?? 0).toLocaleString('en-US')} meet every SLO</span>}
         <a className="xf-speclink" href={`${REPO}/blob/main/experiments/${encodeURIComponent(runId)}.yaml`} target="_blank" rel="noreferrer">experiment spec ↗</a>
-        <a className="fullreport" href={reportHref(s.run_id)} target="_blank" rel="noreferrer">standalone report ↗</a>
       </div>
       {s.caveat && <div className="warnnote">{s.caveat}</div>}
       {error && <div className="viewerror"><h3>Could not load this report’s runs</h3><pre>{error}</pre></div>}

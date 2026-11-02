@@ -208,5 +208,11 @@ export function canonFilters(list: Scenario[], f: Filters): Filters {
 export const finite = (v: number | null | undefined): v is number => typeof v === 'number' && Number.isFinite(v)
 
 // ---------- scenario card ----------
-/** "8x TP4 + EP" → "8×TP4 + EP": in mono the space after the count reads as a gap. */
-export const configLabel = (label: string): string => label.replace(/^(\d+)x /, '$1×')
+/** A colocated config reads as "[TP4 + EP]×8": the topology in brackets, then the instance count.
+ *  N (`$1`) is ONLY the leading integer — num_instances. This matters because the topology itself
+ *  can contain an "x" (TP4xDP2), so N is anchored to the start of the string and is never a
+ *  dimension pulled from inside the brackets; `$2` is everything after the first "<n>x". A single
+ *  instance (N=1) drops the brackets and the "×1" entirely — just "TP8". P/D labels ("2P/6D TP8")
+ *  have no leading "<n>x" separator, so they do not match and are left untouched. */
+export const configLabel = (label: string): string =>
+  label.replace(/^(\d+)[x×]\s*(.+)$/, (_, n, topo) => (Number(n) === 1 ? topo : `[${topo}]×${n}`))

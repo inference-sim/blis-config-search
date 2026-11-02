@@ -221,10 +221,14 @@ jobs:
       - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install pyyaml
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: regen-*
-          path: ${{ runner.temp }}/regen-artifacts
+      # gh, not download-artifact@v8: v8 flattens a lone match, but a pattern always gets per-name dirs here.
+      - name: Download the regenerated reports
+        env: { GH_TOKEN: "${{ github.token }}" }
+        # Tolerate only "nothing to download" (the swap step reports it); any other error fails here.
+        run: |
+          gh run download "$GITHUB_RUN_ID" --pattern 'regen-*' --dir "$RUNNER_TEMP/regen-artifacts" 2>"$RUNNER_TEMP/dl.err" || {
+            grep -qE 'no valid artifacts|no artifact matches' "$RUNNER_TEMP/dl.err" || { cat "$RUNNER_TEMP/dl.err" >&2; exit 1; }
+          }
       - name: Swap the regenerated reports in
         id: swap
         env:

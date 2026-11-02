@@ -1,0 +1,155 @@
+name: muse-spark-open-816b-a42b-h100-agentx-8gpu
+scenario:
+  model: muse-spark-open-816b-a42b-nvfp4
+  hardware: h100
+  workload: agentx-mvp
+  gpus: 8
+  engine:
+    max_model_len: 262144
+    gpu_memory_utilization: 0.95
+  concurrency:
+  - 4
+  - 8
+  - 16
+  - 32
+  - 64
+  replay:
+    corpus: .corpus/traces.jsonl
+    corpus_cache: /tmp/agx-cache-muse-h100
+    grace_period: inf
+sweeps:
+- name: pipeline-topology
+  narrative: TP8 should peak highest, since each pipeline stage adds a boundary hop
+    to every decode step.
+  num-instances:
+  - 1
+  parallel:
+    tp:
+    - 8
+    - 4
+    - 2
+    pp:
+    - 1
+    - 2
+    - 4
+    enable_expert_parallel:
+    - true
+    - false
+- name: batch-caps
+  narrative: A seq cap of 8 should bind on TP8 at 16+ lanes, while a small token budget
+    trades throughput for tail ITL on both shapes.
+  num-instances:
+  - 1
+  parallel:
+    tp:
+    - 8
+    - 4
+    pp:
+    - 1
+    - 2
+    enable_expert_parallel:
+    - true
+  engine:
+    max_num_seqs:
+    - 8
+    - 16
+    max_num_batched_tokens:
+    - 2048
+    - 4096
+    - 16384
+    - 32768
+- name: kv-capacity
+  narrative: fp8 KV should matter most on TP8, where 0.95 leaves almost no KV room,
+    and substitute for memory on the pp shapes.
+  num-instances:
+  - 1
+  parallel:
+    tp:
+    - 8
+    - 4
+    - 2
+    pp:
+    - 1
+    - 2
+    - 4
+    enable_expert_parallel:
+    - true
+  engine:
+    cache_dtype:
+    - auto
+    - fp8
+    gpu_memory_utilization:
+    - 0.9
+    - 0.95
+- name: moe-collective
+  narrative: DeepEP low-latency should win at small decode batches on both shapes,
+    and matter more at EP width 8 than 4.
+  num-instances:
+  - 1
+  parallel:
+    tp:
+    - 8
+    - 4
+    pp:
+    - 1
+    - 2
+    enable_expert_parallel:
+    - true
+  engine:
+    all2all_backend:
+    - deepep_high_throughput
+    - deepep_low_latency
+    - deepep_v2
+    - pplx
+- name: prefix-cache
+  narrative: Turning the prefix cache off should collapse throughput on every shape,
+    since AgentX re-sends a growing shared context.
+  num-instances:
+  - 1
+  parallel:
+    tp:
+    - 8
+    - 4
+    - 2
+    pp:
+    - 1
+    - 2
+    - 4
+    enable_expert_parallel:
+    - true
+  engine:
+    enable_prefix_caching:
+    - false
+- name: prefill-chunking
+  narrative: Capping long prefills should trade a little peak throughput for a much
+    lower ITL p99 at saturation.
+  num-instances:
+  - 1
+  parallel:
+    tp:
+    - 8
+    - 4
+    pp:
+    - 1
+    - 2
+    enable_expert_parallel:
+    - true
+  engine:
+    long_prefill_token_threshold:
+    - 2048
+    - 8192
+- name: cudagraph
+  narrative: FULL-family capture should beat the PIECEWISE default by a few percent,
+    and NONE should collapse.
+  num-instances:
+  - 1
+  parallel:
+    tp:
+    - 8
+    enable_expert_parallel:
+    - true
+  engine:
+    cudagraph_mode:
+    - NONE
+    - FULL
+    - FULL_AND_PIECEWISE

@@ -77,7 +77,7 @@ sweeps:
       long_prefill_token_threshold:
       - 0
       - 1024
-  router: &id001
+  router:
     endpoint_picker_config:
     - pd-prefix.yaml
     plugins:
@@ -87,48 +87,6 @@ sweeps:
           - 256
           - 10240
           - 12288
-- name: pd-dp2
-  narrative: Data-parallel pools should shift the best ratio toward decode, since
-    dp2 attention packs more decodes per GPU than tp8.
-  prefill-instances:
-  - 1
-  - 2
-  - 3
-  - 4
-  - 5
-  decode-instances:
-  - 2
-  - 3
-  - 4
-  - 5
-  - 6
-  prefill:
-    parallel:
-      tp:
-      - 4
-      - 8
-      dp:
-      - 2
-      enable_expert_parallel:
-      - true
-    engine:
-      max_num_batched_tokens:
-      - 8192
-      - 32768
-  decode:
-    parallel:
-      tp:
-      - 4
-      - 8
-      dp:
-      - 2
-      enable_expert_parallel:
-      - true
-    engine:
-      long_prefill_token_threshold:
-      - 0
-      - 1024
-  router: *id001
 - name: pd-always
   narrative: Splitting every request should cost ITL headroom against the threshold
     arms, because each handoff stalls a decode slot.

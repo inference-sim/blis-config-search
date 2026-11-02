@@ -8,7 +8,7 @@ import { Controls, TopConfigs } from './TopConfigs'
 import { OverviewSection } from './Overview'
 import { EngineSection, RoutingSection, TopologySection } from './Sections'
 import { RunsTable } from './RunsTable'
-import { OpenSetup, SetupLink, useSetupDialog } from './SetupDialog'
+import { OpenSetup, SetupButton, useSetupDialog } from './SetupDialog'
 import { METRIC, SLO_OF, TOPO_FIELDS, bareKey, layerOf, poolOf, sortValues } from './model'
 import { catalogDoc } from '../lib'
 import { reportHref } from '../load'
@@ -74,7 +74,12 @@ function Body({ data }: { data: ExploreData }) {
   return (
     <OpenSetup.Provider value={setup.open}>
       {setup.dialog}
-      {data.setup && <p className="xf-stackline">Priced by BLIS <span className="mono">{data.setup.stack[0].ref}</span>{data.setup.stack.slice(1).map((d) => <Fragment key={d.repo}> · {d.name} <span className="mono">{d.ref}</span></Fragment>)}. <SetupLink>How to install this stack</SetupLink></p>}
+      {data.setup && (
+        <div className="xf-repro">
+          <span><b>Reproduce this report</b> <span className="xf-sub">priced by BLIS <span className="mono">{data.setup.stack[0].ref}</span>{data.setup.stack.slice(1).map((d) => <Fragment key={d.repo}> · {d.name} <span className="mono">{d.ref}</span></Fragment>)}</span></span>
+          <span className="xf-repro-b"><SetupButton>Install the pinned stack</SetupButton><SetupButton tab="sweep">Rerun the sweep</SetupButton></span>
+        </div>
+      )}
       <Controls x={x} />
       <TopConfigs x={x} />
       <div className="xf-layout">

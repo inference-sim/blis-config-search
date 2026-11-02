@@ -5,7 +5,7 @@ import type { Run } from './types'
 import { METRIC, SLO_OF, fmt, sloMs } from './model'
 import { ConfigName } from '../components/ConfigName'
 import { CopyButton } from './CopyButton'
-import { SetupLink } from './SetupDialog'
+import { SetupButton } from './SetupDialog'
 
 /** commands.json: each run's reproducible command, and the scenario files those commands read. */
 export interface Commands {
@@ -61,7 +61,7 @@ function CommandRow({ runId, r, span, load }: { runId: string; r: Run; span: num
   else if (run === null) body = <p className="xf-empty">This run has no recorded command.</p>
   else body = (
     <div className="xf-cmd">
-      <div className="xf-cmd-h"><b>0. Install this report's pinned BLIS, catalog and registry once</b><SetupLink>show setup</SetupLink></div>
+      <div className="xf-cmd-h"><b>0. Install this report's pinned BLIS, catalog and registry once</b><SetupButton>Show setup</SetupButton></div>
       {yaml && (
         <>
           <div className="xf-cmd-h"><b>1. Save the scenario as <span className="mono">scenarios/{scen}</span></b><CopyButton text={yaml} /></div>

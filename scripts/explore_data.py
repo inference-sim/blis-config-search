@@ -207,8 +207,18 @@ def _corpus(workload):
     return src["file"], url, corpus.get("sha256")
 
 
-def setup(exp):
-    """The stack that priced this report, and a script that installs exactly it."""
+def _wall_hours(run_dir):
+    """Serial BLIS time the sweep took, summed from its ledger; None when not recorded."""
+    path = os.path.join(run_dir, "runs.jsonl")
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        total = sum(json.loads(l).get("wall_s") or 0 for l in f)
+    return round(total / 3600, 1) if total else None
+
+
+def setup(exp, run_dir=None):
+    """The stack that priced this report, a script that installs exactly it, and the sweep rerun."""
     ps = exp.get("pinned_stack") or {}
     res = ps.get("resolved") or {}
     commit = lambda k: (res.get(k) or {}).get("commit")
@@ -231,13 +241,22 @@ def setup(exp):
         sh += [f"curl -L -o {shlex.quote(dest)} {got[1]}"] if got else [f"# fetch the corpus to {dest} (see SETUP.md)"]
         if sha:
             sh.append(f'echo "{sha}  {dest}" | shasum -a 256 -c')
+    rid = exp.get("name") or ""
+    sweep = ["# from the blis-config-search checkout, after the setup script",
+             "python3 -m venv .venv && . .venv/bin/activate && pip install pyyaml",
+             f"python3 -I scripts/run_experiment.py reports/{rid}/spec.yaml --dry-run --catalog \"$BLIS_CATALOG\"",
+             f"python3 -I scripts/run_experiment.py reports/{rid}/spec.yaml \\",
+             '  --blis "$(command -v blis)" --catalog "$BLIS_CATALOG" --registry "$BLIS_REGISTRY" \\',
+             "  --out rerun/   # writes rerun/<id>/, next to the committed reports/<id>/ to compare"]
     stack = [{"name": "BLIS", "repo": "inference-sim", "ref": ps["blis"], "commit": commit("blis")},
              *[{"name": n, "repo": r, "ref": ps[k], "commit": commit(k)}
                for k, n, r in (("catalog", "catalog", "blis-catalog"), ("registry", "registry", "blis-registry"))
                if ps.get(k)]]
     if ps.get("kernel"):
         stack.append({"name": "latency kernel", "repo": "blis-latency-kernel", "ref": ps["kernel"], "commit": None})
-    return {"stack": stack, "script": "\n".join(sh) + "\n"}
+    totals = exp.get("totals") or {}
+    return {"stack": stack, "script": "\n".join(sh) + "\n", "sweep": "\n".join(sweep) + "\n",
+            "runs": totals.get("runs"), "hours": _wall_hours(run_dir) if run_dir else None}
 
 
 def build(run_dir):
@@ -299,7 +318,7 @@ def build(run_dir):
         "variant": [variants[r.get("variant") or ""] for _, r in rows_in],
         "routers": routers,
         "spec_yaml": spec_text,
-        "setup": setup(exp),
+        "setup": setup(exp, run_dir),
     }
 
 

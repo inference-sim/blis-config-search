@@ -665,10 +665,11 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                 # The corpus snapshot is shared by every run, so build it with one run before the
                 # pool; N cold workers would each parse 568 MB and race to write it.
                 done = []
-                if replay and not corpus_warm:
+                while replay and not corpus_warm and work:
                     done.append(_execute(work[0]))
                     work = work[1:]
-                    corpus_warm = True
+                    # A run refused before BLIS starts (returncode None) never loaded the corpus.
+                    corpus_warm = done[-1][1].get("returncode") is not None
                 # One BLIS run is single-threaded (a discrete-event loop measured at ~1.1 cores),
                 # so the only way to use more cores is more processes. A thread pool is enough:
                 # each worker just waits on a subprocess.

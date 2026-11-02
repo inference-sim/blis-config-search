@@ -1920,7 +1920,7 @@ class DryRunPlan(unittest.TestCase):
         self.assertIsNone(rec["cmd"])
 
     def test_parallel_replay_warms_the_corpus_cache_serially(self):
-        """The first replay run builds the shared corpus snapshot alone, before the pool starts."""
+        """The first replay run that reaches BLIS builds the corpus snapshot alone, before the pool."""
         import threading, time as _t
         spec = {
             "name": "warm", "sweeps": [
@@ -1940,7 +1940,10 @@ class DryRunPlan(unittest.TestCase):
             with lock:
                 state["live"] -= 1
                 events.append("end")
-            return {"metrics": {"tokens_per_sec": 1.0, "itl_p99_ms": 1.0}, "cmd": None}
+                refused = events.count("end") == 1
+            # The first run is refused before BLIS starts, so it must not count as the warm-up.
+            return {"metrics": {"tokens_per_sec": 1.0, "itl_p99_ms": 1.0}, "cmd": None,
+                    "returncode": None if refused else 0}
 
         real_run, real_resolve = E.run_blis.run_one, E.resolve_replay
         E.run_blis.run_one = fake_run_one
@@ -1952,7 +1955,8 @@ class DryRunPlan(unittest.TestCase):
         finally:
             E.run_blis.run_one, E.resolve_replay = real_run, real_resolve
         self.assertEqual(16, len(events))
-        self.assertEqual(["start", "end"], events[:2], "the first run must finish before any other starts")
+        self.assertEqual(["start", "end"] * 2, events[:4],
+                         "warm-up must continue past a refused run until one really launches")
         self.assertGreater(state["peak"], 1, "the rest should run in parallel")
 
     def test_max_parallel_does_not_change_the_ledger(self):

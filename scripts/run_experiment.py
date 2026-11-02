@@ -587,6 +587,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                 accept_sel["speculative_thinking"] = str(wl["thinking"])
 
     runs, sweep_results, all_rows = [], [], []
+    corpus_warm = False
     for sweep in spec["sweeps"]:
         sname = sweep["name"]
         kept, dropped = expand_sweep(sweep, gpus)
@@ -661,6 +662,13 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
             if max_parallel <= 1:
                 done = [_execute(it) for it in work]
             else:
+                # The corpus snapshot is shared by every run, so build it with one run before the
+                # pool; N cold workers would each parse 568 MB and race to write it.
+                done = []
+                if replay and not corpus_warm:
+                    done.append(_execute(work[0]))
+                    work = work[1:]
+                    corpus_warm = True
                 # One BLIS run is single-threaded (a discrete-event loop measured at ~1.1 cores),
                 # so the only way to use more cores is more processes. A thread pool is enough:
                 # each worker just waits on a subprocess.
@@ -668,7 +676,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                 with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel) as ex:
                     # as_completed order would be completion order, which is nondeterministic;
                     # ex.map yields in SUBMISSION order by contract, which is what we want.
-                    done = list(ex.map(_execute, work))
+                    done += list(ex.map(_execute, work))
             # Belt and braces: ex.map already yields in submission order, but the ledger's
             # reproducibility is the whole point of the deterministic sweeper, so the order is
             # also asserted here rather than inherited from an executor implementation detail.

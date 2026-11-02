@@ -84,7 +84,7 @@ jobs:
     timeout-minutes: ${{ fromJSON(vars.REGEN_TIMEOUT_MINUTES || '350') }}
     strategy:
       fail-fast: false
-      max-parallel: ${{ fromJSON(vars.REGEN_MAX_PARALLEL || '4') }}
+      max-parallel: ${{ fromJSON(vars.REGEN_MAX_PARALLEL || '16') }}
       matrix:
         spec: ${{ fromJSON(needs.plan.outputs.specs) }}
     name: sweep ${{ matrix.spec }}
@@ -161,7 +161,8 @@ jobs:
           set -euo pipefail
           python3 -I scripts/run_experiment.py "$SPEC" \
             --blis "$BLIS_BIN" --catalog "$BLIS_CATALOG" --registry "$BLIS_REGISTRY" \
-            --out reports/ --timeout "${{ github.event.inputs.timeout || '600' }}"
+            --out reports/ --timeout "${{ github.event.inputs.timeout || '600' }}" \
+            --max-parallel "${{ vars.SWEEP_MAX_PARALLEL || '1' }}"
 
       - name: Build the site to validate the new reports
         run: python3 -I scripts/build_gallery.py --out /tmp/site-check

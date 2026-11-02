@@ -1418,12 +1418,16 @@ def _failure_line(stderr):
 
 def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_version,
             workload, num_requests, seed, horizon, config, phase="probe", timeout=120, defaults=None,
-            replay=None):
+            replay=None, fabric=DEFAULT_FABRIC):
     """Run one kernel-priced BLIS config and return a record dict. No runs.jsonl I/O (caller writes).
 
     `replay` selects the trace-REPLAY path (`blis replay --agentic-scenario`) instead of
     `blis run`: pass the resolved replay descriptor (scenario/corpus/corpus_sha256/...). When it is
     None the run is a generated-workload `blis run` as before.
+
+    `fabric` is the cluster's inter-node interconnect (a catalog networks/ class); it prices
+    cross-node traffic for a multi-node run and is ignored on a single node. A trailing default
+    (ib-400g) so every existing caller is byte-identical.
     """
     rec = _record_shell(config, phase)
     # Which cost model priced THIS row (see row_stack): makes provenance_split's stack branch able
@@ -1485,7 +1489,7 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                           "reused_from_other_hardware": bool(
                               al_src and hardware and f"({hardware})" not in al_src)}
     scenario_name = write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine,
-                                   num_instances, DEFAULT_FABRIC, router)
+                                   num_instances, fabric, router)
     if replay:
         cmd = build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed,
                                defaults, cli, replay)
@@ -1515,6 +1519,10 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                        "footprint_gpus_per_instance": fp,
                        "gpus": pd_total_gpus(pd) if pd else fp * num_instances,
                        "disaggregated": bool(pd),
+                       # The inter-node fabric this run was priced over, so the report shows the
+                       # real interconnect instead of assuming IB. Single-node runs price no
+                       # cross-node traffic, so the scenario names no fabric and neither does this.
+                       "fabric": fabric if (pd or pool_nodes(parallel, num_instances) > 1) else None,
                        "scenario": scenario_name, "router": router or None,
                        # The acceptance the drafting run was priced with, so the report can
                        # derive a correct per-token rate instead of a per-STEP one.

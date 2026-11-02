@@ -480,8 +480,9 @@ def _local_router(path, root, run_id):
 
 
 def _run_context(entry, root, catalog, corpus, corpus_cache):
-    """(model, hardware, engine_version, workload, seed, replay, nreq_of) for a report's source,
-    built the way its runner builds them, so a smoke run is a run the regeneration would make."""
+    """(model, hardware, engine_version, workload, seed, replay, nreq_of, fabric) for a report's
+    source, built the way its runner builds them, so a smoke run is a run the regeneration would
+    make -- including the cluster fabric, or a multi-node RoCE report re-prices on IB."""
     import run_experiment
     sc = _load_yaml(os.path.join(root, entry["source"]))["scenario"]
     local = {"corpus": os.path.abspath(corpus)} if corpus else {}
@@ -492,9 +493,10 @@ def _run_context(entry, root, catalog, corpus, corpus_cache):
         replay = run_experiment.resolve_replay(sc["workload"], catalog,
                                                dict(sc.get("replay") or {}, **local))
         replay = {k: v for k, v in replay.items() if k != "_overrides"}
+    fabric = (sc.get("cluster") or {}).get("fabric") or run_experiment.run_blis.DEFAULT_FABRIC
     return (sc["model"], sc["hardware"], run_experiment.run_blis.pinned_engine_version(),
             sc["workload"], int(sc.get("seed", 42)), replay,
-            (lambda c: None) if replay else (lambda c: max(80, c * 4)))
+            (lambda c: None) if replay else (lambda c: max(80, c * 4)), fabric)
 
 
 def _same_measurement(a, b):
@@ -544,7 +546,7 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
     if not pairs:   # a ledger with no knob pairs: still prove its cheapest row runs
         ok = sorted((r for r in runs if _ok(r)), key=lambda r: r["config"].get("concurrency") or 0)
         pairs = [{"knob": "", "base": ok[0], "row": None, "moved": False}] if ok else []
-    model, hardware, ev, workload, seed, replay, nreq_of = _run_context(
+    model, hardware, ev, workload, seed, replay, nreq_of, fabric = _run_context(
         entry, root, catalog, corpus, corpus_cache)
     scen_dir = tempfile.mkdtemp(prefix="pin-smoke-")
     todo = {}
@@ -560,7 +562,7 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
         c = cfg.get("concurrency") or 1
         return key, run_blis.run_one(blis, catalog, registry, scen_dir, model, hardware, ev,
                                      workload, nreq_of(c), seed, None, cfg, phase="pin-smoke",
-                                     timeout=timeout, replay=replay)
+                                     timeout=timeout, replay=replay, fabric=fabric)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, max_parallel)) as ex:
         new = dict(ex.map(_one, sorted(todo)))
     shutil.rmtree(scen_dir, ignore_errors=True)

@@ -174,8 +174,11 @@ def pinned_engine_version(pins_path=os.path.join(os.path.dirname(os.path.abspath
                                                   os.pardir, "pins.env")):
     """The vLLM release the pinned blis-vllm models: pins.env's VLLM_REF, e.g. v0.32.0-blis.1 -> 0.32.0."""
     with open(pins_path, encoding="utf-8") as f:
-        ref = next(l.split("=", 1)[1].strip() for l in f if l.startswith("VLLM_REF="))
-    return ref.lstrip("v").split("-", 1)[0]
+        ref = next((l.split("=", 1)[1].strip() for l in f if l.startswith("VLLM_REF=")), "")
+    version, _, suffix = ref.lstrip("v").partition("-")
+    if not version or (suffix and not suffix.startswith("blis.")):
+        raise SystemExit(f"{pins_path}: VLLM_REF={ref!r} names no vLLM release to model")
+    return version
 
 
 GPUS_PER_NODE = 8   # single-node H100; a per-instance footprint beyond this spans nodes (needs a fabric)

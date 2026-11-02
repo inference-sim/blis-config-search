@@ -1801,6 +1801,26 @@ class DryRunPlan(unittest.TestCase):
         self.assertEqual(2, report["totals"]["runs"])
         self.assertEqual(50.0, report["interactivity_floor"]["tok_per_s_per_user"])
 
+    def test_runs_and_report_use_the_pinned_engine_version(self):
+        seen = []
+
+        def fake_run_one(*a, **kw):
+            seen.append(a[6])   # run_one(blis, catalog, registry, dir, model, hw, engine_version, ...)
+            return {"metrics": {"tokens_per_sec": 1.0, "itl_p99_ms": 1.0}, "cmd": None,
+                    "config": dict(kw.get("config") or a[11])}
+
+        real = E.run_blis.run_one
+        E.run_blis.run_one = fake_run_one
+        try:
+            with tempfile.TemporaryDirectory() as out:
+                report = E.run_experiment(spec(), "/opt/blis", "/c", "/r", out, verbose=False)
+        finally:
+            E.run_blis.run_one = real
+        pinned = run_blis.pinned_engine_version()
+        self.assertTrue(seen)
+        self.assertEqual({pinned}, set(seen))
+        self.assertEqual(pinned, report["scenario"]["engine_version"])
+
     def test_dry_run_of_every_committed_fixture(self):
         for path in V.spec_paths(EXPERIMENTS):
             doc, _ = V.load(path)

@@ -24,10 +24,6 @@
         "narrative": "DeepEP low-latency should win on TP8, and the gap should shrink on TP2 DP4, where sequence-parallel MoE splits the batch."
       },
       {
-        "name": "routing-prefix-cache",
-        "narrative": "prefix-affinity should only beat random with caching on, since a cold instance re-prefills the whole shared context."
-      },
-      {
         "name": "prefill-chunking",
         "narrative": "Capping long prefills should trade a little peak throughput for a much lower ITL p99 at saturation."
       },
@@ -46,6 +42,7 @@
   "pinned_stack": {
     "blis": "v0.15.0",
     "catalog": "0.5.0",
+    "engine_version": "0.32.0",
     "kernel": "v0.5.0",
     "registry": "v0.3.0",
     "resolved": {
@@ -62,7 +59,8 @@
         "commit": "96bead697172ab7f2cf8346e04e65b837014d867",
         "describe": "v0.3.0"
       }
-    }
+    },
+    "router": "v1.0.0-blis.2"
   },
   "run_id": "muse-spark-open-816b-a42b-h200-agentx-8gpu",
   "seed": 42,

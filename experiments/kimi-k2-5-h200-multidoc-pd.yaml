@@ -1,6 +1,6 @@
 # Colocated vs. P/D-disaggregated Kimi-K2.5 on 64 H200s for 10k-token prompts: which ratio, which pool shape, which split threshold.
 # MoE 384 experts, MLA, ~1T params: tp4 dp1 refuses (138.8 GiB fixed per rank), so every instance is EP width >= 8.
-# Pools must share dp, so the P/D grid is split into a dp1 sweep (tp8/tp16 pools) and a dp2 sweep (tp4/tp8 pools).
+# P/D pools stay at dp1: the pinned engine has no kv_transfer under dp yet (blis-vllm#44).
 # Multidoc prompts are 10,240 +- 1,200 tokens with no shared prefix, so nonCachedTokens is effectively a prompt-length cut.
 # Left out: all2all_backend (inert at dp1; deepep_high_throughput 2.5x worse at dp2, measured), max_num_seqs (the token cap
 # binds first on 10k prompts), prefix caching and routing scorers (inert on a generated shape), cache_dtype (MLA KV is small).
@@ -38,18 +38,6 @@ sweeps:
       endpoint_picker_config: [pd-prefix.yaml]
       plugins:
         prefix-based-pd-decider: {parameters: {nonCachedTokens: [256, 10240, 12288]}}
-
-  - name: pd-dp2
-    narrative: Data-parallel pools should shift the best ratio toward decode, since dp2 attention packs more decodes per GPU than tp8.
-    prefill-instances: [1, 2, 3, 4, 5]
-    decode-instances: [2, 3, 4, 5, 6]
-    prefill:
-      parallel: {tp: [4, 8], dp: [2], enable_expert_parallel: [true]}
-      engine: {max_num_batched_tokens: [8192, 32768]}
-    decode:
-      parallel: {tp: [4, 8], dp: [2], enable_expert_parallel: [true]}
-      engine: {long_prefill_token_threshold: [0, 1024]}
-    router: *threshold
 
   - name: pd-always
     # Same dp1 layouts as pd-dp1; overrides take one base file, so the always-split decider is its own sweep.

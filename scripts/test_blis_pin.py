@@ -40,6 +40,8 @@ require (
 require (
 \tgithub.com/inference-sim/blis-latency-kernel v0.5.0 // indirect
 )
+
+replace github.com/llm-d/llm-d-router => github.com/inference-sim/llm-d-router v1.0.0-blis.2
 """
 
 
@@ -59,6 +61,30 @@ def test_go_mod_versions():
     check(mods.get("blis-latency-kernel") == "v0.5.0",
           "the kernel is read from go.mod even when it is an indirect requirement")
     check(mods.get("blis-schemas") == "v0.10.0", "schemas version is read")
+    check(mods.get("llm-d-router") == "v1.0.0-blis.2", "the router fork is read from its replace")
+
+
+def test_sync_pins_reads_replace():
+    print("test_sync_pins_reads_replace")
+    import sync_pins
+    got = sync_pins.derive_from_text(GO_MOD)
+    check(got == {"SCHEMAS_REF": "v0.10.0", "VLLM_REF": "v0.32.0-blis.1", "KERNEL_REF": "v0.5.0",
+                  "ROUTER_REF": "v1.0.0-blis.2"}, f"derived pins: {got}")
+    block = sync_pins.derive_from_text("replace (\n\tgithub.com/llm-d/llm-d-router v0.0.0 => "
+                                       "github.com/inference-sim/llm-d-router v1.0.0-blis.3\n)\n")
+    check(block == {"ROUTER_REF": "v1.0.0-blis.3"}, f"a replace block entry is read: {block}")
+    dropped = sync_pins.derive_from_text(GO_MOD.split("replace ")[0])
+    check("ROUTER_REF" not in dropped, f"a dropped replace derives no ROUTER_REF: {dropped}")
+    check("ROUTER_REF=" not in sync_pins.render(dropped), "so the regenerated block clears it")
+
+
+def test_smoke_skips_dropped_sweeps():
+    print("test_smoke_skips_dropped_sweeps")
+    runs = [{"sweep": "a", "config": {}}, {"sweep": "gone", "config": {}}, {"sweep": "b", "config": {}}]
+    spec = {"sweeps": [{"name": "a"}, {"name": "b"}]}
+    check([r["sweep"] for r in B.live_rows(runs, spec)] == ["a", "b"],
+          "a sweep the spec dropped is not re-run, so its refusal is not reported as a break")
+    check(B.live_rows(runs, {}) == runs, "with no sweep list, every row is still checked")
 
 
 def test_rewrite_pins_keeps_comments():
@@ -110,6 +136,9 @@ def test_bump_end_to_end_on_copies():
         after = B.read_pins(pins)
         check(after["BLIS_REF"] == "v99.0.0" and after["BLIS_SHA"] == "e" * 40, "pin moved")
         check(after["KERNEL_REF"] == "v0.5.0", "KERNEL_REF follows the release's go.mod")
+        check(after["VLLM_REF"] == "v0.32.0-blis.1" and after["SCHEMAS_REF"] == "v0.10.0"
+              and after["ROUTER_REF"] == "v1.0.0-blis.2",
+              "every derived pin follows the release's go.mod, not just the kernel")
         check(after["CATALOG_REF"] == cur["CATALOG_REF"]
               and after["REGISTRY_REF"] == cur["REGISTRY_REF"],
               "catalog/registry are NOT guessed -- the PR asks a reviewer")
@@ -470,6 +499,8 @@ def test_workflow_wiring():
 if __name__ == "__main__":
     test_version_ordering()
     test_go_mod_versions()
+    test_sync_pins_reads_replace()
+    test_smoke_skips_dropped_sweeps()
     test_rewrite_pins_keeps_comments()
     test_rewrite_setup_moves_only_instructions()
     test_bump_end_to_end_on_copies()

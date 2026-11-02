@@ -543,6 +543,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     concurrency = list(sc["concurrency"])
     slo_ms = slo_limits(sc.get("slo"))
     shared_engine = dict(sc.get("engine") or {})
+    engine_version = run_blis.pinned_engine_version()
     replay = dict(sc.get("replay") or {}) or None
 
     out_dir = os.path.join(out_root, name)
@@ -639,7 +640,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
             # `_overrides` is provenance for the report (which catalog settings the spec
             # replaced), not a replay field -- keep it out of the command.
             rec = run_blis.run_one(blis, catalog, registry, scenarios_dir, model, hardware,
-                                   sc.get("engine_version", "0.29.0"), workload, nreq, seed,
+                                   engine_version, workload, nreq, seed,
                                    None, cfg, phase=sname, timeout=run_timeout,
                                    replay={k: v for k, v in replay.items()
                                            if k != "_overrides"} if replay else None)
@@ -691,7 +692,8 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
         "description": (spec.get("description") or "").strip(),
         "scenario": {"model": model, "hardware": hardware, "workload": workload, "gpus": gpus,
                      "concurrency": concurrency, "slo": sc.get("slo") or {}, "seed": seed,
-                     "engine": shared_engine or None, "replay": replay},
+                     "engine": shared_engine or None, "engine_version": engine_version,
+                     "replay": replay},
         "slo_ms": slo_ms,
         "interactivity_floor": {"tok_per_s_per_user": floor_rate_from(slo_ms)},
         "objective": "max output tok/s per accelerator subject to the scenario's SLOs",
@@ -937,6 +939,8 @@ def _pinned_stack(blis, catalog, registry):
     pins = build_catalog.read_pins()
     out = {"blis": pins.get("BLIS_REF", "unpinned"),
            "kernel": pins.get("KERNEL_REF", "unpinned"),
+           "router": pins.get("ROUTER_REF", "unpinned"),
+           "engine_version": run_blis.pinned_engine_version(),
            "catalog": pins.get("CATALOG_REF", "unpinned"),
            "registry": pins.get("REGISTRY_REF", "unpinned")}
     resolved = {}

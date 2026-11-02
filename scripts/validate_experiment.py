@@ -749,6 +749,10 @@ def _check_gpu_math_pd(sweep, gpus, where, errs):
         errs.append(f"{where}: the prefill pool sweeps dp {list(pf_dp)} and the decode pool "
                     f"dp {list(dc_dp)}; BLIS applies ONE replica factor to both pools, so "
                     f"their dp must match")
+    if any(str(d) != "1" for d in (list(pf_dp) if _is_list(pf_dp) else [pf_dp])):
+        errs.append(f"{where}: P/D pools at dp {list(pf_dp)}; the pinned engine (vLLM 0.32.0) has no "
+                    f"kv_transfer under data parallelism yet, so every run panics "
+                    f"(https://github.com/inference-sim/blis-vllm/issues/44)")
     ok = []
     for pfp in _parallel_combos(pf_par):
         for dfp in _parallel_combos(dc_par):
@@ -1034,6 +1038,11 @@ def validate(spec, routing_dir=ROUTING_DIR, vocabulary=None, catalog=None):
         # Read once, for the model-aware cross-knob rules below. None (no catalog checkout) just
         # skips them.
         entry = catalog_entry(sc.get("model"), catalog)
+        # blis-vllm v0.32.0-blis.1 (compat/kernelmodel/kvlayers.go) sizes no KV for a recurrent layer.
+        if (entry or {}).get("recurrent"):
+            errs.append(f"scenario.model: {sc.get('model')} has recurrent (linear-attention) "
+                        f"layers, which the pinned engine (vLLM 0.32.0) cannot size a KV cache "
+                        f"for, so every run refuses at startup")
 
     sweeps = spec.get("sweeps")
     if not _is_list(sweeps) or not sweeps:

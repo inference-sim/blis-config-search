@@ -128,9 +128,11 @@ def _model_entry(models_dir, name):
     is_moe = False
     attn_kind = None
     experts = top_k = shared = None
+    recurrent = False
     for lk in layer_kinds:
         for node in (lk.get("nodes") or []):
             op = node.get("op")
+            recurrent = recurrent or op == "RecurrentUpdate"
             if op == "Attention" and attn_kind is None:
                 attn_kind = node.get("kind")
             if op in ("GroupedGEMM", "MoE") or node.get("role") in ("experts", "moe"):
@@ -167,6 +169,7 @@ def _model_entry(models_dir, name):
         "model_type": inner.get("model_type") or cfg.get("model_type") or "?",
         "arch": "MoE" if is_moe else "dense",
         "attn_kind": attn_kind,
+        "recurrent": recurrent,
         "layers": inner.get("num_hidden_layers"),
         "hidden": inner.get("hidden_size"),
         "heads_q": inner.get("num_attention_heads"),
@@ -326,7 +329,7 @@ def _stack(pins, versions):
 
     The rows come from two kinds of pin, which is why some are conditional:
 
-      * DERIVED (kernel, schemas, vllm) -- Go dependencies compiled into the binary, written to
+      * DERIVED (kernel, schemas, vllm, router) -- Go dependencies compiled into the binary, written to
         pins.env from inference-sim's go.mod by scripts/sync_pins.py. A derived key can be legally
         ABSENT: blis-vllm is not a dependency before BLIS v0.14.0, so at an older pin there is no
         row for it rather than a row reading "absent". Omitting beats inventing.
@@ -344,6 +347,9 @@ def _stack(pins, versions):
     if pins.get("VLLM_REF"):
         deps.append(dep("blis-vllm", pins["VLLM_REF"],
                         "engine config surface (vLLM's startup rules), derived from go.mod"))
+    if pins.get("ROUTER_REF"):
+        deps.append(dep("llm-d-router", pins["ROUTER_REF"],
+                        "embedded router that places every request, derived from go.mod"))
     if pins.get("SCHEMAS_REF"):
         deps.append(dep("blis-schemas", pins["SCHEMAS_REF"],
                         "deployment/engine structs the scenario decodes against, derived from go.mod"))

@@ -168,6 +168,27 @@ CLI_FLAGS = {"num_instances": "--num-instances", "concurrency": "--concurrency",
 # pins.env) -- see ROUTING_MOVED below for why this replaced the former --routing-policy flag.
 SCENARIO_ROUTER = ("router_config",)
 PARALLEL_DEFAULTS = {"tp": 1, "pp": 1, "dp": 1, "enable_expert_parallel": False}
+
+
+# inference-sim cmd/engine_driver_build.go coreEngineVersions at BLIS_REF: any other version runs
+# on the compat engine at rc=0. test_build.py checks this against the pinned source.
+CORE_ENGINE_VERSIONS = frozenset({"0.32.0"})
+
+
+def pinned_engine_version(pins_path=None):
+    """The vLLM release the pinned blis-vllm models: pins.env's VLLM_REF, e.g. v0.32.0-blis.1 -> 0.32.0."""
+    import build_catalog
+    pins_path = pins_path or build_catalog.PINS
+    ref = build_catalog.read_pins(pins_path).get("VLLM_REF", "")
+    version, _, suffix = ref.lstrip("v").partition("-")
+    if not version or (suffix and not suffix.startswith("blis.")):
+        raise SystemExit(f"{pins_path}: VLLM_REF={ref!r} names no vLLM release to model")
+    if version not in CORE_ENGINE_VERSIONS:
+        raise SystemExit(f"{pins_path}: VLLM_REF={ref!r} models {version}, which BLIS would price "
+                         f"on its compat engine (core: {', '.join(sorted(CORE_ENGINE_VERSIONS))})")
+    return version
+
+
 GPUS_PER_NODE = 8   # single-node H100; a per-instance footprint beyond this spans nodes (needs a fabric)
 # Cross-node cost resolves from the fabric (a catalog networks/ entry), required once nodes > 1.
 DEFAULT_FABRIC = "ib-400g"   # InfiniBand NDR 400 Gb/s; the standard H100 multi-node interconnect
@@ -1379,6 +1400,17 @@ def _record_shell(config, phase):
             "phase": phase}
 
 
+def _failure_line(stderr):
+    """The line that says why BLIS died: a Go panic's message, else the last fatal log, else the
+    last line. A panic's last line is a bare stack frame (`main.go:19 +0x58`), which names nothing."""
+    lines = [l.strip() for l in (stderr or "").splitlines() if l.strip()]
+    for pick in (lambda l: l.startswith("panic:"), lambda l: "level=fatal" in l or l.startswith("fatal")):
+        hits = [l for l in lines if pick(l)]
+        if hits:
+            return hits[-1]
+    return lines[-1] if lines else ""
+
+
 def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_version,
             workload, num_requests, seed, horizon, config, phase="probe", timeout=120, defaults=None,
             replay=None):
@@ -1463,7 +1495,7 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
         stdout, stderr, rc = "", "timeout", -1
     metrics = parse_metrics(stdout) if rc == 0 else {}
     if rc != 0:
-        error = stderr.strip().splitlines()[-1] if stderr.strip() else f"rc={rc}"
+        error = _failure_line(stderr) or f"rc={rc}"
     elif not metrics:
         error = "rc=0 but no cluster metrics parsed from stdout (output format changed?)"
     else:
@@ -1498,7 +1530,8 @@ def add_common_args(p):
     p.add_argument("--scenarios", required=True, help="dir to write/read generated scenario YAMLs")
     p.add_argument("--model", required=True, help="catalog short-name, e.g. glm-5.3-flash")
     p.add_argument("--hardware", required=True, help="scenario hardware key, e.g. h100")
-    p.add_argument("--engine-version", dest="engine_version", default="0.29.0")
+    p.add_argument("--engine-version", dest="engine_version", default=None,
+                   help="vLLM release to model (default: pins.env VLLM_REF)")
     p.add_argument("--workload")
     p.add_argument("--num-requests", type=int, dest="num_requests")
     p.add_argument("--seed", type=int, default=0)
@@ -1576,7 +1609,8 @@ def main():
     except ValueError as e:
         sys.exit(str(e))
     rec = run_one(args.blis, args.catalog, args.registry, args.scenarios, args.model, args.hardware,
-                  args.engine_version, args.workload, args.num_requests, args.seed, args.horizon,
+                  args.engine_version or pinned_engine_version(), args.workload, args.num_requests,
+                  args.seed, args.horizon,
                   json.loads(args.config), args.phase, args.timeout, args.defaults, replay)
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)

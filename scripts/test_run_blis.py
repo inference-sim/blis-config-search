@@ -782,5 +782,35 @@ class AcceptanceLength(unittest.TestCase):
                              (None, None))
 
 
+class PinnedEngineVersion(unittest.TestCase):
+    def test_follows_vllm_ref(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as f:
+            f.write("# c\nBLIS_REF=v0.15.0\nVLLM_REF=v0.32.0-blis.1\n")
+        self.addCleanup(os.unlink, f.name)
+        self.assertEqual(run_blis.pinned_engine_version(f.name), "0.32.0")
+
+    def test_unmappable_ref_fails_loudly(self):
+        for body in ("BLIS_REF=v0.15.0\n", "VLLM_REF=v0.32.1-0.20261101120000-abcdef\n",
+                     "VLLM_REF=v0.31.0-blis.1\n"):   # last: a compat-engine release
+            with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as f:
+                f.write(body)
+            self.addCleanup(os.unlink, f.name)
+            with self.assertRaises(SystemExit):
+                run_blis.pinned_engine_version(f.name)
+
+
+class FailureLine(unittest.TestCase):
+    def test_panic_message_beats_its_stack_frames(self):
+        err = ("time=x level=info msg=start\npanic: engine build: no pool\n\ngoroutine 1 [running]:\n"
+               "main.main()\n\t/upstream/main.go:19 +0x58\n")
+        self.assertEqual(run_blis._failure_line(err), "panic: engine build: no pool")
+
+    def test_fatal_log_then_last_line(self):
+        self.assertEqual(run_blis._failure_line("a\ntime=x level=fatal msg=\"bad pool\"\nexit 1\n"),
+                         'time=x level=fatal msg="bad pool"')
+        self.assertEqual(run_blis._failure_line("first\nlast\n"), "last")
+        self.assertEqual(run_blis._failure_line(""), "")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

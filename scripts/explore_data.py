@@ -218,7 +218,7 @@ def _wall_hours(run_dir):
 
 
 def setup(exp, run_dir=None):
-    """The stack that priced this report, a script that installs exactly it, and the sweep rerun."""
+    """The stack that priced this report, a script installing it, and how to reproduce the sweep locally."""
     ps = exp.get("pinned_stack") or {}
     res = ps.get("resolved") or {}
     commit = lambda k: (res.get(k) or {}).get("commit")
@@ -242,21 +242,22 @@ def setup(exp, run_dir=None):
         if sha:
             sh.append(f'echo "{sha}  {dest}" | shasum -a 256 -c')
     rid = exp.get("name") or ""
-    sweep = ["# from the blis-config-search checkout, after the setup script",
+    spec = f"reports/{rid}/spec.yaml"
+    # writes to repro/, never reports/: reproducing locally does not touch the published report
+    sweep = ["# in the blis-config-search checkout, after the install script",
              "python3 -m venv .venv && . .venv/bin/activate && pip install pyyaml",
-             f"python3 -I scripts/run_experiment.py reports/{rid}/spec.yaml --dry-run --catalog \"$BLIS_CATALOG\"",
-             f"python3 -I scripts/run_experiment.py reports/{rid}/spec.yaml \\",
+             f'python3 -I scripts/run_experiment.py {spec} --dry-run --catalog "$BLIS_CATALOG"',
+             f"python3 -I scripts/run_experiment.py {spec} \\",
              '  --blis "$(command -v blis)" --catalog "$BLIS_CATALOG" --registry "$BLIS_REGISTRY" \\',
-             "  --out rerun/   # writes rerun/<id>/, next to the committed reports/<id>/ to compare"]
+             "  --out repro/"]
     stack = [{"name": "BLIS", "repo": "inference-sim", "ref": ps["blis"], "commit": commit("blis")},
              *[{"name": n, "repo": r, "ref": ps[k], "commit": commit(k)}
                for k, n, r in (("catalog", "catalog", "blis-catalog"), ("registry", "registry", "blis-registry"))
                if ps.get(k)]]
     if ps.get("kernel"):
         stack.append({"name": "latency kernel", "repo": "blis-latency-kernel", "ref": ps["kernel"], "commit": None})
-    totals = exp.get("totals") or {}
     return {"stack": stack, "script": "\n".join(sh) + "\n", "sweep": "\n".join(sweep) + "\n",
-            "runs": totals.get("runs"), "hours": _wall_hours(run_dir) if run_dir else None}
+            "runs": (exp.get("totals") or {}).get("runs"), "hours": _wall_hours(run_dir) if run_dir else None}
 
 
 def build(run_dir):

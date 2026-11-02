@@ -377,7 +377,7 @@ describe('report explorer page', () => {
     expect(fetches).toBeLessThanOrEqual(2)
   })
 
-  it('opens one setup dialog from the header: the pinned stack, then the sweep rerun', async () => {
+  it('opens one setup dialog from the header: install the pinned stack, then reproduce the sweep', async () => {
     const setup = { stack: [{ name: 'BLIS', repo: 'inference-sim', ref: 'v9.0.0', commit: 'a'.repeat(40) }], script: 'git clone --branch v9.0.0 x\n', sweep: 'python3 -I scripts/run_experiment.py reports/a/spec.yaml\n', runs: 7, hours: 1.5 }
     render(<ScenarioPage runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16)]} load={() => Promise.resolve({ ...FIXTURE, setup })} />)
     await waitFor(() => expect(screen.getByText('Install the pinned stack')).toBeTruthy())
@@ -385,9 +385,9 @@ describe('report explorer page', () => {
     fireEvent.click(screen.getByText('Install the pinned stack'))
     expect(document.querySelector('.xf-dialog')?.hasAttribute('open')).toBe(true)
     expect(document.querySelector('.xf-dialog pre')?.textContent).toMatch(/--branch v9.0.0/)
-    fireEvent.click(screen.getByText('2. Rerun the whole sweep'))
+    fireEvent.click(screen.getByText('2. Reproduce the experiment sweep'))
     expect(document.querySelector('.xf-dialog pre')?.textContent).toMatch(/run_experiment.py reports\/a\/spec.yaml/)
-    expect(document.querySelector('.xf-dialog')?.textContent).toMatch(/7 BLIS runs, about 1.5 h serial/)
+    expect(document.querySelector('.xf-dialog')?.textContent).toMatch(/report on this site is unchanged\. 7 BLIS runs, about 1.5 h serial/)
   })
 
   it('tells apart router arms whose sweep caption is empty, in the dashboard caption style', async () => {

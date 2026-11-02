@@ -81,7 +81,7 @@ export interface Run {
 export interface Setup {
   stack: { name: string; repo: string; ref: string; commit: string | null }[]
   script: string
-  /** Reruns the whole spec through the sweeper. */
+  /** Reproduces the whole sweep locally from the report's committed spec. */
   sweep: string
   runs?: number | null
   /** Serial BLIS hours the original sweep took. */

@@ -4,7 +4,7 @@ import type { Explorer } from './useExplorer'
 import type { Run } from './types'
 import { METRIC, SLO_OF, fmt, sloMs } from './model'
 import { ConfigName } from '../components/ConfigName'
-import { CopyButton } from './CopyButton'
+import { CodeBlock } from './CopyButton'
 import { SetupButton } from './SetupDialog'
 
 /** commands.json: each run's reproducible command, and the scenario files those commands read. */
@@ -61,15 +61,15 @@ function CommandRow({ runId, r, span, load }: { runId: string; r: Run; span: num
   else if (run === null) body = <p className="xf-empty">This run has no recorded command.</p>
   else body = (
     <div className="xf-cmd">
-      <div className="xf-cmd-h"><b>0. Install this report's pinned BLIS, catalog and registry once</b><SetupButton>Show setup</SetupButton></div>
+      <div className="xf-cmd-h"><b>0. Install this report's pinned BLIS, catalog and registry once</b><SetupButton quiet>Setup guide</SetupButton></div>
       {yaml && (
         <>
-          <div className="xf-cmd-h"><b>1. Save the scenario as <span className="mono">scenarios/{scen}</span></b><CopyButton text={yaml} /></div>
-          <pre className="xf-cmd-line xf-yaml">{yaml}</pre>
+          <div className="xf-cmd-h"><b>1. Save the scenario as <span className="mono">scenarios/{scen}</span></b></div>
+          <CodeBlock text={yaml} className="xf-yaml" />
         </>
       )}
-      <div className="xf-cmd-h"><b>{yaml ? '2. Run' : 'Command'}</b><CopyButton text={run[0]} /></div>
-      <pre className="xf-cmd-line">{run[0]}</pre>
+      <div className="xf-cmd-h"><b>{yaml ? '2. Run' : 'Command'}</b></div>
+      <CodeBlock text={run[0]} />
       {!yaml && run[2] != null && (
         <details>
           <summary>the deployment it priced (scenario <span className="mono">{scen}</span>, not regenerable from this report)</summary>

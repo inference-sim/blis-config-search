@@ -785,8 +785,9 @@ def test_explore_data():
         check("--branch v9.0.0" in st["script"] and "a" * 40 in st["script"] and "export BLIS_REGISTRY" in st["script"]
               and "shasum -a 256 -c" in st["script"],
               "the setup script installs the report's own recorded stack, checks each tag's commit and the corpus")
-        check("run_experiment.py reports/m/spec.yaml" in explore_data.setup({"name": "m", "pinned_stack": ps})["sweep"],
-              "the sweep rerun runs the report's own committed spec")
+        sw = explore_data.setup({"name": "m", "pinned_stack": ps})["sweep"]
+        check("run_experiment.py reports/m/spec.yaml" in sw and "--out repro/" in sw,
+              "reproducing the sweep runs the report's own spec into repro/, not over reports/")
         check(explore_data.setup({}) is None, "a ledger with no pinned_stack ships no setup")
         rid, gone = explore_data._router_entry("routing/renamed-away.yaml", rd)
         check(rid == "renamed-away" and gone["chain"] is None,

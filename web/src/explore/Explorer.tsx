@@ -77,7 +77,7 @@ function Body({ data }: { data: ExploreData }) {
       {data.setup && (
         <div className="xf-repro">
           <span><b>Reproduce this report</b> <span className="xf-sub">priced by BLIS <span className="mono">{data.setup.stack[0].ref}</span>{data.setup.stack.slice(1).map((d) => <Fragment key={d.repo}> · {d.name} <span className="mono">{d.ref}</span></Fragment>)}</span></span>
-          <span className="xf-repro-b"><SetupButton>Install the pinned stack</SetupButton><SetupButton tab="sweep">Rerun the sweep</SetupButton></span>
+          <span className="xf-repro-b"><SetupButton>Install the pinned stack</SetupButton><SetupButton tab="sweep">Reproduce the sweep</SetupButton></span>
         </div>
       )}
       <Controls x={x} />

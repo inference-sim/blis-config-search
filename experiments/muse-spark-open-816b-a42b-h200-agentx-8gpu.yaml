@@ -1,0 +1,83 @@
+# Best tok/s/GPU for Muse-Spark (nvfp4) on one 8x H200 node under AgentX with no SLO (raw max), and which knobs travel.
+# MoE 256 experts top_k 8: EP, dp attention and all2all_backend are real; graph prices pp; no speculator, already modelopt.
+# Probed on the pin at 262k context: TP8, TP4 PP2, TP2 PP4, TP4 DP2, TP2 DP4 fit; 2x TP4 refuses; 2x TP2 PP2 needs gmu 0.95.
+# pp x dp is unpriced on the pin, so pipeline and data-parallel shapes are separate sweeps.
+# InfiniBand is never priced: nothing leaves the node. No SLO, so the ladder runs to 64, past saturation (601ms at c=64).
+# Left out: eplb, moe_backend (inert elsewhere), P/D (needs two nodes), quantization and drafting (profile: does not apply).
+
+name: muse-spark-open-816b-a42b-h200-agentx-8gpu
+
+scenario:
+  model: muse-spark-open-816b-a42b-nvfp4
+  hardware: h200
+  workload: agentx-mvp
+  gpus: 8
+  engine: {max_model_len: 262144}   # at the 32k default the replay drops every trace
+  concurrency: [4, 8, 16, 32, 64]    # session lanes, out to saturation
+  replay:
+    corpus: .corpus/traces.jsonl
+    corpus_cache: /tmp/agx-cache-muse-h200
+    grace_period: inf
+
+sweeps:
+  - name: topology-pp
+    # The control for the pipeline shapes below.
+    narrative: TP8 should peak highest, since every pipeline stage adds a boundary hop to each decode step.
+    num-instances: [1]
+    parallel: {tp: [8, 4, 2], pp: [1, 2, 4], enable_expert_parallel: [true]}
+
+  - name: topology-dp
+    # The control for the data-parallel shapes below; EP off replicates experts across dp ranks.
+    narrative: Data-parallel attention should beat pipeline stages at the same tp, and EP should matter more at dp 4 than dp 2.
+    num-instances: [1]
+    parallel: {tp: [4, 2], dp: [2, 4], enable_expert_parallel: [true, false]}
+
+  - name: batch-caps
+    narrative: A seq cap of 8 should bind on TP8 but not on TP2 DP4, whose four attention ranks each see a quarter of the lanes.
+    num-instances: [1]
+    parallel: {tp: [8, 2], dp: [1, 4], enable_expert_parallel: [true]}
+    engine:
+      max_num_seqs: [8, 16]
+      max_num_batched_tokens: [2048, 4096, 16384, 32768]
+
+  - name: kv-capacity
+    narrative: fp8 KV and higher memory utilization should substitute on TP8 but add on TP2 DP4, which replicates attention weights.
+    num-instances: [1]
+    parallel: {tp: [8, 2], dp: [1, 4], enable_expert_parallel: [true]}
+    engine:
+      cache_dtype: [auto, fp8]
+      gpu_memory_utilization: [0.85, 0.95]
+
+  - name: moe-collective
+    # Default allgather_reducescatter twins are in topology-pp / topology-dp; EP width is 8 on both.
+    narrative: DeepEP low-latency should win on TP8, and the gap should shrink on TP2 DP4, where sequence-parallel MoE splits the batch.
+    num-instances: [1]
+    parallel: {tp: [8, 2], dp: [1, 4], enable_expert_parallel: [true]}
+    engine:
+      all2all_backend: [deepep_high_throughput, deepep_low_latency, deepep_v2, pplx]
+
+  # The only 2-instance shape that fits (needs gmu 0.95), so this is the one place routing can be measured.
+  - name: routing-prefix-cache
+    narrative: prefix-affinity should only beat random with caching on, since a cold instance re-prefills the whole shared context.
+    num-instances: [2]
+    parallel: {tp: [2], pp: [2], enable_expert_parallel: [true]}
+    engine:
+      gpu_memory_utilization: [0.95]
+      enable_prefix_caching: [true, false]
+    router:
+      endpoint_picker_config: [random.yaml, load-aware.yaml, prefix-affinity.yaml]
+
+  - name: prefill-chunking
+    narrative: Capping long prefills should trade a little peak throughput for a much lower ITL p99 at saturation.
+    num-instances: [1]
+    parallel: {tp: [8, 4], pp: [1, 2], enable_expert_parallel: [true]}
+    engine:
+      long_prefill_token_threshold: [2048, 8192]
+
+  - name: cudagraph
+    # Per-step host cost; measured not to interact with topology, so one shape.
+    narrative: FULL-family capture should beat the PIECEWISE default by a few percent, and NONE should collapse.
+    num-instances: [1]
+    parallel: {tp: [8], enable_expert_parallel: [true]}
+    engine:
+      cudagraph_mode: [NONE, FULL, FULL_AND_PIECEWISE]

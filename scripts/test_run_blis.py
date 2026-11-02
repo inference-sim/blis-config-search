@@ -798,5 +798,18 @@ class PinnedEngineVersion(unittest.TestCase):
                 run_blis.pinned_engine_version(f.name)
 
 
+class FailureLine(unittest.TestCase):
+    def test_panic_message_beats_its_stack_frames(self):
+        err = ("time=x level=info msg=start\npanic: engine build: no pool\n\ngoroutine 1 [running]:\n"
+               "main.main()\n\t/upstream/main.go:19 +0x58\n")
+        self.assertEqual(run_blis._failure_line(err), "panic: engine build: no pool")
+
+    def test_fatal_log_then_last_line(self):
+        self.assertEqual(run_blis._failure_line("a\ntime=x level=fatal msg=\"bad pool\"\nexit 1\n"),
+                         'time=x level=fatal msg="bad pool"')
+        self.assertEqual(run_blis._failure_line("first\nlast\n"), "last")
+        self.assertEqual(run_blis._failure_line(""), "")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

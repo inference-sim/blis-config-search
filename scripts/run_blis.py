@@ -1392,6 +1392,17 @@ def _record_shell(config, phase):
             "phase": phase}
 
 
+def _failure_line(stderr):
+    """The line that says why BLIS died: a Go panic's message, else the last fatal log, else the
+    last line. A panic's last line is a bare stack frame (`main.go:19 +0x58`), which names nothing."""
+    lines = [l.strip() for l in (stderr or "").splitlines() if l.strip()]
+    for pick in (lambda l: l.startswith("panic:"), lambda l: "level=fatal" in l or l.startswith("fatal")):
+        hits = [l for l in lines if pick(l)]
+        if hits:
+            return hits[-1]
+    return lines[-1] if lines else ""
+
+
 def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_version,
             workload, num_requests, seed, horizon, config, phase="probe", timeout=120, defaults=None,
             replay=None):
@@ -1476,7 +1487,7 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
         stdout, stderr, rc = "", "timeout", -1
     metrics = parse_metrics(stdout) if rc == 0 else {}
     if rc != 0:
-        error = stderr.strip().splitlines()[-1] if stderr.strip() else f"rc={rc}"
+        error = _failure_line(stderr) or f"rc={rc}"
     elif not metrics:
         error = "rc=0 but no cluster metrics parsed from stdout (output format changed?)"
     else:

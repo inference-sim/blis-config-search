@@ -516,6 +516,13 @@ def ensure_corpus(entry, catalog, dest, root=ROOT):
     return dest
 
 
+def live_rows(runs, spec):
+    """The ledger rows whose sweep the spec still runs. A sweep the spec dropped (because the stack
+    now refuses it) is not a regression; regeneration removes its rows."""
+    names = {s.get("name") for s in (spec or {}).get("sweeps") or []}
+    return [r for r in runs if r.get("sweep") in names] if names else runs
+
+
 def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=None,
           max_pairs=SMOKE_PAIRS, timeout=1800, max_parallel=1):
     """Re-run a few of reports/<run_id>/'s own rows on `blis`; return {id, checks, failures}."""
@@ -532,6 +539,7 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
         ensure_corpus(entry, catalog, corpus, root)
     with open(os.path.join(root, "reports", run_id, "runs.jsonl")) as f:
         runs = [json.loads(l) for l in f if l.strip()]
+    runs = live_rows(runs, _load_yaml(os.path.join(root, entry["source"])))
     pairs = smoke_pairs(runs, max_pairs)
     if not pairs:   # a ledger with no knob pairs: still prove its cheapest row runs
         ok = sorted((r for r in runs if _ok(r)), key=lambda r: r["config"].get("concurrency") or 0)

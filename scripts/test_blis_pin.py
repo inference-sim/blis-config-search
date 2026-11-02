@@ -78,6 +78,15 @@ def test_sync_pins_reads_replace():
     check("ROUTER_REF=" not in sync_pins.render(dropped), "so the regenerated block clears it")
 
 
+def test_smoke_skips_dropped_sweeps():
+    print("test_smoke_skips_dropped_sweeps")
+    runs = [{"sweep": "a", "config": {}}, {"sweep": "gone", "config": {}}, {"sweep": "b", "config": {}}]
+    spec = {"sweeps": [{"name": "a"}, {"name": "b"}]}
+    check([r["sweep"] for r in B.live_rows(runs, spec)] == ["a", "b"],
+          "a sweep the spec dropped is not re-run, so its refusal is not reported as a break")
+    check(B.live_rows(runs, {}) == runs, "with no sweep list, every row is still checked")
+
+
 def test_rewrite_pins_keeps_comments():
     print("test_rewrite_pins_keeps_comments")
     text = "# BLIS_REF=v0.0.1 is a comment\nBLIS_REF=v0.14.0\nBLIS_SHA=aaa\n\nCATALOG_REF=0.4.0\n"
@@ -491,6 +500,7 @@ if __name__ == "__main__":
     test_version_ordering()
     test_go_mod_versions()
     test_sync_pins_reads_replace()
+    test_smoke_skips_dropped_sweeps()
     test_rewrite_pins_keeps_comments()
     test_rewrite_setup_moves_only_instructions()
     test_bump_end_to_end_on_copies()

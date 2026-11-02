@@ -128,9 +128,11 @@ def _model_entry(models_dir, name):
     is_moe = False
     attn_kind = None
     experts = top_k = shared = None
+    recurrent = False
     for lk in layer_kinds:
         for node in (lk.get("nodes") or []):
             op = node.get("op")
+            recurrent = recurrent or op == "RecurrentUpdate"
             if op == "Attention" and attn_kind is None:
                 attn_kind = node.get("kind")
             if op in ("GroupedGEMM", "MoE") or node.get("role") in ("experts", "moe"):
@@ -167,6 +169,7 @@ def _model_entry(models_dir, name):
         "model_type": inner.get("model_type") or cfg.get("model_type") or "?",
         "arch": "MoE" if is_moe else "dense",
         "attn_kind": attn_kind,
+        "recurrent": recurrent,
         "layers": inner.get("num_hidden_layers"),
         "hidden": inner.get("hidden_size"),
         "heads_q": inner.get("num_attention_heads"),

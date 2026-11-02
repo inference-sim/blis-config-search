@@ -894,6 +894,14 @@ class CrossKnobConstraints(unittest.TestCase):
         if V.catalog_entry("qwen3-14b"):
             self.assertTrue(any("no experts to balance" in e for e in errs), errs)
 
+    def test_a_recurrent_model_is_refused_on_the_pinned_engine(self):
+        from unittest import mock
+        with mock.patch.object(V, "catalog_entry", return_value={"arch": "MoE", "recurrent": True}):
+            errs = V.validate(spec())
+        self.assertTrue(any("recurrent (linear-attention) layers" in e for e in errs), errs)
+        with mock.patch.object(V, "catalog_entry", return_value={"arch": "MoE", "recurrent": False}):
+            self.assertFalse(any("recurrent (linear-attention)" in e for e in V.validate(spec())))
+
     def test_mamba_knobs_on_a_non_recurrent_model_are_refused(self):
         errs = self.errs({"mamba_cache_mode": ["align"]})
         if V.catalog_entry("qwen3-14b"):

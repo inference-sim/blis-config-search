@@ -4,7 +4,7 @@ githubConfigUrl: https://github.com/inference-sim/blis-config-search
 githubConfigSecret: blis-config-search-runner-token   # key: github_token
 runnerScaleSetName: blis-bigmem                       # what `runs-on` names
 minRunners: 0
-maxRunners: 4                                         # REGEN_MAX_PARALLEL's default; 4 x 64Gi must fit the quota
+maxRunners: 16                                        # REGEN_MAX_PARALLEL's default; jchen has no quota
 
 controllerServiceAccount:
   namespace: jchen
@@ -23,8 +23,11 @@ template:
       - name: runner
         image: ghcr.io/actions/actions-runner:2.338.2
         command: ["/home/runner/run.sh"]
+        # Go sizes its scheduler from the node's 224 cores, not the cgroup; one run uses ~1.1 cores.
+        env:
+          - {name: GOMAXPROCS, value: "2"}
         resources:
-          # One AgentX replay peaks at 15-19 GiB RSS, 64-GPU sweeps >20 GiB. A too-small limit
-          # stalls in direct reclaim rather than OOM-killing, so leave generous headroom.
-          requests: {cpu: "8", memory: 64Gi}
-          limits: {cpu: "16", memory: 96Gi}
+          # Sized for SWEEP_MAX_PARALLEL=8: a 64-GPU replay run peaks >20 GiB, and a too-small
+          # limit stalls in direct reclaim rather than OOM-killing.
+          requests: {cpu: "10", memory: 224Gi}
+          limits: {cpu: "16", memory: 288Gi}

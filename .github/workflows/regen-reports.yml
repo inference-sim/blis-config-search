@@ -26,7 +26,9 @@ name: regen-reports
 #                          timeout. Point this at a larger or self-hosted runner, e.g. the
 #                          ARC scale set in deploy/openshift/arc/: "blis-bigmem".
 #   REGEN_TIMEOUT_MINUTES  per-report job timeout, default 350 (hosted runners cap at 360).
-#   REGEN_MAX_PARALLEL     report jobs at once, default 4.
+#   REGEN_MAX_PARALLEL     report jobs at once, default 16 (the ARC scale set's maxRunners).
+#   SWEEP_MAX_PARALLEL     BLIS runs at once inside one job, default 1. Each run needs its own
+#                          ~25 GiB on a 64-GPU replay, so raise it only on blis-bigmem (sized for 8).
 #   REGEN_RUN_TIMEOUT      per-BLIS-run timeout in seconds, default 1800.
 #
 # Token: as in bump-blis-pin.yml, each batch PR dispatches its own CI unless PIN_BOT_TOKEN is set.
@@ -152,7 +154,7 @@ jobs:
     timeout-minutes: ${{ fromJSON(vars.REGEN_TIMEOUT_MINUTES || '350') }}
     strategy:
       fail-fast: false
-      max-parallel: ${{ fromJSON(vars.REGEN_MAX_PARALLEL || '4') }}
+      max-parallel: ${{ fromJSON(vars.REGEN_MAX_PARALLEL || '16') }}
       matrix:
         report: ${{ fromJSON(needs.plan.outputs.reports) }}
     name: regen ${{ matrix.report.id }}
@@ -187,7 +189,8 @@ jobs:
           set -euo pipefail
           python3 -I scripts/blis_pin.py regen "${{ matrix.report.id }}" \
             --blis .build/blis --catalog blis-catalog --registry blis-registry \
-            --out "$RUNNER_TEMP/regen" --timeout "${{ vars.REGEN_RUN_TIMEOUT || '1800' }}"
+            --out "$RUNNER_TEMP/regen" --timeout "${{ vars.REGEN_RUN_TIMEOUT || '1800' }}" \
+            --max-parallel "${{ vars.SWEEP_MAX_PARALLEL || '1' }}"
       - uses: actions/upload-artifact@v7
         with:
           name: regen-${{ matrix.report.id }}

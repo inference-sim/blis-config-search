@@ -1919,6 +1919,46 @@ class DryRunPlan(unittest.TestCase):
         E._relativize_cmd(rec, "/tmp/out")
         self.assertIsNone(rec["cmd"])
 
+    def test_parallel_replay_warms_the_corpus_cache_serially(self):
+        """The first replay run that reaches BLIS builds the corpus snapshot alone, before the pool."""
+        import threading, time as _t
+        spec = {
+            "name": "warm", "sweeps": [
+                {"name": "a", "narrative": "n", "parallel": {"tp": [8]}},
+                {"name": "b", "narrative": "n", "parallel": {"tp": [8]}}],
+            "scenario": {"model": "m", "hardware": "h", "workload": "w", "gpus": 8,
+                         "slo": {"itl_p99": "20ms"}, "concurrency": [1, 2, 4, 8]},
+        }
+        lock, state, events = threading.Lock(), {"live": 0, "peak": 0}, []
+
+        def fake_run_one(*a, **kw):
+            with lock:
+                state["live"] += 1
+                state["peak"] = max(state["peak"], state["live"])
+                events.append("start")
+            _t.sleep(0.02)
+            with lock:
+                state["live"] -= 1
+                events.append("end")
+                refused = events.count("end") == 1
+            # The first run is refused before BLIS starts, so it must not count as the warm-up.
+            return {"metrics": {"tokens_per_sec": 1.0, "itl_p99_ms": 1.0}, "cmd": None,
+                    "returncode": None if refused else 0}
+
+        real_run, real_resolve = E.run_blis.run_one, E.resolve_replay
+        E.run_blis.run_one = fake_run_one
+        E.resolve_replay = lambda *a, **kw: {"scenario": "s", "corpus": "c"}
+        try:
+            import tempfile as _tf
+            with _tf.TemporaryDirectory() as out:
+                E.run_experiment(spec, "/opt/blis", None, "/r", out, verbose=False, max_parallel=4)
+        finally:
+            E.run_blis.run_one, E.resolve_replay = real_run, real_resolve
+        self.assertEqual(16, len(events))
+        self.assertEqual(["start", "end"] * 2, events[:4],
+                         "warm-up must continue past a refused run until one really launches")
+        self.assertGreater(state["peak"], 1, "the rest should run in parallel")
+
     def test_max_parallel_does_not_change_the_ledger(self):
         """--max-parallel must be a SPEED knob, never a result knob.
 

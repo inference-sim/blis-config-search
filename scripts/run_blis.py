@@ -168,6 +168,16 @@ CLI_FLAGS = {"num_instances": "--num-instances", "concurrency": "--concurrency",
 # pins.env) -- see ROUTING_MOVED below for why this replaced the former --routing-policy flag.
 SCENARIO_ROUTER = ("router_config",)
 PARALLEL_DEFAULTS = {"tp": 1, "pp": 1, "dp": 1, "enable_expert_parallel": False}
+
+
+def pinned_engine_version(pins_path=os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                  os.pardir, "pins.env")):
+    """The vLLM release the pinned blis-vllm models: pins.env's VLLM_REF, e.g. v0.32.0-blis.1 -> 0.32.0."""
+    with open(pins_path, encoding="utf-8") as f:
+        ref = next(l.split("=", 1)[1].strip() for l in f if l.startswith("VLLM_REF="))
+    return ref.lstrip("v").split("-", 1)[0]
+
+
 GPUS_PER_NODE = 8   # single-node H100; a per-instance footprint beyond this spans nodes (needs a fabric)
 # Cross-node cost resolves from the fabric (a catalog networks/ entry), required once nodes > 1.
 DEFAULT_FABRIC = "ib-400g"   # InfiniBand NDR 400 Gb/s; the standard H100 multi-node interconnect
@@ -1498,7 +1508,8 @@ def add_common_args(p):
     p.add_argument("--scenarios", required=True, help="dir to write/read generated scenario YAMLs")
     p.add_argument("--model", required=True, help="catalog short-name, e.g. glm-5.3-flash")
     p.add_argument("--hardware", required=True, help="scenario hardware key, e.g. h100")
-    p.add_argument("--engine-version", dest="engine_version", default="0.29.0")
+    p.add_argument("--engine-version", dest="engine_version", default=None,
+                   help="vLLM release to model (default: pins.env VLLM_REF)")
     p.add_argument("--workload")
     p.add_argument("--num-requests", type=int, dest="num_requests")
     p.add_argument("--seed", type=int, default=0)
@@ -1576,7 +1587,8 @@ def main():
     except ValueError as e:
         sys.exit(str(e))
     rec = run_one(args.blis, args.catalog, args.registry, args.scenarios, args.model, args.hardware,
-                  args.engine_version, args.workload, args.num_requests, args.seed, args.horizon,
+                  args.engine_version or pinned_engine_version(), args.workload, args.num_requests,
+                  args.seed, args.horizon,
                   json.loads(args.config), args.phase, args.timeout, args.defaults, replay)
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)

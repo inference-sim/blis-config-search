@@ -491,7 +491,8 @@ def _run_context(entry, root, catalog, corpus, corpus_cache):
         replay = run_experiment.resolve_replay(sc["workload"], catalog,
                                                dict(sc.get("replay") or {}, **local))
         replay = {k: v for k, v in replay.items() if k != "_overrides"}
-    return (sc["model"], sc["hardware"], sc.get("engine_version", "0.29.0"), sc["workload"],
+    return (sc["model"], sc["hardware"], run_experiment.run_blis.pinned_engine_version(),
+            sc["workload"],
             int(sc.get("seed", 42)), replay,
             (lambda c: None) if replay else (lambda c: max(80, c * 4)))
 

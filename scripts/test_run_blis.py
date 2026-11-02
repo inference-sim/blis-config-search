@@ -782,5 +782,13 @@ class AcceptanceLength(unittest.TestCase):
                              (None, None))
 
 
+class PinnedEngineVersion(unittest.TestCase):
+    def test_follows_vllm_ref(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as f:
+            f.write("# c\nBLIS_REF=v0.15.0\nVLLM_REF=v0.32.0-blis.1\n")
+        self.addCleanup(os.unlink, f.name)
+        self.assertEqual(run_blis.pinned_engine_version(f.name), "0.32.0")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

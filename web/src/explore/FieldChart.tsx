@@ -13,7 +13,8 @@ export function FieldChart({ x, k, title, help }: { x: Explorer; k: string; titl
     const rs = sub.filter((r) => x.fv(r, k) === v)
     const b = rankConfigs(rs, m)[0]
     return { v, n: rs.length, ok: rs.filter((r) => r.ok).length, best: b ? (b[m] as number) : null, bestTopo: b?.topo ?? '', bestConc: b?.conc ?? null }
-  })
+  }).filter((b) => b.n > 0 || sel.includes(b.v))  // empty bars hide; a selected one stays so it can be cleared
+  if (!bars.length) return null
   const measure = (b: Bar) => x.bar === 'pass' ? (b.n ? b.ok / b.n : null) : x.bar === 'count' ? b.n : b.best
   const text = (b: Bar) => x.bar === 'pass' ? (b.n ? `${fmt((b.ok / b.n) * 100, 0)}%` : '–') : x.bar === 'count' ? b.n.toLocaleString('en-US') : fmtMetric(m, b.best)
   // For a latency target the lowest value is the tallest bar.

@@ -183,7 +183,7 @@ thead tr.col th.num button.sortbtn{justify-content:flex-end}
 /* a config's name, shared by the dashboard card and the report page */
 .cfgname{display:block;min-width:0}
 .cfgname .win{display:block;font-family:var(--font-mono);font-size:20px;font-weight:600;letter-spacing:-0.01em;line-height:1.25;color:var(--config-ink);margin-top:3px;overflow-wrap:anywhere}
-.cfgname .winsub{display:block;font-family:var(--font-sans);font-size:12.5px;font-weight:400;color:var(--muted);margin-top:2px}
+.cfgname .winsub,.cfgname .winsub-blank{display:block;font-family:var(--font-sans);font-size:12.5px;font-weight:400;color:var(--muted);margin-top:2px}
 .card .perf{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .card .perf .m{display:flex;flex-direction:column;min-width:0}
 .card .perf .l{font-size:11px;font-weight:600;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

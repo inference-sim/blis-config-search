@@ -39,7 +39,7 @@ function ScenarioCard({ s }: { s: Scenario }) {
       </dl>
       <div className="cardsec">
         <div className="winlbl">#1 config</div>
-        <ConfigName label={w.label} variant={w.variant} />
+        <ConfigName label={w.label} variant={w.variant} reserve />
       </div>
       <div className="cardsec">
         <Metrics s={s} />

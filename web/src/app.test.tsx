@@ -322,6 +322,23 @@ describe('report explorer page', () => {
     expect(new Set(dots.map((d) => d.style.color)).size).toBeGreaterThan(1)
   })
 
+  it('draws a bar only for values with runs in the filter, keeping a selected one so it can be cleared', async () => {
+    page()
+    await waitFor(() => expect(cards().length).toBeGreaterThan(0))
+    const vals = (field: string) => [...document.querySelectorAll(`[data-field="${field}"] button .xf-v`)].map((e) => e.textContent)
+    const bar = (field: string, v: string) => [...document.querySelectorAll(`[data-field="${field}"] button`)].find((b) => b.querySelector('.xf-v')?.textContent === v) as Element
+    expect(vals('dp')).toEqual(['1', '2'])
+    fireEvent.click(bar('tp', '8'))
+    expect(vals('dp')).toEqual(['1'])
+    expect(vals('num_instances')).toEqual(['8'])
+    expect(vals('max_num_seqs')).toEqual(['64'])
+    fireEvent.click(bar('tp', '4')); fireEvent.click(bar('dp', '2'))
+    expect(vals('tp')).toEqual(['4', '8'])
+    expect(bar('tp', '8').getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(bar('tp', '8'))
+    expect(vals('tp')).toEqual(['4'])
+  })
+
   it('names each bar for a screen reader by its field, value and result', async () => {
     page()
     await waitFor(() => expect(cards().length).toBeGreaterThan(0))
@@ -368,6 +385,13 @@ describe('report explorer page', () => {
     expect(new Set(names.map((n) => n.querySelector('.win')?.textContent)).size).toBe(1)
     expect(new Set(names.map((n) => n.querySelector('.winsub')?.textContent)).size).toBe(2)
     expect(names.map((n) => n.querySelector('.winsub')?.textContent)).toContain('pd-prefix nonCachedTokens=1024')
+  })
+
+  it('reserves the caption line on an uncaptioned top config card so the numbers line up', async () => {
+    page()
+    await waitFor(() => expect(cards().length).toBeGreaterThan(0))
+    for (const c of cards()) expect(c.querySelectorAll('.cfgname .winsub, .cfgname .winsub-blank')).toHaveLength(1)
+    expect(cards().some((c) => c.querySelector('.winsub-blank'))).toBe(true)
   })
 
   it('calls a single-pool deployment aggregated, not colocated', async () => {
@@ -550,6 +574,9 @@ describe('scenario cards', () => {
     const [a, b] = [...document.querySelectorAll('.card')]
     expect(a.querySelector('.winsub')?.textContent).toBe('prefix-affinity routing')
     expect(b.querySelector('.winsub')).toBeNull()
+    // the caption line stays reserved so both cards' numbers start at the same height
+    expect(b.querySelector('.cfgname .winsub-blank')?.getAttribute('aria-hidden')).toBe('true')
+    expect(a.querySelector('.winsub-blank')).toBeNull()
   })
 
   it('labels each performance number and gives latency its own column', () => {

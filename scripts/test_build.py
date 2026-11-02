@@ -318,6 +318,20 @@ def test_derived_pins_match_gomod():
             check(key in derived,
                   f"pins.env states {key} but go.mod at {ref} has no such dependency")
 
+    # The engine allowlist must match the binary's, or a compat-engine version would pass.
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import re, subprocess, run_blis
+    go = subprocess.run(["git", "-C", repo, "show", f"{ref}:cmd/engine_driver_build.go"],
+                        capture_output=True, text=True, timeout=30).stdout
+    m = re.search(r"coreEngineVersions\s*=\s*map\[string\]bool\{([^}]*)\}", go)
+    if m:
+        core = set(re.findall(r'"([^"]+)"\s*:\s*true', m.group(1)))
+        check(core == set(run_blis.CORE_ENGINE_VERSIONS),
+              f"run_blis.CORE_ENGINE_VERSIONS {sorted(run_blis.CORE_ENGINE_VERSIONS)} but "
+              f"{ref} coreEngineVersions is {sorted(core)}")
+    else:
+        print(f"  (engine allowlist not checked: no coreEngineVersions at {ref})")
+
     # The block must be machine-generated, so the markers have to survive edits to the file.
     with open(os.path.join(ROOT, "pins.env"), encoding="utf-8") as f:
         text = f.read()

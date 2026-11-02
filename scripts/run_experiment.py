@@ -940,6 +940,7 @@ def _pinned_stack(blis, catalog, registry):
     out = {"blis": pins.get("BLIS_REF", "unpinned"),
            "kernel": pins.get("KERNEL_REF", "unpinned"),
            "router": pins.get("ROUTER_REF", "unpinned"),
+           "engine_version": run_blis.pinned_engine_version(),
            "catalog": pins.get("CATALOG_REF", "unpinned"),
            "registry": pins.get("REGISTRY_REF", "unpinned")}
     resolved = {}

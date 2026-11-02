@@ -790,7 +790,8 @@ class PinnedEngineVersion(unittest.TestCase):
         self.assertEqual(run_blis.pinned_engine_version(f.name), "0.32.0")
 
     def test_unmappable_ref_fails_loudly(self):
-        for body in ("BLIS_REF=v0.15.0\n", "VLLM_REF=v0.32.1-0.20261101120000-abcdef\n"):
+        for body in ("BLIS_REF=v0.15.0\n", "VLLM_REF=v0.32.1-0.20261101120000-abcdef\n",
+                     "VLLM_REF=v0.31.0-blis.1\n"):   # last: a compat-engine release
             with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as f:
                 f.write(body)
             self.addCleanup(os.unlink, f.name)

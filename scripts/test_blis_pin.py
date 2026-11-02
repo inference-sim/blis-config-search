@@ -73,6 +73,9 @@ def test_sync_pins_reads_replace():
     block = sync_pins.derive_from_text("replace (\n\tgithub.com/llm-d/llm-d-router v0.0.0 => "
                                        "github.com/inference-sim/llm-d-router v1.0.0-blis.3\n)\n")
     check(block == {"ROUTER_REF": "v1.0.0-blis.3"}, f"a replace block entry is read: {block}")
+    dropped = sync_pins.derive_from_text(GO_MOD.split("replace ")[0])
+    check("ROUTER_REF" not in dropped, f"a dropped replace derives no ROUTER_REF: {dropped}")
+    check("ROUTER_REF=" not in sync_pins.render(dropped), "so the regenerated block clears it")
 
 
 def test_rewrite_pins_keeps_comments():

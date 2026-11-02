@@ -380,9 +380,9 @@ describe('report explorer page', () => {
   it('opens one reproduce dialog from the header: install the pinned stack, then reproduce the sweep', async () => {
     const setup = { stack: [{ name: 'BLIS', repo: 'inference-sim', ref: 'v9.0.0', commit: 'a'.repeat(40) }], script: 'git clone --branch v9.0.0 x\n', sweep: 'python3 -I scripts/run_experiment.py reports/a/spec.yaml\n', runs: 7, hours: 1.5 }
     render(<ScenarioPage runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16)]} load={() => Promise.resolve({ ...FIXTURE, setup })} />)
-    await waitFor(() => expect(screen.getByLabelText('Reproduce this report')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('Reproduce')).toBeTruthy())
     expect(document.querySelector('.xf-dialog')?.hasAttribute('open')).toBe(false)
-    fireEvent.click(screen.getByLabelText('Reproduce this report'))
+    fireEvent.click(screen.getByText('Reproduce'))
     expect(document.querySelector('.xf-dialog')?.hasAttribute('open')).toBe(true)
     expect(document.querySelector('.xf-dialog pre')?.textContent).toMatch(/--branch v9.0.0/)
     fireEvent.click(screen.getByText('2. Reproduce the experiment sweep'))

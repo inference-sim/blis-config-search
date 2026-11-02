@@ -1,6 +1,6 @@
 // The report page: header, top configs, then a rail beside the overview, Topology, Routing,
 // vLLM engine and Runs sections. One crossfilter drives all of it.
-import { Fragment, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Catalog, Scenario } from '../types'
 import type { ExploreData } from './types'
 import { useExplorer, type Explorer as X } from './useExplorer'
@@ -34,6 +34,7 @@ export function ScenarioPage({ runId, scenarios, catalog, load = loadExplore }: 
 }) {
   const s = scenarios.find((x) => x.run_id === runId)
   const [data, setData] = useState<ExploreData | null>(null)
+  const setup = useSetupDialog(data?.setup)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     let live = true
@@ -45,11 +46,14 @@ export function ScenarioPage({ runId, scenarios, catalog, load = loadExplore }: 
   if (!s) return <div><p className="crumb"><a href="#/reports">← all reports</a></p><div className="empty">Unknown scenario <span className="mono">{runId}</span>.</div></div>
   const modelDoc = catalogDoc(catalog, 'model', s.model)
   return (
+    <OpenSetup.Provider value={setup.open}>
     <div className="xf">
+      {setup.dialog}
       <p className="crumb"><a href="#/reports">← all reports</a></p>
       <h2 className="viewhead">{s.model} on {s.gpu_budget} × {s.hardware}, {s.workload}
         {modelDoc && <a className="specsheet" href={modelDoc} target="_blank" rel="noreferrer">model spec sheet ↗</a>}
-        {s.caveat && <CaveatBadge caveat={s.caveat} />}</h2>
+        {s.caveat && <CaveatBadge caveat={s.caveat} />}
+        <span className="xf-repro"><SetupButton>Reproduce</SetupButton></span></h2>
       <div className="specchips">
         <CatRef href={catalogDoc(catalog, 'hardware', s.hardware)}>{s.hardware}</CatRef>
         <span className="spec">{s.gpu_budget} accelerators</span>
@@ -65,21 +69,14 @@ export function ScenarioPage({ runId, scenarios, catalog, load = loadExplore }: 
       {!data && !error && <div className="loading">Loading runs…</div>}
       {data && <Body data={data} />}
     </div>
+    </OpenSetup.Provider>
   )
 }
 
 function Body({ data }: { data: ExploreData }) {
   const x = useExplorer(data)
-  const setup = useSetupDialog(data.setup)
   return (
-    <OpenSetup.Provider value={setup.open}>
-      {setup.dialog}
-      {data.setup && (
-        <div className="xf-repro">
-          <span><b>Reproduce this report</b> <span className="xf-sub">priced by BLIS <span className="mono">{data.setup.stack[0].ref}</span>{data.setup.stack.slice(1).map((d) => <Fragment key={d.repo}> · {d.name} <span className="mono">{d.ref}</span></Fragment>)}</span></span>
-          <SetupButton />
-        </div>
-      )}
+    <>
       <Controls x={x} />
       <TopConfigs x={x} />
       <div className="xf-layout">
@@ -93,7 +90,7 @@ function Body({ data }: { data: ExploreData }) {
           <RunsTable x={x} />
         </div>
       </div>
-    </OpenSetup.Provider>
+    </>
   )
 }
 

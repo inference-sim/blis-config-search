@@ -6,6 +6,7 @@ import { ScenarioPage } from './explore/Explorer'
 import { FIXTURE } from './explore/model.test'
 import { RunsTable, type Command } from './explore/RunsTable'
 import { useExplorer } from './explore/useExplorer'
+import type { Scalar } from './explore/types'
 import { Reports } from './components/Reports'
 import { Submit } from './components/Submit'
 import { Coverage } from './components/Coverage'
@@ -392,6 +393,23 @@ describe('report explorer page', () => {
     await waitFor(() => expect(cards().length).toBeGreaterThan(0))
     for (const c of cards()) expect(c.querySelectorAll('.cfgname .winsub, .cfgname .winsub-blank')).toHaveLength(1)
     expect(cards().some((c) => c.querySelector('.winsub-blank'))).toBe(true)
+  })
+
+  it('drops a pool heading in the engine section once none of its flags has runs in the filter', async () => {
+    const at = 2 + FIXTURE.keys.length
+    const add = (r: Scalar[], v: Scalar) => [...r.slice(0, at), v, ...r.slice(at)]
+    const pd = FIXTURE.rows.filter((r) => r[0] === 1)
+    const data = {
+      ...FIXTURE, keys: [...FIXTURE.keys, 'prefill_max_num_seqs'],
+      rows: [...FIXTURE.rows.map((r) => add(r, r[0] === 1 ? 32 : null)), ...pd.map((r) => add(r, 128))],
+    }
+    render(<ScenarioPage runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16)]} load={() => Promise.resolve(data)} />)
+    await waitFor(() => expect(cards().length).toBeGreaterThan(0))
+    const heads = () => [...document.querySelectorAll('#sec-engine .eyebrow')].map((e) => e.textContent)
+    expect(heads()).toContain('Prefill pool')
+    fireEvent.click([...document.querySelectorAll('[data-field="mode"] button')].find((b) => b.textContent?.includes('aggregated')) as Element)
+    expect(heads()).not.toContain('Prefill pool')
+    expect(document.querySelector('#sec-engine [data-field="max_num_seqs"]')).toBeTruthy()
   })
 
   it('calls a single-pool deployment aggregated, not colocated', async () => {

@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import type { Explorer } from './useExplorer'
 import type { Run } from './types'
-import { FieldChart, barKey } from './FieldChart'
+import { FieldChart, barKey, fieldBars } from './FieldChart'
 import { RouterPanel } from './RouterView'
 import { H, M, W, YAxis } from './chart'
 import { ConfigName } from '../components/ConfigName'
@@ -229,7 +229,7 @@ export function EngineSection({ x }: { x: Explorer }) {
         <div className="xf-card">
           <div className="xf-card-h"><h3>Engine flags</h3><span className="xf-sub">{barKey(x)} Click a bar to cross-filter.</span></div>
           {groups.map((g) => {
-            const ks = ek.filter((k) => poolOf(k) === g.pool)
+            const ks = ek.filter((k) => poolOf(k) === g.pool && fieldBars(x, k).length > 0)
             if (!ks.length) return null
             return (
               <div className="xf-group" key={g.pool ?? 'shared'}>

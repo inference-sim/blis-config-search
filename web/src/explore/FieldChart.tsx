@@ -4,16 +4,22 @@ import { METRIC, better, fmt, fmtMetric, poolOf, rankConfigs, sortValues, NA } f
 
 interface Bar { v: string; n: number; ok: number; best: number | null; bestTopo: string; bestConc: number | null }
 
-export function FieldChart({ x, k, title, help }: { x: Explorer; k: string; title: string; help?: string }) {
+// The bars a field draws; empty bars hide, but a selected one stays so it can be cleared.
+export function fieldBars(x: Explorer, k: string): Bar[] {
   const sub = x.shown(k)
+  const sel = x.sel[k] ?? []
   const vals = sortValues([...new Set(x.runs.map((r) => x.fv(r, k)))]).filter((v) => v !== NA)
+  return vals.map((v) => {
+    const rs = sub.filter((r) => x.fv(r, k) === v)
+    const b = rankConfigs(rs, x.target)[0]
+    return { v, n: rs.length, ok: rs.filter((r) => r.ok).length, best: b ? (b[x.target] as number) : null, bestTopo: b?.topo ?? '', bestConc: b?.conc ?? null }
+  }).filter((b) => b.n > 0 || sel.includes(b.v))
+}
+
+export function FieldChart({ x, k, title, help }: { x: Explorer; k: string; title: string; help?: string }) {
   const sel = x.sel[k] ?? []
   const m = x.target
-  const bars: Bar[] = vals.map((v) => {
-    const rs = sub.filter((r) => x.fv(r, k) === v)
-    const b = rankConfigs(rs, m)[0]
-    return { v, n: rs.length, ok: rs.filter((r) => r.ok).length, best: b ? (b[m] as number) : null, bestTopo: b?.topo ?? '', bestConc: b?.conc ?? null }
-  }).filter((b) => b.n > 0 || sel.includes(b.v))  // empty bars hide; a selected one stays so it can be cleared
+  const bars = fieldBars(x, k)
   if (!bars.length) return null
   const measure = (b: Bar) => x.bar === 'pass' ? (b.n ? b.ok / b.n : null) : x.bar === 'count' ? b.n : b.best
   const text = (b: Bar) => x.bar === 'pass' ? (b.n ? `${fmt((b.ok / b.n) * 100, 0)}%` : '–') : x.bar === 'count' ? b.n.toLocaleString('en-US') : fmtMetric(m, b.best)

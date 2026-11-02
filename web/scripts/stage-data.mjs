@@ -1,9 +1,9 @@
 // Build site/ with scripts/build_gallery.py, then copy it into web/public/data/ so the SPA can
 // fetch it with same-origin relative requests (works on GitHub Pages with no server).
 //
-//   web/public/data/scenarios.json     one row per report, run records inlined
+//   web/public/data/scenarios.json     one row per report (cards, coverage)
 //   web/public/data/catalog.json       models / hardware / workloads
-//   web/public/data/reports/<run_id>/  the standalone report index.html + its data files
+//   web/public/data/reports/<run_id>/  explore.json + commands.json for the explorer, plus the standalone report
 //
 // Run from web/ (npm run stage:data). REUSE_SITE=1 skips the Python build when site/ exists.
 import { execFileSync } from 'node:child_process'

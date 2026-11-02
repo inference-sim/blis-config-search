@@ -3,7 +3,7 @@ import type { Catalog, Scenario } from './types'
 import { loadCatalog, loadScenarios } from './load'
 import { useHashRoute } from './route'
 import { Reports } from './components/Reports'
-import { ScenarioDetail } from './components/ScenarioDetail'
+import { ScenarioPage } from './explore/Explorer'
 import { Coverage } from './components/Coverage'
 import { Submit } from './components/Submit'
 import { Footer } from './components/Footer'
@@ -40,7 +40,7 @@ export function App() {
   } else if (!data) {
     body = <div className="loading">Loading…</div>
   } else if (route.runId) {
-    body = <ScenarioDetail runId={route.runId} scenarios={data.scenarios} catalog={data.catalog} />
+    body = <ScenarioPage runId={route.runId} scenarios={data.scenarios} catalog={data.catalog} />
   } else {
     switch (route.tab) {
       case 'coverage':

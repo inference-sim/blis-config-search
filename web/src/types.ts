@@ -1,6 +1,5 @@
-// Data contracts for the config-search webpage. These mirror exactly what
-// scripts/build_gallery.py + build_catalog.py emit and web/scripts/stage-data.mjs stages
-// into web/public/data/. Keep in sync with those producers.
+// Data contracts for the site. These mirror what scripts/build_gallery.py + build_catalog.py emit
+// (staged into web/public/data/). The explorer's per-report data is typed in explore/types.ts.
 
 export interface Winner {
   /** Topology only, e.g. "64x TP4xDP2 + EP" — several configs can share this. */
@@ -51,76 +50,6 @@ export interface Scenario {
   winner: Winner
   finalists: Finalist[]
   reason: string
-  // Per-run records for the detail explorer, inlined by build_gallery.py.
-  records: RunRecord[]
-}
-
-// One run row for the per-scenario detail explorer (report.build_records projection).
-export interface RunRecord {
-  id: string
-  src: string
-  conc: number | null
-  tp: number | null
-  dp: number | null
-  ni: number | null
-  gpus: number | null
-  series: string
-  route: string
-  pd: string
-  /** Draft depth K (0 = speculative decoding off). */
-  mtp: number
-  /** The speculative method the model drafted with (dspark, mtp, eagle3, …); null when off. */
-  spec?: string | null
-  /** Acceptance length the run was priced with: mean tokens accepted per verification step. */
-  al?: number | null
-  /** Where that acceptance was measured, e.g. "inferencex-golden-al (b200)". */
-  al_src?: string | null
-  /** How `pu` was obtained: "" direct, "derived-from-acceptance" (AL-scaled — the correct
-   *  per-token rate under drafting), "step-estimate-withheld" (drafting on, AL unknown). */
-  pu_basis?: string
-  mnbt: number | null
-  mns: number | null
-  epw?: number | string | null
-  a2a?: string | null
-  pu: number | null
-  cl: number | null
-  itl: number | null
-  ttft: number | null
-  hit: number | null
-  p95: number | null
-  ok: boolean
-  status: string
-  viol: string[]
-  // --- deployment detail, for the click-to-inspect panel. build_gallery stages all of these;
-  // the web app simply had no type for them. Optional because an older run directory may lack
-  // any given field, and the panel must render what it has rather than assume.
-  /** Knob delta from this topology's defaults, e.g. "least-loaded routing"; "" at defaults. */
-  variant?: string
-  /** Which knobs varied in this run's topology group, raw values (drives the panel's knob list). */
-  knobs?: Record<string, string | number | boolean | null>
-  pp?: number | null
-  nodes?: number | null
-  fabric?: string | null
-  bs?: number | null
-  mml?: number | null
-  gmu?: number | null
-  cg?: string | null
-  quant?: string | null
-  cdt?: string | null
-  scorers?: string | null
-  /** The scheduler POLICY. Not to be confused with `sched`, the scheduling-delay metric. */
-  schedp?: string | null
-  admit?: string | null
-  /** Output per accelerator, from the unrounded throughput. */
-  tpg?: number | null
-  e2e?: number | null
-  /** Scheduling delay p99 in ms (a metric — see `schedp` for the policy). */
-  sched?: number | null
-  itl_mean?: number | null
-  /** The generated scenario file BLIS consumed. */
-  scen?: string | null
-  /** The exact `blis run` invocation, shell-quoted; null for runs recorded before this existed. */
-  cmd?: string | null
 }
 
 export interface ModelEntry {

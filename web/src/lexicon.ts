@@ -11,7 +11,6 @@
 // mirror, because Vite cannot import from outside web/.
 // scripts/test_build.py fails the build if the two drift.
 import raw from './lexicon.json'
-import type { RunRecord } from './types'
 
 export interface MetricMeta {
   label: string
@@ -61,23 +60,11 @@ function resolve<T>(node: T, root: unknown): T {
   return node
 }
 
-export const LEX = resolve(raw as unknown as Lexicon, raw)
-export const OBJECTIVE = LEX.objective
-export const AXES = LEX.axes
+const LEX = resolve(raw as unknown as Lexicon, raw)
 
-/** One metric's label / unit / digits / help, by RunRecord key. */
+/** One metric's label / unit / digits / help, by record key. */
 export const metric = (key: string): MetricMeta => LEX.metrics[key]
-/** The display label for a metric OR a facet key — the two namespaces do not overlap. */
+/** The display label for a metric OR a facet key; the two namespaces do not overlap. */
 export const label = (key: string): string => LEX.metrics[key]?.label ?? LEX.facets[key]?.label ?? key
 /** The glossary line for a metric or facet key, for a column tooltip. */
 export const help = (key: string): string | undefined => LEX.metrics[key]?.help ?? LEX.facets[key]?.help
-/** One figure's title / caption / axis labels / how-to-read text. */
-export const figure = (name: string): FigureMeta => LEX.figures[name]
-
-/** The deploy flags a reader would copy, in the fixed shared order. */
-export const FLAGS: { key: keyof RunRecord; flag: string; bool?: boolean }[] =
-  LEX.flags.map((f) => ({ key: f.key as keyof RunRecord, flag: f.flag, bool: f.bool }))
-/** Values worth no ink: a knob at its default, or an "off" state. */
-export const FLAG_SKIP: Record<string, (string | number)[]> = LEX.flag_skip
-/** The columns the "What to run" table shows, in order. */
-export const OPERATING_COLUMNS = LEX.operating_columns

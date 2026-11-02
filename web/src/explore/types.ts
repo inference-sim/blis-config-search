@@ -23,7 +23,8 @@ export interface Router {
   override: string
   summary: string
   yaml: string
-  chain: RouterChain
+  /** null when the shared routing file is no longer in the repo. */
+  chain: RouterChain | null
 }
 export interface Sweep {
   name: string
@@ -42,6 +43,9 @@ export interface ExploreData {
   keys: string[]
   metrics: MetricKey[]
   rows: Scalar[][]
+  /** Distinct variant captions, and each row's index into them. */
+  variants?: string[]
+  variant?: number[]
   routers: Record<string, Router>
   /** The spec.yaml this report was swept from, as written. */
   spec_yaml: string
@@ -60,8 +64,10 @@ export interface Run {
   ttft: number | null
   ok: boolean
   mode: 'aggregated' | 'P/D'
-  /** Short topology label, e.g. "8× TP4×DP2 EP" or "2P TP8 EP / 6D TP8 EP". */
+  /** Topology in the dashboard's notation, e.g. "8×TP4xDP2 + EP" or "2P/6D TP8 + EP". */
   topo: string
+  /** How the config differs from its sweep's baseline, as the dashboard captions it; "" for none. */
+  variant: string
   /** Identity of the config across loads: every knob value. */
   cfg: string
 }

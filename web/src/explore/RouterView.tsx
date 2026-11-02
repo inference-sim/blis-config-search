@@ -139,7 +139,7 @@ function RouterDetail({ x, id, view, index, onClose }: { x: Explorer; id: string
   const rs = x.shown().filter((run) => routerLabel(run.knobs.router_config, routers) === lbl)
   const best = rankConfigs(rs, x.target)[0]
   // same serving mode as `best`, so the delta measures the router and not aggregated vs P/D
-  const defBest = best && id !== 'default' && rankConfigs(x.shown().filter((run) => run.knobs.router_config == null && run.mode === best.mode), x.target)[0]
+  const defBest = best && id !== 'default' && rankConfigs(x.shown('router_config').filter((run) => run.knobs.router_config == null && run.mode === best.mode), x.target)[0]
   const m = x.target
   const delta = best && defBest ? (best[m] as number) / (defBest[m] as number) - 1 : null
   const good = delta !== null && (METRIC[m].higher ? delta >= 0 : delta <= 0)
@@ -157,8 +157,9 @@ function RouterDetail({ x, id, view, index, onClose }: { x: Explorer; id: string
         {best ? <span>best <b>{fmtMetric(m, best[m])}</b> {METRIC[m].label} · {best.topo} · {best.conc} sessions</span> : <span>no run in this filter meets every SLO</span>}
         {delta !== null && <span>vs the default router, same serving mode: <b className={good ? 'good' : 'bad'}>{delta >= 0 ? '+' : '−'}{Math.abs(delta * 100).toFixed(0)}%</b></span>}
       </div>
-      {r && (view === 'yaml' ? <pre className="xf-yaml">{r.yaml}</pre> : view === 'steps' ? <Steps c={r.chain} hot={hot} /> : <Diagram c={r.chain} hot={hot} />)}
-      {r && <p className="xf-router-path mono">{r.path} · {r.chain.plugins.length} plugins{r.chain.flow_control ? ' · flow control on' : ''}</p>}
+      {r?.chain ? (view === 'yaml' ? <pre className="xf-yaml">{r.yaml}</pre> : view === 'steps' ? <Steps c={r.chain} hot={hot} /> : <Diagram c={r.chain} hot={hot} />)
+        : r && <p className="xf-sub">This routing file is no longer in the repo, so its plugin chain cannot be drawn.</p>}
+      {r?.chain && <p className="xf-router-path mono">{r.path} · {r.chain.plugins.length} plugins{r.chain.flow_control ? ' · flow control on' : ''}</p>}
     </article>
   )
 }

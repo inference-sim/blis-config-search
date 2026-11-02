@@ -180,8 +180,10 @@ thead tr.col th.num button.sortbtn{justify-content:flex-end}
 .card .cardsec{border-top:1px solid var(--line);padding-top:11px}
 .card .cardsec + .cardsec{margin-top:11px}
 .card .winlbl{font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);font-weight:700}
-.card .win{font-family:var(--font-mono);font-size:20px;font-weight:600;letter-spacing:-0.01em;line-height:1.25;color:var(--config-ink);margin-top:3px}
-.card .winsub{font-size:12.5px;color:var(--muted);margin-top:2px}
+/* a config's name, shared by the dashboard card and the report page */
+.cfgname{display:block;min-width:0}
+.cfgname .win{display:block;font-family:var(--font-mono);font-size:20px;font-weight:600;letter-spacing:-0.01em;line-height:1.25;color:var(--config-ink);margin-top:3px;overflow-wrap:anywhere}
+.cfgname .winsub{display:block;font-family:var(--font-sans);font-size:12.5px;font-weight:400;color:var(--muted);margin-top:2px}
 .card .perf{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .card .perf .m{display:flex;flex-direction:column;min-width:0}
 .card .perf .l{font-size:11px;font-weight:600;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -320,11 +322,6 @@ ol.sb-how b{color:var(--ink);font-weight:600}
 .xf-cfg-rank .xf-sub{margin-left:auto;font-size:11px}
 .xf-mode{font-size:10.5px;font-weight:600;padding:1px 7px;border-radius:10px;background:var(--grid);color:var(--muted)}
 .xf-mode.pd{background:var(--accent-soft);color:var(--accent-ink)}
-.xf-cfg-name{font-weight:600;font-size:20px;line-height:1.25;letter-spacing:-0.01em;overflow-wrap:anywhere;color:var(--config-ink)}
-.xf-tags{display:flex;flex-wrap:wrap;gap:4px}
-.xf-tag{font-family:var(--font-mono);font-size:11px;padding:1px 6px;border-radius:3px;background:var(--grid);color:var(--ink);border-left:3px solid var(--faint)}
-.xf-tag.l-routing{border-left-color:var(--l-routing)} .xf-tag.l-engine{border-left-color:var(--l-engine)}
-.xf-tag.plain{color:var(--muted);border-left-color:transparent}
 .xf-metrics{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:8px;align-items:stretch}
 .xf-hero{display:flex;flex-direction:column;justify-content:center;gap:2px;background:var(--accent-soft);border-radius:6px;padding:8px 10px;min-width:0}
 .xf-hero-v{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-weight:600;font-size:28px;line-height:1.1;color:var(--accent-ink);white-space:nowrap}
@@ -408,7 +405,7 @@ ol.sb-how b{color:var(--ink);font-weight:600}
 .xf-topo-charts{display:grid;gap:12px;min-width:0}
 .xf-gpu{position:sticky;top:12px;display:grid;gap:8px;align-content:start;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:12px}
 .xf-gpu p{margin:0}
-.xf-gpu-name{font-weight:600;font-size:13.5px;color:var(--config-ink)}
+.xf-gpu .cfgname .win{font-size:15px}
 .xf-gpu-row{display:grid;gap:8px}
 .xf-gpu-pool{display:grid;gap:6px}
 .xf-gpu-kv{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
@@ -474,10 +471,9 @@ svg.chart .xf-ser.pd polyline{stroke:var(--l-topology)} svg.chart .xf-ser.pd cir
 
 .xf-pl{font-family:var(--font-mono);font-size:11.5px;display:grid;gap:2px;white-space:nowrap}
 .xf-pl.def{color:var(--muted);font-style:italic}
-.xf-pl-p{font-size:10px;color:var(--muted)}
+.xf-pl-p{font-size:10px;color:var(--muted);display:grid;gap:3px;white-space:normal;overflow-wrap:anywhere}
 .xf-pl-p mark{background:var(--warn-bg);color:var(--warn-ink);padding:0 2px;border-radius:2px}
-.xf-pl-g{font-family:var(--font-sans);font-size:11px;color:var(--muted);width:21ch;white-space:normal}
-.xf-pl-p{display:grid;gap:3px;width:21ch;white-space:normal;overflow-wrap:anywhere}
+.xf-pl-g{font-family:var(--font-sans);font-size:11px;color:var(--muted)}
 .xf-pl-more{font-size:10.5px;justify-self:start}
 .xf-pl-nested{display:grid;gap:2px}
 .xf-pl-nested > b{font-weight:600;color:var(--ink)}
@@ -496,11 +492,11 @@ svg.chart .xf-ser.pd polyline{stroke:var(--l-topology)} svg.chart .xf-ser.pd cir
 
 table.xf-runs td{vertical-align:top}
 .xf-cfgcol{white-space:normal!important;min-width:220px}
-.xf-cfglink{all:unset;cursor:pointer;font-weight:600;font-size:12.5px;color:var(--config-ink);display:block}
-.xf-cfglink:hover{text-decoration:underline}
+.xf-cfglink{all:unset;cursor:pointer;display:block}
+.xf-cfglink .cfgname .win{font-size:13px;margin-top:0}
+.xf-cfglink .cfgname .winsub{font-size:11.5px}
+.xf-cfglink:hover .win{text-decoration:underline}
 .xf-cfglink:focus-visible,.xf-cmdbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.xf-cfgcol .xf-tags{margin-top:3px;display:flex;flex-wrap:wrap;gap:3px}
-.xf-cfgcol .xf-tag{font-size:10.5px}
 table.xf-runs td.xf-on{font-weight:600;color:var(--accent-ink)}
 table.xf-runs tr.sel td{background:#eef6f2}
 .xf-status{color:var(--muted)} tr.bad .xf-status{color:var(--bad)}

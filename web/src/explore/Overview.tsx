@@ -90,7 +90,7 @@ export function Scatter({ x }: { x: Explorer }) {
           <title>{tips.get(r.id)}</title>
         </circle>
       ))}
-      {x.ranked.slice(0, 3).map((g, i) => <text key={i} className="xf-rank" x={px(g.lead[xk] as number) + 7} y={py(g.lead[y] as number) - 6}>{i + 1}</text>)}
+      {x.ranked.slice(0, 3).map((g, i) => rs.some((r) => r.id === g.lead.id) && <text key={i} className="xf-rank" x={px(g.lead[xk] as number) + 7} y={py(g.lead[y] as number) - 6}>{i + 1}</text>)}
       {over > 0 && <text className="axlabel" x={W - M.r} y={hi ? M.t + 8 : H - M.b - 6} textAnchor="end">{over} run{over === 1 ? '' : 's'} beyond {fmt(ym, 0)} pinned to the edge</text>}
     </svg>
   )

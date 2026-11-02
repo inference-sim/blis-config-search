@@ -2,8 +2,9 @@
 import { useState } from 'react'
 import type { Explorer } from './useExplorer'
 import type { MetricKey } from './types'
-import { METRIC, METRIC_KEYS, fmtMetric, knobDiff, tagsOf } from './model'
+import { METRIC, METRIC_KEYS, fmtMetric, knobDiff } from './model'
 import type { BarMeasure } from './useExplorer'
+import { ConfigName } from '../components/ConfigName'
 
 export function Controls({ x }: { x: Explorer }) {
   const bars: [BarMeasure, string][] = [['best', 'best of the target'], ['pass', '% meeting SLO'], ['count', 'run count']]
@@ -38,7 +39,6 @@ export function TopConfigs({ x }: { x: Explorer }) {
         <div className="xf-cards">
           {shown.map((g, i) => {
             const r = g.lead
-            const tags = tagsOf(r, x.fields, x.usual, x.data.routers)
             // name only the knobs that varied among the tied configs; the hover lists the values
             const noDiff = (ties: typeof g.ties) => {
               const keys = [...new Set(ties.flatMap((t) => knobDiff(r, t, x.data.routers).map((d) => d.split(':')[0])))]
@@ -47,8 +47,7 @@ export function TopConfigs({ x }: { x: Explorer }) {
             return (
               <button type="button" key={r.cfg} className="xf-cfg" aria-pressed={x.picked === r.cfg} onClick={() => x.pick(r.cfg)}>
                 <span className="xf-cfg-rank"><b>{i + 1}</b><span className={`xf-mode${r.mode === 'P/D' ? ' pd' : ''}`}>{r.mode}</span><span className="xf-sub">{r.conc} sessions · from sweep <span className="mono">{r.sweep}</span></span></span>
-                <span className="xf-cfg-name mono">{r.topo}</span>
-                <span className="xf-tags">{tags.length ? tags.map((t) => <span key={t.text} className={`xf-tag l-${t.layer}`}>{t.text}</span>) : <span className="xf-tag plain">usual knobs</span>}</span>
+                <ConfigName label={r.topo} variant={r.variant} />
                 <span className="xf-metrics">
                   <span className="xf-hero">
                     <span className="xf-hero-v">{fmtMetric(m, r[m])}<small>{METRIC[m].unit}</small></span>
@@ -71,7 +70,6 @@ export function TopConfigs({ x }: { x: Explorer }) {
       ) : <p className="xf-empty">No run in the current filter meets every SLO.</p>}
       <div className="xf-top-f">
         {x.ranked.length > 3 && <button type="button" className="linkbtn" onClick={() => setMore((v) => !v)}>{more ? 'show top 3' : 'show top 6'}</button>}
-        
       </div>
     </section>
   )

@@ -1,6 +1,7 @@
 import type { Scenario } from '../types'
-import { canonFilters, configLabel, facetCounts, filterScenarios, finite, fnum, reportsHash, scenarioHash, type FilterKey, type Filters } from '../lib'
+import { canonFilters, facetCounts, filterScenarios, finite, fnum, reportsHash, scenarioHash, type FilterKey, type Filters } from '../lib'
 import { navigate } from '../route'
+import { ConfigName } from './ConfigName'
 
 export function filtersFromParams(p: Record<string, string>): Filters {
   return { model: p.model ?? '', hardware: p.hardware ?? '', workload: p.workload ?? '', gpu: p.gpu ?? '' }
@@ -38,8 +39,7 @@ function ScenarioCard({ s }: { s: Scenario }) {
       </dl>
       <div className="cardsec">
         <div className="winlbl">#1 config</div>
-        <div className="win">{configLabel(w.label)}</div>
-        {w.variant && <div className="winsub">{w.variant}</div>}
+        <ConfigName label={w.label} variant={w.variant} />
       </div>
       <div className="cardsec">
         <Metrics s={s} />

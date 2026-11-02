@@ -711,7 +711,8 @@ def test_explore_data():
                        row({"tp": 8, "num_instances": 1}, True)]},
                    {"name": "pd", "narrative": "n2", "configs": 1, "rows": [
                        row({"prefill_tp": 8, "prefill_instances": 1, "decode_tp": 8, "decode_instances": 1,
-                            "router_config": "reports/m-h100-x/routing/pd-prefix-0123456789.yaml"}, False)]}]}
+                            "router_config": "reports/m-h100-x/routing/pd-prefix-0123456789.yaml"}, False)
+                       | {"variant": "pd-prefix (nonCachedTokens 256)"}]}]}
         json.dump(exp, open(os.path.join(rd, "experiment.json"), "w"))
         d = explore_data.build(rd)
         width = 2 + len(d["keys"]) + len(d["metrics"]) + 1
@@ -728,6 +729,8 @@ def test_explore_data():
         check([p["name"] for p in r["chain"]["profiles"]] == ["prefill", "decode"],
               "P/D configs keep one scheduling profile per pool")
         check(d["rows"][0][-1] == 1 and d["rows"][1][-1] == 0, "servable is the last column")
+        check([d["variants"][i] for i in d["variant"]] == ["", "pd-prefix (nonCachedTokens 256)"],
+              "each row keeps the variant caption the dashboard shows")
         check(explore_data.build(tmp) is None, "a dir without experiment.json has no explorer data")
         check(d["routers"]["default"]["chain"]["profiles"][0]["steps"][2]
               == {"ref": "prefix-cache-scorer", "weight": 3},
@@ -746,6 +749,9 @@ def test_explore_data():
         check([c[0] for c in cmds] == ["blis run --concurrency 8", "blis run --prefill-instances 1"],
               "each explore row gets its own run's command, matched by config, not file order")
         check(cmds[1][1] == {"scenario": "b.yaml"}, "the deployment it priced ships with the command")
+        rid, gone = explore_data._router_entry("routing/renamed-away.yaml", rd)
+        check(rid == "renamed-away" and gone["chain"] is None,
+              "a shared router file removed since the sweep degrades instead of failing the build")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

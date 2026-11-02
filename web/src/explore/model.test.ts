@@ -32,7 +32,13 @@ describe('unpack and labels', () => {
   it('names both pools of a disaggregated config, not just the prefill one', () => {
     expect(runs[5].mode).toBe('P/D')
     expect(runs[5].topo).toBe('2P TP8 / 6D TP16')
-    expect(topoLabel({ num_instances: 8, tp: 4, dp: 2, enable_expert_parallel: true })).toBe('8× TP4×DP2 EP')
+    expect(topoLabel({ num_instances: 8, tp: 4, dp: 2, enable_expert_parallel: true })).toBe('8×TP4xDP2 + EP')
+    expect(topoLabel({ prefill_instances: 2, prefill_tp: 8, decode_instances: 6, decode_tp: 8 })).toBe('2P/6D TP8')
+  })
+  it('captions a run with the variant the dashboard shows', () => {
+    const v = unpack({ ...FIXTURE, variants: ['', 'max seqs 256'], variant: [0, 0, 1, 0, 0, 0, 0] })
+    expect(v.map((r) => r.variant).slice(0, 3)).toEqual(['', '', 'max seqs 256'])
+    expect(runs[0].variant).toBe('')
   })
   it('shows a generated router arm as its family and the parameter it overrides', () => {
     expect(routerLabel('pd-prefix-0123456789', R)).toBe('pd-prefix nonCachedTokens=256')

@@ -101,10 +101,13 @@ def _router_entry(path, run_dir):
     rid = base[:-5] if base.endswith(".yaml") else base
     local = os.path.join(run_dir, "routing", base)
     src = local if os.path.exists(local) else os.path.join(ROOT, path)
+    family = re.sub(r"-[0-9a-f]{10}$", "", rid)
+    if not os.path.exists(src):  # a shared file renamed or removed since the sweep
+        return rid, {"path": path, "family": family, "override": "",
+                     "summary": ROUTER_SUMMARY.get(family, ""), "yaml": "", "chain": None}
     with open(src, encoding="utf-8") as f:
         text = f.read()
     m = re.search(r"^# Overrides:\s*(.+)$", text, re.M)
-    family = re.sub(r"-[0-9a-f]{10}$", "", rid)
     return rid, {
         "path": path, "family": family,
         "override": m.group(1).strip() if m else "",
@@ -132,8 +135,9 @@ def build(run_dir):
 
     rows_in = [(si, r) for si, s in enumerate(exp["sweeps"]) for r in s["rows"]]
     keys = sorted({k for _, r in rows_in for k in r["config"] if k != "concurrency"})
-    routers, rows, seen = {}, [], {}
+    routers, rows, seen, variants = {}, [], {}, {}
     for si, r in rows_in:
+        variants.setdefault(r.get("variant") or "", len(variants))
         cfg = dict(r["config"])
         if cfg.get("router_config"):
             path = cfg["router_config"]
@@ -165,6 +169,9 @@ def build(run_dir):
         "keys": keys,
         "metrics": [short for short, _ in METRICS],
         "rows": rows,
+        # the dashboard's caption for each row, as an index into one list of distinct strings
+        "variants": list(variants),
+        "variant": [variants[r.get("variant") or ""] for _, r in rows_in],
         "routers": routers,
         "spec_yaml": spec_text,
     }

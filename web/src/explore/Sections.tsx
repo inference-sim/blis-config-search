@@ -5,6 +5,7 @@ import type { Run } from './types'
 import { FieldChart, barKey } from './FieldChart'
 import { RouterPanel } from './RouterView'
 import { H, M, W, YAxis } from './chart'
+import { ConfigName } from '../components/ConfigName'
 import { ENGINE_HELP, METRIC, TOPO_FIELDS, TOPO_INFO, bareKey, fmt, fmtMetric, layerOf, matches, niceMax, poolOf, rankConfigs, type Pool } from './model'
 
 /* ---------------- topology ---------------- */
@@ -66,7 +67,7 @@ function GpuLayout({ r, x }: { r: Run; x: Explorer }) {
   return (
     <aside className="xf-gpu" aria-label="Accelerator layout">
       <p className="eyebrow">{x.picked ? 'Selected config' : 'Best in the filter'}</p>
-      <p className="xf-gpu-name mono">{r.topo}</p>
+      <ConfigName label={r.topo} variant={r.variant} />
       <p className="xf-sub">{fmtMetric(x.target, r[x.target])} {METRIC[x.target].label} at {r.conc} sessions</p>
       <div className="xf-gpu-row">
         {pools.map((p, i) => (

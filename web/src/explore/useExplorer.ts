@@ -30,10 +30,10 @@ export interface Explorer {
   pick: (cfg: string) => void
   fv: (r: Run, k: string) => string
   ranked: ReturnType<typeof groupTies>
-  /** The config under the pointer on any chart, shared so every chart lights it up together. */
   /** The field the overview colors its points by. */
   colorBy: string | null
   setColorBy: (k: string) => void
+  /** The config under the pointer on any chart, shared so every chart lights it up together. */
   hover: string | null
   setHover: (cfg: string | null) => void
   /** Undo what the charts set: the pick, the serving-mode filter and the SLO-only toggle. */

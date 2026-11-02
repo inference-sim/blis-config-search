@@ -208,7 +208,7 @@ describe('report explorer page', () => {
   it('loads the report and leads with the top configs, ties folded into one card', async () => {
     page()
     await waitFor(() => expect(cards().length).toBeGreaterThan(0))
-    expect(cards()[0].querySelector('.xf-cfg-name')?.textContent).toBe('8× TP4×DP2')
+    expect(cards()[0].querySelector('.win')?.textContent).toBe('8×TP4xDP2')
     expect(cards()[0].textContent).toMatch(/same result with 1 other config/)
     expect(document.querySelector('.xf-speclink')?.getAttribute('href')).toMatch(/experiments\/a\.yaml$/)
   })
@@ -228,7 +228,7 @@ describe('report explorer page', () => {
     page()
     await waitFor(() => expect(cards().length).toBeGreaterThan(0))
     fireEvent.click(screen.getByRole('button', { name: 'TTFT p99' }))
-    expect(cards()[0].querySelector('.xf-cfg-name')?.textContent).toBe('8× TP8')
+    expect(cards()[0].querySelector('.win')?.textContent).toBe('8×TP8')
     expect(screen.getByText(/TTFT p99 at each of the spec’s loads/)).toBeTruthy()
   })
 
@@ -247,12 +247,21 @@ describe('report explorer page', () => {
     await waitFor(() => expect(cards().length).toBeGreaterThan(0))
     const bar = (field: string, v: string) => [...document.querySelectorAll(`[data-field="${field}"] button`)].find((b) => b.querySelector('.xf-v')?.textContent === v) as Element
     fireEvent.click(bar('tp', '4')); fireEvent.click(bar('tp', '8'))
-    const before = cards().map((c) => c.querySelector('.xf-cfg-name')?.textContent)
+    const before = cards().map((c) => c.querySelector('.win')?.textContent)
     fireEvent.click(cards()[0])
-    expect(cards().map((c) => c.querySelector('.xf-cfg-name')?.textContent)).toEqual(before)
+    expect(cards().map((c) => c.querySelector('.win')?.textContent)).toEqual(before)
     fireEvent.click(cards()[0])
     const chips = [...document.querySelectorAll('.xf-achip')].map((b) => b.textContent)
     expect(chips).toEqual(['tp 4 ✕', 'tp 8 ✕'])
+  })
+
+  it('labels only the top configs the scatter still plots', async () => {
+    page()
+    await waitFor(() => expect(cards().length).toBeGreaterThan(0))
+    const ranks = () => [...document.querySelectorAll('#sec-overview .xf-rank')].map((t) => t.textContent)
+    expect(ranks()).toEqual(['1', '2', '3'])
+    fireEvent.click(cards()[0])
+    expect(ranks()).toEqual(['1'])
   })
 
   it('pointing at a run on the load ramp lights its config up on the scatter too', async () => {
@@ -326,7 +335,7 @@ describe('report explorer page', () => {
     const pd = [...document.querySelectorAll('[data-field="mode"] button')].find((b) => b.textContent?.includes('P/D')) as Element
     fireEvent.click(pd)
     expect(screen.getByText(/2 of 7 runs shown/)).toBeTruthy()
-    expect(document.querySelector('.xf-runs tbody .xf-cfglink')?.textContent).toBe('2P TP8 / 6D TP16')
+    expect(document.querySelector('.xf-runs tbody .xf-cfglink .win')?.textContent).toBe('2P TP8 / 6D TP16')
   })
 
   it('opens a run\'s exact blis run command, fetched once for the report', async () => {

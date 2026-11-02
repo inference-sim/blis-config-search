@@ -2,7 +2,8 @@
 import { Fragment, useEffect, useState } from 'react'
 import type { Explorer } from './useExplorer'
 import type { Run } from './types'
-import { METRIC, SLO_OF, fmt, sloMs, tagsOf } from './model'
+import { METRIC, SLO_OF, fmt, sloMs } from './model'
+import { ConfigName } from '../components/ConfigName'
 
 export type Command = [string, unknown] | null
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
@@ -107,14 +108,12 @@ export function RunsTable({ x, load = loadCommands }: { x: Explorer; load?: (id:
           </tr></thead>
           <tbody>
             {list.slice(0, limit).map((r) => {
-              const tags = tagsOf(r, x.fields, x.usual, x.data.routers)
               const isOpen = open.has(r.id)
               return (
                 <Fragment key={r.id}>
                   <tr className={`${r.ok ? '' : 'bad'}${r.cfg === x.picked ? ' sel' : ''}`}>
                     <td className="xf-cfgcol">
-                      <button type="button" className="xf-cfglink mono" onClick={() => x.pick(r.cfg)} title="Filter the page to this config">{r.topo}</button>
-                      {tags.length > 0 && <span className="xf-tags">{tags.map((t) => <span key={t.text} className={`xf-tag l-${t.layer}`}>{t.text}</span>)}</span>}
+                      <button type="button" className="xf-cfglink" onClick={() => x.pick(r.cfg)} title="Filter the page to this config"><ConfigName label={r.topo} variant={r.variant} /></button>
                     </td>
                     {COLS.map((c) => <td key={c.k} className={`num${c.k === m ? ' xf-on' : ''}`}>{fmt(val(r, c.k), c.digits)}</td>)}
                     <td className="xf-status">{r.ok ? 'met' : miss(r)}</td>

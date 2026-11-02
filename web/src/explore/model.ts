@@ -74,15 +74,18 @@ export const ENGINE_HELP: Record<string, string> = {
 
 /* ---------------- unpacking ---------------- */
 
+// The dashboard's notation (run_experiment.label_of): "8×TP4xDP2 + EP", "2P/6D TP8 + EP".
 const poolLabel = (tp: Scalar, dp: Scalar, pp: Scalar, ep: Scalar) =>
-  `TP${tp ?? 1}${Number(dp) > 1 ? `×DP${dp}` : ''}${Number(pp) > 1 ? `×PP${pp}` : ''}${ep ? ' EP' : ''}`
+  `TP${tp ?? 1}${Number(dp) > 1 ? `xDP${dp}` : ''}${Number(pp) > 1 ? `xPP${pp}` : ''}${ep ? ' + EP' : ''}`
 
 export function topoLabel(k: Record<string, Scalar>): string {
   if (k.prefill_instances != null) {
-    const p = (pool: string) => `${k[`${pool}_instances`]}${pool[0].toUpperCase()} ${poolLabel(k[`${pool}_tp`], k[`${pool}_dp`], k[`${pool}_pp`], k[`${pool}_enable_expert_parallel`])}`
-    return `${p('prefill')} / ${p('decode')}`
+    const shape = (pool: string) => poolLabel(k[`${pool}_tp`], k[`${pool}_dp`], k[`${pool}_pp`], k[`${pool}_enable_expert_parallel`])
+    const [p, d] = [shape('prefill'), shape('decode')]
+    // one shape when the pools match; both when they differ, which label_of would hide
+    return p === d ? `${k.prefill_instances}P/${k.decode_instances}D ${p}` : `${k.prefill_instances}P ${p} / ${k.decode_instances}D ${d}`
   }
-  return `${k.num_instances}× ${poolLabel(k.tp, k.dp, k.pp, k.enable_expert_parallel)}`
+  return `${k.num_instances}×${poolLabel(k.tp, k.dp, k.pp, k.enable_expert_parallel)}`
 }
 
 export function unpack(d: ExploreData): Run[] {
@@ -95,7 +98,7 @@ export function unpack(d: ExploreData): Run[] {
     return {
       id, sweep: d.sweeps[a[0] as number]?.name ?? '', conc: a[1] as number, knobs,
       tpg: m(0), cl: m(1), pu: m(2), itl: m(3), ttft: m(4), ok: a[2 + nk + 5] === 1,
-      mode, topo: topoLabel(knobs), cfg: d.keys.map((k) => JSON.stringify(knobs[k] ?? null)).join('|'),
+      mode, topo: topoLabel(knobs), variant: d.variants?.[d.variant?.[id] ?? -1] ?? '', cfg: d.keys.map((k) => JSON.stringify(knobs[k] ?? null)).join('|'),
     }
   })
 }

@@ -174,10 +174,11 @@ def build(reports_dir, out_dir):
     if not run_dirs:
         raise SystemExit(f"{reports_dir}: no run directories (none has pareto.json/runs.jsonl)")
 
-    # out_dir is wiped, so it must not hold the repo, reports/, or be one of the run dirs.
-    if (_within(os.path.realpath(ROOT), out_dir) or _within(reports_dir, out_dir)
-            or out_dir in run_dirs):
-        raise SystemExit(f"{out_dir}: refusing to wipe the repo, reports/, or a run dir")
+    # out_dir is wiped: inside the repo only site/ may be, and never reports/ or a run dir.
+    root = os.path.realpath(ROOT)
+    if ((_within(out_dir, root) and out_dir != os.path.join(root, "site"))
+            or _within(reports_dir, out_dir) or out_dir in run_dirs):
+        raise SystemExit(f"{out_dir}: refusing to wipe a repo dir other than site/, reports/, or a run dir")
     shutil.rmtree(out_dir, ignore_errors=True)
     os.makedirs(out_dir)
     rows = []

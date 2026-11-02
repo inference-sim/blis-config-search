@@ -127,7 +127,7 @@ def test_build_refuses_to_wipe_reports():
         reports = os.path.join(tmp, "reports")
         run = os.path.join(reports, "qwen3-14b-h100-chatbot-0004")
         _mk_run_dir(run, "qwen3-14b-h100-chatbot-0004")
-        for out in (reports, tmp, run, bg.ROOT):
+        for out in (reports, tmp, run, bg.ROOT, os.path.join(bg.ROOT, "no-such-dir")):
             try:
                 bg.build(reports, out)
                 check(False, f"--out {out} is refused")

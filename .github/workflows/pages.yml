@@ -30,6 +30,7 @@ on:
       - "web/**"
       - "reports/**"
       - "scripts/**"
+      - "report/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 

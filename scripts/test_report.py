@@ -3,7 +3,7 @@
 
     python3 scripts/test_report.py           # or: python3 -m unittest -v  (from this dir)
 
-Groups, all against the committed examples/sample-run/ fixture:
+Groups, all against the committed testdata/sample-run/ fixture:
   * Records   -- runs.jsonl -> flat RECORDS mapping + feasibility classification;
   * Facts     -- the precomputed FACTS the narrative references;
   * Figures   -- each inline-SVG builder: well-formed SVG, real content, graceful degrade;
@@ -886,7 +886,8 @@ class Parity(unittest.TestCase):
     WEB_MIRROR = os.path.join(HERE, os.pardir, "web", "src", "lexicon.json")
 
     def test_web_mirror_is_byte_identical(self):
-        # Vite cannot import from outside web/, so web/src/lexicon.json is a copy. A copy that drifts is worse than no sharing at all -- it looks shared and is not.
+        # Vite cannot import from outside web/, so web/src/lexicon.json is a copy. A copy that
+        # drifts is worse than no sharing at all: it looks shared and is not.
         if not os.path.exists(self.WEB_MIRROR):
             self.skipTest("web/ not present in this checkout")
         with open(lexicon.PATH, "rb") as a, open(self.WEB_MIRROR, "rb") as b:

@@ -20,3 +20,7 @@ reports/*/scenarios/
 
 # Replay corpora: fetched by scripts/fetch_corpus.py, digest-checked, 568 MB, never vendored.
 /.corpus/
+
+# Local design notes and mockups, not shipped.
+/docs/superpowers/
+/design/

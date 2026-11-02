@@ -1,7 +1,7 @@
 {
-  "_source": "The shared vocabulary of the config-search report surfaces. CANONICAL COPY.",
-  "_mirror": "web/src/lexicon.json is a byte-identical mirror, imported by the React dashboard (which cannot read the skill dir at build time). scripts/test_build.py fails if the two drift.",
-  "_why": "config-search renders the same runs twice -- the standalone HTML report (report.py + figures.py + report/template.html) and the React dashboard (web/src). They had grown two vocabularies for one set of numbers ('Speed per user' / 'Per-user rate' / 'tok/s per user') and, worse, two ranking objectives for 'What to run'. Both now read their labels and their objective from this file, so a reader moving between the two surfaces sees one set of words and one recommendation.",
+  "_source": "The shared vocabulary of the BLIS report surfaces. CANONICAL COPY.",
+  "_mirror": "web/src/lexicon.json is a byte-identical mirror, imported by the React dashboard (which cannot read files outside web/ at build time). scripts/test_build.py fails if the two drift.",
+  "_why": "The site renders the same runs twice -- the standalone HTML report (report.py + figures.py + report/template.html) and the React dashboard (web/src). They had grown two vocabularies for one set of numbers ('Speed per user' / 'Per-user rate' / 'tok/s per user') and, worse, two ranking objectives for 'What to run'. Both now read their labels and their objective from this file, so a reader moving between the two surfaces sees one set of words and one recommendation.",
   "objective": {
     "key": "tpg",
     "label": "tok/s per accelerator",

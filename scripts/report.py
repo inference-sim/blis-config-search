@@ -923,7 +923,7 @@ def render_report(scenario, pareto, runs, report, run_path=None, n_malformed=0):
             + _glossary(report) + _footer(scenario, pareto, records, n_malformed, runs))
     with open(TEMPLATE, encoding="utf-8") as f:
         html = f.read()
-    title = report.get("title") or facts.get("model") or "config-search report"
+    title = report.get("title") or facts.get("model") or "BLIS experiment report"
     # Single-pass substitution: each placeholder is replaced exactly once, so a literal "__BODY__"
     # or "__TITLE__" that legitimately appears in brain-authored prose (now part of `body`) is NOT
     # re-scanned and mistaken for an unconsumed marker (QA G8). We verify the TEMPLATE had each slot

@@ -1,0 +1,107 @@
+{
+  "explore_prose": [
+    "Every run in this experiment is in the explorer below: filter by outcome to see which settings held the SLOs, or by setting to compare one sweep against another.",
+    "Each sweep's hypothesis was written before the runs, and is quoted beside that sweep's measured result below."
+  ],
+  "hero": [
+    {
+      "h": "What was tested",
+      "html": "276 configurations over 8 sweeps (shape-and-ep, batch-caps-vs-shape, moe-dispatch, eplb-vs-dispatch, graph-capture, capture-size-vs-batch, prefill-admission, routing), each at 5 load levels, every run on exactly 16 GPUs."
+    },
+    {
+      "h": "What was found",
+      "html": "<strong>1x TP16 + EP (graph capture full)</strong>, from the <em>graph-capture</em> sweep, reached 88.95 tok/s/GPU (1423.3 tok/s across the fleet) at concurrency 16 while holding the scenario's SLOs."
+    },
+    {
+      "h": "What to run",
+      "html": "1x TP16 + EP (graph capture full) at concurrency 16. 286 of 1380 runs held the SLOs.",
+      "run": true
+    }
+  ],
+  "meta": [
+    "BLIS discrete-event simulation",
+    "Experiment Spec (RFC #21)",
+    "deterministic sweep \u2014 no LLM in the measurement path",
+    "seed 42"
+  ],
+  "recommendation_num": 10,
+  "recommendation_prose": [
+    "The table below ranks the measured operating points by output tok/s per GPU, the objective this experiment selects on, among runs that held the scenario's SLOs."
+  ],
+  "sections": [
+    {
+      "caption_note": "18 configurations, 90 runs.",
+      "num": 2,
+      "prose": [
+        "EP should pay most at tp 8 and fade as dp grows, since wider dp already splits the batch and EP adds dispatch on top.",
+        "Measured: best was <strong>1x TP16 + EP</strong> at 85.45 tok/s/GPU (concurrency 16)."
+      ],
+      "title": "Sweep: shape-and-ep"
+    },
+    {
+      "caption_note": "60 configurations, 300 runs.",
+      "num": 3,
+      "prose": [
+        "The sequence cap should bind well before the token cap on short chatbot prompts, and hardest on one wide instance.",
+        "Measured: best was <strong>1x TP16 + EP (max seqs 1,024)</strong> at 85.45 tok/s/GPU (concurrency 16)."
+      ],
+      "title": "Sweep: batch-caps-vs-shape"
+    },
+    {
+      "caption_note": "70 configurations, 350 runs.",
+      "num": 4,
+      "prose": [
+        "DeepEP backends should lose to allgather/pplx at small dp and close the gap as dp widens, where the token cap admits them.",
+        "Measured: best was <strong>1x TP8xDP2 + EP</strong> at 79.2 tok/s/GPU (concurrency 16)."
+      ],
+      "title": "Sweep: moe-dispatch"
+    },
+    {
+      "caption_note": "30 configurations, 150 runs.",
+      "num": 5,
+      "prose": [
+        "Redundant experts should help most at the widest dp, where an uneven expert load stalls the most ranks.",
+        "Measured: best was <strong>2x TP4xDP2 + EP</strong> at 14.15 tok/s/GPU (concurrency 2)."
+      ],
+      "title": "Sweep: eplb-vs-dispatch"
+    },
+    {
+      "caption_note": "20 configurations, 100 runs.",
+      "num": 6,
+      "prose": [
+        "Full graph capture should beat PIECEWISE by a few percent at every shape, and NONE should roughly halve throughput.",
+        "Measured: best was <strong>1x TP16 + EP (graph capture full)</strong> at 88.95 tok/s/GPU (concurrency 16)."
+      ],
+      "title": "Sweep: graph-capture"
+    },
+    {
+      "caption_note": "24 configurations, 120 runs.",
+      "num": 7,
+      "prose": [
+        "A small capture size should cost throughput only when max_num_seqs lets the batch grow past it.",
+        "Measured: best was <strong>2x TP8 + EP (graph capture full \u00b7 max captured step 512)</strong> at 19.93 tok/s/GPU (concurrency 2)."
+      ],
+      "title": "Sweep: capture-size-vs-batch"
+    },
+    {
+      "caption_note": "24 configurations, 120 runs.",
+      "num": 8,
+      "prose": [
+        "Chunking prefills below the 256-token median prompt should cut the ITL tail but cost throughput, most on one wide instance.",
+        "Measured: best was <strong>1x TP16 + EP (batch tokens 8,192 \u00b7 prefill chunk 1,024)</strong> at 85.45 tok/s/GPU (concurrency 16)."
+      ],
+      "title": "Sweep: prefill-admission"
+    },
+    {
+      "caption_note": "30 configurations, 150 runs.",
+      "num": 9,
+      "prose": [
+        "With only two endpoints, routing should move throughput a few percent at most, slightly more when the batch cap binds.",
+        "Measured: best was <strong>2x TP8 + EP (load-aware routing \u00b7 max seqs 1,024)</strong> at 19 tok/s/GPU (concurrency 2)."
+      ],
+      "title": "Sweep: routing"
+    }
+  ],
+  "standfirst": "A deterministic sweep over chatbot traffic, comparing 8 designs on one GPU budget.",
+  "title": "glm-5.3-flash on 16x h100: glm53flash-h100-chatbot-kernel-0001"
+}

@@ -10,12 +10,13 @@ export type SetupTab = 'install' | 'sweep'
 /** Opens the report's setup dialog, on a tab, from anywhere on the page. */
 export const OpenSetup = createContext<((tab?: SetupTab) => void) | null>(null)
 
-/** Solid for the page's main call to action; `quiet` for a secondary pointer to it. */
-export function SetupButton({ children, tab = 'install', quiet = false }: { children: React.ReactNode; tab?: SetupTab; quiet?: boolean }) {
+/** Solid for the page's main call to action, icon-only when it has no text; `quiet` for a secondary pointer to it. */
+export function SetupButton({ children, tab = 'install', quiet = false }: { children?: React.ReactNode; tab?: SetupTab; quiet?: boolean }) {
   const open = useContext(OpenSetup)
   if (!open) return null
+  const cls = ['xf-setupbtn', quiet && 'quiet', !children && 'icon'].filter(Boolean).join(' ')
   return (
-    <button type="button" className={quiet ? 'xf-setupbtn quiet' : 'xf-setupbtn'} onClick={() => open(tab)}>
+    <button type="button" className={cls} onClick={() => open(tab)} aria-label={children ? undefined : 'Reproduce this report'} title={children ? undefined : 'Reproduce this report'}>
       {children}<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M6 3.5l4.5 4.5L6 12.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
     </button>
   )

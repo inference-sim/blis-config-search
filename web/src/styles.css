@@ -572,9 +572,10 @@ svg.chart .xf-path.hot circle{r:4.6}
 .xf-card-h > div{min-width:0}
 /* report setup dialog */
 .xf-repro{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between;margin:4px 0 14px;padding:8px 12px;border:1px solid var(--accent);border-radius:6px;background:var(--accent-soft);font-size:13px}
-.xf-repro-b{display:flex;gap:8px;flex-wrap:wrap}
 .xf-setupbtn{all:unset;box-sizing:border-box;cursor:pointer;display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;padding:5px 10px 5px 13px;border-radius:6px;background:var(--accent);color:#fff;border:1px solid var(--accent);box-shadow:0 1px 2px rgb(0 0 0 / .12);white-space:nowrap}
 .xf-setupbtn:hover{background:var(--accent-ink);border-color:var(--accent-ink)}
+.xf-setupbtn.icon{padding:0;width:30px;height:30px;justify-content:center}
+.xf-setupbtn.icon svg{width:15px;height:15px}
 .xf-setupbtn.quiet{background:var(--panel);color:var(--accent-ink);border-color:var(--line-strong);box-shadow:none;font-size:12px;padding:3px 8px 3px 10px}
 .xf-setupbtn.quiet:hover{border-color:var(--accent);background:var(--accent-soft)}
 .xf-setupbtn svg{transition:transform .12s}

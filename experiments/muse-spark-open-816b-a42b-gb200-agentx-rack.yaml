@@ -1,0 +1,79 @@
+# Best tok/s/GPU for Muse-Spark (nvfp4) on one GB200 NVL72 rack (64 active GPUs, as in CoreWeave's Carina) under AgentX, no SLO.
+# MoE 256 experts top_k 8: EP up to width 64, dp attention and all2all_backend are real; graph prices pp; no speculator.
+# The whole rack is one NVLink domain, so no group reaches the inter-rack fabric; every 8-GPU shape fit at 262k context.
+# pp x dp is unpriced on the pin, so pipeline shapes are their own sweep. Bounded to ~140 runs for the 3h serial cap.
+# Left out: kv-capacity (gmu and fp8 KV were identical at 8 GPUs on 184 GiB ranks), eplb, moe_backend, P/D,
+# quantization and drafting (profile: does not apply).
+
+name: muse-spark-open-816b-a42b-gb200-agentx-rack
+
+scenario:
+  model: muse-spark-open-816b-a42b-nvfp4
+  hardware: gb200-nvl72
+  workload: agentx-mvp
+  gpus: 64
+  engine: {max_model_len: 262144}   # at the 32k default the replay drops every trace
+  concurrency: [64, 128, 256, 512]  # session lanes; 8 GPUs saturated by 64, so 512 is past saturation for the rack
+  replay:
+    corpus: .corpus/traces.jsonl
+    corpus_cache: /tmp/agx-cache-muse-gb200
+    grace_period: inf
+
+sweeps:
+  - name: topology
+    # The control: every sweep below has its default twin here.
+    narrative: Eight TP8 instances should peak highest, since a 64-wide EP group pays all-to-all on every step for little extra batch.
+    num-instances: [1, 2, 4, 8]
+    parallel: {tp: [8, 4], dp: [1, 2, 4, 8], enable_expert_parallel: [true]}
+
+  - name: ep-off
+    narrative: Replicating experts instead of sharding them should cost KV room and throughput against the EP twins in topology.
+    num-instances: [8, 4]
+    parallel: {tp: [8], dp: [1, 2], enable_expert_parallel: [false]}
+
+  - name: pipeline
+    narrative: Pipeline stages should trail data-parallel shapes of the same width, since each stage adds a boundary hop per step.
+    num-instances: [4, 2]
+    parallel: {tp: [8, 4], pp: [2, 4], enable_expert_parallel: [true]}
+
+  - name: batch-caps
+    # Default caps (256 seqs, 8192 tokens) are the twins in topology.
+    narrative: A seq cap of 32 should bind on 8x TP8 at 512 lanes but not on 2x TP8 DP4, whose dp ranks each schedule their own batch.
+    num-instances: [8, 2]
+    parallel: {tp: [8], dp: [1, 4], enable_expert_parallel: [true]}
+    engine:
+      max_num_seqs: [32, 256]
+      max_num_batched_tokens: [4096, 32768]
+
+  - name: moe-collective
+    # Default allgather_reducescatter twins are in topology; EP width 8 vs 64.
+    narrative: DeepEP backends should pay off at EP width 64 and matter little at width 8, where dispatch volume is small.
+    num-instances: [8, 1]
+    parallel: {tp: [8], dp: [1, 8], enable_expert_parallel: [true]}
+    engine:
+      all2all_backend: [deepep_high_throughput, deepep_low_latency, pplx]
+
+  - name: routing-prefix-cache
+    # queue.yaml matches the default router, so it doubles as the default-router twin.
+    narrative: prefix-affinity should only beat queue and random with caching on, and eight instances give it the most room to win.
+    num-instances: [8]
+    parallel: {tp: [8], enable_expert_parallel: [true]}
+    engine:
+      enable_prefix_caching: [true, false]
+    router:
+      endpoint_picker_config: [random.yaml, queue.yaml, prefix-affinity.yaml]
+
+  - name: prefill-chunking
+    narrative: Capping long prefills should trade a little peak throughput for a much lower ITL p99 at saturation.
+    num-instances: [8]
+    parallel: {tp: [8], enable_expert_parallel: [true]}
+    engine:
+      long_prefill_token_threshold: [2048]
+
+  - name: cudagraph
+    # Per-step host cost; measured not to interact with topology, so one shape.
+    narrative: FULL capture should beat the PIECEWISE default by a few percent, and NONE should collapse.
+    num-instances: [8]
+    parallel: {tp: [8], enable_expert_parallel: [true]}
+    engine:
+      cudagraph_mode: [NONE, FULL]

@@ -1,6 +1,6 @@
 // The report page: header, top configs, then a rail beside the overview, Topology, Routing,
 // vLLM engine and Runs sections. One crossfilter drives all of it.
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import type { Catalog, Scenario } from '../types'
 import type { ExploreData } from './types'
 import { useExplorer, type Explorer as X } from './useExplorer'
@@ -8,6 +8,7 @@ import { Controls, TopConfigs } from './TopConfigs'
 import { OverviewSection } from './Overview'
 import { EngineSection, RoutingSection, TopologySection } from './Sections'
 import { RunsTable } from './RunsTable'
+import { OpenSetup, SetupLink, useSetupDialog } from './SetupDialog'
 import { METRIC, SLO_OF, TOPO_FIELDS, bareKey, layerOf, poolOf, sortValues } from './model'
 import { catalogDoc } from '../lib'
 import { reportHref } from '../load'
@@ -69,8 +70,11 @@ export function ScenarioPage({ runId, scenarios, catalog, load = loadExplore }: 
 
 function Body({ data }: { data: ExploreData }) {
   const x = useExplorer(data)
+  const setup = useSetupDialog(data.setup)
   return (
-    <>
+    <OpenSetup.Provider value={setup.open}>
+      {setup.dialog}
+      {data.setup && <p className="xf-stackline">Priced by BLIS <span className="mono">{data.setup.stack[0].ref}</span>{data.setup.stack.slice(1).map((d) => <Fragment key={d.repo}> · {d.name} <span className="mono">{d.ref}</span></Fragment>)}. <SetupLink>How to install this stack</SetupLink></p>}
       <Controls x={x} />
       <TopConfigs x={x} />
       <div className="xf-layout">
@@ -84,7 +88,7 @@ function Body({ data }: { data: ExploreData }) {
           <RunsTable x={x} />
         </div>
       </div>
-    </>
+    </OpenSetup.Provider>
   )
 }
 

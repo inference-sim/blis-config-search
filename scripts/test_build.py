@@ -760,10 +760,32 @@ def test_explore_data():
                             "concurrency": 8, "router_config": "/home/runner/x/reports/m-h100-x/routing/pd-prefix-0123456789.yaml"}}]
         with open(os.path.join(rd, "runs.jsonl"), "w") as f:
             f.write("".join(json.dumps(r) + "\n" for r in reversed(recs)))
-        cmds = explore_data.commands(rd)
-        check([c[0] for c in cmds] == ["blis run --concurrency 8", "blis run --prefill-instances 1"],
+        cmds = explore_data.commands(rd)["runs"]
+        check([c[0] for c in cmds] == ["blis run \\\n  --concurrency 8", "blis run \\\n  --prefill-instances 1"],
               "each explore row gets its own run's command, matched by config, not file order")
-        check(cmds[1][1] == {"scenario": "b.yaml"}, "the deployment it priced ships with the command")
+        check(cmds[1][1:] == ["b.yaml", {"scenario": "b.yaml"}],
+              "a scenario that cannot be regenerated ships the deployment it priced instead")
+        recipe = explore_data._recipe(
+            ["./upstream/blis", "run", "--scenario", "s.yaml", "--scenarios", "reports/x/scenarios",
+             "--registry", "./blis-registry", "--catalog", "./blis-catalog", "--defaults-filepath",
+             "./upstream/defaults.yaml", "--workload", "chatbot", "--prompt-tokens", "256"], "s.yaml", "chatbot")
+        check("upstream" not in recipe and "--workload " not in recipe and "--scenarios scenarios" in recipe
+              and '--catalog "$BLIS_CATALOG"' in recipe and "--prompt-tokens 256" in recipe,
+              "the shown command drops CI paths and inert flags, keeping what BLIS reads")
+        real = os.path.join(ROOT, "reports", "kimi-k2-5-h200-multidoc-pd")
+        if os.path.exists(real):
+            got = explore_data.commands(real)
+            check(all(r and r[1] in got["scenarios"] for r in got["runs"]),
+                  "every committed run's scenario regenerates to its recorded file name")
+            check(explore_data.build(real)["defaults"].get("max_num_batched_tokens") == 8192,
+                  "an unset knob's default is read from the deployments it ran")
+        ps = {"blis": "v9.0.0", "catalog": "1.0.0", "registry": "v2.0.0",
+              "resolved": {"blis": {"commit": "a" * 40}, "catalog": {"commit": "b" * 40}}}
+        st = explore_data.setup({"pinned_stack": ps, "scenario": {"replay": {"corpus": ".corpus/t.jsonl", "corpus_sha256": "c" * 64}}})
+        check("--branch v9.0.0" in st["script"] and "a" * 40 in st["script"] and "export BLIS_REGISTRY" in st["script"]
+              and "shasum -a 256 -c" in st["script"],
+              "the setup script installs the report's own recorded stack, checks each tag's commit and the corpus")
+        check(explore_data.setup({}) is None, "a ledger with no pinned_stack ships no setup")
         rid, gone = explore_data._router_entry("routing/renamed-away.yaml", rd)
         check(rid == "renamed-away" and gone["chain"] is None,
               "a shared router file removed since the sweep degrades instead of failing the build")

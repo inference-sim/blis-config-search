@@ -1,21 +1,28 @@
-// Every run in the filter: what it was, what it measured, and the exact `blis run` behind it.
+// Every run in the filter: what it was, what it measured, and how to rerun it.
 import { Fragment, useEffect, useState } from 'react'
 import type { Explorer } from './useExplorer'
 import type { Run } from './types'
 import { METRIC, SLO_OF, fmt, sloMs } from './model'
 import { ConfigName } from '../components/ConfigName'
+import { CopyButton } from './CopyButton'
+import { SetupLink } from './SetupDialog'
 
-export type Command = [string, unknown] | null
+/** commands.json: each run's reproducible command, and the scenario files those commands read. */
+export interface Commands {
+  scenarios: Record<string, string>
+  /** [command, scenario file, deployment when its scenario could not be regenerated] */
+  runs: ([string, string | null, unknown] | null)[]
+}
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
 // One fetch per report, on the first command a reader opens.
-const cache = new Map<string, Promise<Command[]>>()
-export function loadCommands(runId: string): Promise<Command[]> {
+const cache = new Map<string, Promise<Commands>>()
+export function loadCommands(runId: string): Promise<Commands> {
   if (!cache.has(runId)) {
     cache.set(runId, fetch(`${BASE}/data/reports/${encodeURIComponent(runId)}/commands.json`)
-      .then((r) => { if (!r.ok) throw new Error(`commands.json: HTTP ${r.status}`); return r.json() as Promise<Command[]> })
+      .then((r) => { if (!r.ok) throw new Error(`commands.json: HTTP ${r.status}`); return r.json() as Promise<Commands> })
       .catch((e) => { cache.delete(runId); throw e }))  // a failed fetch can be retried
   }
-  return cache.get(runId) as Promise<Command[]>
+  return cache.get(runId) as Promise<Commands>
 }
 
 const PAGE = 50
@@ -37,33 +44,36 @@ function yamlish(v: unknown, indent = ''): string {
     .join('\n')
 }
 
-function CopyButton({ text }: { text: string }) {
-  const [done, setDone] = useState(false)
-  const copy = () => navigator.clipboard?.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1500) }).catch(() => {})
-  return <button type="button" className="linkbtn" onClick={copy}>{done ? 'copied' : 'copy'}</button>
-}
-
-function CommandRow({ runId, r, span, load }: { runId: string; r: Run; span: number; load: (id: string) => Promise<Command[]> }) {
-  const [cmd, setCmd] = useState<Command | undefined>(undefined)
+function CommandRow({ runId, r, span, load }: { runId: string; r: Run; span: number; load: (id: string) => Promise<Commands> }) {
+  const [all, setAll] = useState<Commands | undefined>(undefined)
   const [err, setErr] = useState<string | null>(null)
   useEffect(() => {
     let live = true
-    load(runId).then((all) => live && setCmd(all[r.id] ?? null)).catch((e: unknown) => live && setErr(String(e)))
+    load(runId).then((c) => live && setAll(c)).catch((e: unknown) => live && setErr(String(e)))
     return () => { live = false }
-  }, [runId, r.id, load])
-  const scen = cmd && cmd[1] && typeof cmd[1] === 'object' ? (cmd[1] as { scenario?: string }).scenario : undefined
+  }, [runId, load])
+  const run = all?.runs[r.id] ?? null
+  const scen = run?.[1] ?? null
+  const yaml = scen ? all?.scenarios[scen] : undefined
   let body
   if (err) body = <p className="xf-empty">Could not load the command: {err}</p>
-  else if (cmd === undefined) body = <p className="xf-sub">Loading…</p>
-  else if (cmd === null) body = <p className="xf-empty">This run has no recorded command.</p>
+  else if (all === undefined) body = <p className="xf-sub">Loading…</p>
+  else if (run === null) body = <p className="xf-empty">This run has no recorded command.</p>
   else body = (
     <div className="xf-cmd">
-      <div className="xf-cmd-h"><b>blis run</b><CopyButton text={cmd[0]} /></div>
-      <pre className="xf-cmd-line">{cmd[0]}</pre>
-      {cmd[1] != null && (
+      <div className="xf-cmd-h"><b>0. Install this report's pinned BLIS, catalog and registry once</b><SetupLink>show setup</SetupLink></div>
+      {yaml && (
+        <>
+          <div className="xf-cmd-h"><b>1. Save the scenario as <span className="mono">scenarios/{scen}</span></b><CopyButton text={yaml} /></div>
+          <pre className="xf-cmd-line xf-yaml">{yaml}</pre>
+        </>
+      )}
+      <div className="xf-cmd-h"><b>{yaml ? '2. Run' : 'Command'}</b><CopyButton text={run[0]} /></div>
+      <pre className="xf-cmd-line">{run[0]}</pre>
+      {!yaml && run[2] != null && (
         <details>
-          <summary>the deployment it priced{scen ? <> (scenario <span className="mono">{scen}</span>, regenerated from the spec)</> : null}</summary>
-          <pre className="xf-yaml">{yamlish(cmd[1])}</pre>
+          <summary>the deployment it priced (scenario <span className="mono">{scen}</span>, not regenerable from this report)</summary>
+          <pre className="xf-yaml">{yamlish(run[2])}</pre>
         </details>
       )}
     </div>
@@ -71,7 +81,7 @@ function CommandRow({ runId, r, span, load }: { runId: string; r: Run; span: num
   return <tr className="xf-cmdrow"><td colSpan={span}>{body}</td></tr>
 }
 
-export function RunsTable({ x, load = loadCommands }: { x: Explorer; load?: (id: string) => Promise<Command[]> }) {
+export function RunsTable({ x, load = loadCommands }: { x: Explorer; load?: (id: string) => Promise<Commands> }) {
   const [sort, setSort] = useState<{ k: keyof Run; dir: 1 | -1 } | null>(null)
   const [limit, setLimit] = useState(PAGE)
   const [open, setOpen] = useState<Set<number>>(new Set())
@@ -93,7 +103,7 @@ export function RunsTable({ x, load = loadCommands }: { x: Explorer; load?: (id:
   const span = COLS.length + 3
   return (
     <section className="xf-sec" id="sec-runs" aria-labelledby="h-runs">
-      <div className="xf-sec-h"><h2 id="h-runs">Runs</h2><p>{list.length.toLocaleString('en-US')} runs, best {METRIC[m].label} first. Tags show where a run differs from this report’s usual setting; open a run for its exact command.</p></div>
+      <div className="xf-sec-h"><h2 id="h-runs">Runs</h2><p>{list.length.toLocaleString('en-US')} runs, best {METRIC[m].label} first. Tags show where a run differs from this report’s usual setting; open a run for the command that reproduces it.</p></div>
       <div className="xf-card"><div className="tscroll hscroll">
         <table className="readout xf-runs">
           <thead><tr className="col">

@@ -65,6 +65,15 @@ describe('fields', () => {
   it('reads every SLO unit the spec schema allows', () => {
     expect([sloMs('20ms'), sloMs('5s'), sloMs('250us'), sloMs('x')]).toEqual([20, 5000, 0.25, null])
   })
+  it('names the value an unset knob ran at', () => {
+    const d = unpack({ ...FIXTURE, defaults: { max_num_seqs: 256 } })
+    const unset = { ...d[0], knobs: { ...d[0].knobs, max_num_seqs: null } }
+    expect(fieldValue(unset, 'max_num_seqs', R)).toBe('256 (default)')
+    expect(fieldValue(d[0], 'max_num_seqs', R)).toBe('64')
+    expect(fieldValue({ ...d[0], knobs: { ...d[0].knobs, max_num_seqs: 256 } }, 'max_num_seqs', R)).toBe('256 (default)')
+    expect(sortValues(['64', '256 (default)', '512'])).toEqual(['64', '256 (default)', '512'])
+    expect(sortValues(['fp8', 'auto (default)'])).toEqual(['auto (default)', 'fp8'])
+  })
   it('sorts numbers numerically, defaults first, n/a last', () => {
     expect(sortValues(['16', 'n/a', '4', '8'])).toEqual(['4', '8', '16', 'n/a'])
     expect(sortValues(['fp8', 'default', 'auto'])).toEqual(['default', 'auto', 'fp8'])

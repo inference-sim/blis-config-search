@@ -1,6 +1,6 @@
 // One crossfilter field as bars: one bar per value, sized by the page's bar measure. Click to filter.
 import type { Explorer } from './useExplorer'
-import { METRIC, better, fmt, fmtMetric, poolOf, rankConfigs, sortValues, NA } from './model'
+import { METRIC, better, fmt, fmtMetric, poolOf, rankConfigs, sortValues, NA, bareValue } from './model'
 
 interface Bar { v: string; n: number; ok: number; best: number | null; bestTopo: string; bestConc: number | null }
 
@@ -35,7 +35,10 @@ export function FieldChart({ x, k, title, help }: { x: Explorer; k: string; titl
     const av = measure(a) as number
     return (x.bar === 'best' ? better(m, v, av) : v > av) ? b : a
   }, null)
-  const horizontal = bars.length > 5 || bars.some((b) => b.v.length > 7)
+  // the "(default)" tag goes on its own line in a column, so it does not force horizontal bars
+  const horizontal = bars.length > 5 || bars.some((b) => bareValue(b.v).length > 7)
+  // every column gets the tag line when one has it, so the values stay on one row
+  const tagged = bars.some((b) => bareValue(b.v) !== b.v)
   const tip = (b: Bar) => `${title} ${b.v}: ${b.n} runs in filter, ${b.ok} meet every SLO`
     + (b.best !== null ? `; best ${fmtMetric(m, b.best)} ${METRIC[m].label} (${b.bestTopo}, ${b.bestConc} sessions)` : '')
   const cls = (b: Bar, base: string) => [base, sel.includes(b.v) && 'on', sel.length && !sel.includes(b.v) && 'dim', b === win && 'win', !b.n && 'zero'].filter(Boolean).join(' ')
@@ -65,7 +68,7 @@ export function FieldChart({ x, k, title, help }: { x: Explorer; k: string; titl
             <button type="button" key={b.v} className={cls(b, 'xf-vbar')} aria-pressed={sel.includes(b.v)} title={tip(b)} aria-label={tip(b)} onClick={() => x.toggleValue(k, b.v)}>
               <span className="xf-n">{text(b)}</span>
               <span className="xf-col"><i style={{ height: `${size(b)}%` }} /></span>
-              <span className="xf-v">{b.v}</span>
+              <span className="xf-v">{bareValue(b.v)}{tagged && <small className="xf-def">{bareValue(b.v) !== b.v ? 'default' : ''}</small>}</span>
             </button>
           ))}
         </div>

@@ -4,7 +4,7 @@ import type { Catalog, Scenario, WorkloadEntry } from './types'
 import { facetCounts, filterScenarios, NO_FILTERS, parseRoute, coverageRows, TAB_LABELS } from './lib'
 import { ScenarioPage } from './explore/Explorer'
 import { FIXTURE } from './explore/model.test'
-import { RunsTable, type Command } from './explore/RunsTable'
+import { RunsTable, type Commands } from './explore/RunsTable'
 import { useExplorer } from './explore/useExplorer'
 import type { Scalar } from './explore/types'
 import { Reports } from './components/Reports'
@@ -356,18 +356,35 @@ describe('report explorer page', () => {
     expect(document.querySelector('.xf-runs tbody .xf-cfglink .win')?.textContent).toBe('2P TP8 / 6D TP16')
   })
 
-  it('opens a run\'s exact blis run command, fetched once for the report', async () => {
+  it('opens a run\'s command with the scenario it reads, fetched once for the report', async () => {
     let fetches = 0
-    const cmds = FIXTURE.rows.map((_, i) => [`blis run --scenario s${i}.yaml --concurrency 8`, { scenario: `s${i}.yaml`, gpus: 8 }] as [string, unknown])
+    const cmds: Commands = {
+      scenarios: { 's0.yaml': 'kind: Scenario\nname: s0' },
+      runs: FIXTURE.rows.map((_, i) => [`blis run \\\n  --scenario s${i % 2}.yaml`, `s${i % 2}.yaml`, i % 2 ? { gpus: 8 } : null]),
+    }
     render(<RunsTableHost load={() => { fetches++; return Promise.resolve(cmds) }} />)
     await waitFor(() => expect(document.querySelector('.xf-cmdbtn')).toBeTruthy())
     const btns = () => [...document.querySelectorAll('.xf-cmdbtn')] as HTMLElement[]
     fireEvent.click(btns()[0])
-    await waitFor(() => expect(document.querySelector('.xf-cmd-line')?.textContent).toMatch(/^blis run --scenario s\d+\.yaml/))
-    expect(document.querySelector('.xf-cmd summary')?.textContent).toMatch(/regenerated from the spec/)
+    await waitFor(() => expect(document.querySelector('.xf-cmd')).toBeTruthy())
+    const text = document.querySelector('.xf-cmd')?.textContent ?? ''
+    expect(text).toMatch(/blis run/)
+    expect(text).not.toMatch(/upstream/)
+    // a regenerable scenario is shown to save; otherwise the deployment it priced
+    expect(/Save the scenario/.test(text) || /not regenerable/.test(text)).toBe(true)
     fireEvent.click(btns()[1])
-    await waitFor(() => expect(document.querySelectorAll('.xf-cmd-line')).toHaveLength(2))
+    await waitFor(() => expect(document.querySelectorAll('.xf-cmd')).toHaveLength(2))
     expect(fetches).toBeLessThanOrEqual(2)
+  })
+
+  it('opens one setup dialog with the report\'s pinned stack from the header', async () => {
+    const setup = { stack: [{ name: 'BLIS', repo: 'inference-sim', ref: 'v9.0.0', commit: 'a'.repeat(40) }], script: 'git clone --branch v9.0.0 x\n' }
+    render(<ScenarioPage runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16)]} load={() => Promise.resolve({ ...FIXTURE, setup })} />)
+    await waitFor(() => expect(screen.getByText('How to install this stack')).toBeTruthy())
+    expect(document.querySelector('.xf-dialog')?.hasAttribute('open')).toBe(false)
+    fireEvent.click(screen.getByText('How to install this stack'))
+    expect(document.querySelector('.xf-dialog')?.hasAttribute('open')).toBe(true)
+    expect(document.querySelector('.xf-dialog pre')?.textContent).toMatch(/--branch v9.0.0/)
   })
 
   it('tells apart router arms whose sweep caption is empty, in the dashboard caption style', async () => {
@@ -420,7 +437,7 @@ describe('report explorer page', () => {
   })
 })
 
-function RunsTableHost({ load }: { load: (id: string) => Promise<Command[]> }) {
+function RunsTableHost({ load }: { load: (id: string) => Promise<Commands> }) {
   const x = useExplorer(FIXTURE)
   return <RunsTable x={x} load={load} />
 }

@@ -98,7 +98,7 @@ export function unpack(d: ExploreData): Run[] {
     return {
       id, sweep: d.sweeps[a[0] as number]?.name ?? '', conc: a[1] as number, knobs,
       tpg: m(0), cl: m(1), pu: m(2), itl: m(3), ttft: m(4), ok: a[2 + nk + 5] === 1,
-      mode, topo: topoLabel(knobs), variant: d.variants?.[d.variant?.[id] ?? -1] ?? '', cfg: d.keys.map((k) => JSON.stringify(knobs[k] ?? null)).join('|'),
+      mode, defaults: d.defaults ?? {}, topo: topoLabel(knobs), variant: d.variants?.[d.variant?.[id] ?? -1] ?? '', cfg: d.keys.map((k) => JSON.stringify(knobs[k] ?? null)).join('|'),
     }
   })
 }
@@ -106,8 +106,17 @@ export function unpack(d: ExploreData): Run[] {
 /* ---------------- values ---------------- */
 
 export const NA = 'n/a'
-export const disp = (v: Scalar | undefined): string =>
-  v === null || v === undefined || v === '' ? 'default' : typeof v === 'object' ? JSON.stringify(v) : String(v)
+const show = (v: Scalar | object): string => (typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v))
+/** A knob's value; an unset one names the value it actually ran at, when the report knows it. */
+export function disp(v: Scalar | undefined, def?: Scalar | object): string {
+  const known = def !== undefined && def !== null
+  if (v === null || v === undefined || v === '') return known ? `${show(def)} (default)` : 'default'
+  // stating the default value is the same deployment as leaving it unset
+  return known && show(v) === show(def) ? `${show(v)} (default)` : show(v)
+}
+const isDefault = (v: string) => v === 'default' || v.endsWith(' (default)')
+/** A field value without its "(default)" tag. */
+export const bareValue = (v: string) => v.replace(/ \(default\)$/, '')
 
 /** A generated router arm is shown as its family plus the overridden parameter. */
 export function routerLabel(id: Scalar, routers: ExploreData['routers']): string {
@@ -137,14 +146,15 @@ export function fieldValue(r: Run, k: string, routers: ExploreData['routers']): 
     return bareKey(k) === 'enable_expert_parallel' ? (v ? 'on' : 'off') : disp(v)
   }
   if (poolOf(k) && r.mode !== 'P/D') return NA
-  return disp(r.knobs[k])
+  return disp(r.knobs[k], r.defaults[k])
 }
 
-/** Numbers numerically, then text; "default" always first and "n/a" always last. */
+/** Numbers numerically (a known default in its place), else the default first; "n/a" always last. */
 export function sortValues(vals: string[]): string[] {
   const real = vals.filter((v) => v !== NA && v !== 'default')
-  const numeric = real.every((v) => !Number.isNaN(Number(v)))
-  real.sort(numeric ? (a, b) => Number(a) - Number(b) : (a, b) => a.localeCompare(b))
+  const numeric = real.every((v) => !Number.isNaN(Number(bareValue(v))))
+  real.sort(numeric ? (a, b) => Number(bareValue(a)) - Number(bareValue(b))
+    : (a, b) => Number(isDefault(b)) - Number(isDefault(a)) || a.localeCompare(b))
   return [...(vals.includes('default') ? ['default'] : []), ...real, ...(vals.includes(NA) ? [NA] : [])]
 }
 

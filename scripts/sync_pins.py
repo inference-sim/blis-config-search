@@ -15,6 +15,7 @@ they are compiled into the binary, so BLIS_REF determines them:
     blis-schemas          direct require
     blis-vllm             direct require (absent before v0.14.0; the engine surface moved there)
     blis-latency-kernel   at v0.15.0 an INDIRECT require, pulled in via blis-schemas
+    llm-d-router          the inference-sim fork, reached through a `replace` directive
 
 The indirect case is why this parses the whole require set rather than the direct block: a reader
 that only took direct requires would silently drop the kernel at v0.15.0 and publish a footer with
@@ -49,11 +50,15 @@ DERIVED = {
     "github.com/inference-sim/blis-schemas": "SCHEMAS_REF",
     "github.com/inference-sim/blis-vllm": "VLLM_REF",
     "github.com/inference-sim/blis-latency-kernel": "KERNEL_REF",
+    # The router fork keeps upstream's module path, so go.mod reaches it via `replace`.
+    "github.com/inference-sim/llm-d-router": "ROUTER_REF",
 }
 
 # `  github.com/x/y v1.2.3 // indirect` -> (module, version). The trailing comment is optional,
 # so this matches direct and indirect requires alike.
 _REQUIRE = re.compile(r"^\s*(\S+)\s+(v\S+?)\s*(?://.*)?$")
+# `replace a/b => github.com/x/y v1.2.3`, single-line or inside a replace block.
+_REPLACE = re.compile(r"^\s*(?:replace\s+)?\S+(?:\s+v\S+)?\s+=>\s+(\S+)\s+(v\S+?)\s*(?://.*)?$")
 
 
 def read_pins(path=PINS):
@@ -93,9 +98,14 @@ def derive(ref, repo):
     the result -- blis-vllm is not a dependency before v0.14.0, and inventing a version for it
     would be worse than omitting the row.
     """
+    return derive_from_text(gomod_at(ref, repo))
+
+
+def derive_from_text(go_mod):
+    """{pins.env key: version} for the DERIVED modules a go.mod's text names."""
     found = {}
-    for line in gomod_at(ref, repo).splitlines():
-        m = _REQUIRE.match(line)
+    for line in go_mod.splitlines():
+        m = _REPLACE.match(line) or _REQUIRE.match(line)
         if not m:
             continue
         mod, ver = m.group(1), m.group(2)

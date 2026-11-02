@@ -53,7 +53,8 @@ UPSTREAM = "inference-sim/inference-sim"
 TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 # The keys whose VALUE says which stack priced a report. A comment-only edit to pins.env moves
 # none of them and must not queue hours of sweeps.
-STACK_KEYS = ("BLIS_REF", "BLIS_SHA", "KERNEL_REF", "CATALOG_REF", "REGISTRY_REF")
+STACK_KEYS = ("BLIS_REF", "BLIS_SHA", "KERNEL_REF", "VLLM_REF", "SCHEMAS_REF", "ROUTER_REF",
+              "CATALOG_REF", "REGISTRY_REF")
 # A batch is one PR. Small enough to review the numbers, large enough not to open a PR per report.
 MAX_BATCH = 4
 
@@ -116,9 +117,10 @@ def resolve_tag_sha(tag):
 
 
 def go_mod_versions(go_mod):
-    """{module-suffix: version} for the blis-* modules inference-sim's go.mod requires."""
+    """{module-suffix: version} for the blis-* modules and llm-d-router fork inference-sim's go.mod uses."""
     out = {}
-    for m in re.finditer(r"github\.com/inference-sim/(blis-[a-z-]+)\s+(v[0-9][^\s]*)", go_mod):
+    for m in re.finditer(r"github\.com/inference-sim/(blis-[a-z-]+|llm-d-router)\s+(v[0-9][^\s]*)",
+                         go_mod):
         out.setdefault(m.group(1), m.group(2))
     return out
 
@@ -165,8 +167,8 @@ def rewrite_setup(text, old_ref, new_ref, new_sha, note):
 def bump(tag, sha=None, go_mod=None, release_name=None, pins_path=PINS, setup_path=SETUP):
     """Move the pin to `tag`, in pins.env and SETUP.md. Returns {key: (old, new)} for what moved.
 
-    KERNEL_REF moves with it because inference-sim's go.mod pins the kernel. CATALOG_REF and
-    REGISTRY_REF are NOT inferred: they are separate repos and no file upstream says which ones a
+    The derived pins (sync_pins.DERIVED) move with it because inference-sim's go.mod pins them.
+    CATALOG_REF and REGISTRY_REF are NOT inferred: they are separate repos and no file upstream says which ones a
     release needs, so the PR asks a reviewer instead of guessing."""
     pins = read_pins(pins_path)
     old_ref = pins.get("BLIS_REF")
@@ -176,9 +178,8 @@ def bump(tag, sha=None, go_mod=None, release_name=None, pins_path=PINS, setup_pa
     if go_mod is None:
         go_mod = _http_text(f"https://raw.githubusercontent.com/{UPSTREAM}/{sha}/go.mod")
     mods = go_mod_versions(go_mod)
-    updates = {"BLIS_REF": tag, "BLIS_SHA": sha}
-    if mods.get("blis-latency-kernel"):
-        updates["KERNEL_REF"] = mods["blis-latency-kernel"]
+    import sync_pins
+    updates = {"BLIS_REF": tag, "BLIS_SHA": sha, **sync_pins.derive_from_text(go_mod)}
     with open(pins_path) as f:
         pins_text = f.read()
     with open(setup_path) as f:

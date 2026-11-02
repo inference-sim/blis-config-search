@@ -368,6 +368,7 @@ def test_displayed_stack_survives_a_fresh_clone():
         "blis-latency-kernel": pins.get("KERNEL_REF"),
         "blis-schemas": pins.get("SCHEMAS_REF"),
         "blis-vllm": pins.get("VLLM_REF"),
+        "llm-d-router": pins.get("ROUTER_REF"),
         "blis-catalog": pins.get("CATALOG_REF"),
         "blis-registry": pins.get("REGISTRY_REF"),
     }

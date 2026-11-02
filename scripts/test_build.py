@@ -101,21 +101,21 @@ def test_winner_mismatch_raises_not_falls_back():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def test_report_back_link_resolves_on_pages():
-    print("test_report_back_link_resolves_on_pages")
-    # The report is served at data/reports/<run_id>/index.html; the gallery shell is the SPA root.
-    # The back-link must climb three levels (../../../) or it 404s on Pages.
+def test_gallery_renders_no_standalone_html():
+    print("test_gallery_renders_no_standalone_html")
+    # The SPA is the only report surface now (#69): the gallery copies the SPA's data files and
+    # no longer renders a standalone index.html beside them.
     tmp = tempfile.mkdtemp()
     try:
         rd = os.path.join(tmp, "qwen3-14b-h100-chatbot-0004")
         _mk_run_dir(rd, "qwen3-14b-h100-chatbot-0004")
         out = os.path.join(tmp, "site")
         bg.build(os.path.dirname(rd), out)
-        html = open(os.path.join(out, "qwen3-14b-h100-chatbot-0004", "index.html")).read()
-        check("../../../index.html#/reports" in html,
-              "back-link climbs data/reports/<id> to the SPA root")
-        check("\"../index.html#/reports\"" not in html,
-              "the old one-level back-link is gone")
+        dest = os.path.join(out, "qwen3-14b-h100-chatbot-0004")
+        check(not os.path.exists(os.path.join(dest, "index.html")),
+              "the gallery no longer renders a standalone index.html (#69)")
+        check(os.path.isfile(os.path.join(dest, "scenario.json")),
+              "the run's data files are still copied for the SPA")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -812,7 +812,7 @@ def test_explore_data():
 if __name__ == "__main__":
     test_winner_with_a_knob_variant()
     test_winner_mismatch_raises_not_falls_back()
-    test_report_back_link_resolves_on_pages()
+    test_gallery_renders_no_standalone_html()
     test_build_refuses_to_wipe_reports()
     test_validation()
     test_build_determinism()

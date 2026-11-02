@@ -76,7 +76,6 @@ h2.viewhead{margin:0 0 6px;font-size:22px;font-weight:600;letter-spacing:-0.01em
 /* the floor chip is a constraint, not a spec — tint it with the accent so it reads as the
    premise for every servable/not call on the page */
 .spec.floor{color:var(--accent-ink,var(--accent));border-color:var(--accent);background:var(--accent-soft)}
-.fullreport{font-size:12.5px;margin-left:6px}
 
 /* ---- Coverage: the searched-combinations table; entity cells link to blis-catalog ---- */
 /* the recommended config is the payload of a coverage row — give it the same mono/accent
@@ -94,7 +93,6 @@ h2.viewhead{margin:0 0 6px;font-size:22px;font-weight:600;letter-spacing:-0.01em
 .catbtns-l{color:var(--muted);background:var(--paper);font-family:var(--font-mono);font-size:11.5px;display:flex;align-items:center}
 .catbtns a{color:var(--accent-ink);font-weight:500}
 .catbtns a:hover{text-decoration:none;background:var(--accent-soft)}
-.specsheet{font-family:var(--font-sans);font-size:12.5px;font-weight:500;margin-left:12px;vertical-align:middle}
 
 /* ---- controls ---- */
 .chips{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;align-items:center}

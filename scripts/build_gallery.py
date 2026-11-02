@@ -9,8 +9,8 @@ A pure transform (it never runs BLIS) that writes:
     <out>/scenarios.json        one row per report (the cards and the coverage table)
     <out>/<run_id>/explore.json the explorer's runs, sweeps and router chains (explore_data.py)
     <out>/<run_id>/commands.json each run's `blis run` line and deployment, in explore row order
+    <out>/<run_id>/{scenario,pareto,report}.json the raw analysis artifacts the SPA reads
     <out>/catalog.json          the model / GPU / workload spec-sheets (build_catalog.py)
-    <out>/<run_id>/index.html   the standalone report (report.py), plus its data files
 
 Run dirs are read in sorted order and serialized stably, so identical inputs give identical
 output. Every run dir is validated before it contributes a row, and an invalid one aborts the
@@ -35,10 +35,6 @@ RUN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 HARDWARE_RE = re.compile(r"^[a-z][a-z0-9.-]{1,31}$")
 # Copied next to each rendered report; runs.jsonl (~20 MB each) stays in reports/, unpublished.
 REPORT_DATA_FILES = ("scenario.json", "pareto.json", "report.json")
-# The report is served at data/reports/<run_id>/index.html, three levels below the SPA.
-BACK_LINK = ('<div style="font:600 13px/1.4 system-ui,sans-serif;margin:16px 0 0">'
-             '<a href="../../../index.html#/reports" style="color:#1f6e5c;text-decoration:none">'
-             '← back to the reports</a></div>')
 
 
 class Invalid(Exception):
@@ -141,17 +137,13 @@ def validate_and_project(run_dir):
     }
 
 
-def _write_report(run_dir, dest):
-    """Render the standalone report into dest/index.html with a link back to the site."""
+def _write_run_data(run_dir, dest):
+    """Write the data files the SPA reads for one report into dest/.
+
+    The SPA (web/) is the only report surface now; the former standalone index.html was retired
+    (issue #69). What ships per run is the explorer payload and the raw analysis artifacts.
+    """
     os.makedirs(dest, exist_ok=True)
-    path = os.path.join(dest, "index.html")
-    report_py.write_one(run_dir, out=path)
-    with open(path, encoding="utf-8") as f:
-        html = f.read()
-    anchor = '<div class="wrap">'
-    html = html.replace(anchor, anchor + BACK_LINK, 1)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(html)
     explore = explore_data.build(run_dir)
     if explore:
         _dump(os.path.join(dest, "explore.json"), explore)
@@ -191,7 +183,7 @@ def build(reports_dir, out_dir):
     rows = []
     for rd in run_dirs:
         run_id, row = validate_and_project(rd)
-        _write_report(rd, os.path.join(out_dir, run_id))
+        _write_run_data(rd, os.path.join(out_dir, run_id))
         rows.append(row)
     rows.sort(key=lambda r: r["run_id"])
     _dump(os.path.join(out_dir, "scenarios.json"), rows)

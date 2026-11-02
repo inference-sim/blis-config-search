@@ -19,6 +19,3 @@ export async function loadCatalog(): Promise<Catalog> {
   return getJson<Catalog>('catalog.json')
 }
 
-// The self-contained report lives beside its data; link target (new tab).
-export const reportHref = (runId: string) =>
-  `${BASE}/data/reports/${encodeURIComponent(runId)}/index.html`

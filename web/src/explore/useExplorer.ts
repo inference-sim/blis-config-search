@@ -2,7 +2,7 @@
 import { useMemo, useState } from 'react'
 import type { ExploreData, MetricKey, Run } from './types'
 import {
-  configFilters, fieldValue, groupTies, liveFields, matches, mostInfluential, rankConfigs, toggle, unpack, usualValues, type Selection,
+  captions, configFilters, fieldValue, groupTies, liveFields, matches, mostInfluential, rankConfigs, toggle, unpack, usualValues, type Selection,
 } from './model'
 
 export type BarMeasure = 'best' | 'pass' | 'count'
@@ -29,6 +29,8 @@ export interface Explorer {
   picked: string | null
   pick: (cfg: string) => void
   fv: (r: Run, k: string) => string
+  /** The gray line under a config's topology, as on the dashboard cards. */
+  caption: (r: Run) => string
   ranked: ReturnType<typeof groupTies>
   /** The field the overview colors its points by. */
   colorBy: string | null
@@ -44,6 +46,7 @@ export function useExplorer(data: ExploreData): Explorer {
   const runs = useMemo(() => unpack(data), [data])
   const fields = useMemo(() => liveFields(runs, data.keys, data.routers), [runs, data])
   const usual = useMemo(() => usualValues(runs, fields, data.routers), [runs, fields, data])
+  const caps = useMemo(() => captions(runs, fields, usual, data.routers), [runs, fields, usual, data])
   const [target, setTarget] = useState<MetricKey>('tpg')
   const [bar, setBar] = useState<BarMeasure>('best')
   const [sel, setSel] = useState<Selection>({})
@@ -58,6 +61,7 @@ export function useExplorer(data: ExploreData): Explorer {
   const colorBy = colorChoice && fields.includes(colorChoice) ? colorChoice : auto
 
   const fv = (r: Run, k: string) => fieldValue(r, k, data.routers)
+  const caption = (r: Run) => caps.get(r.cfg) ?? r.variant
   const shown = (skip?: string) => runs.filter((r) => (!okOnly || r.ok) && matches(r, sel, data.routers, skip))
 
   const clearPick = () => { setPicked(null); setPickKeys([]); setBeforePick(null) }
@@ -97,6 +101,6 @@ export function useExplorer(data: ExploreData): Explorer {
 
   return {
     data, runs, fields, usual, target, setTarget, bar, setBar, sel, okOnly, setOkOnly,
-    shown, toggleValue, setField, clearField, reset, picked, pick, fv, ranked, hover, setHover, resetCharts, colorBy, setColorBy,
+    shown, toggleValue, setField, clearField, reset, picked, pick, fv, caption, ranked, hover, setHover, resetCharts, colorBy, setColorBy,
   }
 }

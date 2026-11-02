@@ -243,6 +243,22 @@ export function tagsOf(r: Run, fields: string[], usual: ReturnType<typeof usualV
     .map(({ k, v }) => ({ layer: layerOf(k), text: `${poolOf(k) ? poolOf(k) + ' ' : ''}${k === 'router_config' ? '' : bareKey(k) + ' '}${v}` }))
 }
 
+/** Each config's caption: its sweep's variant when that alone tells it apart, else its knob tags. */
+export function captions(runs: Run[], fields: string[], usual: ReturnType<typeof usualValues>, routers: ExploreData['routers']) {
+  const cfgs = new Map<string, Set<string>>()
+  for (const r of runs) {
+    const k = `${r.topo}|${r.variant}`
+    cfgs.set(k, (cfgs.get(k) ?? new Set()).add(r.cfg))
+  }
+  const out = new Map<string, string>()
+  for (const r of runs) {
+    if (out.has(r.cfg)) continue
+    const unique = r.variant && cfgs.get(`${r.topo}|${r.variant}`)!.size === 1
+    out.set(r.cfg, unique ? r.variant : tagsOf(r, fields, usual, routers).map((t) => t.text).join(' · ') || r.variant)
+  }
+  return out
+}
+
 /** A config's settings as filters, limited to fields its serving mode has. */
 export function configFilters(r: Run, fields: string[], routers: ExploreData['routers']): Selection {
   const sel: Selection = {}

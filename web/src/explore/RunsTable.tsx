@@ -113,7 +113,7 @@ export function RunsTable({ x, load = loadCommands }: { x: Explorer; load?: (id:
                 <Fragment key={r.id}>
                   <tr className={`${r.ok ? '' : 'bad'}${r.cfg === x.picked ? ' sel' : ''}`}>
                     <td className="xf-cfgcol">
-                      <button type="button" className="xf-cfglink" onClick={() => x.pick(r.cfg)} title="Filter the page to this config"><ConfigName label={r.topo} variant={r.variant} /></button>
+                      <button type="button" className="xf-cfglink" onClick={() => x.pick(r.cfg)} title="Filter the page to this config"><ConfigName label={r.topo} variant={x.caption(r)} /></button>
                     </td>
                     {COLS.map((c) => <td key={c.k} className={`num${c.k === m ? ' xf-on' : ''}`}>{fmt(val(r, c.k), c.digits)}</td>)}
                     <td className="xf-status">{r.ok ? 'met' : miss(r)}</td>

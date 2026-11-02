@@ -67,7 +67,7 @@ function GpuLayout({ r, x }: { r: Run; x: Explorer }) {
   return (
     <aside className="xf-gpu" aria-label="Accelerator layout">
       <p className="eyebrow">{x.picked ? 'Selected config' : 'Best in the filter'}</p>
-      <ConfigName label={r.topo} variant={r.variant} />
+      <ConfigName label={r.topo} variant={x.caption(r)} />
       <p className="xf-sub">{fmtMetric(x.target, r[x.target])} {METRIC[x.target].label} at {r.conc} sessions</p>
       <div className="xf-gpu-row">
         {pools.map((p, i) => (

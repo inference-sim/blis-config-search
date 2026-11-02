@@ -352,6 +352,24 @@ describe('report explorer page', () => {
     expect(fetches).toBeLessThanOrEqual(2)
   })
 
+  it('tells apart router arms whose sweep caption is empty, in the dashboard caption style', async () => {
+    const arm = { ...FIXTURE.routers['pd-prefix-0123456789'], override: 'prefix-based-pd-decider nonCachedTokens 1024' }
+    const pd = FIXTURE.rows.filter((r) => r[0] === 1)
+    const data = {
+      ...FIXTURE, routers: { ...FIXTURE.routers, 'pd-prefix-1024': arm },
+      rows: [...FIXTURE.rows, ...pd.map((r) => r.map((v) => (v === 'pd-prefix-0123456789' ? 'pd-prefix-1024' : v)))],
+      variants: [''], variant: FIXTURE.rows.concat(pd).map(() => 0),
+    }
+    render(<ScenarioPage runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16)]} load={() => Promise.resolve(data)} />)
+    await waitFor(() => expect(cards().length).toBeGreaterThan(0))
+    fireEvent.click([...document.querySelectorAll('[data-field="mode"] button')].find((b) => b.textContent?.includes('P/D')) as Element)
+    const names = [...document.querySelectorAll('.xf-runs tbody .xf-cfglink .cfgname')]
+    expect(names.length).toBe(4)
+    expect(new Set(names.map((n) => n.querySelector('.win')?.textContent)).size).toBe(1)
+    expect(new Set(names.map((n) => n.querySelector('.winsub')?.textContent)).size).toBe(2)
+    expect(names.map((n) => n.querySelector('.winsub')?.textContent)).toContain('pd-prefix nonCachedTokens=1024')
+  })
+
   it('calls a single-pool deployment aggregated, not colocated', async () => {
     page()
     await waitFor(() => expect(cards().length).toBeGreaterThan(0))

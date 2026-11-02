@@ -47,7 +47,7 @@ export function TopConfigs({ x }: { x: Explorer }) {
             return (
               <button type="button" key={r.cfg} className="xf-cfg" aria-pressed={x.picked === r.cfg} onClick={() => x.pick(r.cfg)}>
                 <span className="xf-cfg-rank"><b>{i + 1}</b><span className={`xf-mode${r.mode === 'P/D' ? ' pd' : ''}`}>{r.mode}</span><span className="xf-sub">{r.conc} sessions · from sweep <span className="mono">{r.sweep}</span></span></span>
-                <ConfigName label={r.topo} variant={r.variant} />
+                <ConfigName label={r.topo} variant={x.caption(r)} />
                 <span className="xf-metrics">
                   <span className="xf-hero">
                     <span className="xf-hero-v">{fmtMetric(m, r[m])}<small>{METRIC[m].unit}</small></span>

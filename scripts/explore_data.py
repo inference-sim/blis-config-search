@@ -18,6 +18,7 @@ import yaml
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import build_catalog  # noqa: E402
 import run_blis  # noqa: E402
 
 # What the engine does with a knob a run leaves unset and the ledger does not record
@@ -182,6 +183,7 @@ def defaults(run_dir, keys):
 
 
 GH = "https://github.com/inference-sim"
+_PINS = build_catalog.read_pins()
 CATALOG_DIR = os.path.join(ROOT, os.pardir, "blis-catalog")
 
 
@@ -254,8 +256,12 @@ def setup(exp, run_dir=None):
              *[{"name": n, "repo": r, "ref": ps[k], "commit": commit(k)}
                for k, n, r in (("catalog", "catalog", "blis-catalog"), ("registry", "registry", "blis-registry"))
                if ps.get(k)]]
-    if ps.get("kernel"):
-        stack.append({"name": "latency kernel", "repo": "blis-latency-kernel", "ref": ps["kernel"], "commit": None})
+    # compiled into BLIS; a ledger from before the router was recorded takes the pin of the same BLIS release
+    router = ps.get("router") or (_PINS.get("ROUTER_REF") if _PINS.get("BLIS_REF") == ps["blis"] else None)
+    for name, repo, ref in (("latency kernel", "blis-latency-kernel", ps.get("kernel")),
+                            ("router", "llm-d-router", router)):
+        if ref and ref != "unpinned":
+            stack.append({"name": name, "repo": repo, "ref": ref, "commit": None})
     return {"stack": stack, "script": "\n".join(sh) + "\n", "sweep": "\n".join(sweep) + "\n",
             "runs": (exp.get("totals") or {}).get("runs"), "hours": _wall_hours(run_dir) if run_dir else None}
 
@@ -348,7 +354,9 @@ def _scenario(run_dir, exp, dep):
         return None
     router = dep.get("router") or {}
     # the sweeper's default when a spec names none (run_experiment.py)
-    for ev in dict.fromkeys([sc.get("engine_version") or "0.29.0", "0.29.0"]):
+    # the version a ledger recorded, else the pre-#57 default every older ledger was swept with
+    recorded = (exp.get("pinned_stack") or {}).get("engine_version")
+    for ev in dict.fromkeys([v for v in (recorded, sc.get("engine_version"), "0.29.0") if v]):
         key = json.dumps([model, hw, ev, dep["parallel"], dep["engine"], dep["num_instances"],
                           run_blis.DEFAULT_FABRIC, router], sort_keys=True)
         if f"{model}-{hw}-{hashlib.sha1(key.encode()).hexdigest()[:10]}.yaml" != name:

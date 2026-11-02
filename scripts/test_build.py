@@ -785,6 +785,9 @@ def test_explore_data():
         check("--branch v9.0.0" in st["script"] and "a" * 40 in st["script"] and "export BLIS_REGISTRY" in st["script"]
               and "shasum -a 256 -c" in st["script"],
               "the setup script installs the report's own recorded stack, checks each tag's commit and the corpus")
+        routed = explore_data.setup({"pinned_stack": dict(ps, router="v1.0.0-blis.9")})["stack"]
+        check({"name": "router", "repo": "llm-d-router", "ref": "v1.0.0-blis.9", "commit": None} in routed,
+              "the setup lists the llm-d-router fork the report recorded")
         sw = explore_data.setup({"name": "m", "pinned_stack": ps})["sweep"]
         check("run_experiment.py reports/m/spec.yaml" in sw and "--out repro/" in sw,
               "reproducing the sweep runs the report's own spec into repro/, not over reports/")

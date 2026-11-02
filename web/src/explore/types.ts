@@ -83,6 +83,8 @@ export interface Setup {
   script: string
   /** Reproduces the whole sweep locally from the report's committed spec. */
   sweep: string
+  /** Today's pins.env would sweep a different stack than the one recorded. */
+  pins_moved?: boolean
   runs?: number | null
   /** Serial BLIS hours the original sweep took. */
   hours?: number | null

@@ -7,7 +7,6 @@ The explorer is a client-side crossfilter over every run, so it ships rows as ar
 shared key list (a 3,880-run report is ~1 MB instead of ~6 MB of objects). Router configs are
 parsed here into the plugin chain the page draws, so the page needs no YAML parser.
 """
-import hashlib
 import json
 import os
 import re
@@ -187,12 +186,16 @@ _PINS = build_catalog.read_pins()
 CATALOG_DIR = os.path.join(ROOT, os.pardir, "blis-catalog")
 
 
-def _clone(repo, ref, commit, dest):
-    """Shallow-clone `ref` and refuse it if the tag no longer points at the recorded commit."""
-    lines = [f"git clone --branch {ref} --depth 1 {GH}/{repo}.git {dest}"]
+def _clone(repo, ref, commit, dest, *then):
+    """Shallow-clone `ref`, then run `then` only if the tag still points at the recorded commit.
+
+    One && chain, not `exit`: the script is pasted into an interactive shell, which must stay open.
+    """
+    steps = [f"git clone --branch {ref} --depth 1 {GH}/{repo}.git {dest}"]
     if commit:
-        lines.append(f'test "$(git -C {dest} rev-parse HEAD)" = {commit} || echo "{dest}: {ref} moved off {commit[:8]}" >&2')
-    return lines
+        steps.append(f'{{ test "$(git -C {dest} rev-parse HEAD)" = {commit} || '
+                     f'{{ echo "{dest}: {ref} moved off {commit[:8]}, stopping" >&2; false; }}; }}')
+    return [" && \\\n  ".join([*steps, *then])]
 
 
 def _corpus(workload):
@@ -227,11 +230,12 @@ def setup(exp, run_dir=None):
     if not ps.get("blis"):
         return None
     sh = ["# the stack that priced this report (needs git and Go)"]
-    sh += _clone("inference-sim", ps["blis"], commit("blis"), "inference-sim")
-    sh += ["(cd inference-sim && go build -o blis main.go)", 'export PATH="$PWD/inference-sim:$PATH"', ""]
+    sh += _clone("inference-sim", ps["blis"], commit("blis"), "inference-sim",
+                 "(cd inference-sim && go build -o blis main.go)", 'export PATH="$PWD/inference-sim:$PATH"')
+    sh.append("")
     for key, repo, env in (("catalog", "blis-catalog", "BLIS_CATALOG"), ("registry", "blis-registry", "BLIS_REGISTRY")):
         if ps.get(key):
-            sh += _clone(repo, ps[key], commit(key), repo) + [f'export {env}="$PWD/{repo}"', ""]
+            sh += _clone(repo, ps[key], commit(key), repo, f'export {env}="$PWD/{repo}"') + [""]
     sh += ["# the commands run from this repo: router configs live here, scenarios/ is where you save each scenario",
            f"git clone --depth 1 {GH}/blis-config-search.git && cd blis-config-search && mkdir -p scenarios"]
     replay = (exp.get("scenario") or {}).get("replay") or {}
@@ -262,7 +266,11 @@ def setup(exp, run_dir=None):
                             ("router", "llm-d-router", router)):
         if ref and ref != "unpinned":
             stack.append({"name": name, "repo": repo, "ref": ref, "commit": None})
+    # a fresh checkout sweeps at today's pins.env; ledgers from before #57 record no engine (0.29.0)
+    then = (ps["blis"], ps.get("catalog"), ps.get("registry"), ps.get("engine_version") or "0.29.0")
+    now = (_PINS.get("BLIS_REF"), _PINS.get("CATALOG_REF"), _PINS.get("REGISTRY_REF"), run_blis.pinned_engine_version())
     return {"stack": stack, "script": "\n".join(sh) + "\n", "sweep": "\n".join(sweep) + "\n",
+            "pins_moved": then != now,
             "runs": (exp.get("totals") or {}).get("runs"), "hours": _wall_hours(run_dir) if run_dir else None}
 
 
@@ -353,13 +361,11 @@ def _scenario(run_dir, exp, dep):
     if not (model and hw and name):
         return None
     router = dep.get("router") or {}
-    # the sweeper's default when a spec names none (run_experiment.py)
     # the version a ledger recorded, else the pre-#57 default every older ledger was swept with
     recorded = (exp.get("pinned_stack") or {}).get("engine_version")
     for ev in dict.fromkeys([v for v in (recorded, sc.get("engine_version"), "0.29.0") if v]):
-        key = json.dumps([model, hw, ev, dep["parallel"], dep["engine"], dep["num_instances"],
-                          run_blis.DEFAULT_FABRIC, router], sort_keys=True)
-        if f"{model}-{hw}-{hashlib.sha1(key.encode()).hexdigest()[:10]}.yaml" != name:
+        if run_blis.scenario_name(model, hw, ev, dep["parallel"], dep["engine"], dep["num_instances"],
+                                  router=router) + ".yaml" != name:
             continue
         shown = {}
         if router.get("router_config"):
@@ -376,7 +382,7 @@ def _scenario(run_dir, exp, dep):
     return None
 
 
-def _recipe(cmd, scenario_name, workload):
+def _recipe(cmd, workload):
     """The recorded command made portable: env-var roots, a repo-relative scenarios dir, one flag per line."""
     args, i, lines = [str(a) for a in cmd], 2, []
     while i < len(args):
@@ -435,7 +441,7 @@ def commands(run_dir):
                 got = _scenario(run_dir, exp, dep) if dep.get("parallel") is not None else None
                 scenarios[name] = got[1] if got else None
             # the deployment ships only when its scenario could not be regenerated exactly
-            out.append([_recipe(rec["cmd"], name, workload), name,
+            out.append([_recipe(rec["cmd"], workload), name,
                         None if scenarios.get(name) else dep or None])
     return {"scenarios": {k: v for k, v in scenarios.items() if v}, "runs": out}
 

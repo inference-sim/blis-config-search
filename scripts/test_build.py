@@ -768,7 +768,7 @@ def test_explore_data():
         recipe = explore_data._recipe(
             ["./upstream/blis", "run", "--scenario", "s.yaml", "--scenarios", "reports/x/scenarios",
              "--registry", "./blis-registry", "--catalog", "./blis-catalog", "--defaults-filepath",
-             "./upstream/defaults.yaml", "--workload", "chatbot", "--prompt-tokens", "256"], "s.yaml", "chatbot")
+             "./upstream/defaults.yaml", "--workload", "chatbot", "--prompt-tokens", "256"], "chatbot")
         check("upstream" not in recipe and "--workload " not in recipe and "--scenarios scenarios" in recipe
               and '--catalog "$BLIS_CATALOG"' in recipe and "--prompt-tokens 256" in recipe,
               "the shown command drops CI paths and inert flags, keeping what BLIS reads")
@@ -792,6 +792,12 @@ def test_explore_data():
         check("run_experiment.py reports/m/spec.yaml" in sw and "--out repro/" in sw,
               "reproducing the sweep runs the report's own spec into repro/, not over reports/")
         check(explore_data.setup({}) is None, "a ledger with no pinned_stack ships no setup")
+        pins = explore_data._PINS
+        now = {"blis": pins["BLIS_REF"], "catalog": pins["CATALOG_REF"], "registry": pins["REGISTRY_REF"],
+               "engine_version": explore_data.run_blis.pinned_engine_version()}
+        check(not explore_data.setup({"pinned_stack": now})["pins_moved"]
+              and explore_data.setup({"pinned_stack": dict(now, engine_version=None)})["pins_moved"],
+              "the sweep tab says when today's pins would sweep a different stack than the report's")
         rid, gone = explore_data._router_entry("routing/renamed-away.yaml", rd)
         check(rid == "renamed-away" and gone["chain"] is None,
               "a shared router file removed since the sweep degrades instead of failing the build")

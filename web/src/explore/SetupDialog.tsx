@@ -44,9 +44,9 @@ function SetupDialog({ setup, tab, setTab, onClose }: { setup: Setup; tab: Setup
         <h3 id="setup-h">Reproduce this report on your machine</h3>
         <button type="button" className="xf-close" onClick={onClose} aria-label="close"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg></button>
       </div>
-      <div className="xf-seg" role="tablist" aria-label="Step">
-        <button type="button" role="tab" aria-selected={tab !== 'sweep'} aria-pressed={tab !== 'sweep'} onClick={() => setTab('install')}>1. Install the pinned stack</button>
-        <button type="button" role="tab" aria-selected={tab === 'sweep'} aria-pressed={tab === 'sweep'} onClick={() => setTab('sweep')}>2. Reproduce the experiment sweep</button>
+      <div className="xf-seg" role="group" aria-label="Step">
+        <button type="button" aria-pressed={tab !== 'sweep'} onClick={() => setTab('install')}>1. Install the pinned stack</button>
+        <button type="button" aria-pressed={tab === 'sweep'} onClick={() => setTab('sweep')}>2. Reproduce the experiment sweep</button>
       </div>
       {tab === 'sweep' ? <Sweep setup={setup} /> : <Install setup={setup} />}
     </dialog>
@@ -82,7 +82,9 @@ function Sweep({ setup }: { setup: Setup }) {
       <p className="xf-note">This only reproduces the numbers locally, into <span className="mono">repro/</span>; the report on this site is unchanged.{setup.runs ? ` ${setup.runs.toLocaleString('en-US')} BLIS runs${setup.hours ? `, about ${setup.hours} h serial` : ''}.` : ''}</p>
       <div className="xf-cmd-h"><b>Sweep commands</b></div>
       <CodeBlock text={setup.sweep} />
-      <p className="xf-sub">Same spec, seed and stack give the same numbers as the committed ledger. To reproduce one config, use its command in the Runs table.</p>
+      {setup.pins_moved
+        ? <p className="xf-note">This repo's pins have moved since the sweep, so a fresh checkout sweeps a newer stack and numbers may differ. To reproduce one config exactly, use its command in the Runs table.</p>
+        : <p className="xf-sub">Same spec, seed and stack give the same numbers as the committed ledger. To reproduce one config, use its command in the Runs table.</p>}
     </>
   )
 }

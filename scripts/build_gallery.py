@@ -178,7 +178,7 @@ def build(reports_dir, out_dir):
     root = os.path.realpath(ROOT)
     if ((_within(out_dir, root) and out_dir != os.path.join(root, "site"))
             or _within(reports_dir, out_dir) or out_dir in run_dirs):
-        raise SystemExit(f"{out_dir}: refusing to wipe a repo dir other than site/, reports/, or a run dir")
+        raise SystemExit(f"{out_dir}: refusing to wipe (only site/ may be wiped inside the repo)")
     shutil.rmtree(out_dir, ignore_errors=True)
     os.makedirs(out_dir)
     rows = []

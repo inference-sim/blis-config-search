@@ -371,6 +371,7 @@ def _scenario(run_dir, exp, dep):
         if router.get("router_config"):
             rc = router["router_config"]
             local = os.path.join("reports", exp["name"], "routing", os.path.basename(rc))
+            # a generated override arm lives in the report; a stock arm (no overrides) in routing/
             rel = local if os.path.exists(os.path.join(ROOT, local)) else os.path.join("routing", os.path.basename(rc))
             shown = {"router_config": "__ROUTER__"}
         text = run_blis.scenario_yaml(model, hw, ev, json.loads(json.dumps(dep["parallel"])),
@@ -387,6 +388,7 @@ def _recipe(cmd, workload):
     args, i, lines = [str(a) for a in cmd], 2, []
     while i < len(args):
         flag = args[i]
+        # assumes no BLIS flag takes a "--"-prefixed value; such a value would be read as the next flag
         val = args[i + 1] if i + 1 < len(args) and not args[i + 1].startswith("--") else None
         i += 2 if val is not None else 1
         if flag in INERT_FLAGS:

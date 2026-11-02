@@ -777,6 +777,10 @@ def test_explore_data():
             got = explore_data.commands(real)
             check(all(r and r[1] in got["scenarios"] for r in got["runs"]),
                   "every committed run's scenario regenerates to its recorded file name")
+            routers = {l.split('"')[1] for t in got["scenarios"].values() for l in t.splitlines()
+                       if "endpoint_picker_config" in l}
+            check(routers and all(os.path.isfile(os.path.normpath(os.path.join(ROOT, "scenarios", r))) for r in routers),
+                  "every shown router path, per-report or stock routing/, resolves from scenarios/")
             check(explore_data.build(real)["defaults"].get("max_num_batched_tokens") == 8192,
                   "an unset knob's default is read from the deployments it ran")
         ps = {"blis": "v9.0.0", "catalog": "1.0.0", "registry": "v2.0.0",

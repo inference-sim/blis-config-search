@@ -937,6 +937,7 @@ def _pinned_stack(blis, catalog, registry):
     pins = build_catalog.read_pins()
     out = {"blis": pins.get("BLIS_REF", "unpinned"),
            "kernel": pins.get("KERNEL_REF", "unpinned"),
+           "router": pins.get("ROUTER_REF", "unpinned"),
            "catalog": pins.get("CATALOG_REF", "unpinned"),
            "registry": pins.get("REGISTRY_REF", "unpinned")}
     resolved = {}

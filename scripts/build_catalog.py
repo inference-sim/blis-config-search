@@ -326,7 +326,7 @@ def _stack(pins, versions):
 
     The rows come from two kinds of pin, which is why some are conditional:
 
-      * DERIVED (kernel, schemas, vllm) -- Go dependencies compiled into the binary, written to
+      * DERIVED (kernel, schemas, vllm, router) -- Go dependencies compiled into the binary, written to
         pins.env from inference-sim's go.mod by scripts/sync_pins.py. A derived key can be legally
         ABSENT: blis-vllm is not a dependency before BLIS v0.14.0, so at an older pin there is no
         row for it rather than a row reading "absent". Omitting beats inventing.
@@ -344,6 +344,9 @@ def _stack(pins, versions):
     if pins.get("VLLM_REF"):
         deps.append(dep("blis-vllm", pins["VLLM_REF"],
                         "engine config surface (vLLM's startup rules), derived from go.mod"))
+    if pins.get("ROUTER_REF"):
+        deps.append(dep("llm-d-router", pins["ROUTER_REF"],
+                        "embedded router that places every request, derived from go.mod"))
     if pins.get("SCHEMAS_REF"):
         deps.append(dep("blis-schemas", pins["SCHEMAS_REF"],
                         "deployment/engine structs the scenario decodes against, derived from go.mod"))

@@ -45,9 +45,8 @@ jobs:
         run: |
           python3 -I scripts/test_build.py
           python3 -I scripts/test_blis_pin.py
-      - name: Report + BLIS runner tests
+      - name: BLIS runner tests
         run: |
-          python3 -I scripts/test_report.py
           python3 -I scripts/test_run_blis.py
       - name: Experiment spec pipeline tests (validator, grids, overrides, ranking)
         run: python3 -I scripts/test_experiment.py

@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
-# lexicon.py -- the shared vocabulary both report surfaces read.
+# lexicon.py -- the shared vocabulary the report surface reads.
 #
-# The site renders the same runs twice: the standalone HTML report (report.py + figures.py)
-# and the React dashboard (web/src). They had grown two vocabularies for one set of numbers and,
-# worse, two ranking objectives for "What to run" -- the report ranked operating points by
-# per-user rate while the dashboard ranked them by tok/s per GPU, so at high load the two tables
-# recommended DIFFERENT configurations for the same scenario (issue #13).
-#
-# Both surfaces now read their labels, their captions and their ranking objective from
-# report/lexicon.json. This module is the Python reader; web/src/lexicon.json is a byte-identical
-# mirror the Vite build imports, and scripts/test_build.py fails if the two drift.
+# The canonical copy is report/lexicon.json. This module is the Python reader (used by the
+# figures/record tooling); web/src/lexicon.json is a byte-identical mirror the Vite build imports,
+# and scripts/test_build.py fails if the two drift. Keeping one vocabulary is what stops a number
+# being labelled "Speed per user" on one surface and "tok/s per user" on another (issue #13).
 #
 # Pure data: no I/O beyond reading the one JSON file, no network, no BLIS.
 import json

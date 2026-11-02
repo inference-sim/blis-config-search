@@ -2173,6 +2173,67 @@ class ProvenanceSplit(unittest.TestCase):
         self.assertIn("distinct resolved stacks", report.provenance_split(stacks))
 
 
+class PerUserRateUnderDrafting(unittest.TestCase):
+    """Under speculative decoding BLIS logs ITL per VERIFICATION STEP, and a step emits AL tokens,
+    so the naive 1000/ITL is a step rate. report._per_user_rate must return the AL-scaled per-token
+    rate, withhold it when AL is unknown, and give the direct rate without drafting -- the one
+    definition _feasible also judges on. (Ported from the retired test_report.py, issue #69, and
+    rewritten to call the kept helper directly rather than the removed build_records.)"""
+
+    ITL = 32.995
+
+    def _run(self, *, k=0, al=None):
+        dep = {"parallel": {"tp": 4}, "num_instances": 1, "gpus": 4,
+               "engine": {"max_num_batched_tokens": 8192, "max_num_seqs": 256}}
+        if k:
+            dep["engine"]["speculative"] = {"method": "dspark", "num_spec_tokens": k}
+            if al:
+                dep["acceptance"] = {"acceptance_length": al, "source": "test (b200)"}
+        return {"concurrency": 8, "config": {"tp": 4}, "deployment": dep, "returncode": 0,
+                "metrics": {"tokens_per_sec": 1041.5, "itl_p99_ms": self.ITL,
+                            "injected_requests": 40, "completed_requests": 40}}
+
+    def test_no_drafting_uses_the_direct_rate(self):
+        import report
+        pu, basis = report._per_user_rate(self._run())
+        self.assertAlmostEqual(pu, 1000 / self.ITL, places=1)
+        self.assertEqual(basis, "")
+
+    def test_drafting_with_acceptance_scales_by_al(self):
+        import report
+        pu, basis = report._per_user_rate(self._run(k=5, al=3.51))
+        self.assertAlmostEqual(pu, 3.51 * 1000 / self.ITL, places=1)
+        self.assertEqual(basis, "derived-from-acceptance")
+
+    def test_the_derived_rate_is_above_the_naive_one(self):
+        """The whole point: the naive axis would reject this config against a 50 tok/s/user floor
+        while the correct one clears it comfortably."""
+        import report
+        pu, _ = report._per_user_rate(self._run(k=5, al=3.51))
+        self.assertLess(1000 / self.ITL, 50)      # naive: looks like a violation
+        self.assertGreater(pu, 50)                # derived: clears the floor
+
+    def test_drafting_without_acceptance_withholds_the_rate(self):
+        """An unknown acceptance factor means an unknown multiple -- publish nothing."""
+        import report
+        pu, basis = report._per_user_rate(self._run(k=5, al=None))
+        self.assertIsNone(pu)
+        self.assertEqual(basis, "step-estimate-withheld")
+
+
+class ReportSchemaDoc(unittest.TestCase):
+    """report/schema.md documents report.json and must describe the per-user rate on the p99 basis,
+    not a mean-ITL basis (review F3). (Ported from the retired test_report.py, issue #69.)"""
+
+    def test_docs_describe_pu_as_p99(self):
+        import report
+        schema = os.path.join(report.REPORT_DIR, "schema.md")
+        text = open(schema, encoding="utf-8").read().lower()
+        self.assertNotIn("mean inter-token latency", text, "schema.md still says mean ITL for pu")
+        self.assertNotIn("1000 / mean itl", text, "schema.md still says 1000/mean ITL for pu")
+        self.assertNotIn("1000/mean-itl", text, "schema.md still says 1000/mean-ITL for pu")
+
+
 def main():
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(sys.modules[__name__])

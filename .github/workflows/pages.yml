@@ -74,7 +74,7 @@ jobs:
           python3 - <<'PY'
           import json, os, sys
           scen = json.load(open("dist/data/scenarios.json"))
-          missing = [s["run_id"] for s in scen if not os.path.isfile(f"dist/data/reports/{s['run_id']}/index.html")]
+          missing = [s["run_id"] for s in scen if not os.path.isfile(f"dist/data/reports/{s['run_id']}/explore.json")]
           if missing:
               sys.exit("missing reports: " + ", ".join(missing))
           cat = json.load(open("dist/data/catalog.json"))

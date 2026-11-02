@@ -1,19 +1,17 @@
 # `report.json`: the narrative seam
 
-`scripts/report.py` renders a magazine-style analytical report from a run directory. Three of its
-four inputs are measurements: `scenario.json`, `pareto.json`, `runs.jsonl`. **`report.json` is the
-fourth**: the narrative, which `scripts/run_experiment.py` writes from the spec and the measured
-results. It carries the prose, the hero panel, the numbered findings, the figures each section
-shows, the operating-point table, and the glossary.
+A report draws on four inputs: three measurements (`scenario.json`, `pareto.json`, `runs.jsonl`)
+and **`report.json`**, the narrative, which `scripts/run_experiment.py` writes from the spec and
+the measured results. It carries the prose, the hero panel, the numbered findings, the operating-
+point table, and the glossary, and is rendered by the React SPA under `web/`.
 
-It is **optional**. Without it, `report.py` still renders the header, the crossfilter explorer over
-every run, and an auto operating-point table — just without the analysis. With it, you get the full
-article. The reader is **defensive**: every field below degrades gracefully if absent.
+It is **optional**. Without it the report still shows the header, the explorer over every run, and
+an auto operating-point table — just without the analysis. With it, you get the full article. The
+reader is **defensive**: every field below degrades gracefully if absent.
 
-The report is a pure function of the run directory, so keep the prose grounded in the run's actual
-numbers (cite `pareto.json` / `runs.jsonl`). Prose strings may contain inline HTML, including glossary
-links `<a class="gl" href="#g-ID" data-def="short definition">term</a>` — the `data-def` gives a
-CSS-only hover tooltip, and `href="#g-ID"` jumps to the matching glossary entry.
+Keep the prose grounded in the run's actual numbers (cite `pareto.json` / `runs.jsonl`). Prose
+strings may contain inline HTML, including glossary links
+`<a class="gl" href="#g-ID" data-def="short definition">term</a>`.
 
 ```jsonc
 {
@@ -84,43 +82,17 @@ Both surfaces now read **`report/lexicon.json`**:
 | `flags` / `flag_skip` | the deploy flags the operating table prints, and the values worth no ink |
 | `operating_columns` | which columns that table shows, in order |
 
-`scripts/lexicon.py` is the Python reader (`report.py` and `figures.py` import it, and `report.py`
-bakes the whole file into the page so the explorer's JS labels match too). `web/src/lexicon.json`
-is a **byte-identical mirror** (Vite cannot import from outside `web/`), and
-`scripts/test_build.py` fails the build if the two drift. Change `report/lexicon.json`, then copy
-it over the mirror.
+`scripts/lexicon.py` is the Python reader. `web/src/lexicon.json` is a **byte-identical mirror**
+(Vite cannot import from outside `web/`), and `scripts/test_build.py` fails the build if the two
+drift. Change `report/lexicon.json`, then copy it over the mirror.
 
-**So:** do not write a metric name, an axis title, a figure caption's leading sentence, or a
-ranking rule into `report.json`. Add it to the lexicon (both copies) and let both surfaces read it.
+**So:** do not write a metric name, an axis title, or a ranking rule into `report.json`. Add it to
+the lexicon (both copies) and let both surfaces read it.
 
-## Figures
+## `RECORDS` field reference (what the explorer consumes)
 
-`figure` names a builder registered in `scripts/figures.py`'s `FIGURES` map. Each entry is
-`{"builder": fn, "keys": (RECORDS field(s) the figure's story depends on)}`. `report.render_figure`
-first checks that **every** `keys` field actually varies across the runs; if one does not (the sweep
-never varied it), it returns a captioned placeholder instead of a misleading flat chart. An unknown
-figure name likewise placeholders.
-
-Each figure's caption, axis titles and "how to read it" line come from the lexicon's `figures`
-block, so the dashboard's charts of the same story are worded identically. A section supplies only
-its `caption_note`.
-
-| name | what it draws | keys (must vary) |
-|---|---|---|
-| `operating_curve` | tok/s per user vs cluster tok/s, one line per config, concurrency-labelled; filled = servable | `conc` |
-| `scale_bars` | max servable concurrency per config, with the first-break marker | `series` |
-| `tail_scatter` | tok/s per user vs p95 latency; crosses = unservable | `conc` |
-
-Builders for knobs the v1 engine does not yet vary (routing, PD split, speculative decoding, dispatch
-collective) are **not shipped**; `figures.py` lists them only as commented-out registry examples.
-When such a builder lands, add its `FIGURES` entry with the appropriate `keys` (e.g. `("route",)`);
-until a sweep varies that knob the variation check renders the placeholder automatically.
-
-## `RECORDS` field reference (what the explorer + figures consume)
-
-Assembled in `report.build_records`. Short keys match the reference report so the explorer JS is
-unchanged. Knobs the engine doesn't vary come through constant (e.g. `route: "default"`, `mtp: 0`) and
-the explorer automatically hides single-value dimensions.
+Assembled in `scripts/explore_data.py`. Knobs the engine doesn't vary come through constant (e.g.
+`route: "default"`, `mtp: 0`) and the explorer automatically hides single-value dimensions.
 
 `id, src, conc, tp, dp, ni, gpus, series, route, pd, mtp, mnbt, mns, a2a, epw,`
 `pu (per-user tok/s: authoritative tok_per_s_per_user if present; else 1000/ITL-p99 when one step`

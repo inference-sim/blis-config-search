@@ -17,7 +17,6 @@ Scripts are always invoked with `-I`.
 # Python tests (hermetic: no BLIS, no network) — same set CI runs in checks.yml
 python3 -I scripts/test_build.py
 python3 -I scripts/test_experiment.py
-python3 -I scripts/test_report.py
 python3 -I scripts/test_run_blis.py
 python3 -I scripts/test_blis_pin.py
 
@@ -46,8 +45,9 @@ One pipeline feeds one static site:
   (deterministic sweeper, no LLM; runs BLIS via `scripts/run_blis.py`) → `reports/<name>/`.
   The `blis-experiment` skill only *writes* specs; it is the sole LLM step.
 - **Site:** `reports/` (committed run dirs, the source of truth) → `scripts/build_gallery.py`
-  (+ `build_catalog.py` for model/GPU/workload spec-sheets; `report.py` renders each report's
-  page from `report/`) → `site/` → `web/` (Vite + React SPA, static on GitHub Pages, `base: './'`).
+  (+ `build_catalog.py` for model/GPU/workload spec-sheets; `report.py` provides the run-dir and
+  feasibility helpers) → `site/` → `web/` (Vite + React SPA, static on GitHub Pages, `base: './'`).
+  The SPA is the only report surface; the former standalone HTML report was retired (#69).
 
 Spec rules worth knowing: every knob value is a list; omitted knobs take the vLLM default; only
 combos with `tp × dp × num-instances == scenario.gpus` are run; knob names must be BLIS's exact

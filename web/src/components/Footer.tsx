@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Catalog, Mode, Stack } from '../types'
+import type { Catalog, Stack } from '../types'
 import { SPEC_DOC } from '../lib'
 
 // The provenance/trust strip, moved out of the old sidebar rail (the left column on the
@@ -40,27 +40,16 @@ function StackPills({ stack }: { stack: Stack }) {
   )
 }
 
-export function Footer({ catalog, mode, hasMock }: { catalog: Catalog | null; mode: Mode | null; hasMock: boolean }) {
-  // Fall back to the old flat pills for a catalog.js generated before `stack` existed.
-  const versions = catalog && !catalog.stack ? Object.entries(catalog.versions) : []
+export function Footer({ catalog }: { catalog: Catalog | null }) {
   return (
     <footer className="sitefoot">
       <div className="footinner">
         <p className="footnote">
           <b>Simulator predictions, not measured results.</b> To add a report, write an{' '}
           <a href={SPEC_DOC} target="_blank" rel="noreferrer">experiment sweep spec</a> and open a pull request.
-          {hasMock && <> Scenarios badged <span className="mock">mock</span> are synthetic placeholders, not BLIS output.</>}
         </p>
         <div className="footmeta">
           {catalog?.stack && <StackPills stack={catalog.stack} />}
-          {versions.length > 0 && (
-            <span className="footvers">
-              {versions.map(([k, v]) => (
-                <span className="pill" key={k} title={k}><span className="pk">{k}</span> {v}</span>
-              ))}
-            </span>
-          )}
-          {mode && <span className="footmode mono">mode: {mode}</span>}
         </div>
       </div>
     </footer>

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import type { Catalog, HardwareEntry, Mode, ModelEntry, WorkloadEntry } from '../types'
+import type { Catalog, HardwareEntry, ModelEntry, WorkloadEntry } from '../types'
 import { Dropdown } from './Dropdown'
 import { SPEC_DOC, fnum } from '../lib'
 
@@ -215,7 +215,7 @@ const wlFacts = (w?: WorkloadEntry) => !w ? '' : w.kind === 'replay'
   ? facts(['trace replay', w.corpus])
   : facts(['synthetic', w.isl_mean && `~${fnum(w.isl_mean, 0)} tok in`, w.osl_mean && `~${fnum(w.osl_mean, 0)} tok out`])
 
-export function Submit({ catalog, mode }: { catalog: Catalog; mode: Mode }) {
+export function Submit({ catalog }: { catalog: Catalog }) {
   const isReplay = (w?: WorkloadEntry) => w?.kind === 'replay'
   const modelOf = (name: string) => catalog.models.find((m) => m.name === name)
   const isMoe = (name: string) => modelOf(name)?.arch === 'MoE'
@@ -357,7 +357,7 @@ export function Submit({ catalog, mode }: { catalog: Catalog; mode: Mode }) {
             <summary>Check it before you submit</summary>
             <p>CI runs these on every PR. Aim for under about 3 hours of serial runtime.</p>
             <pre className="yaml cmd">{`python3 -I scripts/validate_experiment.py ${file}\npython3 -I scripts/run_experiment.py ${file} --dry-run`}</pre>
-            {mode === 'local' && <pre className="yaml cmd">{`python3 -I scripts/run_experiment.py ${file}`}</pre>}
+            <pre className="yaml cmd">{`python3 -I scripts/run_experiment.py ${file} --blis /path/to/blis --catalog "$BLIS_CATALOG" --registry "$BLIS_REGISTRY"`}</pre>
             <p>
               Need help with knobs? The <a href={SKILL_DOC} target="_blank" rel="noreferrer"><span className="mono">blis-experiment</span></a> skill drafts a spec from a one-line question; the <a href={SPEC_DOC} target="_blank" rel="noreferrer">spec guide</a> lists every rule.
             </p>

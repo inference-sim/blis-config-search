@@ -108,39 +108,28 @@ export function facetCounts(list: Scenario[], f: Filters, key: FilterKey): { val
   return out
 }
 
-/** Recommended configs for the summary: real scenarios only; if none, the filtered mocks (flagged). */
-export function topConfigs(filtered: Scenario[]): { items: Scenario[]; mockOnly: boolean } {
-  const real = filtered.filter((s) => !s.synthetic)
-  if (real.length > 0) return { items: real, mockOnly: false }
-  return { items: filtered, mockOnly: filtered.length > 0 }
-}
+// ---------- coverage: what has actually been swept ----------
 
-// ---------- coverage: what has actually been searched ----------
-
-/** One searched combination: the filter tuple plus every report behind it. */
+/** One swept combination: the filter tuple plus every report behind it. */
 export interface CoverageRow {
   model: string
   hardware: string
   workload: string
   gpu_budget: number
   scenarios: Scenario[]
-  /** Reports that are real BLIS output (the rest are synthetic placeholders). */
-  n_real: number
   /**
    * The report whose config this row recommends, resolved once at build time (the table reads
    * it per cell, per sort). With several reports on one tuple (a re-search, or a narrower
-   * sweep) each named its own winner, so they are ranked on tok/s/accelerator: the dual-Pareto
-   * objective the search picks its own winner on, and the one `operatingPoints` ranks by. Real
-   * runs beat synthetic placeholders outright, since a mock's numbers are illustrative.
+   * sweep) each named its own winner, so they are ranked on tok/s/accelerator: the objective
+   * the sweeper picks its own winner on, and the one `operatingPoints` ranks by.
    */
   best: Scenario | null
 }
 
-/** Best of a tuple's reports on tok/s/accelerator, preferring real runs. See `CoverageRow.best`. */
-function pickBest(scenarios: Scenario[], n_real: number): Scenario | null {
-  const pool = n_real > 0 ? scenarios.filter((s) => !s.synthetic) : scenarios
+/** Best of a tuple's reports on tok/s/accelerator. See `CoverageRow.best`. */
+function pickBest(scenarios: Scenario[]): Scenario | null {
   let best: Scenario | null = null
-  for (const s of pool) {
+  for (const s of scenarios) {
     if (best === null || s.winner.tps_per_gpu > best.winner.tps_per_gpu) best = s
   }
   return best
@@ -163,14 +152,13 @@ export function coverageRows(scenarios: Scenario[]): CoverageRow[] {
     const key = [lc(s.model), lc(s.hardware), lc(s.workload), s.gpu_budget].join('\u0000')
     let row = by.get(key)
     if (row === undefined) {
-      row = { model: s.model, hardware: s.hardware, workload: s.workload, gpu_budget: s.gpu_budget, scenarios: [], n_real: 0, best: null }
+      row = { model: s.model, hardware: s.hardware, workload: s.workload, gpu_budget: s.gpu_budget, scenarios: [], best: null }
       by.set(key, row)
     }
     row.scenarios.push(s)
-    if (!s.synthetic) row.n_real++
   }
   const rows = [...by.values()]
-  for (const r of rows) r.best = pickBest(r.scenarios, r.n_real)
+  for (const r of rows) r.best = pickBest(r.scenarios)
   return rows
 }
 
@@ -417,11 +405,3 @@ export function operatingPoints(recs: RunRecord[]): RunRecord[] {
 // ---------- scenario card ----------
 /** "8x TP4 + EP" → "8×TP4 + EP": in mono the space after the count reads as a gap. */
 export const configLabel = (label: string): string => label.replace(/^(\d+)x /, '$1×')
-
-/** "replay · ~84,556 in / 928 out per request" → "84.6k in / 928 out"; "" when absent. */
-export function workloadShape(islOsl: string | null | undefined): string {
-  const m = (islOsl ?? '').match(/~?([\d,]+)\s*in\s*\/\s*~?([\d,]+)\s*out/)
-  if (!m) return ''
-  const k = (v: string) => { const x = Number(v.replace(/,/g, '')); return x >= 1000 ? `${fnum(x / 1000, 1)}k` : fnum(x, 0) }
-  return `${k(m[1])} in / ${k(m[2])} out`
-}

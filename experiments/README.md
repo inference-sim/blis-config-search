@@ -454,7 +454,7 @@ inference-sim release --bump-blis-pin.yml-->  DRAFT pin PR  <--fix commits--  pi
 ```
 
 * **`bump-blis-pin.yml`** polls upstream daily (or on `repository_dispatch: inference-sim-release`,
-  or by hand). For a release newer than `BLIS_REF` it rewrites `pins.env` + SETUP.md, checks the
+  or by hand). For a release newer than `BLIS_REF` it rewrites `pins.env` + `SETUP.md`, checks the
   tag's commit and that the release builds, and opens a **draft** PR with a checklist. It does not
   require this repo's tests to pass: a release that needs code changes still needs its PR. It
   never guesses `CATALOG_REF` / `REGISTRY_REF`.
@@ -469,14 +469,12 @@ inference-sim release --bump-blis-pin.yml-->  DRAFT pin PR  <--fix commits--  pi
     ran before and fails now (**LOUD**), and on a knob that moved the numbers before and now
     measures identically to its baseline (**SILENT**).
 
-  It comments what is left to fix. Push the fixes (knob tables, `run_blis.py`, a submission
-  field the new stack refuses) onto the same branch until it is green.
+  It comments what is left to fix. Push the fixes (knob tables, `run_blis.py`, a spec field
+  the new stack refuses) onto the same branch until it is green.
 * **`regen-reports.yml`** runs when a push to main changes a pin's *value*, which normally means
   the merged pin PR, with its fixes already on main. It re-checks `drift` first, so a pin that
-  skipped the gate cannot start a campaign. `scripts/blis_pin.py plan` classifies every
-  `reports/<id>/` by its source:
-  * an `experiments/` spec, re-swept by `run_experiment.py`;
-  * a `submissions/` file, re-searched by `run_search.py`.
+  skipped the gate cannot start a campaign. `scripts/blis_pin.py plan` finds each
+  `reports/<id>/`'s `experiments/` spec, which `run_experiment.py` re-sweeps.
 
   It batches them by model, at most four per PR. Each report is its own job, and a failed one is
   listed in its batch's PR instead of being left silently stale. Each PR carries an old → new
@@ -485,7 +483,7 @@ inference-sim release --bump-blis-pin.yml-->  DRAFT pin PR  <--fix commits--  pi
 Every PR this loop opens carries the **`auto-update`** label, plus **`blis-pin`** (the draft pin
 PR) or **`report-regen`** (a batch of regenerated reports), so `label:auto-update` lists them all.
 
-So **a report with no spec and no submission cannot be regenerated**, and the test suite refuses
+So **a report with no spec cannot be regenerated**, and the test suite refuses
 one (`test_plan_covers_the_real_gallery`). Re-run a subset by hand with the `only` input.
 
 The 64-GPU AgentX replays need more memory than a hosted runner has; point the `REGEN_RUNS_ON`

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-# run_blis.py -- the ONE place config-search invokes BLIS and records a single run.
+# run_blis.py -- the ONE place a sweep invokes BLIS and records a single run.
 #
-#   python3 -I scripts/run_blis.py ...        (importable: sweep_pool.py reuses run_one())
+#   python3 -I scripts/run_blis.py ...        (importable: run_experiment.py reuses run_one())
 #
 # BLIS is driven on the **blis-latency-kernel** backend. The kernel reads the deployment (model,
 # hardware, tp/pp/dp/ep, engine knobs) from a committed SCENARIO and REFUSES
@@ -67,11 +67,11 @@ SCENARIO_ENGINE = (
     # FULL_DECODE_ONLY 2074.2; NONE costs 44% (605.9 vs 1083.2 at c=4).
     "max_cudagraph_capture_size", "cudagraph_capture_sizes",
     # --- attention / prefix reuse ---
-    "enable_prefix_caching",              # tri-state bool; see the INERT note in the skill
+    "enable_prefix_caching",              # tri-state bool; inert on synthetic shapes (see blis-experiment knobs.md)
     "disable_cascade_attn", "swa_bounded_replay",
     # --- MoE dispatch. all2all_backend is a real lever, but ONLY with expert parallelism on
     # (measured tp4/dp2/EP: 928.2 -> 619.5 with deepep_low_latency, a 33% drop; with EP off it
-    # is byte-identical). The skill gates it on EP for that reason.
+    # is byte-identical), so only sweep it with EP on.
     "all2all_backend", "moe_backend",
     # --- collectives ---
     "allreduce_backend", "disable_custom_all_reduce",
@@ -574,7 +574,7 @@ def is_dsa_model(catalog, model):
 
 
 # `blis run --workload <preset>` is SILENTLY IGNORED in closed-loop mode, which is the only mode
-# config-search uses. cmd/root.go resolves the workload as an if/else chain:
+# a sweep uses. cmd/root.go resolves the workload as an if/else chain:
 #
 #     --workload-spec  ->  concurrency > 0  ->  workloadType == "distribution"  ->  preset loader
 #
@@ -1398,7 +1398,7 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
         # names (see WORKLOAD_IGNORED). A replay carries its lengths in the corpus, so no shape.
         shape = {} if replay else load_workload_shape(catalog, workload)
     except ConfigError as e:
-        # Same row SHAPE as a real run so neither sweep_pool's summary nor the report trips on a
+        # Same row SHAPE as a real run so neither the sweeper nor the report trips on a
         # missing key (every record has wall_s, deployment, metrics, ...). returncode=None marks it
         # "not run"; error carries the reason.
         rec.update({"deployment": None, "cmd": None, "returncode": None, "wall_s": 0.0,

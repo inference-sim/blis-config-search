@@ -1,10 +1,10 @@
-# `report.json` — the brain-authored narrative seam
+# `report.json`: the narrative seam
 
-`report.py` renders a magazine-style analytical report (modeled on the CurveBender "glm53flash"
-format) from a run directory. Three of its four inputs already exist: `scenario.json`, `pareto.json`,
-`runs.jsonl`. **`report.json` is the fourth** — the *narrative* Claude (the search brain) writes after
-reading the runs. It carries the prose, the hero panel, the numbered findings, the figures each
-section shows, the operating-point table, and the glossary.
+`scripts/report.py` renders a magazine-style analytical report from a run directory. Three of its
+four inputs are measurements: `scenario.json`, `pareto.json`, `runs.jsonl`. **`report.json` is the
+fourth**: the narrative, which `scripts/run_experiment.py` writes from the spec and the measured
+results. It carries the prose, the hero panel, the numbered findings, the figures each section
+shows, the operating-point table, and the glossary.
 
 It is **optional**. Without it, `report.py` still renders the header, the crossfilter explorer over
 every run, and an auto operating-point table — just without the analysis. With it, you get the full
@@ -67,7 +67,7 @@ CSS-only hover tooltip, and `href="#g-ID"` jumps to the matching glossary entry.
 
 ## The shared lexicon
 
-config-search renders the same runs on **two** surfaces: this standalone report and the React
+The site renders the same runs on **two** surfaces: this standalone report and the React
 dashboard in `web/`. They had grown two vocabularies for one set of numbers and, worse, two
 ranking objectives for "What to run" — the report ranked operating points by per-user rate while
 the dashboard ranked them by tok/s per GPU, so at high load the two tables recommended *different*
@@ -86,9 +86,9 @@ Both surfaces now read **`report/lexicon.json`**:
 
 `scripts/lexicon.py` is the Python reader (`report.py` and `figures.py` import it, and `report.py`
 bakes the whole file into the page so the explorer's JS labels match too). `web/src/lexicon.json`
-is a **byte-identical mirror** — Vite cannot import out of the read-only skill dir — and
-`scripts/test_build.py` fails the build if the two drift. Change the skill's copy, then copy it
-over the mirror.
+is a **byte-identical mirror** (Vite cannot import from outside `web/`), and
+`scripts/test_build.py` fails the build if the two drift. Change `report/lexicon.json`, then copy
+it over the mirror.
 
 **So:** do not write a metric name, an axis title, a figure caption's leading sentence, or a
 ranking rule into `report.json`. Add it to the lexicon (both copies) and let both surfaces read it.
@@ -97,8 +97,8 @@ ranking rule into `report.json`. Add it to the lexicon (both copies) and let bot
 
 `figure` names a builder registered in `scripts/figures.py`'s `FIGURES` map. Each entry is
 `{"builder": fn, "keys": (RECORDS field(s) the figure's story depends on)}`. `report.render_figure`
-first checks that **every** `keys` field actually varies across the runs; if one does not (the search
-never swept it), it returns a captioned placeholder instead of a misleading flat chart. An unknown
+first checks that **every** `keys` field actually varies across the runs; if one does not (the sweep
+never varied it), it returns a captioned placeholder instead of a misleading flat chart. An unknown
 figure name likewise placeholders.
 
 Each figure's caption, axis titles and "how to read it" line come from the lexicon's `figures`
@@ -114,7 +114,7 @@ its `caption_note`.
 Builders for knobs the v1 engine does not yet vary (routing, PD split, speculative decoding, dispatch
 collective) are **not shipped**; `figures.py` lists them only as commented-out registry examples.
 When such a builder lands, add its `FIGURES` entry with the appropriate `keys` (e.g. `("route",)`);
-until the search sweeps that knob the variation check renders the placeholder automatically.
+until a sweep varies that knob the variation check renders the placeholder automatically.
 
 ## `RECORDS` field reference (what the explorer + figures consume)
 

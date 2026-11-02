@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import type { Catalog, Mode, Scenario } from './types'
-import { loadCatalog, loadMode, loadScenarios } from './load'
+import type { Catalog, Scenario } from './types'
+import { loadCatalog, loadScenarios } from './load'
 import { useHashRoute } from './route'
 import { Reports } from './components/Reports'
 import { ScenarioDetail } from './components/ScenarioDetail'
@@ -12,7 +12,6 @@ import { TAB_LABELS, type Tab } from './lib'
 interface Data {
   scenarios: Scenario[]
   catalog: Catalog
-  mode: Mode
 }
 
 export function App() {
@@ -22,8 +21,8 @@ export function App() {
 
   useEffect(() => {
     let live = true
-    Promise.all([loadScenarios(), loadCatalog(), loadMode()])
-      .then(([scenarios, catalog, mode]) => live && setData({ scenarios, catalog, mode }))
+    Promise.all([loadScenarios(), loadCatalog()])
+      .then(([scenarios, catalog]) => live && setData({ scenarios, catalog }))
       .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)))
     return () => {
       live = false
@@ -48,7 +47,7 @@ export function App() {
         body = <Coverage scenarios={data.scenarios} catalog={data.catalog} />
         break
       case 'submit':
-        body = <Submit catalog={data.catalog} mode={data.mode} />
+        body = <Submit catalog={data.catalog} />
         break
       default:
         body = <Reports scenarios={data.scenarios} params={route.params} />
@@ -69,8 +68,8 @@ export function App() {
             <span className="masthub-name">inference-sim/blis-config-search</span>
           </a>
           <div className="masttitle">
-            <h1><b>config-search</b> · deployment reports</h1>
-            <p className="dek">Pareto-optimal BLIS serving configurations for a model, accelerator budget and workload, each a full interactive report. Simulator predictions; validate before deploying.</p>
+            <h1><b>BLIS</b> · experiment reports</h1>
+            <p className="dek">Deterministic BLIS sweeps of serving configurations for a model, accelerator budget and workload. Simulator predictions; validate before deploying.</p>
           </div>
           <nav className="tabs" aria-label="Sections">
             {TAB_LABELS.map(([t, label]) => (
@@ -82,7 +81,7 @@ export function App() {
         </div>
       </header>
       <main className="main">{body}</main>
-      <Footer catalog={data?.catalog ?? null} mode={data?.mode ?? null} hasMock={!!data?.scenarios.some((s) => s.synthetic)} />
+      <Footer catalog={data?.catalog ?? null} />
     </div>
   )
 }

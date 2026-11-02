@@ -137,7 +137,7 @@ def test_changed_ignores_comments():
 
 def _fake_repo():
     root = tempfile.mkdtemp()
-    for d in ("reports", "experiments", "submissions"):
+    for d in ("reports", "experiments"):
         os.makedirs(os.path.join(root, d))
 
     def rdir(rid, model, files):
@@ -162,16 +162,11 @@ def _fake_repo():
     # an experiment whose spec is gone: falls back to the run dir's own spec.yaml
     rdir("exp-c", "m2", ["experiment.json", "spec.yaml"])
     write("reports/exp-c/spec.yaml", "name: exp-c\nscenario: {model: m2}\n")
-    # submissions: a replay one with a narrative, a shape one without
-    rdir("sub-a", "m1", ["report.json"])
-    write("submissions/sub-a.yaml", "model: m1\nworkload: {replay: {scenario: s}}\n")
-    rdir("sub-b", "m3", [])
-    write("submissions/sub-b.yaml", "model: m3\nworkload: {preset: chatbot}\n")
-    # nothing to regenerate from
-    rdir("orphan", "m3", [])
+    # nothing to regenerate from: no experiment.json (e.g. a retired search report)
+    rdir("orphan", "m3", ["report.json"])
     for i in range(5):
-        rdir(f"many-{i}", "m4", [])
-        write(f"submissions/many-{i}.yaml", "model: m4\nworkload: {preset: chatbot}\n")
+        rdir(f"many-{i}", "m4", ["experiment.json"])
+        write(f"experiments/many-{i}.yaml", f"name: many-{i}\nscenario: {{model: m4}}\n")
     return root
 
 
@@ -186,9 +181,6 @@ def test_classify_and_batch():
               "a renamed spec is found by its `name`, and its replay flag is read")
         check(c["exp-c"]["source"] == os.path.join("reports", "exp-c", "spec.yaml"),
               "a removed spec falls back to the run dir's own spec.yaml")
-        check(c["sub-a"]["kind"] == "submission" and c["sub-a"]["replay"] and c["sub-a"]["narrative"],
-              "a replay submission with a report.json re-derives its narrative")
-        check(not c["sub-b"]["replay"] and not c["sub-b"]["narrative"], "a shape submission")
         check(c["orphan"]["kind"] == "orphan", "no source -> orphan, never a guess")
 
         p = B.plan(root, max_batch=4)
@@ -197,15 +189,14 @@ def test_classify_and_batch():
         check(all(len(b["ids"]) <= 4 for b in p["batches"]), "no batch exceeds max_batch")
         check("m4-1" in names and "m4-2" in names, f"a large model splits into numbered batches: {names}")
         m1 = next(b for b in p["batches"] if b["model"] == "m1")
-        check(sorted(m1["ids"]) == ["exp-a", "exp-b", "sub-a"],
-              "one model's experiment AND submission reports review together")
+        check(sorted(m1["ids"]) == ["exp-a", "exp-b"], "one model's reports review together")
         every = sorted(i for b in p["batches"] for i in b["ids"])
         check(every == sorted(r["id"] for r in p["reports"]),
               "every runnable report lands in exactly one batch")
         check(len(every) == len(set(every)), "no report is regenerated twice")
 
-        only = B.plan(root, only=["sub-b"])
-        check([r["id"] for r in only["reports"]] == ["sub-b"], "--only restricts the plan")
+        only = B.plan(root, only=["exp-c"])
+        check([r["id"] for r in only["reports"]] == ["exp-c"], "--only restricts the plan")
         try:
             B.plan(root, only=["nope"])
             check(False, "--only with an unknown id must refuse, not silently do nothing")
@@ -220,8 +211,8 @@ def test_plan_covers_the_real_gallery():
     print("test_plan_covers_the_real_gallery")
     p = B.plan()
     check(not p["orphans"],
-          "every committed report needs an experiments/ spec or a submissions/ file to "
-          f"regenerate from; orphans: {[o['id'] for o in p['orphans']]}")
+          "every committed report needs an experiments/ spec to regenerate from; "
+          f"orphans: {[o['id'] for o in p['orphans']]}")
     check(len(p["reports"]) == len(B.report_ids()), "the plan covers every committed report")
 
 
@@ -233,11 +224,10 @@ def test_summary_table():
             d = os.path.join(root, rid)
             os.makedirs(d)
             json.dump({"pinned_stack": {"blis": blis}}, open(os.path.join(d, "scenario.json"), "w"))
-            json.dump({"winner": {"chosen": chosen},
-                       "finalists": [{"at_c_use": {"tokens_per_sec_per_gpu": tpg}}]},
-                      open(os.path.join(d, "pareto.json"), "w"))
-            json.dump({"n_runs": runs, "n_servable": servable},
-                      open(os.path.join(d, "gallery.json"), "w"))
+            json.dump({"winner": {"chosen": chosen}}, open(os.path.join(d, "pareto.json"), "w"))
+            json.dump({"totals": {"runs": runs, "servable": servable},
+                       "best_overall": {"tokens_per_sec_per_gpu": tpg}},
+                      open(os.path.join(d, "experiment.json"), "w"))
         put(old, "r1", "v1.0.0", "4x TP8", 20.0, 100, 50)
         put(new, "r1", "v2.0.0", "4x TP8", 22.5, 100, 50)
         put(old, "r2", "v1.0.0", "8x TP4", 10.0, 80, 40)
@@ -302,9 +292,10 @@ def test_smoke_verdicts():
     root = tempfile.mkdtemp()
     try:
         os.makedirs(os.path.join(root, "reports", "r"))
-        os.makedirs(os.path.join(root, "submissions"))
-        with open(os.path.join(root, "submissions", "r.yaml"), "w") as f:
-            f.write("model: m\nhardware: h100\ngpu_budget: 16\nworkload: {preset: chatbot}\n")
+        os.makedirs(os.path.join(root, "experiments"))
+        open(os.path.join(root, "reports", "r", "experiment.json"), "w").close()
+        with open(os.path.join(root, "experiments", "r.yaml"), "w") as f:
+            f.write("name: r\nscenario: {model: m, hardware: h100, gpus: 16, workload: chatbot}\n")
         base = {"tp": 8, "num_instances": 2, "concurrency": 1}
         old = [_rec(dict(base), 100.0), _rec(dict(base, max_num_seqs=64), 80.0),
                _rec(dict(base, router_config="/elsewhere/routing/queue.yaml"), 90.0)]
@@ -422,8 +413,6 @@ def test_workflow_wiring():
           "pins are compared across the whole push: a rebase-merged pin PR ends in its fixes")
     check("../blis-catalog" not in regen and "--catalog blis-catalog" in regen,
           "regen clones the catalog inside the checkout, so ledger cmds stay relative")
-    check("write_agentx_report.py" in regen.split("\n  pr:", 1)[-1],
-          "AgentX narratives are written once the batch sits side by side (they read siblings)")
     check('paths: ["pins.env"]' in regen and "branches: [main]" in regen,
           "regeneration triggers on a pins.env change reaching main")
     check("scripts/blis_pin.py changed" in regen,

@@ -29,8 +29,7 @@ cares that this skill wrote one.
 - **Use when:** the user wants to *learn something* about a deployment — does drafting pay here,
   is disaggregation worth it, which routing policy suits this traffic, where do the batching knobs
   bind, does fp8 KV buy throughput.
-- **Not for:** "just give me the best config" on a budget (that is `config-search`, which probes
-  adaptively for capacity); a single known config (run `blis run` directly); a real cluster.
+- **Not for:** a single known config (run `blis run` directly); a real cluster.
 - **Out of scope by design** (RFC #21): adaptive SLO probes, open-loop `--rate`, adding or
   removing router plugins, defaults shared across sweeps, and any experiment spanning more than
   one hardware type or one workload. Two hardware types means two experiments.

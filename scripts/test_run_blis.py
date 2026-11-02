@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for the config-search engine helpers. No network / no BLIS binary needed.
+"""Unit tests for run_blis.py, the BLIS runner. No network / no BLIS binary needed.
 
     python3 scripts/test_run_blis.py          # or: python3 -m unittest -v  (from this dir)
 """
@@ -11,7 +11,6 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import run_blis
-import sweep_pool
 
 
 class ParseMetrics(unittest.TestCase):
@@ -468,49 +467,10 @@ class RunOneRejects(unittest.TestCase):
         self.assertIsNone(rec["returncode"])
         self.assertIn("unsupported config", rec["error"])
         self.assertEqual(rec["metrics"], {})
-        # same row SHAPE as a real run so sweep_pool summary + the report never trip on missing keys
+        # same row SHAPE as a real run so the sweeper and the report never trip on missing keys
         for k in ("wall_s", "deployment", "metrics_all_instances", "stderr_tail", "cmd"):
             self.assertIn(k, rec)
         self.assertEqual(rec["wall_s"], 0.0)
-
-
-class ComputeCap(unittest.TestCase):
-    def setUp(self):
-        self._cpus, self._mem = sweep_pool.available_cpus, sweep_pool.mem_available_mib
-
-    def tearDown(self):
-        sweep_pool.available_cpus, sweep_pool.mem_available_mib = self._cpus, self._mem
-
-    def _patch(self, cpus, mem):
-        sweep_pool.available_cpus = lambda: cpus
-        sweep_pool.mem_available_mib = lambda: mem
-
-    def test_cores_bound(self):
-        self._patch(10, 10 ** 9)
-        self.assertEqual(sweep_pool.compute_cap(0.8, 0.8, 1024.0, None)[:2], (8, "cores"))
-
-    def test_memory_bound(self):
-        self._patch(64, 4096)
-        self.assertEqual(sweep_pool.compute_cap(0.8, 0.8, 1024.0, None)[:2], (3, "memory"))
-
-    def test_max_parallel_tightens(self):
-        self._patch(10, 10 ** 9)
-        self.assertEqual(sweep_pool.compute_cap(0.8, 0.8, 1024.0, 2)[:2], (2, "explicit --max-parallel"))
-
-    def test_max_parallel_equal_not_relabeled(self):
-        self._patch(10, 10 ** 9)
-        self.assertEqual(sweep_pool.compute_cap(0.8, 0.8, 1024.0, 8)[:2], (8, "cores"))
-
-    def test_mem_unknown_conservative_cap(self):
-        self._patch(10, None)                     # core_cap 8, no /proc/meminfo
-        cap, bound, info = sweep_pool.compute_cap(0.8, 0.8, 1024.0, None)
-        self.assertEqual(cap, sweep_pool.UNKNOWN_MEM_CAP)     # conservative fallback, not 8
-        self.assertEqual(bound, "memory-unknown-fallback")
-        self.assertIsNone(info["mem_available_mib"])
-
-    def test_mem_unknown_but_max_parallel_wins(self):
-        self._patch(10, None)
-        self.assertEqual(sweep_pool.compute_cap(0.8, 0.8, 1024.0, 2)[:2], (2, "explicit --max-parallel"))
 
 
 def _write_catalog(root, model, arch=None, sparse_mla=False, hardware=None, cc=None,

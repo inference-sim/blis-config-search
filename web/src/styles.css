@@ -65,7 +65,6 @@ h2.viewhead{margin:0 0 6px;font-size:22px;font-weight:600;letter-spacing:-0.01em
 .na{color:var(--line-strong);font-family:var(--font-mono)}
 
 /* ---- badges + chips ---- */
-.mock{display:inline-block;font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;padding:1px 6px;border-radius:3px;background:var(--warn-bg);color:var(--warn-ink);border:1px solid var(--warn-line);vertical-align:middle}
 .caveat{display:inline-block;font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;padding:1px 6px;border-radius:3px;background:var(--warn-bg);color:var(--warn-ink);border:1px solid var(--warn-line);vertical-align:middle;margin-left:6px;cursor:help}
 .ver{display:inline-block;font-size:9.5px;font-family:var(--font-mono);padding:1px 5px;border-radius:3px;background:var(--accent-soft);color:var(--accent-ink);border:1px solid var(--accent);margin-left:6px}
 .specchips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 10px}
@@ -163,7 +162,6 @@ thead tr.col th.num button.sortbtn{justify-content:flex-end}
 .cfgcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
 .cfgcard{display:block;background:var(--panel);border:1px solid var(--line-strong);border-left:4px solid var(--accent);border-radius:6px;padding:14px 16px;color:var(--ink)}
 .cfgcard:hover{text-decoration:none;border-color:var(--accent)}
-.cfgcard.is-mock{border-left-color:var(--warn-line)}
 .cfglabel{font-family:var(--font-mono);font-size:15px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .cfgsub{font-size:11.5px;color:var(--muted);margin:2px 0 10px;word-break:break-word}
 dl.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0 0}
@@ -176,7 +174,6 @@ dl.metrics dd,.stats dd{margin:0;font-family:var(--font-mono);font-variant-numer
 .card{background:var(--panel);border:1px solid var(--line);border-top:3px solid var(--accent);border-radius:8px;
   padding:15px 17px 16px;display:flex;flex-direction:column;color:var(--ink);transition:box-shadow .1s,transform .1s}
 .card:hover{text-decoration:none;box-shadow:0 8px 24px rgba(0,0,0,.09);transform:translateY(-2px)}
-.card.is-mock{border-top-color:var(--warn-line)}
 .card .cardhead{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
 .card .cardhead h3{margin:0;font-size:16px;font-weight:600;letter-spacing:-0.01em}
 /* cluster / workload as labelled rows, then #1 config, then performance */
@@ -217,7 +214,6 @@ dl.metrics dd,.stats dd{margin:0;font-family:var(--font-mono);font-variant-numer
 .footstack{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .footmeta .depcount{background:var(--panel);border:1px solid var(--accent);border-radius:3px;padding:2px 8px;cursor:pointer;font-family:var(--font-mono);font-size:11px;color:var(--accent);font-weight:600}
 .footmeta .depcount:hover{background:var(--accent);color:#fff}
-.footmode{color:var(--muted)}
 /* repo link, top-right of the masthead */
 .ghlink{display:inline-flex;align-items:center;gap:6px;color:var(--accent);font-weight:500;font-size:12.5px}
 .masthub{float:right;margin-top:6px;margin-left:12px}

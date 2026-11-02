@@ -41,15 +41,14 @@ jobs:
           # the recorded commit, so refuse a moved tag here as the other workflows do on clone.
           test "$(git -C ../inference-sim rev-parse "$BLIS_REF^{commit}")" = "$BLIS_SHA" || {
             echo "::error::$BLIS_REF no longer points at $BLIS_SHA" >&2; exit 1; }
-      - name: Build + catalog + backend tests
+      - name: Build + catalog + pin tests
         run: |
           python3 -I scripts/test_build.py
-          python3 -I scripts/test_backend.py
           python3 -I scripts/test_blis_pin.py
-      - name: Skill report/runner tests (data producer contract)
+      - name: Report + BLIS runner tests
         run: |
-          python3 -I .claude/skills/config-search/scripts/test_report.py
-          python3 -I .claude/skills/config-search/scripts/test_run_blis.py
+          python3 -I scripts/test_report.py
+          python3 -I scripts/test_run_blis.py
       - name: Experiment spec pipeline tests (validator, grids, overrides, ranking)
         run: python3 -I scripts/test_experiment.py
 

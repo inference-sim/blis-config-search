@@ -11,15 +11,9 @@ export interface Winner {
   name?: string
   tp: number | null
   ni: number | null
-  ep?: boolean
-  quant?: string | null
   gpus: number | null
   /** The RECOMMENDED load, and always the load whose measurement the figures below come from. */
   c_use: number | null
-  /** The 0.8xC* target, present only when the recommendation backed off below it because that
-   *  load measured under the interactivity floor. */
-  c_use_target?: number | null
-  c_star?: number | null
   tps: number
   tps_per_gpu: number
   per_user: number
@@ -36,8 +30,6 @@ export interface Finalist {
   gpus: number | null
   /** The RECOMMENDED load, and always the load the figures were measured at. */
   c_use: number | null
-  /** The 0.8xC* target, when the recommendation backed off below it. */
-  c_use_target?: number | null
   tps: number
   tps_per_gpu: number
   per_user: number
@@ -46,25 +38,20 @@ export interface Finalist {
 
 export interface Scenario {
   run_id: string
-  synthetic: boolean
   model: string
   hardware: string
   gpu_budget: number
   workload: string
-  isl_osl: string
-  /** A caveat about the DATA itself (not the recommendation): real BLIS runs whose measurement
-   *  does not match what the scenario claims to measure. Empty for a scenario with none. */
-  caveat?: string
+  /** Set when the run ledger mixes seeds or stacks, so its rows are not one comparison. */
+  caveat: string
   floor: string
   headroom: number | null
   n_runs: number
   n_servable: number
-  n_records?: number
-  generated: string
   winner: Winner
   finalists: Finalist[]
   reason: string
-  // Per-run records for the detail explorer, inlined by stage-data.mjs (no separate fetch).
+  // Per-run records for the detail explorer, inlined by build_gallery.py.
   records: RunRecord[]
 }
 
@@ -203,8 +190,7 @@ export interface Catalog {
   storage: { name: string; read_mbs: number | null; write_mbs: number | null; base_latency_us: number | null }[]
   registry: { name: string; entries: number }[]
   versions: Record<string, string>
-  // The pinned stack as one root dependency (BLIS) plus what it resolves to. Optional: a
-  // catalog.js generated before build_catalog.py grew `stack` has only the flat `versions`.
+  // The pinned stack as one root dependency (BLIS) plus what it resolves to.
   stack?: Stack
 }
 
@@ -219,4 +205,3 @@ export interface Stack {
   deps: StackDep[]
 }
 
-export type Mode = 'pages' | 'local'

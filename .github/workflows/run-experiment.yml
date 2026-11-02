@@ -10,9 +10,7 @@ name: run-experiment
 # Why this is safe, and why it needs no LLM approval gate:
 #   * The sweeper has NO LLM. It expands the spec's grids, filters on GPU arithmetic, runs BLIS
 #     at the pinned refs with a fixed seed, and ranks by an executable rule. Given the same spec
-#     and the same pins it produces the same report, so there is nothing non-hermetic to gate --
-#     unlike generate-report.yml, whose search brain is a model and which therefore keeps its
-#     maintainer-approved environment.
+#     and the same pins it produces the same report, so there is nothing non-hermetic to gate.
 #   * No secrets are used. Nothing is published: the report lands on a bot branch for review,
 #     and publishing is still gated on a human merging that PR.
 #   * It never writes to main. The bot PR is the only output.
@@ -166,7 +164,7 @@ jobs:
             --out reports/ --timeout "${{ github.event.inputs.timeout || '600' }}"
 
       - name: Build the site to validate the new reports
-        run: python3 -I scripts/build_gallery.py --no-mock --out /tmp/site-check
+        run: python3 -I scripts/build_gallery.py --out /tmp/site-check
 
       - uses: actions/upload-artifact@v7
         with:

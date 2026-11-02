@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Hermetic tests for the gallery/catalog build (no BLIS, no network).
+"""Hermetic tests for the site data build (no BLIS, no network).
 
     python3 -I scripts/test_build.py
 
-Covers: run-dir validation (valid / malicious / out-of-range), the gallery row projection,
-build determinism, --no-mock filtering, and the catalog ingester shape + graceful degradation
-when a sibling repo is absent.
+Covers: run-dir validation (valid / malicious / out-of-range), the row projection, build
+determinism, the pins, and the catalog ingester shape + graceful degradation when a sibling
+repo is absent.
 """
 import json
 import os
@@ -31,7 +31,7 @@ def check(cond, msg):
         print(f"  FAIL: {msg}")
 
 
-def _mk_run_dir(d, run_id, synthetic=True, workload="chatbot", hardware="h100"):
+def _mk_run_dir(d, run_id, workload="chatbot", hardware="h100"):
     os.makedirs(d, exist_ok=True)
     scenario = {"run_id": run_id, "model": "qwen3-14b", "hardware": hardware,
                 "gpu_budget": 8, "workload": {"preset": workload},
@@ -39,22 +39,19 @@ def _mk_run_dir(d, run_id, synthetic=True, workload="chatbot", hardware="h100"):
     pareto = {"finalists": [{"label": "4x TP2", "config": {"tp": 2, "num_instances": 4},
               "gpus": 8, "c_use": 24, "at_c_use": {"tokens_per_sec": 1842.0,
               "tokens_per_sec_per_gpu": 230.3, "tok_per_s_per_user": 68.0, "itl_p99_ms": 14.7}}],
-              "winner": {"chosen": "4x TP2", "reason": "test"}}
+              "winner": {"label": "4x TP2", "variant": "", "reason": "test"}}
     json.dump(scenario, open(os.path.join(d, "scenario.json"), "w"))
     json.dump(pareto, open(os.path.join(d, "pareto.json"), "w"))
-    json.dump({"synthetic": synthetic, "isl_osl": "ShareGPT", "generated": "2026-10-20",
-               "n_runs": 10, "n_servable": 7}, open(os.path.join(d, "gallery.json"), "w"))
+    json.dump({"totals": {"configs": 3, "runs": 12, "servable": 5}},
+              open(os.path.join(d, "experiment.json"), "w"))
     open(os.path.join(d, "runs.jsonl"), "w").close()
-    if synthetic:
-        open(os.path.join(d, "MOCK"), "w").close()
 
 
 def test_winner_with_a_knob_variant():
     print("test_winner_with_a_knob_variant")
     # pareto.json names the winner with its knob delta ("64x TP4xDP2 + EP (least-loaded
-    # routing)") because several finalists share a topology once the search refines knobs. The
-    # gallery matched `label == chosen` and, finding no match, silently fell back to the LAST
-    # finalist — showing the wrong winner on the site.
+    # routing)") because several finalists share a topology once knobs are swept. Matching the
+    # bare label once fell back to the LAST finalist and showed the wrong winner on the site.
     tmp = tempfile.mkdtemp()
     try:
         rd = os.path.join(tmp, "qwen3-14b-h100-chatbot-0002")
@@ -85,9 +82,7 @@ def test_winner_with_a_knob_variant():
 
 def test_winner_mismatch_raises_not_falls_back():
     print("test_winner_mismatch_raises_not_falls_back")
-    # When pareto.json names a winner that matches NO finalist, the old code silently showed the
-    # worst-ranked finalist (finalists[-1]) as the recommendation. A named-but-unmatched winner
-    # means the report is inconsistent and must raise, not pick the last row.
+    # A winner that matches no finalist means the report is inconsistent: raise, never guess.
     tmp = tempfile.mkdtemp()
     try:
         rd = os.path.join(tmp, "qwen3-14b-h100-chatbot-0003")
@@ -95,7 +90,7 @@ def test_winner_mismatch_raises_not_falls_back():
         pareto = {"finalists": [{"label": "4x TP2", "config": {"tp": 2, "num_instances": 4},
                   "gpus": 8, "c_use": 24, "at_c_use": {"tokens_per_sec": 1842.0,
                   "tokens_per_sec_per_gpu": 230.3, "tok_per_s_per_user": 68.0, "itl_p99_ms": 14.7}}],
-                  "winner": {"chosen": "8x TP1 (does not exist)", "reason": "test"}}
+                  "winner": {"label": "8x TP1", "variant": "", "reason": "test"}}
         json.dump(pareto, open(os.path.join(rd, "pareto.json"), "w"))
         try:
             bg.validate_and_project(rd)
@@ -113,14 +108,36 @@ def test_report_back_link_resolves_on_pages():
     tmp = tempfile.mkdtemp()
     try:
         rd = os.path.join(tmp, "qwen3-14b-h100-chatbot-0004")
-        _mk_run_dir(rd, "qwen3-14b-h100-chatbot-0004", synthetic=False)
+        _mk_run_dir(rd, "qwen3-14b-h100-chatbot-0004")
         out = os.path.join(tmp, "site")
-        bg.build(os.path.dirname(rd), out, include_mock=True)
+        bg.build(os.path.dirname(rd), out)
         html = open(os.path.join(out, "qwen3-14b-h100-chatbot-0004", "index.html")).read()
         check("../../../index.html#/reports" in html,
               "back-link climbs data/reports/<id> to the SPA root")
         check("\"../index.html#/reports\"" not in html,
               "the old one-level back-link is gone")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_build_refuses_to_wipe_reports():
+    print("test_build_refuses_to_wipe_reports")
+    tmp = tempfile.mkdtemp()
+    try:
+        reports = os.path.join(tmp, "reports")
+        run = os.path.join(reports, "qwen3-14b-h100-chatbot-0004")
+        _mk_run_dir(run, "qwen3-14b-h100-chatbot-0004")
+        for out in (reports, tmp, run, bg.ROOT, os.path.join(bg.ROOT, "no-such-dir")):
+            try:
+                bg.build(reports, out)
+                check(False, f"--out {out} is refused")
+            except SystemExit:
+                check(True, f"--out {os.path.basename(out)} is refused")
+        check(os.path.isdir(run), "reports/ survives")
+        out = os.path.join(tmp, "site")
+        bg.build(reports, out)
+        check(not os.path.exists(os.path.join(out, "qwen3-14b-h100-chatbot-0004", "runs.jsonl")),
+              "the raw runs.jsonl ledger is not published")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -133,16 +150,10 @@ def test_validation():
         _mk_run_dir(rd, "qwen3-14b-h100-chatbot-0001")
         run_id, row = bg.validate_and_project(rd)
         check(run_id == "qwen3-14b-h100-chatbot-0001", "valid run_id projected")
-        check(row["synthetic"] is True, "MOCK marker -> synthetic")
         check(row["winner"]["tps"] == 1842.0, "winner tps projected")
         check(row["hardware"] == "H100", "hardware uppercased")
-
-        # A swept dir has experiment.json and no gallery.json; its counts must still project.
-        os.remove(os.path.join(rd, "gallery.json"))
-        json.dump({"totals": {"configs": 3, "runs": 12, "servable": 5}},
-                  open(os.path.join(rd, "experiment.json"), "w"))
-        _, row = bg.validate_and_project(rd)
         check((row["n_runs"], row["n_servable"]) == (12, 5), "experiment totals projected")
+        check(row["caveat"] == "", "a coherent ledger carries no caveat")
 
         # bad run_id (directory name)
         bad = os.path.join(tmp, "Bad_Name!!")
@@ -180,29 +191,27 @@ def test_validation():
         shutil.rmtree(tmp)
 
 
-def test_build_determinism_and_nomock():
-    print("test_build_determinism_and_nomock")
+def test_build_determinism():
+    print("test_build_determinism")
     tmp = tempfile.mkdtemp()
     try:
         reports = os.path.join(tmp, "reports")
-        _mk_run_dir(os.path.join(reports, "qwen3-14b-h100-chatbot-0001"), "qwen3-14b-h100-chatbot-0001", synthetic=False)
-        _mk_run_dir(os.path.join(reports, "qwen3-14b-h200-summarization-0002"), "qwen3-14b-h200-summarization-0002",
-                    synthetic=True, workload="summarization", hardware="h200")
-        o1 = os.path.join(tmp, "s1")
-        o2 = os.path.join(tmp, "s2")
-        bg.build(reports, o1, include_mock=True)
-        bg.build(reports, o2, include_mock=True)
-        d1 = open(os.path.join(o1, "data.js")).read()
-        d2 = open(os.path.join(o2, "data.js")).read()
-        check(d1 == d2, "data.js byte-identical across builds (determinism)")
-
-        oprod = os.path.join(tmp, "prod")
-        _, scen = bg.build(reports, oprod, include_mock=False)
-        check(len(scen) == 1 and all(not s["synthetic"] for s in scen), "--no-mock keeps only real rows")
-
-        # records.json emitted per scenario
-        check(os.path.isfile(os.path.join(o1, "qwen3-14b-h100-chatbot-0001", "records.json")),
-              "records.json emitted per scenario")
+        _mk_run_dir(os.path.join(reports, "qwen3-14b-h100-chatbot-0001"), "qwen3-14b-h100-chatbot-0001")
+        _mk_run_dir(os.path.join(reports, "qwen3-14b-h200-multidoc-0002"), "qwen3-14b-h200-multidoc-0002",
+                    workload="multidoc", hardware="h200")
+        o1, o2 = os.path.join(tmp, "s1"), os.path.join(tmp, "s2")
+        rows = bg.build(reports, o1)
+        bg.build(reports, o2)
+        d1 = open(os.path.join(o1, "scenarios.json")).read()
+        check(d1 == open(os.path.join(o2, "scenarios.json")).read(),
+              "scenarios.json byte-identical across builds (determinism)")
+        check([r["run_id"] for r in rows] == sorted(r["run_id"] for r in rows), "rows sorted by run_id")
+        check(all("records" in r for r in json.loads(d1)), "run records are inlined in each row")
+        # A rebuild into the same dir must not keep files from a report that is gone.
+        shutil.rmtree(os.path.join(reports, "qwen3-14b-h200-multidoc-0002"))
+        bg.build(reports, o1)
+        check(not os.path.exists(os.path.join(o1, "qwen3-14b-h200-multidoc-0002")),
+              "a removed report leaves nothing behind in the output")
     finally:
         shutil.rmtree(tmp)
 
@@ -377,7 +386,7 @@ def test_pins_are_the_single_source_of_the_sim_version():
     Three surfaces have to agree, or the site publishes a version that no run was made with:
       * pins.env            -- BLIS_REF / BLIS_SHA (read by build_catalog + the workflow)
       * SETUP.md            -- what a human clones by hand
-      * generate-report.yml -- what CI clones; it must source pins.env, not hard-code a ref
+      * run-experiment.yml  -- what CI clones; it must source pins.env, not hard-code a ref
 
     The regression this guards: `versions["inference-sim"]` used to be a `git describe` of an
     ambient ../inference-sim checkout. Nothing is ingested from that repo, so the pill published
@@ -442,24 +451,19 @@ def test_pins_are_the_single_source_of_the_sim_version():
         shutil.rmtree(tmp)
 
     # SETUP.md documents the same pin a human would clone
-    with open(os.path.join(ROOT, ".claude", "skills", "config-search", "SETUP.md")) as f:
+    with open(os.path.join(ROOT, "SETUP.md")) as f:
         setup = f.read()
     check(f"--branch {ref} " in setup, f"SETUP.md should clone {ref}")
     check(sha in setup, f"SETUP.md should verify the pinned sha {sha[:7]}")
 
-    # CI must read pins.env rather than carry its own copy of the refs
-    with open(os.path.join(ROOT, ".github", "workflows", "generate-report.yml")) as f:
-        wf = f.read()
-    check(". ./pins.env" in wf, "generate-report.yml should source pins.env")
-    for key in ("BLIS_REF", "CATALOG_REF", "REGISTRY_REF"):
-        check(f'"${key}"' in wf, f"the workflow should take {key} from pins.env")
-    check(f"--branch {ref} " not in wf,
-          "generate-report.yml hard-codes the sim ref; source it from pins.env instead")
-
-    # The workflow that sweeps merged experiment specs clones the same three pins.
+    # CI must read pins.env rather than carry its own copy of the refs.
     with open(os.path.join(ROOT, ".github", "workflows", "run-experiment.yml")) as f:
         exp_wf = f.read()
     check(". ./pins.env" in exp_wf, "run-experiment.yml should source pins.env")
+    for key in ("BLIS_REF", "CATALOG_REF", "REGISTRY_REF"):
+        check(f'"${key}"' in exp_wf, f"run-experiment.yml should take {key} from pins.env")
+    check(f"--branch {ref} " not in exp_wf,
+          "run-experiment.yml hard-codes the sim ref; source it from pins.env instead")
     # It must CHECK the sha, by reading it from pins.env -- a literal sha here would be a second
     # copy of the pin, which is the drift pins.env exists to prevent.
     check("$BLIS_SHA" in exp_wf, "run-experiment.yml should verify BLIS_SHA from pins.env")
@@ -471,9 +475,7 @@ def test_pins_are_the_single_source_of_the_sim_version():
     # nothing in the output to say so. CI still refuses outright (it verifies on clone, above);
     # the runner WARNS, because testing against an unreleased simulator is a legitimate thing to
     # do locally and is how a pin bump gets evaluated at all.
-    import run_search
-    for fn in ("blis_pin_warning", "_blis_source_commit"):
-        check(hasattr(run_search, fn), f"run_search should define {fn} (the runner-side pin check)")
+    import run_experiment
     # The check compares a COMMIT to BLIS_SHA. It must not compare the binary digest: the same
     # tag builds to different bytes per toolchain, so a digest pin would fire on honest builds
     # (v0.12.0 is recorded with two different digests across the committed reports alone).
@@ -481,18 +483,13 @@ def test_pins_are_the_single_source_of_the_sim_version():
         pins_txt = f.read()
     check("BLIS_DIGEST" not in pins_txt and "BLIS_SHA256" not in pins_txt,
           "pins.env must not pin a binary DIGEST: it is build-dependent, so it would be wrong "
-          "for every contributor but the one who wrote it (see test_search's pin tests)")
+          "for every contributor but the one who wrote it (see test_experiment's PinCheck)")
     on_pin = {"blis": ref, "resolved": {"blis": {"sha256": "ab" * 32, "commit": sha}}}
-    check(run_search.blis_pin_warning(on_pin, pins) == "",
+    check(run_experiment.blis_pin_warning(on_pin, pins) == "",
           "a binary built from the pinned commit must not warn")
     off = {"blis": ref, "resolved": {"blis": {"sha256": "ab" * 32, "commit": "c" * 40}}}
-    check(bool(run_search.blis_pin_warning(off, pins)),
+    check(bool(run_experiment.blis_pin_warning(off, pins)),
           "a binary built from another commit must warn")
-    # Both runners must apply it; the sweeper is the one that was missing it.
-    with open(os.path.join(ROOT, "scripts", "run_experiment.py")) as f:
-        exp_py = f.read()
-    check("_blis_pin_warning" in exp_py,
-          "run_experiment.py should warn when an off-pin simulator prices a sweep (#23)")
 
     # The catalog must be cloned BEFORE the validate step, or the existence check on
     # scenario.model/hardware/workload silently no-ops and a typo'd identifier still reaches the
@@ -526,7 +523,7 @@ def test_pins_are_the_single_source_of_the_sim_version():
 
     # GUIDANCE must not restate a superseded version. A doc that tells a contributor to clone a
     # ref the stack no longer uses is worse than one saying nothing: SETUP.md was correct at
-    # v0.12.0 while the skill's README and SKILL.md still read "build v0.10.0 ... catalog 0.2.1",
+    # v0.12.0 while two other docs still read "build v0.10.0 ... catalog 0.2.1",
     # and nothing failed, because only SETUP.md was checked (qa-review on #22, F2/F3).
     #
     # Historical statements are legitimate and stay: a dated measurement, a "removed in vX" note,
@@ -534,8 +531,7 @@ def test_pins_are_the_single_source_of_the_sim_version():
     # version they name is one pins.env actually pins.
     pinned_refs = {pins.get(k) for k in ("BLIS_REF", "CATALOG_REF", "REGISTRY_REF", "KERNEL_REF")}
     superseded = {"v0.10.0", "0.2.1", "v0.1.1"} - pinned_refs
-    for rel in (os.path.join(".claude", "skills", "config-search", "README.md"),
-                os.path.join("experiments", "README.md"),
+    for rel in ("README.md", os.path.join("experiments", "README.md"),
                 os.path.join(".claude", "skills", "blis-experiment", "SKILL.md")):
         path = os.path.join(ROOT, rel)
         if not os.path.exists(path):
@@ -548,20 +544,19 @@ def test_pins_are_the_single_source_of_the_sim_version():
 
 
 def test_lexicon_mirror_is_in_sync():
-    """The shared report vocabulary (issue #13) lives in the skill at
-    .claude/skills/config-search/report/lexicon.json; web/src/lexicon.json is a byte-identical
-    mirror, because Vite cannot import out of the read-only skill dir. A mirror that drifts is
-    worse than no sharing at all -- it looks shared and is not -- so the build fails on it."""
+    """The shared report vocabulary (issue #13) lives at report/lexicon.json; web/src/lexicon.json
+    is a byte-identical mirror, because Vite cannot import from outside web/. A mirror that drifts
+    is worse than no sharing at all -- it looks shared and is not -- so the build fails on it."""
     print("test_lexicon_mirror_is_in_sync")
-    canon = os.path.join(ROOT, ".claude", "skills", "config-search", "report", "lexicon.json")
+    canon = os.path.join(ROOT, "report", "lexicon.json")
     mirror = os.path.join(ROOT, "web", "src", "lexicon.json")
-    check(os.path.exists(canon), "skill lexicon.json is missing")
+    check(os.path.exists(canon), "report/lexicon.json is missing")
     if not os.path.exists(mirror):
-        check(False, "web/src/lexicon.json is missing (copy the skill's lexicon.json over it)")
+        check(False, "web/src/lexicon.json is missing (copy report/lexicon.json over it)")
         return
     with open(canon, "rb") as a, open(mirror, "rb") as b:
         ca, cb = a.read(), b.read()
-    check(ca == cb, "web/src/lexicon.json has drifted from the skill's report/lexicon.json; "
+    check(ca == cb, "web/src/lexicon.json has drifted from report/lexicon.json; "
                     "copy the canonical file over it")
     lex = json.loads(ca)
     # the dashboard and the report both key off these, so a rename here must be deliberate
@@ -626,17 +621,75 @@ def test_catalog():
           "absent siblings -> empty catalog + 'absent' version")
 
 
+def test_workflows_sane():
+    print("test_workflows_sane")
+    import yaml as _yaml
+    pg = os.path.join(ROOT, ".github", "workflows", "pages.yml")
+    ptxt = open(pg).read()
+    check(_yaml.safe_load(ptxt) is not None, "pages.yml parses")
+    pdoc = _yaml.safe_load(ptxt)
+    deploy_if = pdoc["jobs"]["deploy"]["if"]
+    check("refs/heads/main" in deploy_if and "push" in deploy_if, "live publish gated to main pushes")
+    check("clean-exclude: pr-preview/" in ptxt, "live publish keeps the PR previews")
+    main_push = next(st for st in pdoc["jobs"]["deploy"]["steps"]
+                     if "github-pages-deploy-action@" in st.get("uses", ""))
+    check(main_push["with"].get("force") is False,
+          "live publish rebases instead of force-pushing over a concurrent preview")
+    deploy_uses = [st.get("uses", "") for st in pdoc["jobs"]["deploy"]["steps"]]
+    check(any(u.startswith("actions/checkout@") for u in deploy_uses),
+          "live publish checks out the repo (the deploy action needs a git working tree)")
+    preview_if = pdoc["jobs"]["preview"]["if"]
+    check("head.repo.full_name == github.repository" in preview_if,
+          "PR previews are same-repo only (no fork build published)")
+    check("umbrella-dir: pr-preview" in ptxt, "PR previews live under pr-preview/, apart from the root")
+    # The deploy comment is posted by our own step, gated on our own wait (pr-preview-action's
+    # wait fails when a newer gh-pages push supersedes the build), so check that chain.
+    psteps = pdoc["jobs"]["preview"]["steps"]
+    wait = next((st for st in psteps if st.get("id") == "wait-pages"), {})
+    comment = next((st for st in psteps if "sticky-pull-request-comment@" in st.get("uses", "")), {})
+    check("pages/builds" in wait.get("run", "") and "built" in wait.get("run", "")
+          and "steps.wait-pages.outcome == 'success'" in comment.get("if", "")
+          and comment.get("with", {}).get("header") == "pr-preview"
+          and pdoc["jobs"]["preview"]["permissions"].get("pages") == "read",
+          "the preview comment waits for the Pages build (and may read its status)")
+    check("github.event.pull_request.number" in str(pdoc["concurrency"]["group"]),
+          "pages runs are grouped per PR, so batch PRs don't cancel each other's previews")
+
+    # The deterministic sweeper needs no approval gate (no LLM in the path), but it must still
+    # never write to main or publish: its only output is a bot PR.
+    rx = os.path.join(ROOT, ".github", "workflows", "run-experiment.yml")
+    rtxt = open(rx).read()
+    check(_yaml.safe_load(rtxt) is not None, "run-experiment.yml parses")
+    check("pull-requests: write" in rtxt, "run-experiment opens a PR rather than pushing to main")
+    check("--base main --head" in rtxt, "run-experiment targets main through a PR")
+    check("pages: write" not in rtxt, "run-experiment never publishes directly")
+    check("validate_experiment.py" in rtxt, "run-experiment validates before building BLIS")
+    check("pins.env" in rtxt, "run-experiment builds the pinned stack from pins.env")
+    # The bot PR is deterministic sweeper output, not LLM output, so it carries no
+    # LLM-attribution footer.
+    check("Generated with [Claude Code]" not in rtxt, "run-experiment's bot PR claims no LLM authorship")
+
+    ck = os.path.join(ROOT, ".github", "workflows", "checks.yml")
+    ctxt = open(ck).read()
+    check(_yaml.safe_load(ctxt) is not None, "checks.yml parses")
+    check("validate_experiment.py experiments/" in ctxt,
+          "checks.yml validates every committed experiment spec")
+    check("test_experiment.py" in ctxt, "checks.yml runs the experiment pipeline tests")
+
+
 if __name__ == "__main__":
     test_winner_with_a_knob_variant()
     test_winner_mismatch_raises_not_falls_back()
     test_report_back_link_resolves_on_pages()
+    test_build_refuses_to_wipe_reports()
     test_validation()
-    test_build_determinism_and_nomock()
+    test_build_determinism()
     test_catalog_workload_kinds()
     test_pins_are_the_single_source_of_the_sim_version()
     test_derived_pins_match_gomod()
     test_displayed_stack_survives_a_fresh_clone()
     test_lexicon_mirror_is_in_sync()
     test_catalog()
+    test_workflows_sane()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

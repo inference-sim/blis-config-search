@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
-# report.py -- the report half of config-search: a PURE run-dir -> index.html transform.
+# report.py -- a PURE run-dir -> index.html transform for one report.
 #
 #   python3 -I scripts/report.py <run-dir>            # -> <run-dir>/index.html
 #   python3 -I scripts/report.py <run-dir> --out p    # -> p
-#   python3 -I scripts/report.py <parent-of-run-dirs> # -> each child's index.html + a card index
 #
-# It reads the run directory the search engine writes and renders a magazine-style analytical report
+# It reads the run directory run_experiment.py writes and renders a magazine-style analytical report
 # modeled on the CurveBender "glm53flash" format: a numbered-finding narrative, pre-rendered inline-SVG
 # figures (figures.py), a client-side crossfilter explorer over every run, and a glossary.
 #
-# Inputs (all optional-tolerant -- three of four are brain-authored "convention, loose on purpose"):
+# Inputs (all optional-tolerant; report/schema.md documents report.json):
 #   scenario.json  resolved Scenario (model/hw/budget/workload/floor/headroom/pinned_stack)
 #   pareto.json    finalists / dropped / winner (the analysis artifact)
 #   runs.jsonl     one row per blis run (the raw ledger) -> RECORDS + figures
-#   report.json    the brain-authored NARRATIVE (standfirst, hero, sections, glossary, operating pts).
+#   report.json    the NARRATIVE (standfirst, hero, sections, glossary, operating pts).
 #                  Absent -> the report still renders header + explorer + an auto operating table.
 #
 # It NEVER runs BLIS and makes no subprocess / network calls at GENERATION time. The rendered page is
@@ -33,7 +32,6 @@ import run_blis  # noqa: E402  -- the ONE per-user / feasibility definition (nam
 
 REPORT_DIR = os.path.normpath(os.path.join(HERE, "..", "report"))
 TEMPLATE = os.path.join(REPORT_DIR, "template.html")
-INDEX_TEMPLATE = os.path.join(REPORT_DIR, "index-template.html")
 VENDOR_DIR = os.path.join(REPORT_DIR, "vendor")
 # The explorer's JS deps, inlined so the report is self-contained / offline (no CDN at view time).
 VENDOR_LIBS = ("d3.min.js", "crossfilter.min.js")
@@ -43,7 +41,6 @@ FACTS_PH = "/*__FACTS__*/{}"
 # the same file the React dashboard reads (issue #13). Inlined, not fetched: the report must stay
 # self-contained and offline.
 LEXICON_PH = "/*__LEXICON__*/{}"
-CARDS_PH = "/*__CONFIG_SEARCH_CARDS__*/[]"
 
 
 def _vendor_js():
@@ -138,13 +135,6 @@ def _json_for_script(obj):
     default-on, so U+2028/U+2029 (which also break inline scripts) are already escaped."""
     return (json.dumps(obj, sort_keys=True)
             .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
-
-
-def _get(d, *keys, default=None):
-    for k in keys:
-        if isinstance(d, dict) and d.get(k) is not None:
-            return d[k]
-    return default
 
 
 def _num(v):
@@ -933,7 +923,7 @@ def render_report(scenario, pareto, runs, report, run_path=None, n_malformed=0):
             + _glossary(report) + _footer(scenario, pareto, records, n_malformed, runs))
     with open(TEMPLATE, encoding="utf-8") as f:
         html = f.read()
-    title = report.get("title") or facts.get("model") or "config-search report"
+    title = report.get("title") or facts.get("model") or "BLIS experiment report"
     # Single-pass substitution: each placeholder is replaced exactly once, so a literal "__BODY__"
     # or "__TITLE__" that legitimately appears in brain-authored prose (now part of `body`) is NOT
     # re-scanned and mistaken for an unconsumed marker (QA G8). We verify the TEMPLATE had each slot
@@ -955,70 +945,28 @@ def render_report(scenario, pareto, runs, report, run_path=None, n_malformed=0):
     return pattern.sub(lambda mo: replacements[mo.group(0)], html)
 
 
-# --- multi-run card index ----------------------------------------------------
-
-def _card_for(scenario, pareto, report, href):
-    finalists = pareto.get("finalists") or []
-    winner = (pareto.get("winner") or {}).get("chosen") or (
-        finalists[0].get("label") if finalists else "?")
-    wl = scenario.get("workload") or {}
-    return {"href": href, "model": scenario.get("model", "?"),
-            "hw": f"{scenario.get('gpu_budget','?')}x {scenario.get('hardware','?')}",
-            "workload": wl.get("preset") or wl.get("name") or "workload",
-            "winner": winner, "summary": report.get("standfirst", "")[:120],
-            "run_id": scenario.get("run_id") or os.path.basename(os.path.dirname(href))}
-
-
-def render_card_index(cards):
-    with open(INDEX_TEMPLATE, encoding="utf-8") as f:
-        html = f.read()
-    return html.replace(CARDS_PH, _json_for_script(cards))   # script-safe (review F5)
-
-
 # --- entrypoints -------------------------------------------------------------
 
 def write_one(run_dir, out=None):
     scenario, pareto, runs, report, n_malformed = load_run_dir(run_dir)
     if not runs and not pareto:
-        raise SystemExit(f"{run_dir}: no runs.jsonl or pareto.json; not a config-search run directory")
+        raise SystemExit(f"{run_dir}: no runs.jsonl or pareto.json; not a run directory")
     out = out or os.path.join(run_dir, "index.html")
     with open(out, "w", encoding="utf-8") as f:
         f.write(render_report(scenario, pareto, runs, report, os.path.abspath(run_dir), n_malformed))
     return out
 
 
-def write_tree(parent):
-    children = sorted(d for d in os.listdir(parent) if is_run_dir(os.path.join(parent, d)))
-    if not children:
-        raise SystemExit(f"{parent}: no run directories (no child has runs.jsonl/pareto.json)")
-    cards = []
-    for name in children:
-        rd = os.path.join(parent, name)
-        write_one(rd)
-        scenario, pareto, _, report, _ = load_run_dir(rd)
-        cards.append(_card_for(scenario, pareto, report, f"{name}/index.html"))
-    index = os.path.join(parent, "index.html")
-    with open(index, "w", encoding="utf-8") as f:
-        f.write(render_card_index(cards))
-    return index, children
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="config-search HTML report (run-dir -> index.html); never runs BLIS")
-    ap.add_argument("path", help="a run directory, or a parent of several run directories")
-    ap.add_argument("--out", help="output HTML path (single run dir only; default <run-dir>/index.html)")
+        description="HTML report (run-dir -> index.html); never runs BLIS")
+    ap.add_argument("path", help="a run directory")
+    ap.add_argument("--out", help="output HTML path (default <run-dir>/index.html)")
     args = ap.parse_args(argv)
-    if not os.path.isdir(args.path):
-        raise SystemExit(f"{args.path}: not a directory")
+    if not is_run_dir(args.path):
+        raise SystemExit(f"{args.path}: not a run directory")
     try:
-        if is_run_dir(args.path):
-            print(f"wrote {write_one(args.path, args.out)}")
-        else:
-            if args.out:
-                raise SystemExit("--out is only valid for a single run directory, not a parent of many")
-            index, children = write_tree(args.path)
-            print(f"wrote {index} + {len(children)} report(s): {', '.join(children)}")
+        print(f"wrote {write_one(args.path, args.out)}")
     except MalformedInput as e:
         # A present-but-unparseable scenario/pareto/report must abort, not silently unconstrain the
         # recommendation (review F1).

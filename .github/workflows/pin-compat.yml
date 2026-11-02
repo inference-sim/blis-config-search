@@ -120,7 +120,7 @@ jobs:
           python3 -I scripts/test_build.py
           python3 -I scripts/test_blis_pin.py
           python3 -I scripts/test_experiment.py
-          python3 -I .claude/skills/config-search/scripts/test_run_blis.py
+          python3 -I scripts/test_run_blis.py
       - name: The same suite with the new stack as ../ siblings (live-vocabulary paths)
         run: |
           set -euo pipefail

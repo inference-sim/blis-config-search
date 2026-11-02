@@ -146,7 +146,7 @@ describe('runFlags', () => {
 // Issue #13 — cross-surface parity. The dashboard and the standalone HTML report render the same
 // runs; they had drifted into two vocabularies and two ranking objectives for "What to run", so
 // at high load they recommended DIFFERENT configurations for one scenario. These pin the seam
-// from the dashboard side (the report side is pinned in the skill's test_report.py `Parity`).
+// from the dashboard side (the report side is pinned in scripts/test_report.py `Parity`).
 describe('report/dashboard parity (issue #13)', () => {
   const rec = (over: Partial<RunRecord> = {}): RunRecord => ({
     id: 'r', src: 'probe', conc: 512, tp: 8, dp: 1, ni: 1, gpus: 100,

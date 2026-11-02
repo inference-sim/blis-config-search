@@ -16,12 +16,10 @@ Scripts are always invoked with `-I`.
 ```bash
 # Python tests (hermetic: no BLIS, no network) — same set CI runs in checks.yml
 python3 -I scripts/test_build.py
-python3 -I scripts/test_backend.py
 python3 -I scripts/test_experiment.py
-python3 -I .claude/skills/config-search/scripts/test_report.py
-python3 -I .claude/skills/config-search/scripts/test_run_blis.py
-python3 -I scripts/test_search.py
-python3 -I scripts/test_topologies.py
+python3 -I scripts/test_report.py
+python3 -I scripts/test_run_blis.py
+python3 -I scripts/test_blis_pin.py
 
 # Single test: test_experiment.py / test_run_blis.py are unittest (run from the script's dir)
 cd scripts && python3 -m unittest test_experiment.GridExpansion   # or .GridExpansion.test_x
@@ -32,30 +30,29 @@ python3 -I scripts/validate_experiment.py experiments/<name>.yaml   # or experim
 python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run
 
 # Site data + web app
-python3 -I scripts/build_gallery.py [--mode local] [--no-mock]      # reports/ -> site/
+python3 -I scripts/build_gallery.py                                 # reports/ -> site/
 cd web && npm ci && npm run dev | build | test | typecheck
 ```
 
 `npm run dev/build` first runs `stage:data`, which calls `build_gallery.py` and copies `site/`
-into `web/public/data/`. Env: `SITE_MODE=local`, `NO_MOCK=1`, `REUSE_SITE=1`.
+into `web/public/data/`. `REUSE_SITE=1` skips the rebuild.
 
 ## Architecture
 
-Two pipelines feed one static site:
+One pipeline feeds one static site:
 
-- **Experiments (preferred):** `experiments/<name>.yaml` (schema: `experiments/schema.json`,
+- **Experiments:** `experiments/<name>.yaml` (schema: `experiments/schema.json`,
   doc: `experiments/README.md`) → `scripts/validate_experiment.py` → `scripts/run_experiment.py`
-  (deterministic sweeper, no LLM) → `reports/<name>/`. The `blis-experiment` skill only *writes*
-  specs; it is the sole LLM step.
-- **Submissions (legacy):** `submissions/<name>.yaml` → `config-search` skill (LLM-driven search
-  via `.claude/skills/config-search/scripts/run_blis.py`, report via `report.py`) → `reports/`.
+  (deterministic sweeper, no LLM; runs BLIS via `scripts/run_blis.py`) → `reports/<name>/`.
+  The `blis-experiment` skill only *writes* specs; it is the sole LLM step.
 - **Site:** `reports/` (committed run dirs, the source of truth) → `scripts/build_gallery.py`
-  (+ `build_catalog.py` for model/GPU/workload spec-sheets) → `site/` → `web/` (Vite + React SPA,
-  static on GitHub Pages, `base: './'`).
+  (+ `build_catalog.py` for model/GPU/workload spec-sheets; `report.py` renders each report's
+  page from `report/`) → `site/` → `web/` (Vite + React SPA, static on GitHub Pages, `base: './'`).
 
 Spec rules worth knowing: every knob value is a list; omitted knobs take the vLLM default; only
 combos with `tp × dp × num-instances == scenario.gpus` are run; knob names must be BLIS's exact
 names (validated against sibling checkouts). Routing policies live in `routing/*.yaml`.
+`report/lexicon.json` is mirrored byte-for-byte at `web/src/lexicon.json`; edit the first, copy it over.
 
 ### Pinned stack and siblings
 
@@ -70,7 +67,8 @@ Several scripts read sibling checkouts in `../` (`inference-sim`, `blis-catalog`
 ### CI (`.github/workflows/`)
 
 - `checks.yml` — the test gate above, plus validate + `--dry-run` every committed spec (fork-safe).
-- `run-experiment.yml` / `generate-report.yml` — run sweeps/searches and open a bot PR with `reports/`.
+- `run-experiment.yml`: runs sweeps and opens a bot PR with `reports/`.
+- `bump-blis-pin.yml` → `pin-compat.yml` → `regen-reports.yml`: the pin-bump loop, which re-sweeps every report.
 - `pages.yml` — PR previews at `/pr-preview/pr-<N>/`; publishes on main.
 
 `deploy/` runs sweeps as OpenShift Jobs: one BLIS run is single-threaded and `run_experiment.py`

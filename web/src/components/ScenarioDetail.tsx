@@ -5,7 +5,7 @@ import { reportHref } from '../load'
 import { EMPTY_SEL, catalogDoc, dash, emphasis, finite, fnum, operatingPoints, resolveHighlight, runFlags, selectRecords, sortRows, toggleHighlight, useSort, type Selection, type SortState } from '../lib'
 import { OBJECTIVE, OPERATING_COLUMNS, figure as fig, help as lexHelp, label as lexLabel, metric } from '../lexicon'
 import { Crossfilter } from './Crossfilter'
-import { MockBadge, CaveatBadge } from './Reports'
+import { CaveatBadge } from './Reports'
 import { CatRef } from './Coverage'
 
 const PALETTE = ['#1f6e5c', '#34366e', '#b5651d', '#a3301f', '#6b7d1f', '#7a4a8c', '#2a7f9e', '#8a6d00']
@@ -954,19 +954,18 @@ export function ScenarioDetail({ runId, scenarios, catalog }: { runId: string; s
   return (
     <div>
       <p className="crumb"><a href="#/reports">← all reports</a></p>
-      <h2 className="viewhead">{s.model}{modelDoc && <a className="specsheet" href={modelDoc} target="_blank" rel="noreferrer">model spec sheet ↗</a>}{s.synthetic && <MockBadge />}{!s.synthetic && s.caveat && <CaveatBadge caveat={s.caveat} />}</h2>
+      <h2 className="viewhead">{s.model}{modelDoc && <a className="specsheet" href={modelDoc} target="_blank" rel="noreferrer">model spec sheet ↗</a>}{s.caveat && <CaveatBadge caveat={s.caveat} />}</h2>
       <div className="specchips">
         <CatRef href={catalogDoc(catalog, 'hardware', s.hardware)}>{s.hardware}</CatRef><span className="spec">{s.gpu_budget} accelerators</span>
-        <CatRef href={catalogDoc(catalog, 'workload', s.workload)}>{s.workload}</CatRef><span className="spec">{s.isl_osl}</span>
+        <CatRef href={catalogDoc(catalog, 'workload', s.workload)}>{s.workload}</CatRef>
         {/* The interactivity floor is the premise of every servable/not call below, so state it
             here with the other constraints rather than only in the dek far down the briefing. */}
         {s.floor && <span className="spec floor" title="Interactivity floor: a run is servable only if it holds this.">floor: {s.floor}</span>}
         <a className="fullreport" href={reportHref(s.run_id)} target="_blank" rel="noreferrer">Open full report ↗</a>
       </div>
-      {s.synthetic && <div className="warnnote">Mock scenario: synthetic placeholder data, not a real simulation run.</div>}
       {/* The full caveat, not just the badge: a reader about to copy a deployment out of this
           page has to be able to read what these runs actually measured. */}
-      {!s.synthetic && s.caveat && <div className="warnnote">{s.caveat}</div>}
+      {s.caveat && <div className="warnnote">{s.caveat}</div>}
 
       <section className="briefing" aria-label="Top configs to try">
         <div className="seclabel2">Top configs to try</div>
@@ -983,10 +982,7 @@ export function ScenarioDetail({ runId, scenarios, catalog }: { runId: string; s
             <div><dt>tok/s/accelerator</dt><dd className="num best">{fnum(w.tps_per_gpu)}</dd></div>
             <div><dt>tok/s/user</dt><dd className="num best">{fnum(w.per_user)}</dd></div>
             <div><dt>ITL p99 (ms)</dt><dd className="num best">{fnum(w.itl_p99, 2)}</dd></div>
-            {/* c_use is the recommended load AND the load measured. When it backed off below the
-                0.8xC* target, say so here rather than showing a bare number that looks like the
-                target. */}
-            <div><dt>Accelerators · load</dt><dd className="num"><span className="num">{fnum(w.gpus, 0)}</span> · c<span className="num">{fnum(w.c_use, 0)}</span>{w.c_use_target != null && w.c_use_target !== w.c_use && <span className="note" title={`the 0.8xC* target of c${w.c_use_target} measured below the interactivity floor, so the recommendation is the highest servable measured load`}> (backed off from c{w.c_use_target})</span>}</dd></div>
+            <div><dt>Accelerators · load</dt><dd className="num"><span className="num">{fnum(w.gpus, 0)}</span> · c<span className="num">{fnum(w.c_use, 0)}</span></dd></div>
           </div>
         </div>
         {runnersUp.length > 0 && (

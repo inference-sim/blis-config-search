@@ -1,0 +1,565 @@
+{
+  "dropped": [
+    {
+      "count": 2,
+      "gpus": 2,
+      "reason": "uses 2 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 4,
+      "gpus": 4,
+      "reason": "uses 4 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 4,
+      "gpus": 16,
+      "reason": "uses 16 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 2,
+      "gpus": 32,
+      "reason": "uses 32 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 8,
+      "gpus": 4,
+      "reason": "uses 4 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 8,
+      "gpus": 16,
+      "reason": "uses 16 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 4,
+      "gpus": 2,
+      "reason": "uses 2 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 8,
+      "gpus": 4,
+      "reason": "uses 4 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 8,
+      "gpus": 16,
+      "reason": "uses 16 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 4,
+      "gpus": 32,
+      "reason": "uses 32 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 4,
+      "gpus": 4,
+      "reason": "uses 4 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 4,
+      "gpus": 16,
+      "reason": "uses 16 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 1,
+      "gpus": 2,
+      "reason": "uses 2 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 2,
+      "gpus": 4,
+      "reason": "uses 4 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 2,
+      "gpus": 16,
+      "reason": "uses 16 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 1,
+      "gpus": 32,
+      "reason": "uses 32 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 2,
+      "gpus": 4,
+      "reason": "uses 4 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 2,
+      "gpus": 16,
+      "reason": "uses 16 GPUs, not the scenario's 8"
+    }
+  ],
+  "finalists": [
+    {
+      "at_c_use": {
+        "itl_p99_ms": 19.521,
+        "tok_per_s_per_user": 51.2,
+        "tokens_per_sec": 87.6,
+        "tokens_per_sec_per_gpu": 10.95
+      },
+      "c_star": 16,
+      "c_use": 16,
+      "config": {
+        "concurrency": 16,
+        "enable_expert_parallel": true,
+        "gpu_memory_utilization": 0.95,
+        "max_model_len": 262144,
+        "num_instances": 1,
+        "pp": 1,
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 4,
+          "itl_p99_ms": 15.505,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 64.5,
+          "tokens_per_sec": 59.6,
+          "ttft_p99_ms": 13619.8
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 16.803,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 59.5,
+          "tokens_per_sec": 78.6,
+          "ttft_p99_ms": 14996.6
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 19.521,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 51.2,
+          "tokens_per_sec": 87.6,
+          "ttft_p99_ms": 157712.9
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 631.896,
+          "preemption_count": 4,
+          "tok_per_s_per_user": 1.6,
+          "tokens_per_sec": 59.2,
+          "ttft_p99_ms": 256413.5
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 613.611,
+          "preemption_count": 1,
+          "tok_per_s_per_user": 1.6,
+          "tokens_per_sec": 56.8,
+          "ttft_p99_ms": 570208.4
+        }
+      ],
+      "gpus": 8,
+      "label": "1x TP8 + EP",
+      "sweep": "pipeline-topology",
+      "variant": ""
+    },
+    {
+      "at_c_use": {
+        "itl_p99_ms": 196.566,
+        "tok_per_s_per_user": 5.1,
+        "tokens_per_sec": 94.8,
+        "tokens_per_sec_per_gpu": 11.85
+      },
+      "c_star": 16,
+      "c_use": 16,
+      "config": {
+        "concurrency": 16,
+        "enable_expert_parallel": true,
+        "gpu_memory_utilization": 0.95,
+        "max_model_len": 262144,
+        "max_num_batched_tokens": 2048,
+        "max_num_seqs": 16,
+        "num_instances": 1,
+        "pp": 1,
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 4,
+          "itl_p99_ms": 15.505,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 64.5,
+          "tokens_per_sec": 59.1,
+          "ttft_p99_ms": 16500.3
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 16.803,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 59.5,
+          "tokens_per_sec": 77.4,
+          "ttft_p99_ms": 18129.0
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 196.566,
+          "preemption_count": 2,
+          "tok_per_s_per_user": 5.1,
+          "tokens_per_sec": 94.8,
+          "ttft_p99_ms": 25403.4
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 221.407,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 4.5,
+          "tokens_per_sec": 58.7,
+          "ttft_p99_ms": 229958.6
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 220.161,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 4.5,
+          "tokens_per_sec": 55.9,
+          "ttft_p99_ms": 562432.5
+        }
+      ],
+      "gpus": 8,
+      "label": "1x TP8 + EP",
+      "sweep": "batch-caps",
+      "variant": "max seqs 16"
+    },
+    {
+      "at_c_use": {
+        "itl_p99_ms": 20.502,
+        "tok_per_s_per_user": 48.8,
+        "tokens_per_sec": 122.1,
+        "tokens_per_sec_per_gpu": 15.26
+      },
+      "c_star": 16,
+      "c_use": 16,
+      "config": {
+        "cache_dtype": "fp8",
+        "concurrency": 16,
+        "enable_expert_parallel": true,
+        "gpu_memory_utilization": 0.95,
+        "max_model_len": 262144,
+        "num_instances": 1,
+        "pp": 1,
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 4,
+          "itl_p99_ms": 15.092,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 66.3,
+          "tokens_per_sec": 61.5,
+          "ttft_p99_ms": 13476.8
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 16.627,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 60.1,
+          "tokens_per_sec": 86.4,
+          "ttft_p99_ms": 14808.7
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 20.502,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 48.8,
+          "tokens_per_sec": 122.1,
+          "ttft_p99_ms": 16089.5
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 681.803,
+          "preemption_count": 5,
+          "tok_per_s_per_user": 1.5,
+          "tokens_per_sec": 83.2,
+          "ttft_p99_ms": 145983.8
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 693.065,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 1.4,
+          "tokens_per_sec": 69.1,
+          "ttft_p99_ms": 372050.2
+        }
+      ],
+      "gpus": 8,
+      "label": "1x TP8 + EP",
+      "sweep": "kv-capacity",
+      "variant": "gpu mem util 0.95 \u00b7 KV dtype fp8"
+    },
+    {
+      "at_c_use": {
+        "itl_p99_ms": 19.521,
+        "tok_per_s_per_user": 51.2,
+        "tokens_per_sec": 87.6,
+        "tokens_per_sec_per_gpu": 10.95
+      },
+      "c_star": 16,
+      "c_use": 16,
+      "config": {
+        "all2all_backend": "deepep_high_throughput",
+        "concurrency": 16,
+        "enable_expert_parallel": true,
+        "gpu_memory_utilization": 0.95,
+        "max_model_len": 262144,
+        "num_instances": 1,
+        "pp": 1,
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 4,
+          "itl_p99_ms": 15.505,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 64.5,
+          "tokens_per_sec": 59.6,
+          "ttft_p99_ms": 13619.8
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 16.803,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 59.5,
+          "tokens_per_sec": 78.6,
+          "ttft_p99_ms": 14996.6
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 19.521,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 51.2,
+          "tokens_per_sec": 87.6,
+          "ttft_p99_ms": 157712.9
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 631.896,
+          "preemption_count": 4,
+          "tok_per_s_per_user": 1.6,
+          "tokens_per_sec": 59.2,
+          "ttft_p99_ms": 256413.5
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 613.611,
+          "preemption_count": 1,
+          "tok_per_s_per_user": 1.6,
+          "tokens_per_sec": 56.8,
+          "ttft_p99_ms": 570208.4
+        }
+      ],
+      "gpus": 8,
+      "label": "1x TP8 + EP",
+      "sweep": "moe-collective",
+      "variant": ""
+    },
+    {
+      "at_c_use": {
+        "itl_p99_ms": 16.773,
+        "tok_per_s_per_user": 59.6,
+        "tokens_per_sec": 66.7,
+        "tokens_per_sec_per_gpu": 8.33
+      },
+      "c_star": 8,
+      "c_use": 8,
+      "config": {
+        "concurrency": 8,
+        "enable_expert_parallel": true,
+        "enable_prefix_caching": false,
+        "gpu_memory_utilization": 0.95,
+        "max_model_len": 262144,
+        "num_instances": 1,
+        "pp": 1,
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 4,
+          "itl_p99_ms": 15.865,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 63.0,
+          "tokens_per_sec": 40.0,
+          "ttft_p99_ms": 14023.3
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 16.773,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 59.6,
+          "tokens_per_sec": 66.7,
+          "ttft_p99_ms": 18338.9
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 544.485,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 1.8,
+          "tokens_per_sec": 65.2,
+          "ttft_p99_ms": 155274.1
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 624.743,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 1.6,
+          "tokens_per_sec": 58.1,
+          "ttft_p99_ms": 264480.1
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 613.649,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 1.6,
+          "tokens_per_sec": 55.5,
+          "ttft_p99_ms": 597719.4
+        }
+      ],
+      "gpus": 8,
+      "label": "1x TP8 + EP",
+      "sweep": "prefix-cache",
+      "variant": ""
+    },
+    {
+      "at_c_use": {
+        "itl_p99_ms": 19.521,
+        "tok_per_s_per_user": 51.2,
+        "tokens_per_sec": 87.6,
+        "tokens_per_sec_per_gpu": 10.95
+      },
+      "c_star": 16,
+      "c_use": 16,
+      "config": {
+        "concurrency": 16,
+        "enable_expert_parallel": true,
+        "gpu_memory_utilization": 0.95,
+        "long_prefill_token_threshold": 8192,
+        "max_model_len": 262144,
+        "num_instances": 1,
+        "pp": 1,
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 4,
+          "itl_p99_ms": 15.505,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 64.5,
+          "tokens_per_sec": 59.6,
+          "ttft_p99_ms": 13619.8
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 16.803,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 59.5,
+          "tokens_per_sec": 78.6,
+          "ttft_p99_ms": 14996.6
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 19.521,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 51.2,
+          "tokens_per_sec": 87.6,
+          "ttft_p99_ms": 157712.9
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 631.896,
+          "preemption_count": 4,
+          "tok_per_s_per_user": 1.6,
+          "tokens_per_sec": 59.2,
+          "ttft_p99_ms": 256413.5
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 613.611,
+          "preemption_count": 1,
+          "tok_per_s_per_user": 1.6,
+          "tokens_per_sec": 56.8,
+          "ttft_p99_ms": 570208.4
+        }
+      ],
+      "gpus": 8,
+      "label": "1x TP8 + EP",
+      "sweep": "prefill-chunking",
+      "variant": "prefill chunk 8,192"
+    },
+    {
+      "at_c_use": {
+        "itl_p99_ms": 18.173,
+        "tok_per_s_per_user": 55.0,
+        "tokens_per_sec": 88.4,
+        "tokens_per_sec_per_gpu": 11.06
+      },
+      "c_star": 16,
+      "c_use": 16,
+      "config": {
+        "concurrency": 16,
+        "cudagraph_mode": "FULL",
+        "enable_expert_parallel": true,
+        "gpu_memory_utilization": 0.95,
+        "max_model_len": 262144,
+        "num_instances": 1,
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 4,
+          "itl_p99_ms": 15.921,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 62.8,
+          "tokens_per_sec": 61.9,
+          "ttft_p99_ms": 13437.5
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 16.702,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 59.9,
+          "tokens_per_sec": 84.5,
+          "ttft_p99_ms": 14829.6
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 18.173,
+          "preemption_count": 2,
+          "tok_per_s_per_user": 55.0,
+          "tokens_per_sec": 88.4,
+          "ttft_p99_ms": 145850.6
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 613.528,
+          "preemption_count": 2,
+          "tok_per_s_per_user": 1.6,
+          "tokens_per_sec": 60.0,
+          "ttft_p99_ms": 273065.0
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 606.936,
+          "preemption_count": 1,
+          "tok_per_s_per_user": 1.6,
+          "tokens_per_sec": 56.4,
+          "ttft_p99_ms": 601374.0
+        }
+      ],
+      "gpus": 8,
+      "label": "1x TP8 + EP",
+      "sweep": "cudagraph",
+      "variant": "graph capture full"
+    }
+  ],
+  "run_id": "muse-spark-open-816b-a42b-h100-agentx-8gpu",
+  "winner": {
+    "chosen": "1x TP8 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)",
+    "label": "1x TP8 + EP",
+    "reason": "1x TP8 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8) in sweep 'kv-capacity' gives the most tok/s/accelerator (15.26 tok/s/accelerator, 122.1 tok/s fleet) while holding the scenario's SLOs, at concurrency 16.",
+    "sweep": "kv-capacity",
+    "variant": "gpu mem util 0.95 \u00b7 KV dtype fp8"
+  }
+}

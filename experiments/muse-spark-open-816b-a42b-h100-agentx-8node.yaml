@@ -4,6 +4,8 @@
 # crosses RoCE every step -- half an ib-400g link, which is the whole reason this is a separate spec from the H200/IB one.
 # 80 GiB H100 ranks (vs H200's 140): TP8 needs gmu 0.95 for one 262k sequence (proven on the single-node 8gpu spec), and KV room
 # is tight enough that fp8 KV is its own sweep here -- the H200 8node spec dropped it as identical on 140 GiB ranks.
+# P/D is the most fabric-sensitive sweep here: pools never share a node, so unlike the GB200 rack (one NVLink domain) every KV
+# handoff crosses RoCE. Pools stay dp1 (pinned engine refuses kv_transfer under dp, blis-vllm#44) and tp8 (one node each).
 # Footprints must be RE-PROBED on the cluster (no local binary): wider dp/EP shapes that fit on H200 may refuse on 80 GiB H100.
 
 name: muse-spark-open-816b-a42b-h100-agentx-8node
@@ -82,6 +84,29 @@ sweeps:
     parallel: {tp: [8], enable_expert_parallel: [true]}
     engine:
       long_prefill_token_threshold: [2048]
+
+  # P/D: pools never share a node, so each handoff crosses RoCE (the fabric lever). The colocated
+  # 8x TP8 arm in `topology` is the fair control. Pools stay tp8 dp1 (kv_transfer refuses dp,
+  # blis-vllm#44), so prefill-instances + decode-instances == 8.
+  - name: pd-ratio
+    narrative: Decode-heavy ratios should win on AgentX, since cached prefixes leave only a short uncached tail to prefill per turn -- and the RoCE handoff taxes the prefill-heavy splits more.
+    prefill-instances: [1, 2, 3, 4]
+    decode-instances: [7, 6, 5, 4]
+    prefill: {parallel: {tp: [8], enable_expert_parallel: [true]}}
+    decode: {parallel: {tp: [8], enable_expert_parallel: [true]}}
+    router:
+      endpoint_picker_config: [pd-prefix.yaml]
+      plugins:
+        prefix-based-pd-decider: {parameters: {nonCachedTokens: [256, 1024, 4096, 16384]}}
+
+  - name: pd-always
+    # Same tp8 layouts as pd-ratio; overrides take one base file, so the always-split decider is its own sweep.
+    narrative: Splitting every request should trail the threshold arms, because a turn with a cached prefix pays a cross-node RoCE handoff for little prefill.
+    prefill-instances: [1, 2, 3, 4]
+    decode-instances: [7, 6, 5, 4]
+    prefill: {parallel: {tp: [8], enable_expert_parallel: [true]}}
+    decode: {parallel: {tp: [8], enable_expert_parallel: [true]}}
+    router: {endpoint_picker_config: [pd-always.yaml]}
 
   - name: cudagraph
     # Per-step host cost; measured not to interact with topology, so one shape.

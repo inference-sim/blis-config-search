@@ -246,7 +246,7 @@
         }
       ],
       "gpus": 64,
-      "label": "4x TP4 + EP",
+      "label": "4x TP4xPP4 + EP",
       "sweep": "pipeline",
       "variant": ""
     },
@@ -537,9 +537,9 @@
   ],
   "run_id": "muse-spark-open-816b-a42b-gb200-agentx-rack",
   "winner": {
-    "chosen": "4x TP4 + EP",
-    "label": "4x TP4 + EP",
-    "reason": "4x TP4 + EP in sweep 'pipeline' gives the most tok/s/accelerator (25.84 tok/s/accelerator, 1653.6 tok/s fleet) while holding the scenario's SLOs, at concurrency 512.",
+    "chosen": "4x TP4xPP4 + EP",
+    "label": "4x TP4xPP4 + EP",
+    "reason": "4x TP4xPP4 + EP in sweep 'pipeline' gives the most tok/s/accelerator (25.84 tok/s/accelerator, 1653.6 tok/s fleet) while holding the scenario's SLOs, at concurrency 512.",
     "sweep": "pipeline",
     "variant": ""
   }

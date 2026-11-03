@@ -638,7 +638,7 @@
         }
       ],
       "gpus": 72,
-      "label": "5P/2D TP8 + EP",
+      "label": "5P TP8 + EP / 2D TP16 + EP",
       "sweep": "pd-wide-decode",
       "variant": ""
     },
@@ -731,7 +731,7 @@
         }
       ],
       "gpus": 72,
-      "label": "1P/7D TP16 + EP",
+      "label": "1P TP16 + EP / 7D TP8 + EP",
       "sweep": "pd-wide-prefill",
       "variant": ""
     },

@@ -638,10 +638,39 @@ class Labelling(unittest.TestCase):
         self.assertEqual("8x TP4xDP2 + EP", E.label_of(
             {"tp": 4, "dp": 2, "num_instances": 8, "enable_expert_parallel": True}))
 
+    def test_colocated_label_shows_pipeline_parallelism(self):
+        # pp is a GPU-footprint factor (tp*pp*dp), so a pp>1 shape must not read like pp=1.
+        self.assertEqual("4x TP8xPP2 + EP", E.label_of(
+            {"tp": 8, "pp": 2, "num_instances": 4, "enable_expert_parallel": True}))
+        self.assertEqual("4x TP4xPP4xDP2", E.label_of(
+            {"tp": 4, "pp": 4, "dp": 2, "num_instances": 4}))
+
+    def test_pipeline_parallelism_hidden_when_one(self):
+        # pp=1 (the default) stays suppressed, like dp=1, so plain shapes are uncluttered.
+        self.assertEqual("8x TP8 + EP", E.label_of(
+            {"tp": 8, "pp": 1, "num_instances": 8, "enable_expert_parallel": True}))
+
     def test_disaggregated_label_names_both_pools(self):
+        # Matching pool shapes collapse to one shape after the P/D instance counts.
         self.assertEqual("3P/5D TP8 + EP", E.label_of(
-            {"prefill_instances": 3, "decode_instances": 5, "prefill_tp": 8,
-             "prefill_enable_expert_parallel": True}))
+            {"prefill_instances": 3, "decode_instances": 5,
+             "prefill_tp": 8, "prefill_enable_expert_parallel": True,
+             "decode_tp": 8, "decode_enable_expert_parallel": True}))
+
+    def test_disaggregated_label_splits_when_pools_differ(self):
+        # A wide-decode sweep runs prefill tp8 against decode tp16; one shape would hide the other.
+        self.assertEqual("2P TP8 + EP / 3D TP16 + EP", E.label_of(
+            {"prefill_instances": 2, "decode_instances": 3,
+             "prefill_tp": 8, "prefill_enable_expert_parallel": True,
+             "decode_tp": 16, "decode_enable_expert_parallel": True}))
+
+    def test_disaggregated_label_shows_pool_pipeline_parallelism(self):
+        # pp>1 is priced on each pool of a disaggregated run too (kernel v0.5.0), so label it.
+        # Here only the prefill pool is pipelined, so the pools differ and the label splits.
+        self.assertEqual("2P TP8xPP2 + EP / 6D TP8 + EP", E.label_of(
+            {"prefill_instances": 2, "decode_instances": 6,
+             "prefill_tp": 8, "prefill_pp": 2, "prefill_enable_expert_parallel": True,
+             "decode_tp": 8, "decode_enable_expert_parallel": True}))
 
     def test_variant_describes_only_what_differs_from_the_sweep_baseline(self):
         cands = [{"max_num_seqs": 256}, {"max_num_seqs": 256}, {"max_num_seqs": 64}]

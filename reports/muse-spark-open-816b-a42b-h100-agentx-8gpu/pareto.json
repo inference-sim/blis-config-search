@@ -153,7 +153,7 @@
         }
       ],
       "gpus": 8,
-      "label": "1x TP4 + EP",
+      "label": "1x TP4xPP2 + EP",
       "sweep": "pipeline-topology",
       "variant": ""
     },
@@ -220,7 +220,7 @@
         }
       ],
       "gpus": 8,
-      "label": "1x TP4 + EP",
+      "label": "1x TP4xPP2 + EP",
       "sweep": "batch-caps",
       "variant": "batch tokens 4,096"
     },
@@ -286,7 +286,7 @@
         }
       ],
       "gpus": 8,
-      "label": "1x TP4 + EP",
+      "label": "1x TP4xPP2 + EP",
       "sweep": "kv-capacity",
       "variant": "gpu mem util 0.95 \u00b7 KV dtype fp8"
     },
@@ -352,7 +352,7 @@
         }
       ],
       "gpus": 8,
-      "label": "1x TP4 + EP",
+      "label": "1x TP4xPP2 + EP",
       "sweep": "moe-collective",
       "variant": ""
     },
@@ -418,7 +418,7 @@
         }
       ],
       "gpus": 8,
-      "label": "1x TP4 + EP",
+      "label": "1x TP4xPP2 + EP",
       "sweep": "prefix-cache",
       "variant": ""
     },
@@ -484,7 +484,7 @@
         }
       ],
       "gpus": 8,
-      "label": "1x TP4 + EP",
+      "label": "1x TP4xPP2 + EP",
       "sweep": "prefill-chunking",
       "variant": "prefill chunk 8,192"
     },
@@ -557,7 +557,7 @@
   "run_id": "muse-spark-open-816b-a42b-h100-agentx-8gpu",
   "winner": {
     "chosen": "1x TP4 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)",
-    "label": "1x TP4 + EP",
+    "label": "1x TP4xPP2 + EP",
     "reason": "1x TP4 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8) in sweep 'kv-capacity' gives the most tok/s/accelerator (11.91 tok/s/accelerator, 95.3 tok/s fleet) while holding the scenario's SLOs, at concurrency 16.",
     "sweep": "kv-capacity",
     "variant": "gpu mem util 0.95 \u00b7 KV dtype fp8"

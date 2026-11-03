@@ -1488,10 +1488,8 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                           # asks that reuse be recorded, so a report can state it.
                           "reused_from_other_hardware": bool(
                               al_src and hardware and f"({hardware})" not in al_src)}
-    # Fabric prices cross-node traffic only, so a single-node run names none and is normalized to
-    # the default BEFORE the scenario hash -- otherwise two single-node runs differing only in a
-    # fabric that never reaches the YAML would hash to different files, and the explorer (which
-    # reconstructs with the recorded, normalized fabric) could not match the recorded name.
+    # Fabric only reaches a multi-node YAML, so normalize it to the default on a single node:
+    # the scenario hash then matches what the explorer reconstructs from the recorded fabric.
     multinode = bool(pd) or pool_nodes(parallel, num_instances) > 1
     fabric = fabric if multinode else DEFAULT_FABRIC
     scenario_name = write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine,

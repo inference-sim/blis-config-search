@@ -548,6 +548,10 @@ svg.chart .xf-dot.hot{stroke:var(--ink);stroke-width:1.6}
 svg.chart .xf-bg{cursor:pointer}
 svg.chart .xf-bg.hot{fill:var(--ink)}
 svg.chart .xf-path.faded{opacity:.25}
+svg.chart .xf-ser circle{cursor:pointer}
+svg.chart.focused .xf-ser circle:not(.hot){opacity:.5}
+svg.chart .xf-ser circle.hot{stroke:var(--ink);stroke-width:1.6}
+svg.chart .xf-ser.faded{opacity:.25}
 svg.chart .xf-path.hot polyline{stroke-width:3}
 svg.chart .xf-path.hot circle{r:4.6}
 .xf-legend{gap:4px 6px}

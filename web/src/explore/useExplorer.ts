@@ -77,6 +77,7 @@ export function useExplorer(data: ExploreData): Explorer {
   const resetCharts = () => {
     const base = { ...(beforePick ?? sel) }
     if (colorBy) delete base[colorBy]
+    delete base.mode
     setSel(base); setOkOnly(false); clearPick(); setHover(null)
   }
 

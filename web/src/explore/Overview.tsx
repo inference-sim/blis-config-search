@@ -4,7 +4,7 @@ import { useMemo } from 'react'
 import type { Explorer } from './useExplorer'
 import type { MetricKey, Run } from './types'
 import { METRIC, NA, SLO_OF, TOPO_FIELDS, TOPO_INFO, bareKey, fmt, fmtMetric, niceMax, poolOf, quantile, sloMs, sortValues, tagsOf } from './model'
-import { H, M, W, YAxis } from './chart'
+import { Backdrop, H, LegendBtn, M, W, YAxis } from './chart'
 
 const PAL = ['var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c7)', 'var(--c5)']
 // categorical order for coloring by a field; past seven values the rest share one "other" hue
@@ -45,11 +45,6 @@ export function runTip(x: Explorer, r: Run) {
     + `${fmt(r.tpg, 1)} tok/s/acc · ${fmt(r.pu, 1)} tok/s/user\nTPOT p99 ${fmt(r.itl, 1)} ms · TTFT p99 ${fmt(r.ttft, 0)} ms\n${r.ok ? 'meets every SLO' : 'misses an SLO'}`
 }
 
-/** A full-plot backdrop: clicking it (empty space) resets the charts. */
-function Backdrop({ x }: { x: Explorer }) {
-  return <rect className="xf-backdrop" x={M.l} y={M.t} width={W - M.l - M.r} height={H - M.t - M.b} onClick={x.resetCharts} />
-}
-
 export function Scatter({ x }: { x: Explorer }) {
   const tips = useMemo(() => new Map(x.runs.map((r) => [r.id, runTip(x, r)])), [x.runs, x.fields, x.usual]) // eslint-disable-line react-hooks/exhaustive-deps
   const y = x.target
@@ -77,7 +72,7 @@ export function Scatter({ x }: { x: Explorer }) {
     <svg className={`chart xf-chart${focus ? ' focused' : ''}`} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${METRIC[y].label} against ${METRIC[xk].label}`}
       onPointerLeave={() => x.setHover(null)}>
       <YAxis ym={ym} py={py} label={`${METRIC[y].label}${hi ? ' →' : ' (lower is up)'}`} />
-      <Backdrop x={x} />
+      <Backdrop onClick={x.resetCharts} />
       {xticks.map((v) => <text key={v} x={px(v)} y={H - M.b + 13} textAnchor="middle" className="tick">{fmt(v, 0)}</text>)}
       <text x={(M.l + W - M.r) / 2} y={H - 3} textAnchor="middle" className="axlabel">{METRIC[xk].label} →</text>
       {slo !== null && slo <= ym && <g className="xf-slo"><line x1={M.l} x2={W - M.r} y1={py(slo)} y2={py(slo)} /><text x={W - M.r} y={py(slo) - 4} textAnchor="end">SLO</text></g>}
@@ -118,7 +113,7 @@ export function LoadRamp({ x }: { x: Explorer }) {
     <svg className={`chart xf-chart${focus ? ' focused' : ''}`} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${METRIC[m].label} by sessions`}
       onPointerLeave={() => x.setHover(null)}>
       <YAxis ym={ym} py={py} label={`${METRIC[m].label}${hi ? '' : ' ms (lower is up)'}`} />
-      <Backdrop x={x} />
+      <Backdrop onClick={x.resetCharts} />
       {loads.map((c) => <text key={c} x={px(c)} y={H - M.b + 13} textAnchor="middle" className="tick">{c}</text>)}
       <text x={(M.l + W - M.r) / 2} y={H - 3} textAnchor="middle" className="axlabel">sessions (the spec’s loads)</text>
       {slo !== null && <g className="xf-slo"><line x1={M.l} x2={W - M.r} y1={py(slo)} y2={py(slo)} /><text x={W - M.r} y={py(slo) - 4} textAnchor="end">SLO {x.data.slo[SLO_OF[m] as string]}</text></g>}
@@ -141,25 +136,11 @@ export function LoadRamp({ x }: { x: Explorer }) {
   )
 }
 
-/** A legend entry that does something: filters, toggles, or hovers a config. */
-function LegendBtn({ on, off, onClick, onHover, children, label }: {
-  on?: boolean; off?: boolean; onClick: () => void; onHover?: (h: boolean) => void; children: React.ReactNode; label: string
-}) {
-  return (
-    <button type="button" className={`xf-lg${on ? ' on' : ''}${off ? ' off' : ''}`} aria-pressed={!!on} aria-label={label} onClick={onClick}
-      onPointerEnter={() => onHover?.(true)} onPointerLeave={() => onHover?.(false)} onFocus={() => onHover?.(true)} onBlur={() => onHover?.(false)}>
-      {children}
-    </button>
-  )
-}
-
 export function OverviewSection({ x }: { x: Explorer }) {
   const y = x.target, xk: MetricKey = y === 'pu' ? 'tpg' : 'pu'
   const follow = followed(x)
   const color = colorScale(x)
   const cSel = color.field ? x.sel[color.field] ?? [] : []
-  const hovered = x.hover ? x.runs.find((r) => r.cfg === x.hover) : null
-  const hoverBest = hovered ? x.ranked.find((g) => g.lead.cfg === x.hover)?.lead ?? hovered : null
   const anyChartFilter = cSel.length > 0 || x.okOnly || !!x.picked
   const shownVals = color.values.slice(0, 7)
   return (
@@ -223,11 +204,21 @@ export function OverviewSection({ x }: { x: Explorer }) {
           </div>
         </div>
       </div>
-      <p className={`xf-hoverline${hoverBest ? '' : ' idle'}`} aria-live="polite">
-        {hoverBest
-          ? <><b className="mono">{hoverBest.topo}</b> {tagsOf(hoverBest, x.fields, x.usual, x.data.routers).map((t) => t.text).join(' · ')} · best {fmtMetric(y, hoverBest[y])} {METRIC[y].label} at {hoverBest.conc} sessions · click to filter</>
-          : 'Point at a run on either chart to compare it across both.'}
-      </p>
+      <HoverLine x={x} idle="Point at a run on either chart to compare it across both." />
     </section>
+  )
+}
+
+/** What the shared hover points at: the hovered config's best run, read out under the charts. */
+export function HoverLine({ x, idle }: { x: Explorer; idle: string }) {
+  const y = x.target
+  const hovered = x.hover ? x.runs.find((r) => r.cfg === x.hover) : null
+  const best = hovered ? x.ranked.find((g) => g.lead.cfg === x.hover)?.lead ?? hovered : null
+  return (
+    <p className={`xf-hoverline${best ? '' : ' idle'}`} aria-live="polite">
+      {best
+        ? <><b className="mono">{best.topo}</b> {tagsOf(best, x.fields, x.usual, x.data.routers).map((t) => t.text).join(' · ')} · best {fmtMetric(y, best[y])} {METRIC[y].label} at {best.conc} sessions · click to filter</>
+        : idle}
+    </p>
   )
 }

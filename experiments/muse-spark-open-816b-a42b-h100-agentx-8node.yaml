@@ -2,11 +2,12 @@
 # MoE 256 experts top_k 8: EP width tp*dp, dp attention and all2all_backend are real; graph prices pp; no speculator, modelopt.
 # H100 on RoCE (roce-200g, 25 GB/s), NOT InfiniBand (issue #71): an instance wider than 8 GPUs spans nodes, so its EP all-to-all
 # crosses RoCE every step -- half an ib-400g link, which is the whole reason this is a separate spec from the H200/IB one.
-# 80 GiB H100 ranks (vs H200's 140): TP8 needs gmu 0.95 for one 262k sequence (proven on the single-node 8gpu spec), and KV room
-# is tight enough that fp8 KV is its own sweep here -- the H200 8node spec dropped it as identical on 140 GiB ranks.
-# P/D is the most fabric-sensitive sweep here: pools never share a node, so unlike the GB200 rack (one NVLink domain) every KV
-# handoff crosses RoCE. Pools stay dp1 (pinned engine refuses kv_transfer under dp, blis-vllm#44) and tp8 (one node each).
-# Footprints must be RE-PROBED on the cluster (no local binary): wider dp/EP shapes that fit on H200 may refuse on 80 GiB H100.
+# 80 GiB H100 ranks (vs H200's 140): the 8gpu report shows TP8 at 262k has only 0.65 GiB KV room at gmu 0.95 (and
+# refuses at 0.9), so gmu is pinned 0.95 and fp8 KV is its own sweep -- the H200 8node spec dropped it on 140 GiB ranks.
+# P/D folds in the full H200 P/D exploration (#79): pools never share a node, so unlike the GB200 rack (one NVLink
+# domain) every handoff crosses RoCE; pools stay tp8 dp1 (engine refuses kv_transfer under dp, blis-vllm#44) bar
+# pd-wide-decode's two-node tp16 decode. tp4 dp>1 shapes are expected to thin (8gpu report refused every tp2/tp4 dp).
+# Sized for SWEEP_MAX_PARALLEL=8 under 3h wall (~1.9h at the GB200 P/D spec's measured 171s/run).
 
 name: muse-spark-open-816b-a42b-h100-agentx-8node
 
@@ -44,29 +45,49 @@ sweeps:
 
   - name: moe-collective
     # The fabric-sensitive sweep: in-node EP width 8 (8x TP8) vs cross-node EP width 64 (1x TP8 DP8) over RoCE.
+    # deepep_low_latency is left off the DP8 shape: it refused on H200 (131 GiB DeepEP buffers per rank) and cannot
+    # fit 80 GiB H100 at all, so it runs only at in-node width 8 where its buffers are smaller.
     narrative: DeepEP backends should pay off most at cross-node EP width 64, where dispatch crosses RoCE, and matter little at in-node width 8 on NVLink.
-    num-instances: [8, 1]
-    parallel: {tp: [8], dp: [1, 8], enable_expert_parallel: [true]}
+    num-instances: [8]
+    parallel: {tp: [8], enable_expert_parallel: [true]}
     engine:
       all2all_backend: [deepep_high_throughput, deepep_low_latency, deepep_v2, pplx]
 
+  - name: moe-collective-wide
+    # Cross-node EP width 64; deepep_low_latency omitted (will not fit 80 GiB ranks, see moe-collective).
+    narrative: At cross-node EP width 64 the DeepEP throughput backends should beat pplx by the most, since every dispatch crosses RoCE.
+    num-instances: [1]
+    parallel: {tp: [8], dp: [8], enable_expert_parallel: [true]}
+    engine:
+      all2all_backend: [deepep_high_throughput, deepep_v2, pplx]
+
   - name: kv-capacity
-    # H100-specific vs the H200 8node spec: 80 GiB ranks leave little KV room at 262k, so fp8 KV may be what lets the
-    # cross-node and wide-dp shapes start at all. Cross tp and dp so the pressure differs by per-GPU KV bytes.
-    narrative: fp8 KV should matter most where KV room is tightest -- the wide cross-node DP8 shape on 80 GiB H100 ranks -- and substitute for memory the narrow shapes already have.
-    num-instances: [8, 1]
-    parallel: {tp: [8], dp: [1, 8], enable_expert_parallel: [true]}
+    # H100-specific vs the H200 8node spec. EP shards the experts tp*dp ways, so the TIGHT shape is 8x TP8 (8-way:
+    # only 0.65 GiB KV room at gmu 0.95 in the 8gpu report, and it refuses at 0.9), NOT the 64-way DP8 shape, which
+    # holds the fewest weights per rank. gmu 0.95 only here; the DP8 arm with its memory headroom carries the gmu sweep.
+    narrative: fp8 KV should matter most on 8x TP8, whose 80 GiB ranks leave the least KV room (fp8 was +40% there at c=32 in the 8gpu report), and little on the 64-wide DP8 shape.
+    num-instances: [8]
+    parallel: {tp: [8], enable_expert_parallel: [true]}
+    engine:
+      cache_dtype: [auto, fp8]
+
+  - name: kv-capacity-wide
+    # The roomy 64-way DP8 shape, where gmu has headroom to vary; its KV room makes fp8 a weaker lever here.
+    narrative: With the most KV room of any shape, the 64-wide DP8 layout should gain little from fp8 KV or a higher gmu.
+    num-instances: [1]
+    parallel: {tp: [8], dp: [8], enable_expert_parallel: [true]}
     engine:
       cache_dtype: [auto, fp8]
       gpu_memory_utilization: [0.9, 0.95]
 
   - name: batch-caps
+    # 32768 refuses on 8x TP8 at 262k (needs 3.48 GiB KV, 0.65 available in the 8gpu report); 16384 fit there.
     narrative: A seq cap of 32 should bind on 8x TP8 at 512 lanes but not on 2x TP8 DP4, whose dp ranks each schedule their own batch.
     num-instances: [8, 2]
     parallel: {tp: [8], dp: [1, 4], enable_expert_parallel: [true]}
     engine:
       max_num_seqs: [32, 256]
-      max_num_batched_tokens: [4096, 32768]
+      max_num_batched_tokens: [4096, 16384]
 
   - name: routing-prefix-cache
     # queue.yaml matches the default router, so it doubles as the default-router twin.
@@ -122,16 +143,28 @@ sweeps:
 
   - name: pd-pool-engine
     # Decode pools prefill locally whenever the decider skips the split, so their long-prefill cap is live.
-    # Per-pool token budgets, neither a must-match knob, so the pools may differ.
-    narrative: A 32k prefill budget should matter on the prefill-light layout and a decode-pool prefill cap on the decode-heavy one.
+    # Per-pool token budgets, neither a must-match knob, so the pools may differ. 32768 is capped to 16384: a tp8
+    # pool at 262k refuses past there on 80 GiB ranks (same KV check as batch-caps), unlike the GB200 rack.
+    narrative: A bigger prefill budget should matter on the prefill-light layout and a decode-pool prefill cap on the decode-heavy one.
     prefill-instances: [2, 4]
     decode-instances: [6, 4]
     prefill:
       parallel: {tp: [8], enable_expert_parallel: [true]}
-      engine: {max_num_batched_tokens: [8192, 32768]}
+      engine: {max_num_batched_tokens: [8192, 16384]}
     decode:
       parallel: {tp: [8], enable_expert_parallel: [true]}
       engine: {long_prefill_token_threshold: [0, 2048]}
+    router: {endpoint_picker_config: [pd-prefix.yaml]}
+
+  - name: pd-decode-cudagraph
+    # Per-step host cost on the decode pool; does not interact with topology, so one layout.
+    narrative: Full graph capture on the decode pool should lower ITL by a few percent, with FULL_DECODE_ONLY matching FULL there.
+    prefill-instances: [3]
+    decode-instances: [5]
+    prefill: {parallel: {tp: [8], enable_expert_parallel: [true]}}
+    decode:
+      parallel: {tp: [8], enable_expert_parallel: [true]}
+      engine: {cudagraph_mode: [FULL, FULL_DECODE_ONLY]}
     router: {endpoint_picker_config: [pd-prefix.yaml]}
 
   - name: cudagraph

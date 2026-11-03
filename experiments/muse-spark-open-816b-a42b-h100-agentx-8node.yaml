@@ -108,6 +108,32 @@ sweeps:
     decode: {parallel: {tp: [8], enable_expert_parallel: [true]}}
     router: {endpoint_picker_config: [pd-always.yaml]}
 
+  - name: pd-wide-decode
+    # A TP16 decode instance is two nodes; P*8 + D*16 == 64 keeps the surviving pairs 2P3D / 4P2D / 6P1D.
+    narrative: TP16 decode instances should hold ITL at higher load than TP8 ones, trading batch slots for faster steps.
+    prefill-instances: [2, 4, 6]
+    decode-instances: [3, 2, 1]
+    prefill: {parallel: {tp: [8], enable_expert_parallel: [true]}}
+    decode: {parallel: {tp: [16], enable_expert_parallel: [true]}}
+    router:
+      endpoint_picker_config: [pd-prefix.yaml]
+      plugins:
+        prefix-based-pd-decider: {parameters: {nonCachedTokens: [256, 4096]}}
+
+  - name: pd-pool-engine
+    # Decode pools prefill locally whenever the decider skips the split, so their long-prefill cap is live.
+    # Per-pool token budgets, neither a must-match knob, so the pools may differ.
+    narrative: A 32k prefill budget should matter on the prefill-light layout and a decode-pool prefill cap on the decode-heavy one.
+    prefill-instances: [2, 4]
+    decode-instances: [6, 4]
+    prefill:
+      parallel: {tp: [8], enable_expert_parallel: [true]}
+      engine: {max_num_batched_tokens: [8192, 32768]}
+    decode:
+      parallel: {tp: [8], enable_expert_parallel: [true]}
+      engine: {long_prefill_token_threshold: [0, 2048]}
+    router: {endpoint_picker_config: [pd-prefix.yaml]}
+
   - name: cudagraph
     # Per-step host cost; measured not to interact with topology, so one shape.
     narrative: FULL capture should beat the PIECEWISE default by a few percent, and NONE should collapse.

@@ -205,7 +205,8 @@ def changed(old_pins, new_pins):
 
 def same_stack(a_dir, b_dir):
     """Whether two report dirs carry the same pinned-stack labels. `resolved` is ignored: it is
-    build provenance, and a regen job's binary records less of it than a run-experiment build."""
+    build provenance, and a regen job's binary records less of it than a run-experiment build.
+    Only the recorded labels are compared: a pin move that touches none (e.g. BLIS_SHA) is unseen."""
     def labels(d):
         s = (_load_json(os.path.join(d, "scenario.json"), {}) or {}).get("pinned_stack") or {}
         return {k: v for k, v in s.items() if k != "resolved"}

@@ -466,6 +466,8 @@ def test_workflow_wiring():
     check("fail-fast: false" in regen, "one failed report must not cancel the others")
     check("blis_pin.py same-stack" in regen and '"$GITHUB_SHA..HEAD" -- "reports/$id"' in regen,
           "a report re-swept on main during the campaign keeps main's copy")
+    check('[ ! -d "reports/$id" ]' in regen and 'stale="$stale $id"' in regen,
+          "a report removed, or re-swept on the old stack, on main mid-campaign is not swapped in")
     check('git show "$GITHUB_SHA:pins.env"' in regen and "steps.stack.outputs.current == 'true'" in regen,
           "a campaign whose pins moved on main mid-sweep opens no PR")
     check("always()" in regen, "batch PRs open even when some report jobs failed")

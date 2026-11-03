@@ -4,7 +4,8 @@ import type { Explorer } from './useExplorer'
 import type { Run } from './types'
 import { FieldChart, barKey, fieldBars } from './FieldChart'
 import { RouterPanel } from './RouterView'
-import { H, M, W, YAxis } from './chart'
+import { Backdrop, H, LegendBtn, M, W, YAxis } from './chart'
+import { HoverLine } from './Overview'
 import { ConfigName } from '../components/ConfigName'
 import { ENGINE_HELP, METRIC, TOPO_FIELDS, TOPO_INFO, bareKey, fmt, fmtMetric, layerOf, matches, niceMax, poolOf, rankConfigs, type Pool } from './model'
 
@@ -19,6 +20,8 @@ export function TopologySection({ x }: { x: Explorer }) {
     : [{ pool: null, label: null }]
   const best = (x.picked && rankConfigs(x.shown().filter((r) => r.cfg === x.picked), x.target)[0]) || rankConfigs(x.shown(), x.target)[0]
   const pdInView = inView.has('P/D')
+  // the mode chart ignores the mode filter so its own legend can filter without hiding it
+  const pdAnyMode = x.shown('mode').some((r) => r.mode === 'P/D')
   return (
     <section className="xf-sec" id="sec-topology" aria-labelledby="h-topology">
       <SectionHead id="h-topology" layer="topology" title="Topology" sub="How the accelerators are split: parallelism, instance count, and aggregated or prefill/decode pools." />
@@ -41,10 +44,10 @@ export function TopologySection({ x }: { x: Explorer }) {
           {best && <GpuLayout r={best} x={x} />}
         </div>
       </div>
-      {modes.has('P/D') && pdInView && (
+      {modes.has('P/D') && pdAnyMode && (
         <div className="xf-grid2">
           {modes.size > 1 && <ModeChart x={x} />}
-          <RatioHeatmap x={x} />
+          {pdInView && <RatioHeatmap x={x} />}
         </div>
       )}
     </section>
@@ -114,32 +117,52 @@ function PoolBlocks({ r, pool }: { r: Run; pool: Pool }) {
 }
 
 
+const MODES = ['aggregated', 'P/D'] as const
+
 function ModeChart({ x }: { x: Explorer }) {
   const m = x.target, loads = x.data.concurrency
-  const rs = x.shown()
+  const rs = x.shown('mode')
+  const modeSel = x.sel.mode ?? []
   const best = (mode: string, c: number) => rankConfigs(rs.filter((r) => r.mode === mode && r.conc === c), m)[0]
-  const series = (['aggregated', 'P/D'] as const).map((mode) => ({ mode, pts: loads.map((c) => best(mode, c)).filter((r): r is Run => !!r) }))
+  const series = MODES.map((mode) => ({ mode, pts: loads.map((c) => best(mode, c)).filter((r): r is Run => !!r) }))
   const all = series.flatMap((s) => s.pts.map((r) => r[m] as number))
   if (!all.length) return <div className="xf-card"><h3>Aggregated vs disaggregated</h3><p className="xf-empty">No run in this filter meets every SLO.</p></div>
   const ym = niceMax(Math.max(...all))
   const px = (c: number) => M.l + (loads.indexOf(c) / Math.max(1, loads.length - 1)) * (W - M.l - M.r)
   const py = (v: number) => H - M.b - (v / ym) * (H - M.t - M.b)
+  const focus = x.hover ?? x.picked
+  const off = (mode: string) => modeSel.length > 0 && !modeSel.includes(mode)
   return (
     <div className="xf-card">
       <div className="xf-card-h"><h3>Aggregated vs disaggregated</h3></div>
-      <p className="xf-sub">Best {METRIC[m].label} at each load among runs that meet every SLO.</p>
-      <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`best ${METRIC[m].label} by serving mode`}>
+      <p className="xf-sub">Best {METRIC[m].label} at each load among runs that meet every SLO. Point at a run to light up its config; click it to filter.</p>
+      <svg className={`chart xf-chart${focus ? ' focused' : ''}`} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`best ${METRIC[m].label} by serving mode`}
+        onPointerLeave={() => x.setHover(null)}>
         <YAxis ym={ym} py={py} label={`best ${METRIC[m].label}`} />
+        <Backdrop onClick={x.resetCharts} />
         {loads.map((c) => <text key={c} x={px(c)} y={H - M.b + 13} textAnchor="middle" className="tick">{c}</text>)}
         <text x={(M.l + W - M.r) / 2} y={H - 3} textAnchor="middle" className="axlabel">sessions</text>
         {series.map((s) => (
-          <g key={s.mode} className={s.mode === 'P/D' ? 'xf-ser pd' : 'xf-ser'}>
+          <g key={s.mode} className={`xf-ser${s.mode === 'P/D' ? ' pd' : ''}${off(s.mode) ? ' faded' : ''}`}>
             {s.pts.length > 1 && <polyline points={s.pts.map((r) => `${px(r.conc)},${py(r[m] as number)}`).join(' ')} />}
-            {s.pts.map((r) => <circle key={r.id} cx={px(r.conc)} cy={py(r[m] as number)} r="4"><title>{`${s.mode} · ${r.topo} · ${r.conc} sessions · ${fmtMetric(m, r[m])} ${METRIC[m].label}`}</title></circle>)}
+            {s.pts.map((r) => (
+              <circle key={r.id} cx={px(r.conc)} cy={py(r[m] as number)} r={r.cfg === focus ? 5.6 : 4} className={r.cfg === focus ? 'hot' : undefined}
+                onPointerEnter={() => x.setHover(r.cfg)} onClick={() => x.pick(r.cfg)}>
+                <title>{`${s.mode} · ${r.topo} · ${r.conc} sessions · ${fmtMetric(m, r[m])} ${METRIC[m].label}`}</title>
+              </circle>
+            ))}
           </g>
         ))}
       </svg>
-      <div className="legend"><span><i className="sw2 c-colo" />aggregated</span><span><i className="sw2 c-pd" />P/D</span></div>
+      <div className="legend xf-legend">
+        {MODES.map((mode) => (
+          <LegendBtn key={mode} on={modeSel.includes(mode)} off={off(mode)} onClick={() => x.toggleValue('mode', mode)}
+            label={`${modeSel.includes(mode) ? 'Stop filtering to' : 'Show only'} ${mode} runs`}>
+            <i className={`sw2 ${mode === 'P/D' ? 'c-pd' : 'c-colo'}`} />{mode}
+          </LegendBtn>
+        ))}
+      </div>
+      <HoverLine x={x} idle="Point at a run to compare it with the overview charts." />
     </div>
   )
 }

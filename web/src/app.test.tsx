@@ -357,6 +357,26 @@ describe('report explorer page', () => {
     expect(document.querySelector('.xf-runs tbody .xf-cfglink .win')?.textContent).toBe('2P TP8 / 6D TP16')
   })
 
+  it('shares hover and click with the overview on the aggregated vs disaggregated chart', async () => {
+    page()
+    await waitFor(() => expect(cards().length).toBeGreaterThan(0))
+    const card = [...document.querySelectorAll('.xf-card')].find((c) => c.querySelector('h3')?.textContent === 'Aggregated vs disaggregated') as Element
+    const pt = card.querySelector('.xf-ser.pd circle') as Element
+    fireEvent.pointerEnter(pt)
+    expect(card.querySelector('.xf-hoverline')?.classList.contains('idle')).toBe(false)
+    expect(document.querySelectorAll('#sec-overview .xf-dot.hot').length).toBeGreaterThan(0)
+    fireEvent.click(pt)
+    expect(screen.queryByText(/7 of 7 runs shown/)).toBeNull()
+    fireEvent.click(card.querySelector('.xf-backdrop') as Element)
+    expect(screen.getByText(/7 of 7 runs shown/)).toBeTruthy()
+    const lg = [...card.querySelectorAll('.xf-lg')] as HTMLElement[]
+    expect(lg.map((b) => b.textContent)).toEqual(['aggregated', 'P/D'])
+    fireEvent.click(lg[1])
+    expect(lg[1].getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByText(/2 of 7 runs shown/)).toBeTruthy()
+    expect(card.querySelector('.xf-ser:not(.pd)')?.classList.contains('faded')).toBe(true)
+  })
+
   it('opens a run\'s command with the scenario it reads, fetched once for the report', async () => {
     let fetches = 0
     const cmds: Commands = {

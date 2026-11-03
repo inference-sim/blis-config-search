@@ -309,16 +309,19 @@ def materialize_router(cand, routing_dir, out_dir):
 def label_of(cand):
     """The topology label for a candidate -- what a reader scans down a column.
 
-    Colocated reuses topologies.label (`8x TP4xDP2 + EP`); a disaggregated candidate names both
+    Colocated reuses topologies.label (`8x TP4xPP2xDP2 + EP`); a disaggregated candidate names both
     pools (`3P/5D TP8 + EP`), because instances alone would not say which pool they are.
     """
     if cand.get("prefill_instances") is not None:
         pf, dc = cand["prefill_instances"], cand["decode_instances"]
-        tp, dp = cand.get("prefill_tp", 1), cand.get("prefill_dp", 1)
-        shape = f"TP{tp}" + (f"xDP{dp}" if dp and dp > 1 else "")
+        tp, pp, dp = cand.get("prefill_tp", 1), cand.get("prefill_pp", 1), cand.get("prefill_dp", 1)
+        shape = (f"TP{tp}"
+                 + (f"xPP{pp}" if pp and pp > 1 else "")
+                 + (f"xDP{dp}" if dp and dp > 1 else ""))
         ep = " + EP" if cand.get("prefill_enable_expert_parallel") else ""
         return f"{pf}P/{dc}D {shape}{ep}"
-    return topologies.label({"tp": cand.get("tp", 1), "dp": cand.get("dp", 1),
+    return topologies.label({"tp": cand.get("tp", 1), "pp": cand.get("pp", 1),
+                             "dp": cand.get("dp", 1),
                              "num_instances": cand.get("num_instances", 1),
                              "enable_expert_parallel": cand.get("enable_expert_parallel")})
 

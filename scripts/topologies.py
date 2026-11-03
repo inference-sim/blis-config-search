@@ -7,15 +7,19 @@ tokens 2,048" rather than a field dump.
 
 
 def label(cand):
-    """Topology label for a candidate ("32x TP4xDP2 + EP").
+    """Topology label for a candidate ("32x TP4xPP2xDP2 + EP").
 
-    Deliberately topology-ONLY: instances x TP x DP x EP is what dominates an LLM serving
-    decision and what a reader scans down a column. Engine and routing knobs are described
+    Deliberately topology-ONLY: instances x TP x PP x DP x EP is what dominates an LLM serving
+    decision and what a reader scans down a column — the first four are the per-instance GPU
+    footprint (tp x pp x dp) times the instance count. Engine and routing knobs are described
     separately by knob_phrase() — squeezing them in here produced
     `64x TP4xDP2 + EP · ll · b8k · seq256 · mem0.9`, unreadable and full of invented shorthand.
+    pp and dp are shown only when > 1, so a plain `8x TP8` shape stays uncluttered.
     """
-    dp = cand.get("dp", 1)
-    shape = f"TP{cand['tp']}" + (f"xDP{dp}" if dp > 1 else "")
+    pp, dp = cand.get("pp", 1), cand.get("dp", 1)
+    shape = (f"TP{cand['tp']}"
+             + (f"xPP{pp}" if pp > 1 else "")
+             + (f"xDP{dp}" if dp > 1 else ""))
     ep = " + EP" if cand.get("enable_expert_parallel") else ""
     return f"{cand['num_instances']}x {shape}{ep}"
 

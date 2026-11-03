@@ -556,9 +556,9 @@
   ],
   "run_id": "muse-spark-open-816b-a42b-h100-agentx-8gpu",
   "winner": {
-    "chosen": "1x TP4 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)",
+    "chosen": "1x TP4xPP2 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)",
     "label": "1x TP4xPP2 + EP",
-    "reason": "1x TP4 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8) in sweep 'kv-capacity' gives the most tok/s/accelerator (11.91 tok/s/accelerator, 95.3 tok/s fleet) while holding the scenario's SLOs, at concurrency 16.",
+    "reason": "1x TP4xPP2 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8) in sweep 'kv-capacity' gives the most tok/s/accelerator (11.91 tok/s/accelerator, 95.3 tok/s fleet) while holding the scenario's SLOs, at concurrency 16.",
     "sweep": "kv-capacity",
     "variant": "gpu mem util 0.95 \u00b7 KV dtype fp8"
   }

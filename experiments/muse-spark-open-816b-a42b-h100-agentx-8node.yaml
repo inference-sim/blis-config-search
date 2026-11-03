@@ -1,0 +1,92 @@
+# Best tok/s/GPU for Muse-Spark (nvfp4) on 8 H100 nodes (64 GPUs) under AgentX, no SLO (raw max), and which knobs travel.
+# MoE 256 experts top_k 8: EP width tp*dp, dp attention and all2all_backend are real; graph prices pp; no speculator, modelopt.
+# H100 on RoCE (roce-200g, 25 GB/s), NOT InfiniBand (issue #71): an instance wider than 8 GPUs spans nodes, so its EP all-to-all
+# crosses RoCE every step -- half an ib-400g link, which is the whole reason this is a separate spec from the H200/IB one.
+# 80 GiB H100 ranks (vs H200's 140): TP8 needs gmu 0.95 for one 262k sequence (proven on the single-node 8gpu spec), and KV room
+# is tight enough that fp8 KV is its own sweep here -- the H200 8node spec dropped it as identical on 140 GiB ranks.
+# Footprints must be RE-PROBED on the cluster (no local binary): wider dp/EP shapes that fit on H200 may refuse on 80 GiB H100.
+
+name: muse-spark-open-816b-a42b-h100-agentx-8node
+
+scenario:
+  model: muse-spark-open-816b-a42b-nvfp4
+  hardware: h100
+  workload: agentx-mvp
+  gpus: 64
+  cluster: {fabric: roce-200g}            # H100 fleets run on RoCE; cross-node EP/all2all is priced at 25 GB/s, not IB's 50
+  engine:
+    max_model_len: 262144                 # at the 32k default the replay drops every trace
+    gpu_memory_utilization: 0.95          # H100 TP8 refuses at 0.9 for one 262k sequence (single-node spec)
+  concurrency: [64, 128, 256, 512]        # session lanes; 8 GPUs saturated by 64, so 512 is past saturation for the fleet
+  replay:
+    corpus: .corpus/traces.jsonl
+    corpus_cache: /tmp/agx-cache-muse-h100-8node
+    grace_period: inf
+
+sweeps:
+  - name: topology
+    # The control: every sweep below has its default twin here. EP width tp*dp grows 8 -> 64 across the ladder.
+    narrative: Eight single-node TP8 instances should peak highest, since a 64-wide EP group pays cross-node RoCE all-to-all every step for little extra batch.
+    num-instances: [8, 4, 2, 1]
+    parallel: {tp: [8, 4], dp: [1, 2, 4, 8], enable_expert_parallel: [true]}
+
+  - name: ep-off
+    narrative: Replicating all 256 experts instead of sharding them should cost KV room and throughput against the EP twins in topology.
+    num-instances: [8, 4]
+    parallel: {tp: [8], dp: [1, 2], enable_expert_parallel: [false]}
+
+  - name: pipeline
+    narrative: Pipeline stages should trail data-parallel shapes of the same width, since each stage adds a boundary hop per decode step.
+    num-instances: [4, 2]
+    parallel: {tp: [8, 4], pp: [2, 4], enable_expert_parallel: [true]}
+
+  - name: moe-collective
+    # The fabric-sensitive sweep: in-node EP width 8 (8x TP8) vs cross-node EP width 64 (1x TP8 DP8) over RoCE.
+    narrative: DeepEP backends should pay off most at cross-node EP width 64, where dispatch crosses RoCE, and matter little at in-node width 8 on NVLink.
+    num-instances: [8, 1]
+    parallel: {tp: [8], dp: [1, 8], enable_expert_parallel: [true]}
+    engine:
+      all2all_backend: [deepep_high_throughput, deepep_low_latency, deepep_v2, pplx]
+
+  - name: kv-capacity
+    # H100-specific vs the H200 8node spec: 80 GiB ranks leave little KV room at 262k, so fp8 KV may be what lets the
+    # cross-node and wide-dp shapes start at all. Cross tp and dp so the pressure differs by per-GPU KV bytes.
+    narrative: fp8 KV should matter most where KV room is tightest -- the wide cross-node DP8 shape on 80 GiB H100 ranks -- and substitute for memory the narrow shapes already have.
+    num-instances: [8, 1]
+    parallel: {tp: [8], dp: [1, 8], enable_expert_parallel: [true]}
+    engine:
+      cache_dtype: [auto, fp8]
+      gpu_memory_utilization: [0.9, 0.95]
+
+  - name: batch-caps
+    narrative: A seq cap of 32 should bind on 8x TP8 at 512 lanes but not on 2x TP8 DP4, whose dp ranks each schedule their own batch.
+    num-instances: [8, 2]
+    parallel: {tp: [8], dp: [1, 4], enable_expert_parallel: [true]}
+    engine:
+      max_num_seqs: [32, 256]
+      max_num_batched_tokens: [4096, 32768]
+
+  - name: routing-prefix-cache
+    # queue.yaml matches the default router, so it doubles as the default-router twin.
+    narrative: prefix-affinity should only beat queue and random with caching on, and eight instances give it the most room to win.
+    num-instances: [8]
+    parallel: {tp: [8], enable_expert_parallel: [true]}
+    engine:
+      enable_prefix_caching: [true, false]
+    router:
+      endpoint_picker_config: [random.yaml, queue.yaml, prefix-affinity.yaml]
+
+  - name: prefill-chunking
+    narrative: Capping long prefills should trade a little peak throughput for a much lower ITL p99 at saturation.
+    num-instances: [8]
+    parallel: {tp: [8], enable_expert_parallel: [true]}
+    engine:
+      long_prefill_token_threshold: [2048]
+
+  - name: cudagraph
+    # Per-step host cost; measured not to interact with topology, so one shape.
+    narrative: FULL capture should beat the PIECEWISE default by a few percent, and NONE should collapse.
+    num-instances: [8]
+    parallel: {tp: [8], enable_expert_parallel: [true]}
+    engine:
+      cudagraph_mode: [NONE, FULL]

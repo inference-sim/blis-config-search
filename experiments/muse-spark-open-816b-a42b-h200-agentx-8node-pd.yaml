@@ -1,0 +1,95 @@
+# Is P/D disaggregation worth it for Muse-Spark (nvfp4) on 8 H200 nodes (64 GPUs) under AgentX?
+# The gap left by #72 (that spec's grid is the colocated control this one has to beat).
+# MoE 256 experts top_k 8, SWA, no speculator; 8 nodes are NOT one NVLink domain, so unlike the
+# GB200 rack every KV handoff crosses the fabric -- here ib-400g (50 GB/s, the runner's multi-node
+# default), half the cost of GB200 NVLink but twice H100's RoCE, which is why this is its own spec.
+# Pools stay tp8 dp1 (kv_transfer refuses dp, blis-vllm#44; one node each), so P+D == 8.
+# Left out: fp8 KV / gmu (identical on 140 GiB ranks, per #72), eplb, moe_backend, quantization,
+# drafting (profile: does not apply).
+
+name: muse-spark-open-816b-a42b-h200-agentx-8node-pd
+
+scenario:
+  model: muse-spark-open-816b-a42b-nvfp4
+  hardware: h200
+  workload: agentx-mvp
+  gpus: 64
+  engine: {max_model_len: 262144}   # at the 32k default the replay drops every trace
+  concurrency: [64, 128, 256, 512]  # session lanes; 8 GPUs saturated by 64, so 512 is past saturation
+  replay:
+    corpus: .corpus/traces.jsonl
+    corpus_cache: /tmp/agx-cache-muse-h200-8node-pd
+    grace_period: inf
+
+sweeps:
+  - name: colocated
+    # The fair control for every P/D sweep: the colocated shapes P/D has to beat.
+    narrative: Eight single-node TP8 instances should lead, since wider dp groups pay cross-node IB all-to-all for little extra batch.
+    num-instances: [8, 4, 2, 1]
+    parallel: {tp: [8, 4], dp: [1, 2, 4, 8], enable_expert_parallel: [true]}
+
+  - name: colocated-tuned
+    narrative: A bigger token budget with a long-prefill cap should hold ITL to higher load, narrowing what P/D can win.
+    num-instances: [8, 2]
+    parallel: {tp: [8], dp: [1, 4], enable_expert_parallel: [true]}
+    engine:
+      max_num_batched_tokens: [8192, 32768]
+      long_prefill_token_threshold: [0, 2048]
+
+  # P/D: pools never share a node, so each handoff crosses IB (the fabric lever, cheaper than the
+  # H100 RoCE twin but not free like the GB200 rack). Pools stay tp8 dp1, so P + D == 8.
+  - name: pd-ratio
+    narrative: Decode-heavy ratios should win on AgentX, since cached prefixes leave only a short uncached tail to prefill per turn.
+    prefill-instances: [1, 2, 3, 4]
+    decode-instances: [7, 6, 5, 4]
+    prefill: {parallel: {tp: [8], enable_expert_parallel: [true]}}
+    decode: {parallel: {tp: [8], enable_expert_parallel: [true]}}
+    router: &threshold
+      endpoint_picker_config: [pd-prefix.yaml]
+      plugins:
+        prefix-based-pd-decider: {parameters: {nonCachedTokens: [256, 1024, 4096, 16384]}}
+
+  - name: pd-always
+    # Same tp8 layouts as pd-ratio; overrides take one base file, so the always-split decider is its own sweep.
+    narrative: Splitting every request should trail the threshold arms, because a turn with a cached prefix pays an IB handoff for little prefill.
+    prefill-instances: [1, 2, 3, 4]
+    decode-instances: [7, 6, 5, 4]
+    prefill: {parallel: {tp: [8], enable_expert_parallel: [true]}}
+    decode: {parallel: {tp: [8], enable_expert_parallel: [true]}}
+    router: {endpoint_picker_config: [pd-always.yaml]}
+
+  - name: pd-wide-decode
+    # A TP16 decode instance is two nodes; P*8 + D*16 == 64 keeps the surviving pairs 2P3D / 4P2D / 6P1D.
+    narrative: TP16 decode instances should hold ITL at higher load than TP8 ones, trading batch slots for faster steps.
+    prefill-instances: [2, 4, 6]
+    decode-instances: [3, 2, 1]
+    prefill: {parallel: {tp: [8], enable_expert_parallel: [true]}}
+    decode: {parallel: {tp: [16], enable_expert_parallel: [true]}}
+    router:
+      <<: *threshold
+      plugins:
+        prefix-based-pd-decider: {parameters: {nonCachedTokens: [256, 4096]}}
+
+  - name: pd-pool-engine
+    # Decode pools prefill locally whenever the decider skips the split, so their long-prefill cap is live.
+    narrative: A 32k prefill budget should matter on the prefill-light layout and a decode-pool prefill cap on the decode-heavy one.
+    prefill-instances: [2, 4]
+    decode-instances: [6, 4]
+    prefill:
+      parallel: {tp: [8], enable_expert_parallel: [true]}
+      engine: {max_num_batched_tokens: [8192, 32768]}
+    decode:
+      parallel: {tp: [8], enable_expert_parallel: [true]}
+      engine: {long_prefill_token_threshold: [0, 2048]}
+    router: {endpoint_picker_config: [pd-prefix.yaml]}
+
+  - name: pd-decode-cudagraph
+    # Per-step host cost does not interact with topology, so one layout.
+    narrative: Full graph capture on the decode pool should lower ITL by a few percent, with FULL_DECODE_ONLY matching FULL there.
+    prefill-instances: [3]
+    decode-instances: [5]
+    prefill: {parallel: {tp: [8], enable_expert_parallel: [true]}}
+    decode:
+      parallel: {tp: [8], enable_expert_parallel: [true]}
+      engine: {cudagraph_mode: [FULL, FULL_DECODE_ONLY]}
+    router: {endpoint_picker_config: [pd-prefix.yaml]}

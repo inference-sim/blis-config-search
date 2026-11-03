@@ -10,11 +10,11 @@
     },
     {
       "h": "What was found",
-      "html": "<strong>4x TP4 + EP</strong>, from the <em>pipeline</em> sweep, reached 25.84 tok/s/accelerator (1653.6 tok/s across the fleet) at concurrency 512 while holding the scenario's SLOs."
+      "html": "<strong>4x TP4xPP4 + EP</strong>, from the <em>pipeline</em> sweep, reached 25.84 tok/s/accelerator (1653.6 tok/s across the fleet) at concurrency 512 while holding the scenario's SLOs."
     },
     {
       "h": "What to run",
-      "html": "4x TP4 + EP at concurrency 512. 140 of 140 runs held the SLOs.",
+      "html": "4x TP4xPP4 + EP at concurrency 512. 140 of 140 runs held the SLOs.",
       "run": true
     }
   ],
@@ -52,7 +52,7 @@
       "num": 4,
       "prose": [
         "Pipeline stages should trail data-parallel shapes of the same width, since each stage adds a boundary hop per step.",
-        "Measured: best was <strong>4x TP4 + EP</strong> at 25.84 tok/s/accelerator (concurrency 512)."
+        "Measured: best was <strong>4x TP4xPP4 + EP</strong> at 25.84 tok/s/accelerator (concurrency 512)."
       ],
       "title": "Sweep: pipeline"
     },

@@ -10,11 +10,11 @@
     },
     {
       "h": "What was found",
-      "html": "<strong>4x TP8 + EP</strong>, from the <em>pipeline</em> sweep, reached 12.86 tok/s/accelerator (822.9 tok/s across the fleet) at concurrency 128 while holding the scenario's SLOs."
+      "html": "<strong>4x TP8xPP2 + EP</strong>, from the <em>pipeline</em> sweep, reached 12.86 tok/s/accelerator (822.9 tok/s across the fleet) at concurrency 128 while holding the scenario's SLOs."
     },
     {
       "h": "What to run",
-      "html": "4x TP8 + EP at concurrency 128. 308 of 312 runs held the SLOs.",
+      "html": "4x TP8xPP2 + EP at concurrency 128. 308 of 312 runs held the SLOs.",
       "run": true
     }
   ],
@@ -52,7 +52,7 @@
       "num": 4,
       "prose": [
         "Pipeline stages should trail data-parallel shapes of the same width, since each stage adds a boundary hop per decode step.",
-        "Measured: best was <strong>4x TP8 + EP</strong> at 12.86 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>4x TP8xPP2 + EP</strong> at 12.86 tok/s/accelerator (concurrency 128)."
       ],
       "title": "Sweep: pipeline"
     },
@@ -142,7 +142,7 @@
       "num": 14,
       "prose": [
         "TP16 decode instances should hold ITL at higher load than TP8 ones, trading batch slots for faster steps.",
-        "Measured: best was <strong>6P/1D TP8 + EP</strong> at 6.11 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>6P TP8 + EP / 1D TP16 + EP</strong> at 6.11 tok/s/accelerator (concurrency 128)."
       ],
       "title": "Sweep: pd-wide-decode"
     },

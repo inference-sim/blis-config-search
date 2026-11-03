@@ -823,8 +823,8 @@ def catalog_entry(model, catalog=None):
 
 
 def _catalog(catalog=None):
-    """The built catalog's three vocabularies, keyed `models` (name -> row), `hardware`,
-    `workloads` (name -> True), plus `present`. All empty with `present` False when there is no
+    """The built catalog's vocabularies, keyed `models` (name -> row), `hardware`, `workloads`,
+    `fabrics` (each name -> True), plus `present`. All empty with `present` False when there is no
     catalog checkout.
 
     One build serves both the model-aware rules and the existence check, and `present` is what
@@ -832,14 +832,15 @@ def _catalog(catalog=None):
     """
     root = catalog or os.path.join(SIBLINGS, "blis-catalog")
     if root not in _CATALOG_CACHE:
-        got = {"models": {}, "hardware": {}, "workloads": {}, "present": False}
+        got = {"models": {}, "hardware": {}, "workloads": {}, "fabrics": {}, "present": False}
         if os.path.isdir(root):
             try:
                 sys.path.insert(0, os.path.join(ROOT, "scripts"))
                 import build_catalog
                 cat = build_catalog.build(os.path.join(root, os.pardir))
                 got["models"] = {m.get("name"): m for m in cat.get("models", [])}
-                for key, src in (("hardware", "hardware"), ("workloads", "workloads")):
+                for key, src in (("hardware", "hardware"), ("workloads", "workloads"),
+                                 ("fabrics", "fabrics")):
                     got[key] = {(e.get("name") if isinstance(e, dict) else e): True
                                 for e in (cat.get(src) or [])}
                     got[key].pop(None, None)
@@ -847,7 +848,8 @@ def _catalog(catalog=None):
                 # to reject names against.
                 got["present"] = bool(got["models"])
             except Exception:
-                got = {"models": {}, "hardware": {}, "workloads": {}, "present": False}
+                got = {"models": {}, "hardware": {}, "workloads": {}, "fabrics": {},
+                       "present": False}
         _CATALOG_CACHE[root] = got
     return _CATALOG_CACHE[root]
 
@@ -877,6 +879,38 @@ def scenario_identity_errors(sc, catalog=None):
         known = sorted(cat[bucket])
         errs.append(f"scenario.{key}: {name!r} is not in the catalog{_suggest(name, known)} "
                     f"-- known: {', '.join(known)}")
+    return errs
+
+
+def cluster_errors(sc, catalog=None):
+    """`scenario.cluster` structure, plus a fabric that the catalog's networks/ classes define.
+
+    STRUCTURE is checked always: `cluster` must be a mapping whose only key is `fabric`, a
+    non-empty string. The NAME is checked only when a catalog is checked out, exactly as
+    model/hardware/workload are -- BLIS resolves cross-node cost from networks/<fabric>.yaml and
+    exits rc=1 on every run of the sweep if it is missing, so a typo is as fatal as a bad hardware
+    key and worth the same before-build catch. Omitted means the runner's ib-400g default.
+    """
+    cluster = sc.get("cluster")
+    if cluster is None:
+        return []
+    errs = []
+    if not isinstance(cluster, dict) or not cluster:
+        errs.append("scenario.cluster: must be a non-empty mapping, e.g. {fabric: roce-200g}")
+        return errs
+    for key in cluster:
+        if key != "fabric":
+            errs.append(f"scenario.cluster.{key}: unknown key (the only cluster knob is `fabric`)")
+    fabric = cluster.get("fabric")
+    if "fabric" in cluster and (not isinstance(fabric, str) or not fabric):
+        errs.append("scenario.cluster.fabric: must be a non-empty string naming a networks/ class "
+                    "(ib-400g, roce-200g, ethernet-100gbe)")
+        return errs
+    cat = _catalog(catalog)
+    if fabric and cat["present"] and cat["fabrics"] and fabric not in cat["fabrics"]:
+        known = sorted(cat["fabrics"])
+        errs.append(f"scenario.cluster.fabric: {fabric!r} is not a catalog fabric"
+                    f"{_suggest(fabric, known)} -- known: {', '.join(known)}")
     return errs
 
 
@@ -976,7 +1010,7 @@ def validate(spec, routing_dir=ROUTING_DIR, vocabulary=None, catalog=None):
         sc = {}
     else:
         known_sc = {"model", "hardware", "workload", "gpus", "slo", "concurrency", "seed",
-                    "engine", "replay"}
+                    "engine", "replay", "cluster"}
         for key in sc:
             if key not in known_sc:
                 errs.append(f"scenario.{key}: unknown key "
@@ -987,6 +1021,7 @@ def validate(spec, routing_dir=ROUTING_DIR, vocabulary=None, catalog=None):
         # Present AND real: a name the catalog does not define cannot run anywhere. No-op without
         # a catalog checkout.
         errs.extend(scenario_identity_errors(sc, catalog))
+        errs.extend(cluster_errors(sc, catalog))
         gpus = sc.get("gpus")
         if not isinstance(gpus, int) or isinstance(gpus, bool) or gpus < 1:
             errs.append("scenario.gpus: required positive integer -- the budget EVERY run uses")

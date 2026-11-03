@@ -46,6 +46,7 @@ scenario:                       # shared by EVERY sweep
   gpus: 32                      # EVERY run uses exactly 32 GPUs
   slo: {itl_p99: 20ms}          # latency caps need units; throughput_per_gpu is a tok/s floor
   concurrency: [4, 8, 16, 32, 64, 128]
+  cluster: {fabric: ib-400g}    # inter-node interconnect; omit for the ib-400g default (H100 on RoCE: roce-200g)
 
 sweeps:
   # Both sweeps share this topology grid, so every drafting row has an exact K=0 twin at the
@@ -79,6 +80,13 @@ sweeps:
 - **Concurrency is set once, in `scenario`,** so every sweep is measured at the same loads.
 - **Knob names are BLIS's exact names** (see below). Nothing is invented here.
 - **One hardware type and one workload per experiment.** Comparing H100 vs. H200 takes two.
+- **The cluster fabric is a knob, not the hardware.** A fabric is a property of the cluster, not
+  the GPU die, so it is stated separately: `scenario.cluster.fabric` names a catalog `networks/`
+  class (`ib-400g`, `roce-200g`, `ethernet-100gbe`) and prices the cross-node traffic a
+  multi-node run generates. Omit it for the `ib-400g` default; an H100 fleet on RoCE must set
+  `roce-200g`, or it is silently priced on InfiniBand at ~2× the real cross-node bandwidth. The
+  validator checks the name against the catalog. Single-node runs have no cross-node traffic, so
+  the fabric is ignored.
 - **Each sweep needs a `narrative`** — **one sentence**, at most two, under ~200 characters.
   It is the single line the report prints above that sweep's measured result, so it states the
   prediction and nothing else. Grid rationale, prior measurements, and why you skipped some other
@@ -398,7 +406,8 @@ BLIS imposes real constraints on P/D, all checked before any run:
   handoff moves whole KV blocks), and KV cache format.
 - Drafting is **one configuration per run**, not per pool.
 - A prefill pool needs a decode pool, and vice versa; a colocated pool can't sit beside either.
-- Pools never share a node, so a P/D run always spans ≥ 2 nodes and uses the inter-node fabric.
+- Pools never share a node, so a P/D run always spans ≥ 2 nodes and prices its handoff over
+  `scenario.cluster.fabric` (default `ib-400g`).
 - The handoff is NIXL (`NixlConnector` by default).
 
 A sweep is colocated **or** disaggregated, never both.
@@ -413,8 +422,8 @@ A sweep is colocated **or** disaggregated, never both.
 editor can flag a malformed spec as you type. It is an aid, not the authority:
 **`scripts/validate_experiment.py` is what CI runs**, it does not load the schema, and it checks
 everything a schema can't reach — knob names, enum values, GPU arithmetic, SLO units, router
-files, and whether the model/hardware/workload exist. A spec your editor likes can still be
-rejected; run the validator before opening a PR.
+files, and whether the model/hardware/workload/fabric exist. A spec your editor likes can still
+be rejected; run the validator before opening a PR.
 
 The two are kept honest by `SchemaAgreesWithValidator` in `scripts/test_experiment.py`: every
 shipped spec must satisfy both, and a corpus of structurally-broken specs must be rejected by

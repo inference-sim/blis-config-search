@@ -545,6 +545,9 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     shared_engine = dict(sc.get("engine") or {})
     engine_version = run_blis.pinned_engine_version()
     replay = dict(sc.get("replay") or {}) or None
+    # The cluster's inter-node fabric, defaulting to IB so a spec that states none is byte-identical.
+    # Only a multi-node run prices cross-node traffic; run_blis ignores it on a single node.
+    fabric = (sc.get("cluster") or {}).get("fabric") or run_blis.DEFAULT_FABRIC
 
     out_dir = os.path.join(out_root, name)
     scenarios_dir = os.path.join(out_dir, "scenarios")
@@ -644,7 +647,8 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                                    engine_version, workload, nreq, seed,
                                    None, cfg, phase=sname, timeout=run_timeout,
                                    replay={k: v for k, v in replay.items()
-                                           if k != "_overrides"} if replay else None)
+                                           if k != "_overrides"} if replay else None,
+                                   fabric=fabric)
             rec["sweep"] = sname
             _relativize_cmd(rec, out_dir)
             ok, why = servable(rec, slo_ms, gpus)
@@ -702,7 +706,9 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
         "scenario": {"model": model, "hardware": hardware, "workload": workload, "gpus": gpus,
                      "concurrency": concurrency, "slo": sc.get("slo") or {}, "seed": seed,
                      "engine": shared_engine or None, "engine_version": engine_version,
-                     "replay": replay},
+                     # The cluster fabric the sweep assumed, so a report states its interconnect
+                     # without reopening the spec. Omitted (null) means the ib-400g default.
+                     "cluster": (sc.get("cluster") or None), "replay": replay},
         "slo_ms": slo_ms,
         "interactivity_floor": {"tok_per_s_per_user": floor_rate_from(slo_ms)},
         "objective": "max output tok/s per accelerator subject to the scenario's SLOs",

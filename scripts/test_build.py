@@ -709,6 +709,7 @@ def test_explore_data():
     """explore.json: rows share one key list, router arms resolve to their parsed chain."""
     print("test_explore_data")
     import explore_data
+    import run_blis
     tmp = tempfile.mkdtemp()
     try:
         rd = os.path.join(tmp, "m-h100-x")
@@ -772,6 +773,33 @@ def test_explore_data():
         check("upstream" not in recipe and "--workload " not in recipe and "--scenarios scenarios" in recipe
               and '--catalog "$BLIS_CATALOG"' in recipe and "--prompt-tokens 256" in recipe,
               "the shown command drops CI paths and inert flags, keeping what BLIS reads")
+        # A multi-node run priced over a non-IB fabric (issue #71): the fabric is part of the
+        # scenario hash, so _scenario must regenerate with the RECORDED fabric or the panel shows
+        # nothing. A record predating the field falls back to IB, which is what it was priced on.
+        par16 = {"tp": 8, "pp": 1, "dp": 1}
+        for fab, dep_extra in (("roce-200g", {"fabric": "roce-200g"}), ("ib-400g", {})):
+            nm = run_blis.scenario_name("m", "h100", "0.29.0", par16, {"block_size": 16}, 16, fab) + ".yaml"
+            dep16 = {"scenario": nm, "parallel": par16, "engine": {"block_size": 16},
+                     "num_instances": 16, **dep_extra}
+            exp16 = {"name": "m-h100-x", "pinned_stack": {"engine_version": "0.29.0"},
+                     "scenario": {"model": "m", "hardware": "h100"}}
+            got = explore_data._scenario(rd, exp16, dep16)
+            check(got is not None and got[0] == nm,
+                  f"a {fab} multi-node run regenerates to its recorded scenario name")
+            check(f"fabric: {fab}" in got[1], f"the regenerated scenario names {fab}")
+        # A SINGLE-NODE run in a non-IB spec: run_one normalizes the fabric to the default before
+        # hashing (single node prices no cross-node traffic), so the recorded name is the IB one and
+        # _scenario -- which reconstructs from the recorded fabric: None -- must still match it.
+        par1 = {"tp": 8, "pp": 1, "dp": 1}
+        nm1 = run_blis.scenario_name("m", "h100", "0.29.0", par1, {"block_size": 16}, 1,
+                                     run_blis.DEFAULT_FABRIC) + ".yaml"
+        dep1 = {"scenario": nm1, "parallel": par1, "engine": {"block_size": 16},
+                "num_instances": 1, "fabric": None}
+        got1 = explore_data._scenario(rd, {"name": "m-h100-x", "pinned_stack": {"engine_version": "0.29.0"},
+                                           "scenario": {"model": "m", "hardware": "h100"}}, dep1)
+        check(got1 is not None and got1[0] == nm1,
+              "a single-node run in a non-IB spec still regenerates (fabric normalized to default)")
+        check("fabric:" not in got1[1], "a single-node scenario names no fabric")
         real = os.path.join(ROOT, "reports", "kimi-k2-5-h200-multidoc-pd")
         if os.path.exists(real):
             got = explore_data.commands(real)

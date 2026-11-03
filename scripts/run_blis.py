@@ -1418,12 +1418,16 @@ def _failure_line(stderr):
 
 def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_version,
             workload, num_requests, seed, horizon, config, phase="probe", timeout=120, defaults=None,
-            replay=None):
+            replay=None, fabric=DEFAULT_FABRIC):
     """Run one kernel-priced BLIS config and return a record dict. No runs.jsonl I/O (caller writes).
 
     `replay` selects the trace-REPLAY path (`blis replay --agentic-scenario`) instead of
     `blis run`: pass the resolved replay descriptor (scenario/corpus/corpus_sha256/...). When it is
     None the run is a generated-workload `blis run` as before.
+
+    `fabric` is the cluster's inter-node interconnect (a catalog networks/ class); it prices
+    cross-node traffic for a multi-node run and is ignored on a single node. A trailing default
+    (ib-400g) so every existing caller is byte-identical.
     """
     rec = _record_shell(config, phase)
     # Which cost model priced THIS row (see row_stack): makes provenance_split's stack branch able
@@ -1484,8 +1488,12 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                           # asks that reuse be recorded, so a report can state it.
                           "reused_from_other_hardware": bool(
                               al_src and hardware and f"({hardware})" not in al_src)}
+    # Fabric only reaches a multi-node YAML, so normalize it to the default on a single node:
+    # the scenario hash then matches what the explorer reconstructs from the recorded fabric.
+    multinode = bool(pd) or pool_nodes(parallel, num_instances) > 1
+    fabric = fabric if multinode else DEFAULT_FABRIC
     scenario_name = write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine,
-                                   num_instances, DEFAULT_FABRIC, router)
+                                   num_instances, fabric, router)
     if replay:
         cmd = build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed,
                                defaults, cli, replay)
@@ -1515,6 +1523,10 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                        "footprint_gpus_per_instance": fp,
                        "gpus": pd_total_gpus(pd) if pd else fp * num_instances,
                        "disaggregated": bool(pd),
+                       # The inter-node fabric this run was priced over, so the report shows the
+                       # real interconnect instead of assuming IB. None on a single node, which
+                       # prices no cross-node traffic (fabric was normalized to the default above).
+                       "fabric": fabric if multinode else None,
                        "scenario": scenario_name, "router": router or None,
                        # The acceptance the drafting run was priced with, so the report can
                        # derive a correct per-token rate instead of a per-STEP one.
@@ -1535,6 +1547,9 @@ def add_common_args(p):
     p.add_argument("--scenarios", required=True, help="dir to write/read generated scenario YAMLs")
     p.add_argument("--model", required=True, help="catalog short-name, e.g. glm-5.3-flash")
     p.add_argument("--hardware", required=True, help="scenario hardware key, e.g. h100")
+    p.add_argument("--fabric", default=DEFAULT_FABRIC,
+                   help=f"inter-node fabric (catalog networks/ class) for a multi-node run; "
+                        f"ignored on a single node (default: {DEFAULT_FABRIC})")
     p.add_argument("--engine-version", dest="engine_version", default=None,
                    help="vLLM release to model (default: pins.env VLLM_REF)")
     p.add_argument("--workload")
@@ -1616,7 +1631,8 @@ def main():
     rec = run_one(args.blis, args.catalog, args.registry, args.scenarios, args.model, args.hardware,
                   args.engine_version or pinned_engine_version(), args.workload, args.num_requests,
                   args.seed, args.horizon,
-                  json.loads(args.config), args.phase, args.timeout, args.defaults, replay)
+                  json.loads(args.config), args.phase, args.timeout, args.defaults, replay,
+                  fabric=args.fabric)
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         with open(args.out, "a") as f:

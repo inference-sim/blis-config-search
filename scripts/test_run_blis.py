@@ -445,6 +445,42 @@ class PoolSizing(unittest.TestCase):
         self.assertNotEqual(a, b)
 
 
+class FabricSelection(unittest.TestCase):
+    """A multi-node scenario is priced over the chosen fabric; omitting one keeps today's IB
+    default, so existing specs are byte-identical (issue #71)."""
+
+    def test_chosen_fabric_reaches_the_scenario_yaml(self):
+        par, eng = {"tp": 8, "pp": 1, "dp": 1}, {"block_size": 16}
+        y = run_blis.scenario_yaml("m", "h100", "0.29.0", par, eng, "n", num_instances=16,
+                                   fabric="roce-200g")
+        self.assertIn("fabric: roce-200g", y)
+
+    def test_default_fabric_is_ib_400g(self):
+        par, eng = {"tp": 8, "pp": 1, "dp": 1}, {"block_size": 16}
+        y = run_blis.scenario_yaml("m", "h100", "0.29.0", par, eng, "n", num_instances=16)
+        self.assertIn(f"fabric: {run_blis.DEFAULT_FABRIC}", y)
+        self.assertEqual(run_blis.DEFAULT_FABRIC, "ib-400g")
+
+    def test_multinode_fabric_changes_the_scenario_identity(self):
+        """Two MULTI-NODE runs differing only in fabric must get different scenario files, or the
+        second reuses a pool priced on the wrong interconnect."""
+        import tempfile
+        d = tempfile.mkdtemp()
+        par, eng = {"tp": 8, "pp": 1, "dp": 1}, {"block_size": 16}
+        a = run_blis.write_scenario(d, "m", "h100", "0.29.0", par, eng, 16, "ib-400g")
+        b = run_blis.write_scenario(d, "m", "h100", "0.29.0", par, eng, 16, "roce-200g")
+        self.assertNotEqual(a, b)
+
+    def test_cli_exposes_fabric_with_the_ib_default(self):
+        import argparse
+        p = argparse.ArgumentParser()
+        run_blis.add_common_args(p)
+        self.assertEqual(p.parse_args(["--scenarios", "s", "--model", "m",
+                                       "--hardware", "h100"]).fabric, run_blis.DEFAULT_FABRIC)
+        self.assertEqual(p.parse_args(["--scenarios", "s", "--model", "m", "--hardware", "h100",
+                                       "--fabric", "roce-200g"]).fabric, "roce-200g")
+
+
 class BuildCmd(unittest.TestCase):
     def test_kernel_flags_and_cli_knobs(self):
         cmd = run_blis.build_cmd("blis", "cat", "reg", "scn", "s.yaml", "chatbot", 100, 0, None, None,

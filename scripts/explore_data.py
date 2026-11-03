@@ -361,11 +361,14 @@ def _scenario(run_dir, exp, dep):
     if not (model and hw and name):
         return None
     router = dep.get("router") or {}
+    # The fabric the run was priced over (issue #71): part of the scenario hash, so regenerating
+    # with the wrong one would never match the recorded name. A record predating the field used IB.
+    fabric = dep.get("fabric") or run_blis.DEFAULT_FABRIC
     # the version a ledger recorded, else the pre-#57 default every older ledger was swept with
     recorded = (exp.get("pinned_stack") or {}).get("engine_version")
     for ev in dict.fromkeys([v for v in (recorded, sc.get("engine_version"), "0.29.0") if v]):
         if run_blis.scenario_name(model, hw, ev, dep["parallel"], dep["engine"], dep["num_instances"],
-                                  router=router) + ".yaml" != name:
+                                  fabric, router) + ".yaml" != name:
             continue
         shown = {}
         if router.get("router_config"):
@@ -376,7 +379,7 @@ def _scenario(run_dir, exp, dep):
             shown = {"router_config": "__ROUTER__"}
         text = run_blis.scenario_yaml(model, hw, ev, json.loads(json.dumps(dep["parallel"])),
                                       dict(dep["engine"]), name[:-5], dep["num_instances"],
-                                      run_blis.DEFAULT_FABRIC, shown or None)
+                                      fabric, shown or None)
         if shown:
             text = text.replace(json.dumps(os.path.abspath("__ROUTER__")), json.dumps("../" + rel))
         return name, text

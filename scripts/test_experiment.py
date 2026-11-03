@@ -125,6 +125,9 @@ def _structurally_bad():
         "empty knob list": lambda d: sweep0(d).setdefault("parallel", {}).__setitem__("tp", []),
         "colocated AND disaggregated": lambda d: sweep0(d).update(
             {"prefill-instances": [2], "decode-instances": [2]}),
+        "cluster not a mapping": lambda d: d["scenario"].__setitem__("cluster", "roce-200g"),
+        "unknown cluster key": lambda d: d["scenario"].__setitem__("cluster", {"fabric": "ib-400g",
+                                                                               "bogus": 1}),
     }
     return {name: mutate(fn) for name, fn in cases.items()}
 
@@ -394,6 +397,36 @@ class ValidatorRejects(unittest.TestCase):
 
     def test_valid_spec_has_no_errors(self):
         self.assertEqual([], self.errs(spec()))
+
+    def test_cluster_must_be_a_mapping_with_only_fabric(self):
+        bad = spec()
+        bad["scenario"]["cluster"] = "roce-200g"
+        self.assertTrue(any("scenario.cluster:" in e for e in self.errs(bad)))
+        bad2 = spec()
+        bad2["scenario"]["cluster"] = {"fabric": "ib-400g", "bogus": 1}
+        self.assertTrue(any("scenario.cluster.bogus" in e for e in self.errs(bad2)))
+
+    def test_fabric_omitted_or_empty_cluster_is_structural_error(self):
+        # Present but empty is a mistake, not the IB default (which comes from OMITTING cluster).
+        bad = spec()
+        bad["scenario"]["cluster"] = {}
+        self.assertTrue(any("scenario.cluster:" in e for e in self.errs(bad)))
+
+    def test_unknown_fabric_is_refused_against_the_catalog(self):
+        # A name the catalog's networks/ does not define fails every run of the sweep, so catch it
+        # before a build -- but only when a catalog is checked out, like the model/hardware check.
+        if not V._catalog()["present"] or not V._catalog()["fabrics"]:
+            self.skipTest("needs a ../blis-catalog checkout with networks/")
+        bad = spec()
+        bad["scenario"]["cluster"] = {"fabric": "ib-4000g"}  # typo
+        self.assertTrue(any("not a catalog fabric" in e for e in self.errs(bad)), self.errs(bad))
+
+    def test_known_fabric_validates(self):
+        if not V._catalog()["present"] or "roce-200g" not in V._catalog()["fabrics"]:
+            self.skipTest("needs a ../blis-catalog checkout with networks/roce-200g")
+        ok = spec()
+        ok["scenario"]["cluster"] = {"fabric": "roce-200g"}
+        self.assertEqual([], self.errs(ok))
 
     def test_duration_parsing(self):
         self.assertEqual(20.0, V.parse_duration_ms("20ms"))

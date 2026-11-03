@@ -52,6 +52,19 @@
           "minimum": 1,
           "maximum": 100000
         },
+        "cluster": {
+          "description": "The cluster the scenario runs on. Today the one knob is the inter-node fabric, which prices cross-node traffic for a multi-node run. Omitted means ib-400g, so existing specs are byte-identical.",
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "fabric": {
+              "description": "A blis-catalog networks/ class (ib-400g, roce-200g, ethernet-100gbe). A property of the cluster, not the GPU die -- an H100 fleet on RoCE must say so, or it is priced on InfiniBand. The validator checks the name against the sibling blis-catalog checkout.",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
         "slo": { "$ref": "#/$defs/slo" },
         "concurrency": {
           "description": "The load ladder, set once here so every sweep is measured at the same levels. Closed-loop concurrency (sessions); for a replay these are session-tree lanes.",

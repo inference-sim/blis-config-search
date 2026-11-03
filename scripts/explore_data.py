@@ -350,11 +350,12 @@ def _match_key(sweep, conc, cfg, drop):
 INERT_FLAGS = {"--defaults-filepath", "--corpus-cache", "--workload"}
 
 
-def _scenario(run_dir, exp, dep):
+def _scenario(run_dir, exp, dep, unset=None):
     """(file name, YAML) of the scenario a run read, regenerated from its recorded deployment.
 
-    Only returned when it hashes to the recorded file name, so it is byte-for-byte what BLIS got;
-    the router path is rewritten relative to a `scenarios/` dir at the repo root.
+    Only returned when it hashes to the recorded file name, so it is what BLIS got: the router path
+    is rewritten relative to a `scenarios/` dir at the repo root, and `unset` (see _note_unset)
+    adds comments only.
     """
     sc = exp.get("scenario") or {}
     model, hw, name = sc.get("model"), sc.get("hardware"), dep.get("scenario")
@@ -382,12 +383,63 @@ def _scenario(run_dir, exp, dep):
                                       fabric, shown or None)
         if shown:
             text = text.replace(json.dumps(os.path.abspath("__ROUTER__")), json.dumps("../" + rel))
-        return name, text
+        return name, _note_unset(text, unset or {})
     return None
 
 
-def _recipe(cmd, workload):
-    """The recorded command made portable: env-var roots, a repo-relative scenarios dir, one flag per line."""
+def _unset_value(key, role, dflt):
+    """The default a pool ran `key` at when unset: the role's own column, then the shared one."""
+    for k in (f"{role}_{key}", key):
+        if k in dflt:
+            return dflt[k]
+    return ENGINE_UNSET.get(key)
+
+
+def _note_unset(text, dflt):
+    """Comment each spec knob a pool's engine block leaves unset with the default it ran at.
+
+    Comments keep the file equivalent to the one BLIS read, so it reruns to the same result.
+    """
+    bare = sorted({re.sub(r"^(prefill|decode)_", "", k) for k in dflt})
+    out, role, stated = [], "", None
+
+    def flush():
+        if stated is None:
+            return
+        for key in bare:
+            field = NESTED[key][0] if key in NESTED else key
+            v = _unset_value(key, role, dflt)
+            if field not in stated and v is not None:
+                out.append(f"      # {key}: {json.dumps(v)}  (unset; the default it ran at)")
+
+    for line in text.splitlines():
+        if stated is not None and not line.startswith("      "):
+            flush()
+            stated = None
+        if m := re.match(r"  - role: (\S+)", line):
+            role = m.group(1)
+        out.append(line)
+        if line == "    engine:":
+            stated = set()
+        elif stated is not None and (m := re.match(r"      (\w+):", line)):
+            stated.add(m.group(1))
+    flush()
+    return "\n".join(out) + "\n"
+
+
+def _max_model_len(dep):
+    """The one max_model_len every pool of a deployment ran at, else None."""
+    pd = ((dep or {}).get("parallel") or {}).get("pd") or {}
+    engines = [p.get("engine") or {} for p in pd.values()] or [(dep or {}).get("engine") or {}]
+    lens = {e.get("max_model_len") for e in engines}
+    return lens.pop() if len(lens) == 1 else None
+
+
+def _recipe(cmd, workload, dep=None):
+    """The recorded command made portable: env-var roots, a repo-relative scenarios dir, one flag per line.
+
+    `--max-context-length max_model_len` shows the number the deployment resolved it to.
+    """
     args, i, lines = [str(a) for a in cmd], 2, []
     while i < len(args):
         flag = args[i]
@@ -402,6 +454,8 @@ def _recipe(cmd, workload):
             val = '"$BLIS_CATALOG"'
         elif flag == "--scenarios":
             val = "scenarios"
+        elif flag == "--max-context-length" and val == "max_model_len" and _max_model_len(dep):
+            val = str(_max_model_len(dep))
         elif val is not None:
             val = shlex.quote(val)
         lines.append(flag if val is None else f"{flag} {val}")
@@ -430,6 +484,11 @@ def commands(run_dir):
                 by_key[_match_key(rec.get("sweep"), rec["concurrency"], cfg, ())] = rec
     out, scenarios = [], {}
     workload = (exp.get("scenario") or {}).get("workload")
+    # every engine knob the spec sets or sweeps, with the value a run that leaves it unset used
+    knobs = {k for s in exp.get("sweeps") or [] for r in s["rows"] for k in r["config"]
+             if k != "concurrency" and not TOPOLOGY_KEY.match(k)}
+    knobs |= set((exp.get("scenario") or {}).get("engine") or {})
+    unset = defaults(run_dir, sorted(knobs))
     for s in exp.get("sweeps") or []:
         for r in s["rows"]:
             cfg = {k: v for k, v in r["config"].items() if k != "concurrency"}
@@ -443,10 +502,10 @@ def commands(run_dir):
             dep = rec.get("deployment") or {}
             name = dep.get("scenario")
             if name and name not in scenarios:
-                got = _scenario(run_dir, exp, dep) if dep.get("parallel") is not None else None
+                got = _scenario(run_dir, exp, dep, unset) if dep.get("parallel") is not None else None
                 scenarios[name] = got[1] if got else None
             # the deployment ships only when its scenario could not be regenerated exactly
-            out.append([_recipe(rec["cmd"], workload), name,
+            out.append([_recipe(rec["cmd"], workload, dep), name,
                         None if scenarios.get(name) else dep or None])
     return {"scenarios": {k: v for k, v in scenarios.items() if v}, "runs": out}
 

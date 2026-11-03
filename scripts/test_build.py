@@ -800,6 +800,23 @@ def test_explore_data():
         check(got1 is not None and got1[0] == nm1,
               "a single-node run in a non-IB spec still regenerates (fabric normalized to default)")
         check("fabric:" not in got1[1], "a single-node scenario names no fabric")
+        # A run whose spec omits knobs the sweep sets elsewhere (issue #68): the shown file names
+        # the default it ran at, as a comment, so it still parses to exactly what BLIS read.
+        noted = explore_data._scenario(rd, {"name": "m-h100-x", "pinned_stack": {"engine_version": "0.29.0"},
+                                            "scenario": {"model": "m", "hardware": "h100"}}, dep1,
+                                       {"max_num_seqs": 256, "speculative_method": "off", "block_size": 16})
+        check(noted[0] == nm1 and '# max_num_seqs: 256' in noted[1] and '# speculative_method: "off"' in noted[1]
+              and "# block_size" not in noted[1], "an unset spec knob is shown with its default; a stated one is not")
+        load = lambda t: list(explore_data.yaml.safe_load_all(t))
+        check(load(noted[1]) == load(got1[1]),
+              "the default comments leave the scenario BLIS reads unchanged")
+        pd_dep = {"engine": {}, "parallel": {"pd": {"prefill": {"engine": {"max_model_len": 262144}},
+                                                    "decode": {"engine": {"max_model_len": 262144}}}}}
+        replay = ["blis", "replay", "--max-context-length", "max_model_len", "--seed", "1"]
+        check("--max-context-length 262144" in explore_data._recipe(replay, None, pd_dep),
+              "the shown replay command passes the resolved max_model_len, not the placeholder")
+        check("--max-context-length max_model_len" in explore_data._recipe(replay, None, {}),
+              "a deployment with no recorded max_model_len keeps the placeholder")
         real = os.path.join(ROOT, "reports", "kimi-k2-5-h200-multidoc-pd")
         if os.path.exists(real):
             got = explore_data.commands(real)

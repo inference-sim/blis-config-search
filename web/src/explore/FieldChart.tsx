@@ -1,6 +1,6 @@
 // One crossfilter field as bars: one bar per value, sized by the page's bar measure. Click to filter.
 import type { Explorer } from './useExplorer'
-import { METRIC, better, fmt, fmtMetric, poolOf, rankConfigs, sortValues, NA, bareValue } from './model'
+import { METRIC, better, fmt, fmtMetric, poolOf, rankConfigs, sortValues, NA, bareValue, isNumeric } from './model'
 
 interface Bar { v: string; n: number; ok: number; best: number | null; bestTopo: string; bestConc: number | null }
 
@@ -36,7 +36,9 @@ export function FieldChart({ x, k, title, help }: { x: Explorer; k: string; titl
     return (x.bar === 'best' ? better(m, v, av) : v > av) ? b : a
   }, null)
   // the "(default)" tag goes on its own line in a column, so it does not force horizontal bars
-  const horizontal = bars.length > 5 || bars.some((b) => bareValue(b.v).length > 7)
+  // a crowded field takes two grid columns; only a categorical one turns horizontal, numbers keep their axis
+  const wide = bars.length > 5 || bars.some((b) => bareValue(b.v).length > 7)
+  const horizontal = wide && !isNumeric(bars.map((b) => b.v))
   // every column gets the tag line when one has it, so the values stay on one row
   const tagged = bars.some((b) => bareValue(b.v) !== b.v)
   const tip = (b: Bar) => `${title} ${b.v}: ${b.n} runs in filter, ${b.ok} meet every SLO`
@@ -45,7 +47,7 @@ export function FieldChart({ x, k, title, help }: { x: Explorer; k: string; titl
   const pool = poolOf(k)
 
   return (
-    <div className={`xf-field${horizontal ? ' wide' : ''}`} data-field={k}>
+    <div className={`xf-field${wide ? ' wide' : ''}`} data-field={k}>
       <div className="xf-field-h">
         {pool && <span className="xf-pool">{pool}</span>}
         <b>{title}</b>

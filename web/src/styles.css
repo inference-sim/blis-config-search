@@ -424,6 +424,7 @@ ol.sb-how b{color:var(--ink);font-weight:600}
 
 .xf-heat{display:grid;gap:3px;align-items:center;max-width:520px}
 .xf-heat-h{font-family:var(--font-mono);font-size:11px;color:var(--muted);text-align:center;padding:0 6px}
+.xf-heat-axis{font-size:11px;font-weight:600;color:var(--muted);text-align:center;white-space:nowrap;padding:0 6px}
 .xf-heat-c{all:unset;box-sizing:border-box;height:32px;border-radius:3px;display:grid;place-items:center;cursor:pointer;
   background:color-mix(in srgb, var(--l-topology) calc(var(--t) * 100%), var(--panel))}
 .xf-heat-c span{font-family:var(--font-mono);font-size:11px;font-weight:600;color:var(--ink)}

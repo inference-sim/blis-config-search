@@ -179,10 +179,13 @@ function RatioHeatmap({ x }: { x: Explorer }) {
       </div>
       <p className="xf-sub">One cell per ratio, across every pool shape and load in the filter. Click a cell to filter to it; empty cells have no runs in the filter.</p>
       <div className="xf-heat" style={{ gridTemplateColumns: `auto repeat(${D.length}, minmax(48px, 1fr))` }}>
+        {/* axis titles: decode across the top, prefill down the side */}
         <span />
-        {D.map((d) => <span key={d} className="xf-heat-h">{d}D</span>)}
+        <span className="xf-heat-axis" style={{ gridColumn: '2 / -1' }}>Decode instances</span>
+        <span className="xf-heat-axis">Prefill instances</span>
+        {D.map((d) => <span key={d} className="xf-heat-h">{d}</span>)}
         {P.map((p) => [
-          <span key={`l${p}`} className="xf-heat-h">{p}P</span>,
+          <span key={`l${p}`} className="xf-heat-h">{p}</span>,
           ...D.map((d) => {
             const rs = cell(p, d), v = val(rs), b = rankConfigs(rs, m)[0]
             const on = isOn(p, d)
@@ -190,9 +193,9 @@ function RatioHeatmap({ x }: { x: Explorer }) {
             const t = v ? shade(v) : 0
             return (
               <button type="button" key={`${p}-${d}`} className={`xf-heat-c${on ? ' on' : ''}`} aria-pressed={on} onClick={() => click(p, d)}
-                aria-label={`${p}P / ${d}D: ${measure === 'pass' ? `${fmt(v * 100, 0)}% of runs meet every SLO` : v ? `best ${fmtMetric(m, v)} ${METRIC[m].label}` : 'no run meets every SLO'}`}
+                aria-label={`${p} prefill / ${d} decode: ${measure === 'pass' ? `${fmt(v * 100, 0)}% of runs meet every SLO` : v ? `best ${fmtMetric(m, v)} ${METRIC[m].label}` : 'no run meets every SLO'}`}
                 style={{ ['--t' as string]: String(0.08 + t * 0.82) }}
-                title={`${p}P / ${d}D: ${rs.length} runs, ${rs.filter((r) => r.ok).length} meet every SLO${b ? `; best ${b.topo}, ${fmtMetric(m, b[m])} ${METRIC[m].label} at ${b.conc} sessions` : ''}`}>
+                title={`${p} prefill / ${d} decode: ${rs.length} runs, ${rs.filter((r) => r.ok).length} meet every SLO${b ? `; best ${b.topo}, ${fmtMetric(m, b[m])} ${METRIC[m].label} at ${b.conc} sessions` : ''}`}>
                 <span className={t > 0.55 ? 'light' : ''}>{measure === 'pass' ? `${fmt(v * 100, 0)}%` : v ? fmtMetric(m, v) : 'none'}</span>
               </button>
             )

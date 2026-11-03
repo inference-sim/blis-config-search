@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ExploreData, Scalar } from './types'
 import {
-  configFilters, overrideParts, sloMs, fieldValue, groupTies, liveFields, matches, rankConfigs, routerLabel, sortValues, toggle, topoLabel, unpack,
+  configFilters, overrideParts, sloMs, fieldValue, groupTies, liveFields, matches, rankConfigs, routerLabel, sortValues, isNumeric, toggle, topoLabel, unpack,
 } from './model'
 
 const KEYS = ['decode_instances', 'decode_tp', 'dp', 'max_num_seqs', 'num_instances', 'prefill_instances', 'prefill_tp', 'router_config', 'tp']
@@ -78,6 +78,11 @@ describe('fields', () => {
     expect(sortValues(['16', 'n/a', '4', '8'])).toEqual(['4', '8', '16', 'n/a'])
     expect(sortValues(['fp8', 'default', 'auto'])).toEqual(['default', 'auto', 'fp8'])
     expect(sortValues(['default', '2048', '16384', '8192'])).toEqual(['default', '2048', '8192', '16384'])
+  })
+  it('treats numbers as numeric despite defaults and n/a', () => {
+    expect(isNumeric(['2', '3', '4', '5', '6', '7', '8'])).toBe(true)
+    expect(isNumeric(['default', '256 (default)', '512', 'n/a'])).toBe(true)
+    expect(isNumeric(['fp8', 'auto (default)'])).toBe(false)
   })
 })
 

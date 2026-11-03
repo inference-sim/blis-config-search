@@ -149,11 +149,15 @@ export function fieldValue(r: Run, k: string, routers: ExploreData['routers']): 
   return disp(r.knobs[k], r.defaults[k])
 }
 
+/** True when every real value (not "n/a" or a bare "default") is a number. */
+export function isNumeric(vals: string[]): boolean {
+  return vals.filter((v) => v !== NA && v !== 'default').every((v) => !Number.isNaN(Number(bareValue(v))))
+}
+
 /** Numbers numerically (a known default in its place), else the default first; "n/a" always last. */
 export function sortValues(vals: string[]): string[] {
   const real = vals.filter((v) => v !== NA && v !== 'default')
-  const numeric = real.every((v) => !Number.isNaN(Number(bareValue(v))))
-  real.sort(numeric ? (a, b) => Number(bareValue(a)) - Number(bareValue(b))
+  real.sort(isNumeric(real) ? (a, b) => Number(bareValue(a)) - Number(bareValue(b))
     : (a, b) => Number(isDefault(b)) - Number(isDefault(a)) || a.localeCompare(b))
   return [...(vals.includes('default') ? ['default'] : []), ...real, ...(vals.includes(NA) ? [NA] : [])]
 }

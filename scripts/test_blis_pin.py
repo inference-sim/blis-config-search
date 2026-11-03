@@ -199,6 +199,26 @@ def _fake_repo():
     return root
 
 
+def test_same_stack():
+    print("test_same_stack")
+    with tempfile.TemporaryDirectory() as t:
+        def mk(name, blis="v0.15.0", resolved=None):
+            d = os.path.join(t, name)
+            os.makedirs(d)
+            with open(os.path.join(d, "scenario.json"), "w") as f:
+                json.dump({"pinned_stack": {"blis": blis, "engine_version": "0.32.0",
+                                            "resolved": resolved or {}}}, f)
+            return d
+        a = mk("a", resolved={"blis": {"commit": "c1", "describe": "v0.15.0", "sha256": "aa"}})
+        b, c = mk("b", resolved={"blis": {"sha256": "aa"}}), mk("c", blis="v0.16.0")
+        rebuilt, unhashed = mk("rebuilt", resolved={"blis": {"sha256": "bb"}}), mk("unhashed")
+        check(B.same_stack(a, b), "build provenance beyond the binary hash does not make a different stack")
+        check(not B.same_stack(a, rebuilt), "a same-tag rebuild with a different binary is a different stack")
+        check(B.same_stack(a, unhashed), "labels decide when one side records no binary hash")
+        check(not B.same_stack(a, c), "a different blis ref is a different stack")
+        check(not B.same_stack(a, os.path.join(t, "missing")), "a missing report matches nothing")
+
+
 def test_classify_and_batch():
     print("test_classify_and_batch")
     root = _fake_repo()
@@ -447,6 +467,12 @@ def test_workflow_wiring():
     check("scripts/blis_pin.py changed" in regen,
           "a comment-only pins.env edit must not queue a campaign")
     check("fail-fast: false" in regen, "one failed report must not cancel the others")
+    check("blis_pin.py same-stack" in regen and '"$GITHUB_SHA..HEAD" -- "reports/$id"' in regen,
+          "a report re-swept on main during the campaign keeps main's copy")
+    check('[ ! -d "reports/$id" ]' in regen and 'stale="$stale $id"' in regen,
+          "a report removed, or re-swept on the old stack, on main mid-campaign is not swapped in")
+    check('git show "$GITHUB_SHA:pins.env"' in regen and "steps.stack.outputs.current == 'true'" in regen,
+          "a campaign whose pins moved on main mid-sweep opens no PR")
     check("always()" in regen, "batch PRs open even when some report jobs failed")
     check("scripts/test_blis_pin.py" in open(os.path.join(wf, "checks.yml")).read(),
           "checks.yml must run these tests")
@@ -505,6 +531,7 @@ if __name__ == "__main__":
     test_rewrite_setup_moves_only_instructions()
     test_bump_end_to_end_on_copies()
     test_changed_ignores_comments()
+    test_same_stack()
     test_classify_and_batch()
     test_plan_covers_the_real_gallery()
     test_summary_table()

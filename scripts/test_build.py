@@ -697,6 +697,20 @@ def test_workflows_sane():
     # LLM-attribution footer.
     check("Generated with [Claude Code]" not in rtxt, "run-experiment's bot PR claims no LLM authorship")
 
+    # A job that pushes a bot branch must check out the default branch: a branch cut from the
+    # triggering commit carries its workflow files, and once main's differ GITHUB_TOKEN's push is
+    # refused (run 41486677858 lost three batch PRs to this after a 10h sweep).
+    wfdir = os.path.join(ROOT, ".github", "workflows")
+    for fn in sorted(os.listdir(wfdir)):
+        doc = _yaml.safe_load(open(os.path.join(wfdir, fn)))
+        for jname, job in (doc.get("jobs") or {}).items():
+            steps = job.get("steps") or []
+            if not any("git push origin" in (st.get("run") or "") for st in steps):
+                continue
+            co = next((st for st in steps if st.get("uses", "").startswith("actions/checkout@")), {})
+            check((co.get("with") or {}).get("ref") == "${{ github.event.repository.default_branch }}",
+                  f"{fn} job {jname} pushes a branch, so it must branch from the default branch")
+
     ck = os.path.join(ROOT, ".github", "workflows", "checks.yml")
     ctxt = open(ck).read()
     check(_yaml.safe_load(ctxt) is not None, "checks.yml parses")

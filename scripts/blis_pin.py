@@ -15,6 +15,7 @@ the pin is what starts hours of regeneration against it.
   python3 -I scripts/blis_pin.py latest                       # newest upstream release tag
   python3 -I scripts/blis_pin.py bump v0.15.0                 # rewrite pins.env + SETUP.md
   python3 -I scripts/blis_pin.py changed OLD_PINS.env         # which pins a push moved
+  python3 -I scripts/blis_pin.py same-stack DIR DIR           # exit 0 if two reports share a stack
   python3 -I scripts/blis_pin.py plan [--only ID,...]         # what to regenerate, in batches
   python3 -I scripts/blis_pin.py regen ID --blis B --catalog C --registry R --out DIR
   python3 -I scripts/blis_pin.py summary --old DIR --new DIR ID [ID ...]
@@ -200,6 +201,26 @@ def changed(old_pins, new_pins):
     """The stack pins whose value differs between two parsed pins.env files."""
     return {k: (old_pins.get(k), new_pins.get(k)) for k in STACK_KEYS
             if old_pins.get(k) != new_pins.get(k)}
+
+
+def same_stack(a_dir, b_dir):
+    """Whether two report dirs carry the same pinned-stack labels and, when both record it, the
+    same BLIS binary sha256 (one tag has shipped differently-pricing builds). The rest of
+    `resolved` is ignored: a regen job's binary records less provenance than a run-experiment build.
+    Only the recorded labels are compared: a pin move that touches none (e.g. BLIS_SHA) is unseen."""
+    def stack(d):
+        return (_load_json(os.path.join(d, "scenario.json"), {}) or {}).get("pinned_stack") or {}
+
+    def labels(s):
+        return {k: v for k, v in s.items() if k != "resolved"}
+
+    def sha(s):
+        return ((s.get("resolved") or {}).get("blis") or {}).get("sha256")
+
+    a, b = stack(a_dir), stack(b_dir)
+    if not labels(a) or labels(a) != labels(b):
+        return False
+    return not (sha(a) and sha(b)) or sha(a) == sha(b)
 
 
 # ---------------------------------------------------------------------------------- plan
@@ -699,6 +720,9 @@ def main(argv=None):
     b.add_argument("--release-name")
     c = sub.add_parser("changed", help="print the stack pins that differ from OLD pins.env")
     c.add_argument("old")
+    ss = sub.add_parser("same-stack", help="exit 0 if two report dirs were priced by the same stack")
+    ss.add_argument("a")
+    ss.add_argument("b")
     p = sub.add_parser("plan", help="classify every committed report and batch it into PRs")
     p.add_argument("--only", help="comma-separated run ids (default: every committed report)")
     p.add_argument("--max-batch", type=int, default=MAX_BATCH)
@@ -746,6 +770,8 @@ def main(argv=None):
         print(json.dumps({k: list(v) for k, v in moved.items()}))
     elif a.cmd == "changed":
         print(json.dumps({k: list(v) for k, v in changed(read_pins(a.old), read_pins()).items()}))
+    elif a.cmd == "same-stack":
+        sys.exit(0 if same_stack(a.a, a.b) else 1)
     elif a.cmd == "plan":
         only = [x for x in (a.only or "").replace(" ", ",").split(",") if x]
         print(json.dumps(plan(only=only or None, max_batch=a.max_batch)))

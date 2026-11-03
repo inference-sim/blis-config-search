@@ -309,17 +309,20 @@ def materialize_router(cand, routing_dir, out_dir):
 def label_of(cand):
     """The topology label for a candidate -- what a reader scans down a column.
 
-    Colocated reuses topologies.label (`8x TP4xPP2xDP2 + EP`); a disaggregated candidate names both
-    pools (`3P/5D TP8 + EP`), because instances alone would not say which pool they are.
+    Colocated reuses topologies.label (`8x TP4xPP2xDP2 + EP`). A disaggregated candidate names
+    both pools: `3P/5D TP8 + EP` when they share a shape, and `2P TP8 + EP / 3D TP16 + EP` when
+    they differ (e.g. a wide-decode sweep), since one pool's shape would otherwise be invisible.
     """
     if cand.get("prefill_instances") is not None:
+        def pool_shape(role):
+            return topologies.shape(cand.get(f"{role}_tp", 1), cand.get(f"{role}_pp", 1),
+                                    cand.get(f"{role}_dp", 1),
+                                    cand.get(f"{role}_enable_expert_parallel"))
         pf, dc = cand["prefill_instances"], cand["decode_instances"]
-        tp, pp, dp = cand.get("prefill_tp", 1), cand.get("prefill_pp", 1), cand.get("prefill_dp", 1)
-        shape = (f"TP{tp}"
-                 + (f"xPP{pp}" if pp and pp > 1 else "")
-                 + (f"xDP{dp}" if dp and dp > 1 else ""))
-        ep = " + EP" if cand.get("prefill_enable_expert_parallel") else ""
-        return f"{pf}P/{dc}D {shape}{ep}"
+        p_shape, d_shape = pool_shape("prefill"), pool_shape("decode")
+        if p_shape == d_shape:
+            return f"{pf}P/{dc}D {p_shape}"
+        return f"{pf}P {p_shape} / {dc}D {d_shape}"
     return topologies.label({"tp": cand.get("tp", 1), "pp": cand.get("pp", 1),
                              "dp": cand.get("dp", 1),
                              "num_instances": cand.get("num_instances", 1),

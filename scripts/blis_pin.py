@@ -204,14 +204,23 @@ def changed(old_pins, new_pins):
 
 
 def same_stack(a_dir, b_dir):
-    """Whether two report dirs carry the same pinned-stack labels. `resolved` is ignored: it is
-    build provenance, and a regen job's binary records less of it than a run-experiment build.
+    """Whether two report dirs carry the same pinned-stack labels and, when both record it, the
+    same BLIS binary sha256 (one tag has shipped differently-pricing builds). The rest of
+    `resolved` is ignored: a regen job's binary records less provenance than a run-experiment build.
     Only the recorded labels are compared: a pin move that touches none (e.g. BLIS_SHA) is unseen."""
-    def labels(d):
-        s = (_load_json(os.path.join(d, "scenario.json"), {}) or {}).get("pinned_stack") or {}
+    def stack(d):
+        return (_load_json(os.path.join(d, "scenario.json"), {}) or {}).get("pinned_stack") or {}
+
+    def labels(s):
         return {k: v for k, v in s.items() if k != "resolved"}
-    a = labels(a_dir)
-    return bool(a) and a == labels(b_dir)
+
+    def sha(s):
+        return ((s.get("resolved") or {}).get("blis") or {}).get("sha256")
+
+    a, b = stack(a_dir), stack(b_dir)
+    if not labels(a) or labels(a) != labels(b):
+        return False
+    return not (sha(a) and sha(b)) or sha(a) == sha(b)
 
 
 # ---------------------------------------------------------------------------------- plan

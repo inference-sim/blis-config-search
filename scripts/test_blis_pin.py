@@ -210,8 +210,11 @@ def test_same_stack():
                                             "resolved": resolved or {}}}, f)
             return d
         a = mk("a", resolved={"blis": {"commit": "c1", "describe": "v0.15.0", "sha256": "aa"}})
-        b, c = mk("b", resolved={"blis": {"sha256": "bb"}}), mk("c", blis="v0.16.0")
-        check(B.same_stack(a, b), "build provenance (resolved) does not make a different stack")
+        b, c = mk("b", resolved={"blis": {"sha256": "aa"}}), mk("c", blis="v0.16.0")
+        rebuilt, unhashed = mk("rebuilt", resolved={"blis": {"sha256": "bb"}}), mk("unhashed")
+        check(B.same_stack(a, b), "build provenance beyond the binary hash does not make a different stack")
+        check(not B.same_stack(a, rebuilt), "a same-tag rebuild with a different binary is a different stack")
+        check(B.same_stack(a, unhashed), "labels decide when one side records no binary hash")
         check(not B.same_stack(a, c), "a different blis ref is a different stack")
         check(not B.same_stack(a, os.path.join(t, "missing")), "a missing report matches nothing")
 

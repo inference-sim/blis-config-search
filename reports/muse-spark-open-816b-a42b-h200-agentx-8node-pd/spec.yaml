@@ -1,0 +1,211 @@
+name: muse-spark-open-816b-a42b-h200-agentx-8node-pd
+scenario:
+  model: muse-spark-open-816b-a42b-nvfp4
+  hardware: h200
+  workload: agentx-mvp
+  gpus: 64
+  engine:
+    max_model_len: 262144
+  concurrency:
+  - 64
+  - 128
+  - 256
+  - 512
+  replay:
+    corpus: .corpus/traces.jsonl
+    corpus_cache: /tmp/agx-cache-muse-h200-8node-pd
+    grace_period: inf
+sweeps:
+- name: colocated
+  narrative: Eight single-node TP8 instances should lead, since wider dp groups pay
+    cross-node IB all-to-all for little extra batch.
+  num-instances:
+  - 8
+  - 4
+  - 2
+  - 1
+  parallel:
+    tp:
+    - 8
+    - 4
+    dp:
+    - 1
+    - 2
+    - 4
+    - 8
+    enable_expert_parallel:
+    - true
+- name: colocated-tuned
+  narrative: A bigger token budget with a long-prefill cap should hold ITL to higher
+    load, narrowing what P/D can win.
+  num-instances:
+  - 8
+  - 2
+  parallel:
+    tp:
+    - 8
+    dp:
+    - 1
+    - 4
+    enable_expert_parallel:
+    - true
+  engine:
+    max_num_batched_tokens:
+    - 8192
+    - 32768
+    long_prefill_token_threshold:
+    - 0
+    - 2048
+- name: pd-ratio
+  narrative: Decode-heavy ratios should win on AgentX, since cached prefixes leave
+    only a short uncached tail to prefill per turn.
+  prefill-instances:
+  - 1
+  - 2
+  - 3
+  - 4
+  decode-instances:
+  - 7
+  - 6
+  - 5
+  - 4
+  prefill:
+    parallel:
+      tp:
+      - 8
+      enable_expert_parallel:
+      - true
+  decode:
+    parallel:
+      tp:
+      - 8
+      enable_expert_parallel:
+      - true
+  router:
+    endpoint_picker_config: &id001
+    - pd-prefix.yaml
+    plugins:
+      prefix-based-pd-decider:
+        parameters:
+          nonCachedTokens:
+          - 256
+          - 1024
+          - 4096
+          - 16384
+- name: pd-always
+  narrative: Splitting every request should trail the threshold arms, because a turn
+    with a cached prefix pays an IB handoff for little prefill.
+  prefill-instances:
+  - 1
+  - 2
+  - 3
+  - 4
+  decode-instances:
+  - 7
+  - 6
+  - 5
+  - 4
+  prefill:
+    parallel:
+      tp:
+      - 8
+      enable_expert_parallel:
+      - true
+  decode:
+    parallel:
+      tp:
+      - 8
+      enable_expert_parallel:
+      - true
+  router:
+    endpoint_picker_config:
+    - pd-always.yaml
+- name: pd-wide-decode
+  narrative: TP16 decode instances should hold ITL at higher load than TP8 ones, trading
+    batch slots for faster steps.
+  prefill-instances:
+  - 2
+  - 4
+  - 6
+  decode-instances:
+  - 3
+  - 2
+  - 1
+  prefill:
+    parallel:
+      tp:
+      - 8
+      enable_expert_parallel:
+      - true
+  decode:
+    parallel:
+      tp:
+      - 16
+      enable_expert_parallel:
+      - true
+  router:
+    endpoint_picker_config: *id001
+    plugins:
+      prefix-based-pd-decider:
+        parameters:
+          nonCachedTokens:
+          - 256
+          - 4096
+- name: pd-pool-engine
+  narrative: A 32k prefill budget should matter on the prefill-light layout and a
+    decode-pool prefill cap on the decode-heavy one.
+  prefill-instances:
+  - 2
+  - 4
+  decode-instances:
+  - 6
+  - 4
+  prefill:
+    parallel:
+      tp:
+      - 8
+      enable_expert_parallel:
+      - true
+    engine:
+      max_num_batched_tokens:
+      - 8192
+      - 32768
+  decode:
+    parallel:
+      tp:
+      - 8
+      enable_expert_parallel:
+      - true
+    engine:
+      long_prefill_token_threshold:
+      - 0
+      - 2048
+  router:
+    endpoint_picker_config:
+    - pd-prefix.yaml
+- name: pd-decode-cudagraph
+  narrative: Full graph capture on the decode pool should lower ITL by a few percent,
+    with FULL_DECODE_ONLY matching FULL there.
+  prefill-instances:
+  - 3
+  decode-instances:
+  - 5
+  prefill:
+    parallel:
+      tp:
+      - 8
+      enable_expert_parallel:
+      - true
+  decode:
+    parallel:
+      tp:
+      - 8
+      enable_expert_parallel:
+      - true
+    engine:
+      cudagraph_mode:
+      - FULL
+      - FULL_DECODE_ONLY
+  router:
+    endpoint_picker_config:
+    - pd-prefix.yaml

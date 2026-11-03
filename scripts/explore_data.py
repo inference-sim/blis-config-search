@@ -430,7 +430,7 @@ def _note_unset(text, dflt):
 def _max_model_len(dep):
     """The one max_model_len every pool of a deployment ran at, else None."""
     pd = ((dep or {}).get("parallel") or {}).get("pd") or {}
-    engines = [p.get("engine") or {} for p in pd.values()] or [(dep or {}).get("engine") or {}]
+    engines = [(pd[r].get("engine") or {}) for r in run_blis.PD_ROLES if r in pd] or [(dep or {}).get("engine") or {}]
     lens = {e.get("max_model_len") for e in engines}
     return lens.pop() if len(lens) == 1 else None
 

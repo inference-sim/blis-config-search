@@ -810,7 +810,7 @@ def test_explore_data():
         load = lambda t: list(explore_data.yaml.safe_load_all(t))
         check(load(noted[1]) == load(got1[1]),
               "the default comments leave the scenario BLIS reads unchanged")
-        pd_dep = {"engine": {}, "parallel": {"pd": {"prefill": {"engine": {"max_model_len": 262144}},
+        pd_dep = {"engine": {}, "parallel": {"pd": {"connector": "NixlConnector", "prefill": {"engine": {"max_model_len": 262144}},
                                                     "decode": {"engine": {"max_model_len": 262144}}}}}
         replay = ["blis", "replay", "--max-context-length", "max_model_len", "--seed", "1"]
         check("--max-context-length 262144" in explore_data._recipe(replay, None, pd_dep),

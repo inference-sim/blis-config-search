@@ -10,11 +10,11 @@
     },
     {
       "h": "What was found",
-      "html": "<strong>4x TP8 + EP (gpu mem util 0.95)</strong>, from the <em>kv-and-engram</em> sweep, reached 36.58 tok/s/GPU (1170.6 tok/s across the fleet) at concurrency 96 while holding the scenario's SLOs."
+      "html": "<strong>4x TP8 + EP (max seqs 256 \u00b7 batch tokens 32,768)</strong>, from the <em>batch-caps</em> sweep, reached 38.23 tok/s/accelerator (1223.3 tok/s across the fleet) at concurrency 96 while holding the scenario's SLOs."
     },
     {
       "h": "What to run",
-      "html": "4x TP8 + EP (gpu mem util 0.95) at concurrency 96. 30 of 280 runs held the SLOs.",
+      "html": "4x TP8 + EP (max seqs 256 \u00b7 batch tokens 32,768) at concurrency 96. 36 of 280 runs held the SLOs.",
       "run": true
     }
   ],
@@ -26,7 +26,7 @@
   ],
   "recommendation_num": 10,
   "recommendation_prose": [
-    "The table below ranks the measured operating points by output tok/s per GPU, the objective this experiment selects on, among runs that held the scenario's SLOs."
+    "The table below ranks the measured operating points by output tok/s per accelerator, the objective this experiment selects on, among runs that held the scenario's SLOs."
   ],
   "sections": [
     {
@@ -34,7 +34,7 @@
       "num": 2,
       "prose": [
         "Wide TP8 instances should win at the SLO, since narrow tp pays more per-step latency than the extra replicas buy back.",
-        "Measured: best was <strong>4x TP8 + EP</strong> at 26.07 tok/s/GPU (concurrency 64)."
+        "Measured: best was <strong>4x TP8 + EP</strong> at 26.94 tok/s/accelerator (concurrency 64)."
       ],
       "title": "Sweep: topology"
     },
@@ -52,7 +52,7 @@
       "num": 4,
       "prose": [
         "Deeper dspark drafts should add tok/s, but the 20ms ITL bound should cap K lower on narrow tp than on TP8.",
-        "Measured: best was <strong>4x TP8 + EP (5 draft tokens)</strong> at 18.94 tok/s/GPU (concurrency 32)."
+        "Measured: best was <strong>4x TP8 + EP</strong> at 24.21 tok/s/accelerator (concurrency 64)."
       ],
       "title": "Sweep: drafting-depth"
     },
@@ -61,7 +61,7 @@
       "num": 5,
       "prose": [
         "max_num_seqs should bind on TP8 ranks and not on TP2, while a small token cap trades throughput for tail ITL on both.",
-        "Measured: best was <strong>4x TP8 + EP (max seqs 256 \u00b7 batch tokens 32,768)</strong> at 34.75 tok/s/GPU (concurrency 96)."
+        "Measured: best was <strong>4x TP8 + EP (max seqs 256 \u00b7 batch tokens 32,768)</strong> at 38.23 tok/s/accelerator (concurrency 96)."
       ],
       "title": "Sweep: batch-caps"
     },
@@ -79,7 +79,7 @@
       "num": 7,
       "prose": [
         "Moving Engram tables into HBM should only pay when gmu leaves KV room for them, and cost more on narrow tp.",
-        "Measured: best was <strong>4x TP8 + EP (gpu mem util 0.95)</strong> at 36.58 tok/s/GPU (concurrency 96)."
+        "Measured: best was <strong>4x TP8 + EP</strong> at 26.94 tok/s/accelerator (concurrency 64)."
       ],
       "title": "Sweep: kv-and-engram"
     },
@@ -88,7 +88,7 @@
       "num": 8,
       "prose": [
         "FULL-family capture should beat the PIECEWISE default by a few percent and NONE should collapse.",
-        "Measured: best was <strong>4x TP8 + EP (graph capture full)</strong> at 26.9 tok/s/GPU (concurrency 64)."
+        "Measured: best was <strong>4x TP8 + EP (graph capture full+piecewise)</strong> at 27.06 tok/s/accelerator (concurrency 64)."
       ],
       "title": "Sweep: cudagraph"
     },

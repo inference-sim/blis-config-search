@@ -218,14 +218,31 @@ jobs:
       GH_TOKEN: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
       HAS_BOT_TOKEN: ${{ secrets.PIN_BOT_TOKEN != '' }}
     steps:
+      # Branch from current main: a campaign outlives workflow edits, and a branch carrying
+      # stale workflow files is refused to GITHUB_TOKEN (no `workflows` scope).
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0       # see what main changed since the swept commit
           token: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
       - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install pyyaml
+      - name: Is the swept stack still the pinned one?
+        id: stack
+        run: |
+          set -euo pipefail
+          git show "$GITHUB_SHA:pins.env" > /tmp/swept-pins.env
+          moved="$(python3 -I scripts/blis_pin.py changed /tmp/swept-pins.env)"
+          if [ "$moved" = "{}" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::pins moved on main during this run ($moved); the regen run that move queued supersedes this one"
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
       # gh, not download-artifact@v8: v8 flattens a lone match, but a pattern always gets per-name dirs here.
       - name: Download the regenerated reports
+        if: steps.stack.outputs.current == 'true'
         env: { GH_TOKEN: "${{ github.token }}" }
         # Tolerate only "nothing to download" (the swap step reports it); any other error fails here.
         run: |
@@ -234,15 +251,21 @@ jobs:
           }
       - name: Swap the regenerated reports in
         id: swap
+        if: steps.stack.outputs.current == 'true'
         env:
           IDS: ${{ join(matrix.batch.ids, ' ') }}
         run: |
           set -euo pipefail
           art="$RUNNER_TEMP/regen-artifacts"
           cp -r reports "$RUNNER_TEMP/old-reports"
-          ok=""; failed=""
+          ok=""; failed=""; superseded=""
           for id in $IDS; do
-            if [ -f "$art/regen-$id/scenario.json" ]; then
+            if [ -f "$art/regen-$id/scenario.json" ] \
+               && [ -n "$(git log -1 --format=%H "$GITHUB_SHA..HEAD" -- "reports/$id")" ] \
+               && python3 -I scripts/blis_pin.py same-stack "reports/$id" "$art/regen-$id"; then
+              # Re-swept on main during the campaign: main's copy is already on this stack.
+              superseded="$superseded $id"
+            elif [ -f "$art/regen-$id/scenario.json" ]; then
               # Whole-directory swap: a file the new run no longer writes must not survive.
               rm -rf "reports/$id"
               cp -r "$art/regen-$id" "reports/$id"
@@ -251,16 +274,19 @@ jobs:
               failed="$failed $id"
             fi
           done
-          ok="$(echo $ok | xargs)"; failed="$(echo $failed | xargs)"
-          echo "regenerated: ${ok:-none}; failed: ${failed:-none}"
-          { echo "ok=$ok"; echo "failed=$failed"; } >> "$GITHUB_OUTPUT"
-          [ -n "$ok" ] || { echo "::error::no report in batch ${{ matrix.batch.name }} regenerated"; exit 1; }
+          ok="$(echo $ok | xargs)"; failed="$(echo $failed | xargs)"; superseded="$(echo $superseded | xargs)"
+          echo "regenerated: ${ok:-none}; failed: ${failed:-none}; already current on main: ${superseded:-none}"
+          { echo "ok=$ok"; echo "failed=$failed"; echo "superseded=$superseded"; } >> "$GITHUB_OUTPUT"
+          [ -n "$ok" ] || [ -z "$failed" ] || { echo "::error::no report in batch ${{ matrix.batch.name }} regenerated"; exit 1; }
       - name: Build the site to validate the regenerated reports
+        if: steps.swap.outputs.ok != ''
         run: python3 -I scripts/build_gallery.py --out /tmp/site-check
       - name: Open the batch PR
+        if: steps.swap.outputs.ok != ''
         env:
           OK: ${{ steps.swap.outputs.ok }}
           FAILED: ${{ steps.swap.outputs.failed }}
+          SUPERSEDED: ${{ steps.swap.outputs.superseded }}
           BATCH: ${{ matrix.batch.name }}
           BLIS_REF: ${{ needs.plan.outputs.blis_ref }}
         run: |
@@ -286,7 +312,9 @@ jobs:
           (inference-sim **$BLIS_REF**, merged in ${GITHUB_SHA::10}).
 
           $table
-
+          ${SUPERSEDED:+
+          Kept main's copy, already re-swept on this stack during the run: $SUPERSEDED
+          }
           Each report was re-run from its own experiment spec at its recorded seed, by the
           deterministic sweeper (no LLM). The directory is replaced whole,
           so nothing from the old run survives beside the new one.

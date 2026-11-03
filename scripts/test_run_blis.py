@@ -461,15 +461,24 @@ class FabricSelection(unittest.TestCase):
         self.assertIn(f"fabric: {run_blis.DEFAULT_FABRIC}", y)
         self.assertEqual(run_blis.DEFAULT_FABRIC, "ib-400g")
 
-    def test_fabric_changes_the_scenario_identity(self):
-        """Two runs differing only in fabric must get different scenario files, or the second
-        reuses a pool priced on the wrong interconnect."""
+    def test_multinode_fabric_changes_the_scenario_identity(self):
+        """Two MULTI-NODE runs differing only in fabric must get different scenario files, or the
+        second reuses a pool priced on the wrong interconnect."""
         import tempfile
         d = tempfile.mkdtemp()
         par, eng = {"tp": 8, "pp": 1, "dp": 1}, {"block_size": 16}
         a = run_blis.write_scenario(d, "m", "h100", "0.29.0", par, eng, 16, "ib-400g")
         b = run_blis.write_scenario(d, "m", "h100", "0.29.0", par, eng, 16, "roce-200g")
         self.assertNotEqual(a, b)
+
+    def test_cli_exposes_fabric_with_the_ib_default(self):
+        import argparse
+        p = argparse.ArgumentParser()
+        run_blis.add_common_args(p)
+        self.assertEqual(p.parse_args(["--scenarios", "s", "--model", "m",
+                                       "--hardware", "h100"]).fabric, run_blis.DEFAULT_FABRIC)
+        self.assertEqual(p.parse_args(["--scenarios", "s", "--model", "m", "--hardware", "h100",
+                                       "--fabric", "roce-200g"]).fabric, "roce-200g")
 
 
 class BuildCmd(unittest.TestCase):

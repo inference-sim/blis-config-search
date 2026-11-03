@@ -1488,6 +1488,12 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                           # asks that reuse be recorded, so a report can state it.
                           "reused_from_other_hardware": bool(
                               al_src and hardware and f"({hardware})" not in al_src)}
+    # Fabric prices cross-node traffic only, so a single-node run names none and is normalized to
+    # the default BEFORE the scenario hash -- otherwise two single-node runs differing only in a
+    # fabric that never reaches the YAML would hash to different files, and the explorer (which
+    # reconstructs with the recorded, normalized fabric) could not match the recorded name.
+    multinode = bool(pd) or pool_nodes(parallel, num_instances) > 1
+    fabric = fabric if multinode else DEFAULT_FABRIC
     scenario_name = write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine,
                                    num_instances, fabric, router)
     if replay:
@@ -1520,9 +1526,9 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                        "gpus": pd_total_gpus(pd) if pd else fp * num_instances,
                        "disaggregated": bool(pd),
                        # The inter-node fabric this run was priced over, so the report shows the
-                       # real interconnect instead of assuming IB. Single-node runs price no
-                       # cross-node traffic, so the scenario names no fabric and neither does this.
-                       "fabric": fabric if (pd or pool_nodes(parallel, num_instances) > 1) else None,
+                       # real interconnect instead of assuming IB. None on a single node, which
+                       # prices no cross-node traffic (fabric was normalized to the default above).
+                       "fabric": fabric if multinode else None,
                        "scenario": scenario_name, "router": router or None,
                        # The acceptance the drafting run was priced with, so the report can
                        # derive a correct per-token rate instead of a per-STEP one.
@@ -1543,6 +1549,9 @@ def add_common_args(p):
     p.add_argument("--scenarios", required=True, help="dir to write/read generated scenario YAMLs")
     p.add_argument("--model", required=True, help="catalog short-name, e.g. glm-5.3-flash")
     p.add_argument("--hardware", required=True, help="scenario hardware key, e.g. h100")
+    p.add_argument("--fabric", default=DEFAULT_FABRIC,
+                   help=f"inter-node fabric (catalog networks/ class) for a multi-node run; "
+                        f"ignored on a single node (default: {DEFAULT_FABRIC})")
     p.add_argument("--engine-version", dest="engine_version", default=None,
                    help="vLLM release to model (default: pins.env VLLM_REF)")
     p.add_argument("--workload")
@@ -1624,7 +1633,8 @@ def main():
     rec = run_one(args.blis, args.catalog, args.registry, args.scenarios, args.model, args.hardware,
                   args.engine_version or pinned_engine_version(), args.workload, args.num_requests,
                   args.seed, args.horizon,
-                  json.loads(args.config), args.phase, args.timeout, args.defaults, replay)
+                  json.loads(args.config), args.phase, args.timeout, args.defaults, replay,
+                  fabric=args.fabric)
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         with open(args.out, "a") as f:

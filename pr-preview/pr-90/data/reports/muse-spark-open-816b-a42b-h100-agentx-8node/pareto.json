@@ -1366,9 +1366,9 @@
   ],
   "run_id": "muse-spark-open-816b-a42b-h100-agentx-8node",
   "winner": {
-    "chosen": "4x TP8 + EP",
+    "chosen": "4x TP8xPP2 + EP",
     "label": "4x TP8xPP2 + EP",
-    "reason": "4x TP8 + EP in sweep 'pipeline' gives the most tok/s/accelerator (12.86 tok/s/accelerator, 822.9 tok/s fleet) while holding the scenario's SLOs, at concurrency 128.",
+    "reason": "4x TP8xPP2 + EP in sweep 'pipeline' gives the most tok/s/accelerator (12.86 tok/s/accelerator, 822.9 tok/s fleet) while holding the scenario's SLOs, at concurrency 128.",
     "sweep": "pipeline",
     "variant": ""
   }

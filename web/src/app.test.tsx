@@ -745,6 +745,22 @@ describe('footer pinned-stack disclosure', () => {
     expect(root.getAttribute('title')).toContain('v0.12.0')
   })
 
+  it('links each pill to its repo at the pinned tag', () => {
+    render(<Footer catalog={cat()} />)
+    fireEvent.click(toggle())
+    const hrefs = [...document.querySelectorAll('.footstack a.pill')].map((a) => a.getAttribute('href'))
+    expect(hrefs[0]).toBe('https://github.com/inference-sim/inference-sim/tree/v0.12.0')
+    expect(hrefs).toContain('https://github.com/inference-sim/blis-catalog/tree/0.4.0')
+    expect(hrefs).toHaveLength(5)
+  })
+
+  it('links an unpinned dep to the repo root, not a tag that does not exist', () => {
+    const absent: Catalog['stack'] = { root: stack!.root, deps: [{ name: 'blis-registry', version: 'absent', note: '' }] }
+    render(<Footer catalog={cat({ stack: absent })} />)
+    fireEvent.click(toggle())
+    expect(document.querySelectorAll('.footstack a.pill')[1].getAttribute('href')).toBe('https://github.com/inference-sim/blis-registry')
+  })
+
   it('shows no toggle when the stack somehow has none', () => {
     render(<Footer catalog={cat({ stack: { root: stack!.root, deps: [] } })} />)
     expect(screen.queryByRole('button')).toBeNull()

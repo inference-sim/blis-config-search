@@ -9,6 +9,19 @@ import { SPEC_DOC } from '../lib'
 // The stack is ONE dependency, not a flat row of peers: the BLIS simulator binary prices every
 // run, and the kernel/catalog/registry are what that binary resolves to. So BLIS is the only
 // pill shown at rest; the +N toggle reveals the transitives (see build_catalog._stack).
+// Every pinned repo lives under the inference-sim org (llm-d-router is its fork), so link the tag.
+const GH = 'https://github.com/inference-sim'
+const repoUrl = (name: string, version: string) =>
+  /^v?\d/.test(version) ? `${GH}/${name}/tree/${version}` : `${GH}/${name}`
+
+function Pill({ name, version, title }: { name: string; version: string; title: string }) {
+  return (
+    <a className="pill" href={repoUrl(name, version)} target="_blank" rel="noreferrer" title={title}>
+      <span className="pk">{name}</span> {version}
+    </a>
+  )
+}
+
 function StackPills({ stack }: { stack: Stack }) {
   const [open, setOpen] = useState(false)
   // The root lists every version that priced a committed report, pin first; show only the pin.
@@ -17,14 +30,8 @@ function StackPills({ stack }: { stack: Stack }) {
   const n = stack.deps.length
   return (
     <span className="footstack">
-      <span className="pill" title={title}>
-        <span className="pk">{stack.root.name}</span> {pinned}
-      </span>
-      {open && stack.deps.map((d) => (
-        <span className="pill" key={d.name} title={d.note}>
-          <span className="pk">{d.name}</span> {d.version}
-        </span>
-      ))}
+      <Pill name={stack.root.name} version={pinned} title={title} />
+      {open && stack.deps.map((d) => <Pill key={d.name} name={d.name} version={d.version} title={d.note} />)}
       {n > 0 && (
         <button
           type="button"

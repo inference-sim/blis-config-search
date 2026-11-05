@@ -138,6 +138,217 @@ class ResultDocument(unittest.TestCase):
         self.assertEqual({}, m)
 
 
+MEASURED_DOC = json.loads(RESULT_DOC)
+MEASURED_DOC["metrics"].update({"interactivity_mean": 41.2, "interactivity_p50": 40.1,
+                                "interactivity_p90": 31.5, "itl_p50_ms": 24.9,
+                                "ttft_p50_ms": 340.2, "e2e_p50_ms": 2050.4})
+MEASURED_DOC["metric_defs"] = {k: {"formula": "f", "statistic": k.rsplit("_", 1)[-1]}
+                               for k in MEASURED_DOC["metrics"]}
+
+
+def _fake_blis(stdout, rc=0):
+    """A stub `blis` that prints `stdout` and exits rc, so run_one runs end to end."""
+    d = tempfile.mkdtemp()
+    out = os.path.join(d, "stdout.txt")
+    with open(out, "w") as f:
+        f.write(stdout)
+    exe = os.path.join(d, "blis")
+    with open(exe, "w") as f:
+        f.write(f"#!/bin/sh\ncat {out}\nexit {rc}\n")
+    os.chmod(exe, 0o755)
+    return d, exe
+
+
+class MeasuredWindow(unittest.TestCase):
+    """Issue #97: the Result document's measured window rides along, verbatim, under `measured`."""
+
+    def _run(self, stdout, rc=0, **kw):
+        import shutil
+        d, exe = _fake_blis(stdout, rc)
+        self.addCleanup(shutil.rmtree, d, True)
+        cfg = {"tp": 1, "num_instances": 1, "concurrency": 4}
+        return d, run_blis.run_one(exe, None, os.path.join(d, "reg"), os.path.join(d, "sc"),
+                                   "m", "h100", "v0", None, 16, 0, None, cfg, **kw)
+
+    def test_copied_verbatim_with_defs(self):
+        mw = run_blis.measured_window(MEASURED_DOC)
+        self.assertEqual(mw["metrics"], MEASURED_DOC["metrics"])
+        self.assertEqual(mw["metric_defs"], MEASURED_DOC["metric_defs"])
+        for k in ("interactivity_mean", "interactivity_p50", "interactivity_p90",
+                  "itl_p50_ms", "ttft_p50_ms", "e2e_p50_ms"):
+            self.assertIn(k, mw["metrics"])
+            self.assertIn(k, mw["metric_defs"])
+
+    def test_absent_without_a_top_level_metrics_block(self):
+        doc = json.loads(RESULT_DOC)
+        del doc["metrics"]
+        self.assertIsNone(run_blis.measured_window(doc))
+        self.assertIsNone(run_blis.measured_window(None))
+
+    def test_run_one_records_it_and_leaves_legacy_metrics_alone(self):
+        _, rec = self._run(json.dumps(MEASURED_DOC))
+        self.assertIsNone(rec["error"], rec["error"])
+        self.assertEqual(rec["measured"]["metrics"]["interactivity_p50"], 40.1)
+        # whole-run basis untouched: itl_p99 is still the step interval, not the measured 33.87
+        self.assertEqual(rec["metrics"], run_blis.parse_metrics(json.dumps(MEASURED_DOC)))
+        self.assertEqual(rec["metrics"]["itl_p99_ms"], 294.031)
+        self.assertNotIn("result", rec)
+
+    def test_run_one_omits_it_when_blis_printed_none(self):
+        doc = json.loads(RESULT_DOC)
+        del doc["metrics"]
+        _, rec = self._run(json.dumps(doc))
+        self.assertNotIn("measured", rec)
+        _, rec = self._run('{"instance_id":"cluster","tokens_per_sec":11.0}')   # pre-v0.15.0
+        self.assertNotIn("measured", rec)
+        _, rec = self._run(json.dumps(MEASURED_DOC), rc=1)                    # failed run
+        self.assertNotIn("measured", rec)
+
+    def test_full_document_saved_on_request(self):
+        import gzip, hashlib
+        s = json.dumps(MEASURED_DOC)
+        d, rec = self._run(s, result_dir=None)
+        rd = os.path.join(d, "run")
+        _, rec = self._run(s, result_dir=os.path.join(rd, "results"), run_dir=rd)
+        ref = rec["result"]
+        self.assertTrue(ref["path"].startswith("results/") and ref["path"].endswith(".gz"))
+        self.assertEqual(ref["sha256"], hashlib.sha256(s.encode()).hexdigest())
+        with open(os.path.join(rd, ref["path"]), "rb") as f:
+            raw = f.read()
+        self.assertEqual(gzip.decompress(raw).decode(), s)
+        # deterministic bytes: saving again gives the same file
+        again = run_blis.save_result(s, os.path.join(d, "other"))
+        with open(os.path.join(d, again["path"]), "rb") as f:
+            self.assertEqual(f.read(), raw)
+
+    def test_result_path_is_always_relative(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        s = json.dumps(MEASURED_DOC)
+        for run_dir in (None, d, os.path.join(d, "elsewhere")):
+            ref = run_blis.save_result(s, os.path.join(d, "results"), run_dir)
+            self.assertFalse(os.path.isabs(ref["path"]), ref["path"])
+            self.assertNotIn("\\", ref["path"])
+            self.assertTrue(os.path.isfile(os.path.normpath(os.path.join(run_dir or d, ref["path"]))))
+
+    def test_unreachable_result_dir_is_refused_not_rebased(self):
+        # Windows cross-drive: relpath raises; the record must never silently switch its base.
+        real = os.path.relpath
+
+        def cross_drive(path, start=os.curdir):
+            raise ValueError("path is on mount 'D:', start on mount 'C:'")
+        os.path.relpath = cross_drive
+        try:
+            with self.assertRaises(ValueError):
+                run_blis.check_result_dir("D:/results", "C:/run")
+            with self.assertRaises(ValueError):
+                run_blis.save_result("{}", tempfile.mkdtemp(), "C:/run")
+        finally:
+            os.path.relpath = real
+        run_blis.check_result_dir(os.path.join(tempfile.gettempdir(), "r"), tempfile.gettempdir())
+
+
+class ConfigKey(unittest.TestCase):
+    def test_shared_across_concurrency(self):
+        a = run_blis._record_shell({"tp": 8, "num_instances": 2, "concurrency": 16}, "p")
+        b = run_blis._record_shell({"concurrency": 64, "num_instances": 2, "tp": 8}, "p")
+        self.assertEqual(a["config_key"], b["config_key"])
+        self.assertNotEqual(a["config_hash"], b["config_hash"])
+
+    def test_differs_across_configs(self):
+        a = run_blis._record_shell({"tp": 8, "concurrency": 16}, "p")
+        b = run_blis._record_shell({"tp": 4, "concurrency": 16}, "p")
+        self.assertNotEqual(a["config_key"], b["config_key"])
+
+    def test_config_hash_unchanged(self):
+        # the committed ledgers' hashes must not move
+        with open(SAMPLE_RUNS) as f:
+            for line in f:
+                r = json.loads(line)
+                shell = run_blis._record_shell(r["config"], r["phase"])
+                self.assertEqual(shell["config_hash"], r["config_hash"])
+
+    def test_error_rows_carry_it(self):
+        rec = run_blis.run_one("/nonexistent", None, "/reg", tempfile.mkdtemp(), "m", "h100",
+                               "v0", None, 16, 0, None, {"bogus_knob": 1, "concurrency": 2})
+        self.assertEqual(rec["config_key"], run_blis.config_key({"bogus_knob": 1}))
+
+
+SAMPLE_RUN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata", "sample-run")
+SAMPLE_RUNS = os.path.join(SAMPLE_RUN, "runs.jsonl")
+
+
+class NewFieldsChangeNoVerdict(unittest.TestCase):
+    """Feasibility, ranking and rendered output are identical with or without the new fields."""
+
+    def _augmented(self, runs):
+        out = []
+        for r in runs:
+            r = json.loads(json.dumps(r))
+            r["config_key"] = run_blis.config_key(r["config"])
+            r["measured"] = {"metrics": {"itl_p99_ms": 1.0, "ttft_p99_ms": 1.0,
+                                         "interactivity_p50": 9999.0, "output_tok_s": 1e9},
+                             "metric_defs": {"itl_p99_ms": {"formula": "f"}}}
+            r["result"] = {"path": "results/x.gz", "sha256": "0" * 64}
+            out.append(r)
+        return out
+
+    def test_sample_run(self):
+        import report
+        import run_experiment
+        with open(SAMPLE_RUNS) as f:
+            runs = [json.loads(l) for l in f if l.strip()]
+        aug = self._augmented(runs)
+        with open(os.path.join(SAMPLE_RUN, "scenario.json")) as f:
+            scen = json.load(f)
+        floor, slos = scen.get("interactivity_floor"), {"itl_p99": 20, "ttft_p99": 400}
+        for a, b in zip(runs, aug):
+            self.assertEqual(report._feasible(a, floor, slos), report._feasible(b, floor, slos))
+            self.assertEqual(report._per_user_rate(a), report._per_user_rate(b))
+            gpus = (a.get("deployment") or {}).get("gpus")
+            self.assertEqual(run_experiment.servable(a, slos, gpus),
+                             run_experiment.servable(b, slos, gpus))
+            self.assertEqual(run_experiment.run_row(a, a["config"], "l", "", "s", 1, gpus),
+                             run_experiment.run_row(b, b["config"], "l", "", "s", 1, gpus))
+        rank = lambda rs: run_experiment.best_of([
+            {**run_experiment.run_row(r, r["config"], str(i), "", "s", r["concurrency"],
+                                      r["deployment"]["gpus"]),
+             "servable": run_experiment.servable(r, slos, r["deployment"]["gpus"])[0]}
+            for i, r in enumerate(rs)])
+        self.assertEqual(rank(runs), rank(aug))
+        self.assertEqual(report.provenance_split(runs), report.provenance_split(aug))
+
+    def test_rendered_site(self):
+        # sample-run's pareto.json predates the gallery's winner format, so render a committed
+        # report instead; the smallest keeps this fast.
+        import shutil
+        import build_gallery
+        src = os.path.join(os.path.dirname(SAMPLE_RUN), os.pardir, os.pardir, "reports",
+                           "muse-spark-open-816b-a42b-h200-agentx-8gpu")
+        if not os.path.isdir(src):
+            self.skipTest("committed report not present")
+        with open(os.path.join(src, "runs.jsonl")) as f:
+            runs = [json.loads(l) for l in f if l.strip()]
+
+        def site(ledger):
+            tmp = tempfile.mkdtemp()
+            self.addCleanup(shutil.rmtree, tmp, True)
+            rd = os.path.join(tmp, "reports", os.path.basename(src))
+            shutil.copytree(src, rd)
+            with open(os.path.join(rd, "runs.jsonl"), "w") as f:
+                f.writelines(json.dumps(r, sort_keys=True) + "\n" for r in ledger)
+            out = os.path.join(tmp, "site")
+            build_gallery.build(os.path.join(tmp, "reports"), out)
+            files = {}
+            for root, _, names in os.walk(out):
+                for n in names:
+                    p = os.path.join(root, n)
+                    with open(p, "rb") as f:
+                        files[os.path.relpath(p, out)] = f.read()
+            return files
+        self.assertEqual(site(runs), site(self._augmented(runs)))
+
+
 class CompletionIssue(unittest.TestCase):
     def test_clean(self):
         self.assertIsNone(run_blis._completion_issue(

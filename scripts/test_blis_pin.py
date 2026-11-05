@@ -30,15 +30,15 @@ def check(cond, msg):
         print(f"  FAIL: {msg}")
 
 
+# TEMPORARY: the inference-sim commands, from scripts/testdata/blis-m1 (inference-sim#2077).
+FIXTURE_BLIS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata", "blis-m1",
+                            "blis")
+
 GO_MOD = """module github.com/inference-sim/inference-sim
 
 require (
-\tgithub.com/inference-sim/blis-schemas v0.10.0
-\tgithub.com/inference-sim/blis-vllm v0.32.0-blis.1
-)
-
-require (
-\tgithub.com/inference-sim/blis-latency-kernel v0.5.0 // indirect
+\tgithub.com/inference-sim/blis-substrate v0.11.0
+\tgithub.com/inference-sim/blis-vllm v0.32.0-blis.2
 )
 
 replace github.com/llm-d/llm-d-router => github.com/inference-sim/llm-d-router v1.0.0-blis.2
@@ -58,9 +58,8 @@ def test_version_ordering():
 def test_go_mod_versions():
     print("test_go_mod_versions")
     mods = B.go_mod_versions(GO_MOD)
-    check(mods.get("blis-latency-kernel") == "v0.5.0",
-          "the kernel is read from go.mod even when it is an indirect requirement")
-    check(mods.get("blis-schemas") == "v0.10.0", "schemas version is read")
+    check(mods.get("blis-substrate") == "v0.11.0", "the substrate version is read")
+    check(mods.get("blis-vllm") == "v0.32.0-blis.2", "the engine version is read")
     check(mods.get("llm-d-router") == "v1.0.0-blis.2", "the router fork is read from its replace")
 
 
@@ -68,7 +67,7 @@ def test_sync_pins_reads_replace():
     print("test_sync_pins_reads_replace")
     import sync_pins
     got = sync_pins.derive_from_text(GO_MOD)
-    check(got == {"SCHEMAS_REF": "v0.10.0", "VLLM_REF": "v0.32.0-blis.1", "KERNEL_REF": "v0.5.0",
+    check(got == {"SUBSTRATE_REF": "v0.11.0", "VLLM_REF": "v0.32.0-blis.2",
                   "ROUTER_REF": "v1.0.0-blis.2"}, f"derived pins: {got}")
     block = sync_pins.derive_from_text("replace (\n\tgithub.com/llm-d/llm-d-router v0.0.0 => "
                                        "github.com/inference-sim/llm-d-router v1.0.0-blis.3\n)\n")
@@ -131,14 +130,25 @@ def test_bump_end_to_end_on_copies():
         shutil.copy(B.PINS, pins)
         shutil.copy(B.SETUP, setup)
         cur = B.read_pins(pins)
+        if not B.semver(cur["BLIS_REF"]):
+            # A draft pins a branch commit; the bot orders only release tags, so start the copy
+            # from one. rewrite_setup moves the same four lines whatever the old ref is.
+            with open(pins) as f:
+                text = B.rewrite_pins(f.read(), {"BLIS_REF": "v0.15.0"})
+            with open(pins, "w") as f:
+                f.write(text)
+            with open(setup) as f:
+                text = B.rewrite_setup(f.read(), cur["BLIS_REF"], "v0.15.0", cur["BLIS_SHA"], "x")
+            with open(setup, "w") as f:
+                f.write(text)
+            cur = B.read_pins(pins)
         moved = B.bump("v99.0.0", sha="e" * 40, go_mod=GO_MOD, release_name="v99.0.0: big",
                        pins_path=pins, setup_path=setup)
         after = B.read_pins(pins)
         check(after["BLIS_REF"] == "v99.0.0" and after["BLIS_SHA"] == "e" * 40, "pin moved")
-        check(after["KERNEL_REF"] == "v0.5.0", "KERNEL_REF follows the release's go.mod")
-        check(after["VLLM_REF"] == "v0.32.0-blis.1" and after["SCHEMAS_REF"] == "v0.10.0"
-              and after["ROUTER_REF"] == "v1.0.0-blis.2",
-              "every derived pin follows the release's go.mod, not just the kernel")
+        check(after["SUBSTRATE_REF"] == "v0.11.0", "SUBSTRATE_REF follows the release's go.mod")
+        check(after["VLLM_REF"] == "v0.32.0-blis.2" and after["ROUTER_REF"] == "v1.0.0-blis.2",
+              "every derived pin follows the release's go.mod")
         check(after["CATALOG_REF"] == cur["CATALOG_REF"]
               and after["REGISTRY_REF"] == cur["REGISTRY_REF"],
               "catalog/registry are NOT guessed -- the PR asks a reviewer")
@@ -364,25 +374,25 @@ def test_smoke_verdicts():
         try:
             run_blis.run_one = fake(lambda c: _rec(c, 81.0 if c.get("max_num_seqs") else
                                                    91.0 if c.get("router_config") else 101.0))
-            r = B.smoke("r", "blis", "cat", "reg", root=root)
+            r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
             check(not r["failures"], f"numbers moved but knobs still act: no failure {r['failures']}")
             check(any(c.get("router_config") == os.path.join(root, "routing", "queue.yaml")
                       for c in seen), "a ledger's absolute router path is mapped to this checkout")
             run_blis.run_one = fake(lambda c: _rec(c, 100.0))
-            r = B.smoke("r", "blis", "cat", "reg", root=root)
+            r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
             check(any(f.startswith("SILENT") and "max_num_seqs" in f for f in r["failures"]),
                   f"a knob that moved before and is identical now is SILENT: {r['failures']}")
             run_blis.run_one = fake(lambda c: _rec(c, 99.0, error="overloaded: still_queued=3"))
-            r = B.smoke("r", "blis", "cat", "reg", root=root)
+            r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
             check(not r["failures"] and len(r["warnings"]) == 3,
                   f"a row that runs but tips into overload is a warning, not LOUD: {r}")
             check("**Warnings**" in B.smoke_markdown([r]), "the comment lists the warnings")
             run_blis.run_one = fake(lambda c: _rec(c, 0, error="unsupported config: x"))
-            r = B.smoke("r", "blis", "cat", "reg", root=root)
+            r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
             check(sum(f.startswith("LOUD") for f in r["failures"]) == 3,
                   "a config the new stack refuses is LOUD")
             run_blis.run_one = fake(lambda c: _rec(c, 0, rc=1, error="field x not found"))
-            r = B.smoke("r", "blis", "cat", "reg", root=root)
+            r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
             check(sum(f.startswith("LOUD") for f in r["failures"]) == 3,
                   "every row that ran before and fails now is LOUD")
             check("field x not found" in r["failures"][0], "the engine's own reason is quoted")
@@ -390,53 +400,6 @@ def test_smoke_verdicts():
             check("**FAIL**" in md and "fix these on this PR" in md, "the comment says what to do")
         finally:
             run_blis.run_one = real
-    finally:
-        shutil.rmtree(root)
-
-
-def test_drift():
-    print("test_drift")
-    import validate_experiment as V
-    root = tempfile.mkdtemp()
-    try:
-        def put(rel, text):
-            path = os.path.join(root, rel)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w") as f:
-                f.write(text)
-        eng = sorted(V.ENGINE_KNOBS)
-        put("blis-vllm/rules/engineconfig/fieldnames_test.go",
-            "want := map[string]string{\n" + "".join(f'\t"{n}": "x",\n' for n in eng) + "}\n")
-        put("blis-schemas/spec/deployment/deployment.go",
-            "type Parallelism struct {\n" + "".join(f'\tX int `yaml:"{n},omitempty"`\n'
-                                                   for n in sorted(V.PARALLEL_KNOBS)) + "}\n")
-        pack = "".join(f'\t{f}: set({", ".join(chr(34) + v + chr(34) for v in V.ENGINE_ENUMS[k])}),\n'
-                       for f, k in (("CUDAGraphModes", "cudagraph_mode"),
-                                    ("CacheDTypes", "cache_dtype")))
-        put(f"blis-vllm/rules/{V.RULES_PACK}/pack.go", pack)
-        check(B.drift(root) == [], f"tables that match the stack: no drift {B.drift(root)}")
-        put("blis-vllm/rules/engineconfig/fieldnames_test.go",
-            "want := map[string]string{\n" + "".join(f'\t"{n}": "x",\n' for n in eng[1:])
-            + '\t"brand_new_knob": "x",\n}\n')
-        d = B.drift(root)
-        check(any("brand_new_knob" in x for x in d), "a knob the stack added is reported")
-        check(any(eng[0] in x and "no longer defines" in x for x in d),
-              "a knob the stack removed is reported")
-        put(f"blis-vllm/rules/{V.RULES_PACK}/pack.go", pack.replace('"FULL"', '"FULL", "NEW_MODE"'))
-        check(any("NEW_MODE" in x for x in B.drift(root)), "a new enum value is reported")
-        put("blis-vllm/rules/v0_99/pack.go", pack)
-        check(any("v0_99" in x for x in B.drift(root)),
-              "a newer rules pack upstream means the reader is reading a stale vLLM")
-        check(len(B.drift(os.path.join(root, "nothing-here"))) >= 3,
-              "missing upstream files fail loudly, never read as 'no drift'")
-        nothing = os.path.join(root, "nothing-here")
-        check(B.drift(nothing, {"blis-latency-kernel": "v0.3.0"}) == [],
-              "a module the release does not require (v0.12.0 has no blis-vllm) is not drift")
-        req = B.drift(nothing, {"blis-vllm": "v0.32.0", "blis-schemas": "v0.8.0"})
-        check(len(req) >= 3, "a REQUIRED module whose files cannot be read still fails loudly")
-        only_schemas = B.drift(nothing, {"blis-schemas": "v0.5.0"})
-        check(len(only_schemas) == 1 and "parallel" in only_schemas[0],
-              f"only the required module's checks run: {only_schemas}")
     finally:
         shutil.rmtree(root)
 
@@ -485,11 +448,14 @@ def test_workflow_wiring():
     gate = compat.split("\n  gate:", 1)[-1]
     check("if: always()" in gate and "needs: [changed, build, smoke]" in gate,
           "`gate` always reports, so it is the one check that can be marked required")
-    check("--go-mod upstream/go.mod" in compat and "--go-mod upstream/go.mod" in regen,
-          "drift is told which modules the release requires")
+    for name, text in (("pin-compat.yml", compat), ("regen-reports.yml", regen)):
+        check("validate_experiment.py experiments/ --blis upstream/blis" in text,
+              f"{name} validates every spec against the new binary's commands")
+        check("blis_pin.py drift" not in text and "blis-schemas" not in text,
+              f"{name} compares no copied settings table against sibling checkouts")
     check(sha not in compat and ". ./pins.env" in compat and "$BLIS_SHA" in compat,
           "pin-compat.yml reads the pin from pins.env and refuses a moved tag")
-    for step in ("blis_pin.py drift", "blis_pin.py smoke", "blis_pin.py modules"):
+    for step in ("blis_pin.py smoke",):
         check(step in compat, f"the gate runs `{step}`")
     check("fail-fast: false" in compat, "one report's smoke failure must not hide the others'")
     check("<!-- pin-compat -->" in compat and "comment \"$PR\" --edit-last" not in compat,
@@ -509,8 +475,6 @@ def test_workflow_wiring():
         check("gh label create auto-update --force" in text and f"gh label create {kind} --force" in text,
               f"{name} creates its labels first: `gh pr create --label` fails on a missing label")
         check("issues: write" in text, f"{name} needs issues: write to create labels")
-    check("blis_pin.py drift" in regen,
-          "regeneration re-checks drift, so a pin that skipped the gate cannot start a campaign")
     checks_yml = open(os.path.join(wf, "checks.yml")).read()
     check("workflow_dispatch:" in checks_yml.split("\njobs:")[0],
           "checks.yml is dispatchable: a GITHUB_TOKEN PR event starts no workflows")
@@ -537,7 +501,6 @@ if __name__ == "__main__":
     test_summary_table()
     test_smoke_pairs()
     test_smoke_verdicts()
-    test_drift()
     test_workflow_wiring()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

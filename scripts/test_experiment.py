@@ -25,7 +25,12 @@ except ImportError:
 import run_experiment as E          # noqa: E402
 import validate_experiment as V     # noqa: E402
 import run_blis                     # noqa: E402
+import blis_cli                     # noqa: E402
+import settings                     # noqa: E402
 import fetch_corpus as FC           # noqa: E402
+
+# TEMPORARY: the inference-sim commands, from scripts/testdata/blis-m1 (inference-sim#2077).
+BLIS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata", "blis-m1", "blis")
 
 EXPERIMENTS = os.path.join(ROOT, "experiments")
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata")
@@ -58,7 +63,7 @@ class CommittedSpecsValidate(unittest.TestCase):
                 continue
             doc, err = V.load(path)
             self.assertIsNone(err, f"{path}: {err}")
-            self.assertEqual([], V.validate(doc, ROUTING), f"{path} should validate")
+            self.assertEqual([], V.validate(doc, BLIS, ROUTING), f"{path} should validate")
 
     def test_every_fixture_expands_to_runs(self):
         """A spec that validates but expands to nothing is a spec nobody can learn from."""
@@ -212,7 +217,7 @@ class SchemaAgreesWithValidator(unittest.TestCase):
         for path in V.spec_paths(EXPERIMENTS):
             doc, err = V.load(path)
             self.assertIsNone(err, f"{path}: {err}")
-            self.assertEqual([], V.validate(doc, ROUTING), f"{path} should validate")
+            self.assertEqual([], V.validate(doc, BLIS, ROUTING), f"{path} should validate")
             errs = self.errors(doc)
             self.assertEqual(
                 [], errs,
@@ -228,7 +233,7 @@ class SchemaAgreesWithValidator(unittest.TestCase):
                 self.assertTrue(self.errors(doc),
                                 f"schema.json accepts a structurally-bad spec ({name}) that the "
                                 f"validator rejects -- the schema has drifted behind")
-                self.assertTrue(V.validate(copy.deepcopy(doc), ROUTING),
+                self.assertTrue(V.validate(copy.deepcopy(doc), BLIS, ROUTING),
                                 f"the validator accepts a structurally-bad spec ({name})")
 
     def test_the_corpus_is_one_mutation_off_a_spec_that_really_passes(self):
@@ -236,7 +241,7 @@ class SchemaAgreesWithValidator(unittest.TestCase):
         above would 'pass' for the wrong reason and the suite would go quietly blind."""
         base, err = V.load(os.path.join(FIXTURES, "engine-spec.yaml"))
         self.assertIsNone(err)
-        self.assertEqual([], V.validate(copy.deepcopy(base), ROUTING))
+        self.assertEqual([], V.validate(copy.deepcopy(base), BLIS, ROUTING))
         self.assertEqual([], self.errors(base))
 
     def test_the_schema_stays_looser_only_where_it_says_it_is(self):
@@ -249,17 +254,13 @@ class SchemaAgreesWithValidator(unittest.TestCase):
         def typo(d):
             d["sweeps"][0].setdefault("engine", {})["max_num_seq"] = [256]
 
-        def bad_enum(d):
-            d["sweeps"][0].setdefault("engine", {})["cudagraph_mode"] = ["full"]
-
         def bad_gpus(d):
             d["scenario"]["gpus"] = 8
             for sweep in d["sweeps"]:
                 sweep["num-instances"] = [3]
                 sweep.setdefault("parallel", {})["tp"] = [3]
 
-        for name, fn in (("knob name", typo), ("enum value", bad_enum),
-                         ("GPU arithmetic", bad_gpus)):
+        for name, fn in (("knob name", typo), ("GPU arithmetic", bad_gpus)):
             with self.subTest(case=name):
                 doc = copy.deepcopy(base)
                 fn(doc)
@@ -267,7 +268,7 @@ class SchemaAgreesWithValidator(unittest.TestCase):
                     [], self.errors(doc),
                     f"schema.json now catches {name}, which its description says it cannot "
                     f"reach -- either the description or the schema is wrong")
-                self.assertTrue(V.validate(copy.deepcopy(doc), ROUTING),
+                self.assertTrue(V.validate(copy.deepcopy(doc), BLIS, ROUTING),
                                 f"the validator must be the one catching {name}")
 
     def test_the_schema_says_it_is_not_the_authority(self):
@@ -286,7 +287,7 @@ class SchemaAgreesWithValidator(unittest.TestCase):
 
 class ValidatorRejects(unittest.TestCase):
     def errs(self, doc):
-        return V.validate(doc, ROUTING)
+        return V.validate(doc, BLIS, ROUTING)
 
     def test_scalar_knob_is_refused(self):
         bad = spec(sweeps=[{"name": "s", "num-instances": [2], "parallel": {"tp": 8}}])
@@ -412,22 +413,6 @@ class ValidatorRejects(unittest.TestCase):
         bad["scenario"]["cluster"] = {}
         self.assertTrue(any("scenario.cluster:" in e for e in self.errs(bad)))
 
-    def test_unknown_fabric_is_refused_against_the_catalog(self):
-        # A name the catalog's networks/ does not define fails every run of the sweep, so catch it
-        # before a build -- but only when a catalog is checked out, like the model/hardware check.
-        if not V._catalog()["present"] or not V._catalog()["fabrics"]:
-            self.skipTest("needs a ../blis-catalog checkout with networks/")
-        bad = spec()
-        bad["scenario"]["cluster"] = {"fabric": "ib-4000g"}  # typo
-        self.assertTrue(any("not a catalog fabric" in e for e in self.errs(bad)), self.errs(bad))
-
-    def test_known_fabric_validates(self):
-        if not V._catalog()["present"] or "roce-200g" not in V._catalog()["fabrics"]:
-            self.skipTest("needs a ../blis-catalog checkout with networks/roce-200g")
-        ok = spec()
-        ok["scenario"]["cluster"] = {"fabric": "roce-200g"}
-        self.assertEqual([], self.errs(ok))
-
     def test_duration_parsing(self):
         self.assertEqual(20.0, V.parse_duration_ms("20ms"))
         self.assertEqual(5000.0, V.parse_duration_ms("5s"))
@@ -436,10 +421,10 @@ class ValidatorRejects(unittest.TestCase):
         self.assertIsNone(V.parse_duration_ms("20 ms"))
 
     def test_knob_vocabulary_reports_its_source(self):
-        par, eng, source = V.knob_vocabulary()
-        self.assertIn("tp", par)
-        self.assertIn("max_num_seqs", eng)
-        self.assertTrue(source)
+        vocab = V.knob_vocabulary(BLIS)
+        self.assertIn("tp", vocab.parallel)
+        self.assertIn("max_num_seqs", vocab.engine_names())
+        self.assertIn("blis fields", vocab.source)
 
 
 # --- grid expansion ---------------------------------------------------------------------------
@@ -686,119 +671,65 @@ class Labelling(unittest.TestCase):
                          E.variant_of(cands[0], "prefix-affinity", base))
 
 
-class KnobSurfaceStaysInSync(unittest.TestCase):
-    """The three lists describing the engine surface must not drift apart.
+class KnobSurfaceComesFromTheSimulator(unittest.TestCase):
+    """The validator and the runner read one vocabulary, from the simulator (CFG-3)."""
 
-    Each drift has a specific, silent failure mode, so each gets a test rather than a comment.
-    """
+    def test_the_vocabulary_is_the_field_lists(self):
+        vocab = V.knob_vocabulary(BLIS)
+        fields = blis_cli.fields(BLIS, "vllm")
+        config = {f["name"] for f in fields["fields"] if f["source"] == "config"}
+        for name in vocab.flat - set(settings.ENGINE_BLOCK_NAMES):
+            self.assertIn(name, config, name)
+        self.assertEqual("0.32.0", vocab.release)
+        self.assertIn("blis fields", vocab.source)
 
-    def test_every_runner_knob_can_be_labelled(self):
-        """A swept knob missing from VARIANT_KEYS leaves every arm labelled "(baseline)".
+    def test_renamed_fields_are_known_by_the_engine_block_name_only(self):
+        """The engine block refuses vLLM's name for these four, so a spec must not use it."""
+        vocab = V.knob_vocabulary(BLIS)
+        self.assertIn("cache_dtype", vocab.flat)
+        self.assertNotIn("kv_cache_dtype", vocab.flat)
+        self.assertIn("method", vocab.blocks["speculative"])
+        self.assertNotIn("speculative_config", vocab.engine_names() - set(vocab.blocks))
+        self.assertIn("frontend", vocab.flat, "frontend is the engine block's VLLM_USE_RUST_FRONTEND")
 
-        That is how a cudagraph_mode sweep spanning 147 to 263 tok/s/GPU first rendered as four
-        indistinguishable rows: the runner carried the knob, the report could not name it.
-        """
-        missing = sorted(set(run_blis.SCENARIO_ENGINE) - set(E.VARIANT_KEYS))
-        self.assertEqual([], missing,
-                         f"engine knobs the runner carries but the report cannot name: {missing}")
+    def test_the_validator_and_the_runner_agree(self):
+        """A name the validator accepts is one the runner can carry, and the converse."""
+        vocab = V.knob_vocabulary(BLIS)
+        for name in sorted(vocab.flat)[:200]:
+            run_blis.classify_config({"tp": 8, name: 1}, vocab)
+        with self.assertRaises(run_blis.ConfigError):
+            run_blis.classify_config({"tp": 8, "max_num_seq": 1}, vocab)
 
-    def test_every_runner_knob_has_a_readable_name(self):
-        """A knob with no KNOB_NAMES entry prints its raw field name in a variant label."""
+    def test_the_repository_holds_no_copied_settings_list(self):
+        """CFG-3's check: no hand-kept list of engine settings, and no vllm_arg_policy.yaml."""
+        for path in glob.glob(os.path.join(ROOT, "**", "vllm_arg_policy*"), recursive=True):
+            self.fail(f"{path}: a copied settings list; read `blis fields` instead")
+        for mod in (V, run_blis, E):
+            for gone in ("ENGINE_KNOBS", "PARALLEL_KNOBS", "ENGINE_ENUMS", "SCENARIO_ENGINE",
+                         "ENGINE_NOT_WIRED", "ENGINE_DECODED_BUT_INERT", "NESTED_ENGINE_FIELDS"):
+                self.assertFalse(hasattr(mod, gone), f"{mod.__name__}.{gone}")
+
+    def test_every_variant_key_has_a_readable_name(self):
+        """A key with no KNOB_NAMES entry prints its raw field name in a variant label."""
         import topologies
-        bare = [k for k in run_blis.SCENARIO_ENGINE
-                if k not in topologies.KNOB_NAMES and k != "speculative"]
-        self.assertEqual([], bare, f"engine knobs with no readable name: {bare}")
+        bare = [k for k in E.VARIANT_KEYS if k not in topologies.KNOB_NAMES]
+        self.assertEqual([], bare, f"variant keys with no readable name: {bare}")
 
-    def test_validator_accepts_every_knob_the_runner_can_carry(self):
-        """A knob the runner carries but the validator rejects is unreachable by any spec."""
-        unreachable = sorted(set(run_blis.SCENARIO_ENGINE) - set(V.ENGINE_KNOBS))
-        self.assertEqual([], unreachable,
-                         f"runner carries but validator rejects: {unreachable}")
+    def test_a_simulator_without_the_commands_is_an_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            fake = os.path.join(d, "blis")
+            with open(fake, "w") as f:
+                f.write("#!/bin/sh\necho 'unknown command' >&2\nexit 1\n")
+            os.chmod(fake, 0o755)
+            with self.assertRaises(blis_cli.BlisCommandError) as e:
+                V.knob_vocabulary(fake)
+            self.assertIn("unknown command", str(e.exception))
 
-    def test_validator_rejects_every_knob_the_runner_cannot_carry(self):
-        """The converse: a name that validates but dies at run time wastes the whole sweep.
-
-        The validator's name list is vLLM v0.32.0's (~51 fields), while the pinned stack's
-        blis-schemas has 31, so the difference MUST be covered by ENGINE_NOT_WIRED.
-        """
-        carried = set(run_blis.SCENARIO_ENGINE) | {"speculative"}
-        gap = sorted(set(V.ENGINE_KNOBS) - carried - set(V.ENGINE_NOT_WIRED))
-        self.assertEqual([], gap,
-                         f"these validate but the runner would refuse them at run time: {gap}")
-
-    def test_not_wired_names_are_refused_by_the_runner_too(self):
-        """Both layers must agree a knob is unavailable, and say why."""
-        for knob in sorted(V.ENGINE_NOT_WIRED):
-            with self.assertRaises(run_blis.ConfigError, msg=knob):
-                run_blis.classify_config({"tp": 8, "num_instances": 1, knob: 1})
-
-    def test_not_wired_reasons_match_the_runners(self):
-        """The validator runs first, so its reason is the one a spec author sees: keep it the
-        runner's reason, not a stale copy of it."""
-        for knob, why in {**V.ENGINE_NOT_MODELLED, **V.ENGINE_CONDITIONAL}.items():
-            self.assertTrue(run_blis.UNSUPPORTED[knob].endswith(why),
-                            f"{knob}: validator says {why!r}, runner says "
-                            f"{run_blis.UNSUPPORTED[knob]!r}")
-
-    def test_enum_values_are_read_from_the_rules_pack_when_present(self):
-        enums, source = V.engine_enums()
-        self.assertIn("cudagraph_mode", enums)
-        self.assertIn("FULL_AND_PIECEWISE", enums["cudagraph_mode"])
-        self.assertIn("fp8_ds_mla", enums["cache_dtype"])
-        self.assertIn("deepep_low_latency", enums["all2all_backend"])
-        self.assertEqual(("fcfs", "priority"), tuple(enums["scheduling_policy"]))
-        self.assertTrue(source)
-
-    def test_enumerated_knobs_are_all_knobs_the_runner_carries(self):
-        """An enum for a knob no spec can sweep is dead weight and misleads a reader.
-
-        "Sweepable" includes the inner fields of the nested blocks: `speculative.method` is a
-        real swept value even though `speculative_method` is not a top-level engine key.
-        """
-        inner = {f for fields in V.NESTED_ENGINE_FIELDS.values() for f in fields}
-        inner |= {f"speculative_{f}" for f in V.NESTED_ENGINE_FIELDS["speculative"]}
-        stray = sorted(set(V.ENGINE_ENUMS) - set(run_blis.SCENARIO_ENGINE) - inner)
-        self.assertEqual([], stray, f"value sets for unsweepable knobs: {stray}")
-
-    def test_draft_methods_are_validated_without_a_blis_vllm_checkout(self):
-        """CI has no sibling checkout, so the PINNED set must carry the draft methods too --
-        otherwise a typo'd method validates in CI and fails every run."""
-        self.assertIn("speculative_method", V.ENGINE_ENUMS)
-        for real in ("dspark", "glm5_next_mtp", "mtp", "eagle3"):
-            self.assertIn(real, V.ENGINE_ENUMS["speculative_method"])
-
-
-class EngineValueChecking(unittest.TestCase):
+class EngineNameChecking(unittest.TestCase):
     def errs(self, engine):
         doc = spec(sweeps=[{"name": "s", "num-instances": [2], "parallel": {"tp": [8]},
                             "engine": engine}])
-        return V.validate(doc, ROUTING)
-
-    def test_wrong_case_enum_is_refused(self):
-        """`cudagraph_mode: [full]` is a natural thing to write; the engine's enum is upper-case."""
-        errs = self.errs({"cudagraph_mode": ["full"]})
-        self.assertTrue(any("not a value the engine accepts" in e for e in errs), errs)
-
-    def test_near_miss_enum_gets_a_suggestion(self):
-        errs = self.errs({"all2all_backend": ["deepep_lowlatency"]})
-        self.assertTrue(any("deepep_low_latency" in e for e in errs), errs)
-
-    def test_wrong_dtype_spelling_is_refused(self):
-        errs = self.errs({"cache_dtype": ["fp16"]})
-        self.assertTrue(any("not a value" in e for e in errs), errs)
-
-    def test_valid_enum_values_pass(self):
-        self.assertEqual([], self.errs({"cudagraph_mode": ["NONE", "FULL_AND_PIECEWISE"],
-                                        "cache_dtype": ["auto", "fp8"],
-                                        "scheduling_policy": ["fcfs", "priority"]}))
-
-    def test_non_boolean_for_a_tristate_knob_is_refused(self):
-        errs = self.errs({"enable_prefix_caching": ["no"]})
-        self.assertTrue(any("not a boolean" in e for e in errs), errs)
-
-    def test_boolean_knobs_accept_booleans(self):
-        self.assertEqual([], self.errs({"enable_prefix_caching": [True, False],
-                                        "async_scheduling": [True]}))
+        return V.validate(doc, BLIS, ROUTING)
 
     def test_list_valued_knob_needs_a_list_of_lists(self):
         errs = self.errs({"cudagraph_capture_sizes": [1, 2, 4]})
@@ -807,84 +738,44 @@ class EngineValueChecking(unittest.TestCase):
     def test_list_valued_knob_accepts_a_list_of_lists(self):
         self.assertEqual([], self.errs({"cudagraph_capture_sizes": [[1, 2, 4], [1, 2, 4, 8]]}))
 
-    def test_shared_scenario_engine_values_are_checked_too(self):
+    def test_shared_scenario_engine_names_are_checked_too(self):
         doc = spec()
-        doc["scenario"]["engine"] = {"cudagraph_mode": "full"}
-        self.assertTrue(any("not a value the engine accepts" in e
-                            for e in V.validate(doc, ROUTING)))
+        doc["scenario"]["engine"] = {"max_num_seq": 64}
+        self.assertTrue(any("scenario.engine.max_num_seq" in e
+                            for e in V.validate(doc, BLIS, ROUTING)))
 
     def test_nested_block_unknown_inner_field_is_refused(self):
-        """`eplb` carries `enable_eplb`, not `enabled`; the engine decodes strictly."""
-        errs = self.errs({"eplb": {"enabled": [True]}})
-        self.assertTrue(any("not a field of this block" in e for e in errs), errs)
+        errs = self.errs({"engram_config": {"cpu_offlaod": [True]}})
+        self.assertTrue(any("cpu_offload" in e for e in errs), errs)
 
     def test_nested_block_inner_values_must_be_lists(self):
-        errs = self.errs({"eplb": {"enable_eplb": True}})
+        errs = self.errs({"engram_config": {"cpu_offload": True}})
         self.assertTrue(any("must be a list" in e for e in errs), errs)
 
-    def test_nested_block_boolean_field_is_checked(self):
-        errs = self.errs({"eplb": {"enable_eplb": ["yes"]}})
-        self.assertTrue(any("not a boolean" in e for e in errs), errs)
+    def test_valid_nested_block_passes(self):
+        self.assertEqual([], self.errs({"engram_config": {"cpu_offload": [True, False]}}))
 
-    def test_valid_nested_blocks_pass(self):
-        """A WELL-FORMED nested block passes. It must also be a sensible one: EPLB needs an MoE
-        model and a divisible expert count, and an enabled DBO needs a stated threshold -- the
-        cross-knob rules check both, so this fixture states a real deployment rather than a
-        syntactically valid impossible one."""
-        doc = spec(sweeps=[{"name": "s", "num-instances": [1],
-                            "parallel": {"tp": [4], "dp": [2],
-                                         "enable_expert_parallel": [True]},
-                            "engine": {
-                                "eplb": {"enable_eplb": [True],
-                                         "num_redundant_experts": [0, 32]},
-                                "dbo": {"enable_dbo": [True, False],
-                                        "dbo_decode_token_threshold": [256]},
-                                "engram_config": {"cpu_offload": [True, False]}}}])
-        doc["scenario"].update({"model": "deepseek-v2-lite", "gpus": 8})
-        self.assertEqual([], V.validate(doc, ROUTING))
+    def test_an_inert_setting_is_refused_by_its_field_list_status(self):
+        """The field list says which settings change no decision (VLM-3 statuses). Sweeping one
+        reports the same number in every arm, so the validator refuses it with that status."""
+        status = settings.inert_reason(V.knob_vocabulary(BLIS), "stream_interval")
+        self.assertIsNone(status, "stream_interval is not_modelled in the pinned field list")
+        inert = sorted(n for n, e in V.knob_vocabulary(BLIS).status.items()
+                       if e["status"] == "inert_unproven" and "." not in n)
+        self.assertTrue(inert, "the pinned field list has inert_unproven fields")
+        errs = self.errs({inert[0]: [1, 2]})
+        self.assertTrue(any("inert_unproven" in e for e in errs), errs)
+
+    def test_values_are_left_to_the_engine(self):
+        """Value sets are the engine's (X15): it refuses a bad value at start-up with its own
+        message, so the validator keeps no copy of them."""
+        self.assertEqual([], self.errs({"cudagraph_mode": ["full"]}))
 
     def test_nested_block_expands_to_one_candidate_per_combination(self):
-        sweep = {"name": "s", "num-instances": [1], "parallel": {"tp": [8]},
-                 "engine": {"eplb": {"enable_eplb": [True],
-                                     "num_redundant_experts": [0, 32, 64]}}}
-        kept, _ = E.expand_sweep(sweep, 8)
-        self.assertEqual(3, len(kept))
-        self.assertEqual([0, 32, 64],
-                         sorted(c["eplb"]["num_redundant_experts"] for c in kept))
-        self.assertTrue(all(c["eplb"]["enable_eplb"] is True for c in kept))
-
-    def test_nested_block_arms_get_distinguishable_variants(self):
-        sweep = {"name": "s", "num-instances": [1], "parallel": {"tp": [8]},
-                 "engine": {"eplb": {"enable_eplb": [True],
-                                     "num_redundant_experts": [0, 32]}}}
-        kept, _ = E.expand_sweep(sweep, 8)
-        base = E.sweep_baseline(kept)
-        variants = [E.variant_of(c, "", base) for c in kept]
-        self.assertEqual(len(variants), len(set(variants)),
-                         f"arms must be distinguishable, got {variants}")
-        self.assertTrue(any("redundant experts 32" in v for v in variants), variants)
-
-    def test_nested_block_renders_as_a_sub_block(self):
-        """The scenario wants a real YAML sub-block, not a JSON-flow dict."""
-        par, eng, _cli, _r = run_blis.classify_config(
-            {"tp": 8, "num_instances": 1,
-             "eplb": {"enable_eplb": True, "num_redundant_experts": 32}})
-        doc = run_blis.scenario_yaml("deepseek-v2-lite", "h100", "0.29.0", par, eng, "x", 1)
-        self.assertIn("      eplb:", doc)
-        self.assertIn("        enable_eplb: true", doc)
-        self.assertIn("        num_redundant_experts: 32", doc)
-
-    def test_newly_wired_knobs_expand_and_label(self):
-        """The knobs this change added must survive expansion AND get a readable variant."""
-        sweep = {"name": "s", "num-instances": [1], "parallel": {"tp": [8]},
-                 "engine": {"cudagraph_mode": ["PIECEWISE", "FULL", "NONE"]}}
-        kept, _ = E.expand_sweep(sweep, 8)
-        self.assertEqual(3, len(kept))
-        base = E.sweep_baseline(kept)
-        variants = {E.variant_of(c, "", base) for c in kept}
-        self.assertIn("graph capture full", variants)
-        self.assertIn("graph capture none", variants)
-
+        kept, _ = E.expand_sweep({"name": "s", "num-instances": [1], "parallel": {"tp": [8]},
+                                  "engine": {"engram_config": {"cpu_offload": [True, False]}}}, 8)
+        self.assertEqual([{"cpu_offload": True}, {"cpu_offload": False}],
+                         [c["engram_config"] for c in kept])
 
 class CrossKnobConstraints(unittest.TestCase):
     """Constraints that span two knobs, or a knob and the model.
@@ -903,7 +794,7 @@ class CrossKnobConstraints(unittest.TestCase):
         doc["scenario"]["model"] = model
         if scenario_engine:
             doc["scenario"]["engine"] = scenario_engine
-        return V.validate(doc, ROUTING)
+        return V.validate(doc, BLIS, ROUTING)
 
     def test_long_prefill_above_default_context_is_refused(self):
         errs = self.errs({"long_prefill_token_threshold": [999999]})
@@ -941,64 +832,6 @@ class CrossKnobConstraints(unittest.TestCase):
         """Sweeping NONE against real modes is exactly how you measure capture's worth."""
         self.assertEqual([], self.errs({"cudagraph_mode": ["NONE", "FULL"]}))
 
-    def test_max_model_len_beyond_the_catalog_context_is_refused(self):
-        errs = self.errs({"max_model_len": [999999999]}, model="deepseek-v2-lite")
-        if errs:                      # needs a catalog checkout; skip the assertion without one
-            self.assertTrue(any("catalog context window" in e for e in errs), errs)
-
-    def test_moe_knobs_on_a_dense_model_are_refused(self):
-        errs = self.errs({"all2all_backend": ["deepep_low_latency"]})
-        if V.catalog_entry("qwen3-14b"):
-            self.assertTrue(any("DENSE model" in e for e in errs), errs)
-
-    def test_eplb_on_a_dense_model_is_refused(self):
-        errs = self.errs({"eplb": {"enable_eplb": [True]}})
-        if V.catalog_entry("qwen3-14b"):
-            self.assertTrue(any("no experts to balance" in e for e in errs), errs)
-
-    def test_a_recurrent_model_is_refused_on_the_pinned_engine(self):
-        from unittest import mock
-        with mock.patch.object(V, "catalog_entry", return_value={"arch": "MoE", "recurrent": True}):
-            errs = V.validate(spec())
-        self.assertTrue(any("recurrent (linear-attention) layers" in e for e in errs), errs)
-        with mock.patch.object(V, "catalog_entry", return_value={"arch": "MoE", "recurrent": False}):
-            self.assertFalse(any("recurrent (linear-attention)" in e for e in V.validate(spec())))
-
-    def test_mamba_knobs_on_a_non_recurrent_model_are_refused(self):
-        errs = self.errs({"mamba_cache_mode": ["align"]})
-        if V.catalog_entry("qwen3-14b"):
-            self.assertTrue(any("no recurrent layers" in e for e in errs), errs)
-
-    def test_dbo_enabled_without_a_threshold_is_refused(self):
-        errs = self.errs({"dbo": {"enable_dbo": [True]}})
-        self.assertTrue(any("16x" in e for e in errs), errs)
-
-    def test_dbo_enabled_with_a_threshold_passes(self):
-        errs = self.errs({"dbo": {"enable_dbo": [True],
-                                  "dbo_decode_token_threshold": [256, 512]}})
-        self.assertEqual([], errs)
-
-    def test_eplb_redundancy_breaking_expert_divisibility_is_refused(self):
-        """deepseek-v2-lite has 64 experts; at EP width 8, 64+5 does not divide."""
-        if not V.catalog_entry("deepseek-v2-lite"):
-            self.skipTest("needs a ../blis-catalog checkout")
-        errs = self.errs({"eplb": {"enable_eplb": [True], "num_redundant_experts": [5]}},
-                         model="deepseek-v2-lite",
-                         parallel={"tp": [4], "dp": [2], "enable_expert_parallel": [True]})
-        self.assertTrue(any("not divisible by 8" in e for e in errs), errs)
-        self.assertTrue(any("nearest fixes" in e for e in errs), errs)
-
-    def test_eplb_redundancy_that_divides_passes(self):
-        if not V.catalog_entry("deepseek-v2-lite"):
-            self.skipTest("needs a ../blis-catalog checkout")
-        doc = spec(sweeps=[{"name": "s", "num-instances": [1],
-                            "parallel": {"tp": [4], "dp": [2],
-                                         "enable_expert_parallel": [True]},
-                            "engine": {"eplb": {"enable_eplb": [True],
-                                                "num_redundant_experts": [0, 8, 32]}}}])
-        doc["scenario"].update({"model": "deepseek-v2-lite", "gpus": 8})
-        self.assertEqual([], V.validate(doc, ROUTING))
-
     def test_a_knob_fixed_in_scenario_engine_counts_for_the_cross_check(self):
         """scenario.engine pins a value for every run, so it participates in the constraint."""
         errs = self.errs({"long_prefill_token_threshold": [65536]},
@@ -1009,7 +842,7 @@ class CrossKnobConstraints(unittest.TestCase):
         for path in V.spec_paths(EXPERIMENTS):
             doc, err = V.load(path)
             self.assertIsNone(err, f"{path}: {err}")
-            self.assertEqual([], V.validate(doc, ROUTING), path)
+            self.assertEqual([], V.validate(doc, BLIS, ROUTING), path)
 
 
 class NarrativeLength(unittest.TestCase):
@@ -1046,7 +879,7 @@ class NarrativeLength(unittest.TestCase):
     def test_a_long_narrative_is_not_a_validation_error(self):
         doc = spec()
         doc["sweeps"][0]["narrative"] = "x" * 900
-        self.assertEqual([], V.validate(doc, ROUTING),
+        self.assertEqual([], V.validate(doc, BLIS, ROUTING),
                          "prose length must not fail a build")
 
     def test_our_own_fixtures_respect_the_limit(self):
@@ -1274,7 +1107,7 @@ class KnobProfile(unittest.TestCase):
 
     Exists because the catalog ROW alone cannot answer it -- it carries no speculator, no
     sliding window, no KV-dtype table and no capability gating. Those live in the model's
-    graph.yaml and in blis-vllm's architecture-keyed rules.
+    graph.yaml.
 
     The headline case, verified against the pinned binary: deepseek-v4.1-flash prices
     nvfp4_ds_mla only under capability family 10, so it is a real KV axis on b200 and refused
@@ -1315,14 +1148,6 @@ class KnobProfile(unittest.TestCase):
         self.assertEqual(10, self.K.hardware_facts(self.CATALOG, "b200")["capability_family"])
         self.assertEqual(9, self.K.hardware_facts(self.CATALOG, "h100")["capability_family"])
 
-    def test_arch_rules_read_both_resolution_rows(self):
-        """An earlier regex cut at the first `},` and lost the family-9 row entirely."""
-        ar = self.K.arch_rules("DeepseekV41ForCausalLM")
-        fams = sorted(r["capability_family"] for r in ar["cache_dtype_resolutions"])
-        self.assertEqual([9, 10, 10], fams)
-        self.assertTrue(ar["refuses_mtp"])
-        self.assertTrue(ar["engram"])
-
     def test_kv_precision_is_an_axis_on_b200_and_not_on_hopper(self):
         b = self.verdict(self.K.profile("deepseek-v4.1-flash", "b200", "agentx-mvp",
                                         self.CATALOG), "cache_dtype")
@@ -1331,7 +1156,6 @@ class KnobProfile(unittest.TestCase):
         self.assertIn("nvfp4_ds_mla", b["values"])
         self.assertNotIn("nvfp4_ds_mla", h["values"],
                          "nvfp4_ds_mla is family-10 only; BLIS refuses it on SM90")
-        self.assertIn("fp8_ds_mla", h["values"])
 
     def test_dense_model_rules_out_every_expert_knob(self):
         p = self.K.profile("qwen3-14b", "h100", "chatbot", self.CATALOG)
@@ -1345,7 +1169,6 @@ class KnobProfile(unittest.TestCase):
                                           self.CATALOG), "speculative")
         self.assertTrue(moe["applies"])
         self.assertIn("dspark", " ".join(str(v) for v in moe["values"]))
-        self.assertIn("REFUSES every MTP-family", moe["why"])
         dense = self.verdict(self.K.profile("qwen3-14b", "h100", "chatbot", self.CATALOG),
                              "speculative")
         self.assertFalse(dense["applies"])
@@ -1382,9 +1205,10 @@ class KnobProfile(unittest.TestCase):
     def test_every_profiled_knob_is_one_the_runner_can_carry(self):
         """A profile that recommends an unsweepable knob would send a designer into a refusal."""
         p = self.K.profile("deepseek-v4.1-flash", "b200", "agentx-mvp", self.CATALOG)
-        carried = (set(run_blis.SCENARIO_ENGINE) | set(run_blis.SCENARIO_PARALLEL)
-                   | {"speculative", "router.endpoint_picker_config",
-                      "dp + enable_expert_parallel", "mamba_cache_*"})
+        vocab = V.knob_vocabulary(BLIS)
+        carried = (vocab.engine_names() | vocab.parallel
+                   | {"router.endpoint_picker_config", "dp + enable_expert_parallel",
+                      "mamba_cache_*"})
         for k in p["knobs"]:
             name = k["knob"].strip()
             self.assertTrue(name in carried or name.startswith("mamba_cache"),
@@ -1422,7 +1246,7 @@ class HeaderLength(unittest.TestCase):
 
     def test_a_long_header_is_not_a_validation_error(self):
         doc = spec()
-        self.assertEqual([], V.validate(doc, ROUTING))
+        self.assertEqual([], V.validate(doc, BLIS, ROUTING))
 
     def test_shipped_fixtures_respect_the_limit(self):
         """Every spec this repo ships is an example a contributor copies, so each must meet
@@ -1433,155 +1257,54 @@ class HeaderLength(unittest.TestCase):
                                  f"{os.path.basename(path)} opens with {n} comment lines")
 
 
-class ExtendedValueSets(unittest.TestCase):
+class SpeculativeBlock(unittest.TestCase):
     def errs(self, engine):
         return V.validate(spec(sweeps=[{"name": "s", "num-instances": [2],
-                                        "parallel": {"tp": [8]}, "engine": engine}]), ROUTING)
+                                        "parallel": {"tp": [8]}, "engine": engine}]), BLIS, ROUTING)
 
-    def test_quantization_is_an_enum(self):
-        errs = self.errs({"quantization": ["fp_8"]})
-        self.assertTrue(any("fp8" in e for e in errs), errs)
-
-    def test_real_quantization_values_pass(self):
-        self.assertEqual([], self.errs({"quantization": ["fp8", "modelopt_fp4", "mxfp4"]}))
-
-    def test_speculative_method_is_checked_against_the_engine_set(self):
-        errs = self.errs({"speculative": {"method": ["dspar"], "num_spec_tokens": [3]}})
-        self.assertTrue(any("dspark" in e for e in errs), errs)
-
-    def test_speculative_rejects_fields_that_are_recorded_but_not_priced(self):
-        """All 7 of v0.32.0's speculative fields DECODE at the v0.14.0 pin; only 2 move a number.
-
-        Before the bump this was a decode refusal ("not a field the pinned stack carries"), since
-        blis-schemas v0.5.0's Speculative held just method + num_spec_tokens. Now the field
-        decodes, so the sweep would run and report differences that are pure noise -- acceptance
-        comes from the registry's measured profiles, selected by method and depth. That is worth
-        refusing for a different reason, and saying which.
-        """
-        for field, value in (("draft_sample_method", "greedy"),
-                             ("rejection_sample_method", "standard"),
-                             ("enable_adaptive_verification", True),
-                             ("kv_cache_dtype", "fp8")):
-            errs = self.errs({"speculative": {"method": ["dspark"], "num_spec_tokens": [3],
-                                              field: [value]}})
-            self.assertTrue(any("not priced by it" in e for e in errs), (field, errs))
-            self.assertTrue(any("registry" in e for e in errs), (field, errs))
-
-    def test_speculative_still_rejects_an_invented_field(self):
-        """The decode surface widened, so a typo must not slip through as 'not priced'."""
+    def test_an_invented_field_is_refused(self):
         errs = self.errs({"speculative": {"method": ["dspark"], "num_spec_tokens": [3],
                                           "draft_smaple_method": ["greedy"]}})
-        self.assertTrue(any("not a field the pinned stack carries" in e for e in errs), errs)
-        self.assertTrue(any("draft_sample_method" in e for e in errs), errs)
-
-    def test_speculative_refuses_a_drafter_checkpoint(self):
-        """draft_model decodes, but no sweep over it can RUN on any catalog model, so it is
-        refused here rather than burning the campaign at run time (see the validator's comment)."""
-        errs = self.errs({"speculative": {"method": ["dspark"],
-                                          "num_spec_tokens": [3],
-                                          "draft_model": ["eagle3-qwen3-14b"]}})
-        self.assertTrue(any("draft_model" in e for e in errs), errs)
-        self.assertTrue(any("no sweep over it can run" in e for e in errs), errs)
+        self.assertTrue(any("draft_smaple_method" in e for e in errs), errs)
 
     def test_valid_speculative_passes(self):
         self.assertEqual([], self.errs({"speculative": {"method": ["dspark"],
                                                         "num_spec_tokens": [1, 3, 5]}}))
 
-    def test_catalog_entry_is_optional(self):
-        """CI validates specs with no catalog checkout, so the model-aware rules must skip."""
-        self.assertIsNone(V.catalog_entry("qwen3-14b", catalog="/nonexistent-catalog"))
-
-
 class ScenarioIdentityExists(unittest.TestCase):
-    """model / hardware / workload must NAME SOMETHING REAL, when a catalog is there to ask.
-
-    Existence is provable and cheap; feasibility is BLIS's call and stays that way. Before this,
-    `hardware: h200x` validated clean, dry-ran clean, planned 154 runs and failed every one of
-    them with `opening .../hardware/h200x.yaml: no such file or directory` -- after a Go build,
-    which is exactly the wasted CI job the GPU-arithmetic check exists to prevent (susiejojo
-    review).
-    """
-
-    CATALOG = os.path.join(ROOT, os.pardir, "blis-catalog")
+    """model and hardware must name catalog entries, by `blis catalog resolve` (design §5)."""
 
     def errs(self, **scenario):
         sc = dict(spec()["scenario"])
         sc.update(scenario)
-        return V.scenario_identity_errors(sc, self.CATALOG)
-
-    def real(self):
-        if not V._catalog(self.CATALOG)["present"]:
-            self.skipTest("no blis-catalog checkout")
+        return V.scenario_identity_errors(sc, BLIS)
 
     def test_a_real_scenario_is_accepted(self):
-        self.real()
         self.assertEqual([], self.errs())
 
-    def test_an_unknown_hardware_is_refused_with_a_suggestion(self):
-        self.real()
+    def test_an_unknown_hardware_is_refused_with_the_commands_reason(self):
         errs = self.errs(hardware="h200x")
         self.assertEqual(1, len(errs), errs)
         self.assertIn("scenario.hardware", errs[0])
-        self.assertIn("did you mean 'h200'", errs[0])
+        self.assertIn("no hardware entry", errs[0])
 
-    def test_an_unknown_model_is_refused_with_a_suggestion(self):
-        self.real()
-        errs = self.errs(model="qwen3-14bb")
-        self.assertEqual(1, len(errs), errs)
-        self.assertIn("did you mean 'qwen3-14b'", errs[0])
-
-    def test_an_unknown_workload_is_refused_with_a_suggestion(self):
-        self.real()
-        errs = self.errs(workload="chatbott")
-        self.assertIn("did you mean 'chatbot'", errs[0])
-
-    def test_the_error_lists_the_valid_names(self):
-        """A suggestion can miss (`gb200` is closest to `b200`, not `gb200-nvl72`), so the error
-        always carries the vocabulary too."""
-        self.real()
-        errs = self.errs(hardware="totally-not-a-gpu")
-        self.assertIn("known:", errs[0])
-        self.assertIn("h100", errs[0])
-
-    def test_all_three_are_reported_at_once(self):
-        """One pass, not one typo per CI round-trip."""
-        self.real()
-        errs = self.errs(model="nope-x", hardware="nope-y", workload="nope-z")
-        self.assertEqual(3, len(errs), errs)
-
-    def test_no_catalog_checkout_skips_the_check_entirely(self):
-        """Fork CI validates with no catalog and no secrets; it must not fail there."""
-        self.assertEqual([], V.scenario_identity_errors(
-            {"model": "nope", "hardware": "nope", "workload": "nope"},
-            catalog="/nonexistent-catalog"))
-
-    def test_an_empty_catalog_directory_is_not_an_authority(self):
-        """A present-but-broken checkout must skip, not reject every real name."""
-        with tempfile.TemporaryDirectory() as d:
-            self.assertEqual([], V.scenario_identity_errors(
-                {"model": "qwen3-14b", "hardware": "h100", "workload": "chatbot"}, catalog=d))
+    def test_both_are_reported_at_once(self):
+        self.assertEqual(2, len(self.errs(model="nope-x", hardware="nope-y")))
 
     def test_a_missing_identifier_is_left_to_the_required_check(self):
-        """`required` already reports an absent key; this must not add a second error for it."""
-        self.assertEqual([], V.scenario_identity_errors({}, self.CATALOG))
+        self.assertEqual([], V.scenario_identity_errors({}, BLIS))
 
     def test_validate_refuses_a_typod_identifier_end_to_end(self):
-        self.real()
         doc = spec()
         doc["scenario"]["hardware"] = "h200x"
-        errs = V.validate(doc, ROUTING, None, self.CATALOG)
-        self.assertTrue(any("scenario.hardware" in e for e in errs), errs)
+        self.assertTrue(any("scenario.hardware" in e for e in V.validate(doc, BLIS, ROUTING)))
 
-    def test_every_shipped_spec_names_real_catalog_entries(self):
-        """The guard that would have caught this in review, applied to what we ship."""
-        self.real()
-        for path in sorted(glob.glob(os.path.join(ROOT, "experiments", "*.yaml"))):
-            doc, err = V.load(path)
-            self.assertIsNone(err, f"{path}: {err}")
-            self.assertEqual([], V.scenario_identity_errors(doc.get("scenario") or {},
-                                                            self.CATALOG),
-                             f"{os.path.basename(path)} names something the catalog lacks")
-
+    def test_the_validator_reads_no_catalog_file(self):
+        """Design §5: config search's scripts never read catalog or registry files directly."""
+        with open(os.path.join(ROOT, "scripts", "validate_experiment.py"), encoding="utf-8") as f:
+            src = f.read()
+        for needle in ("build_catalog", "graph.yaml", "models/", "hardware/"):
+            self.assertNotIn(needle, src)
 
 class Ranking(unittest.TestCase):
     def rows(self):
@@ -1768,7 +1491,7 @@ class PdRunner(unittest.TestCase):
         return base
 
     def test_pools_resolve_with_instance_counts_and_footprints(self):
-        par, _eng, cli, _router = run_blis.classify_config(self.cfg())
+        par, _eng, cli, _router = run_blis.classify_config(self.cfg(), V.knob_vocabulary(BLIS))
         pd = par["pd"]
         self.assertEqual(3, pd["prefill"]["instances"])
         self.assertEqual(5, pd["decode"]["instances"])
@@ -1777,39 +1500,39 @@ class PdRunner(unittest.TestCase):
 
     def test_counts_must_add_up_to_num_instances(self):
         with self.assertRaises(run_blis.ConfigError) as e:
-            run_blis.classify_config(self.cfg(num_instances=7))
+            run_blis.classify_config(self.cfg(num_instances=7), V.knob_vocabulary(BLIS))
         self.assertIn("must add up", str(e.exception))
 
     def test_pool_without_counterpart_is_refused(self):
         with self.assertRaises(run_blis.ConfigError):
-            run_blis.classify_config({"prefill_instances": 2, "prefill_tp": 8})
+            run_blis.classify_config({"prefill_instances": 2, "prefill_tp": 8}, V.knob_vocabulary(BLIS))
 
     def test_pools_must_agree_on_dp(self):
         with self.assertRaises(run_blis.ConfigError) as e:
             run_blis.classify_config(self.cfg(prefill_dp=2, decode_dp=1,
-                                              prefill_instances=1, decode_instances=1))
+                                              prefill_instances=1, decode_instances=1), V.knob_vocabulary(BLIS))
         self.assertIn("replica factor", str(e.exception))
 
     def test_pools_must_agree_on_block_size(self):
         with self.assertRaises(run_blis.ConfigError) as e:
-            run_blis.classify_config(self.cfg(prefill_block_size=64, decode_block_size=16))
+            run_blis.classify_config(self.cfg(prefill_block_size=64, decode_block_size=16), V.knob_vocabulary(BLIS))
         self.assertIn("whole KV blocks", str(e.exception))
 
     def test_pools_must_agree_on_cache_dtype(self):
         with self.assertRaises(run_blis.ConfigError) as e:
             run_blis.classify_config(self.cfg(prefill_cache_dtype="fp8",
-                                              decode_cache_dtype="auto"))
+                                              decode_cache_dtype="auto"), V.knob_vocabulary(BLIS))
         self.assertIn("cache formats must agree", str(e.exception))
 
     def test_only_nixl_connectors_are_accepted(self):
         with self.assertRaises(run_blis.ConfigError) as e:
-            run_blis.classify_config(self.cfg(pd_connector="LMCache"))
+            run_blis.classify_config(self.cfg(pd_connector="LMCache"), V.knob_vocabulary(BLIS))
         self.assertIn("NIXL", str(e.exception))
-        par, _e, _c, _r = run_blis.classify_config(self.cfg(pd_connector="NixlPullConnector"))
+        par, _e, _c, _r = run_blis.classify_config(self.cfg(pd_connector="NixlPullConnector"), V.knob_vocabulary(BLIS))
         self.assertEqual("NixlPullConnector", par["pd"]["connector"])
 
     def test_connector_is_not_emitted_as_a_cli_flag(self):
-        _p, _e, cli, _r = run_blis.classify_config(self.cfg(pd_connector="NixlConnector"))
+        _p, _e, cli, _r = run_blis.classify_config(self.cfg(pd_connector="NixlConnector"), V.knob_vocabulary(BLIS))
         self.assertNotIn("pd_connector", cli)
 
     def test_per_pool_drafting_is_refused_with_the_real_reason(self):
@@ -1817,7 +1540,7 @@ class PdRunner(unittest.TestCase):
         misunderstanding of where drafting lives -- it must say so, not "unknown key"."""
         for key in ("prefill_num_speculative_tokens", "decode_speculative_method"):
             with self.assertRaises(run_blis.ConfigError) as e:
-                run_blis.classify_config(self.cfg(**{key: 3}))
+                run_blis.classify_config(self.cfg(**{key: 3}), V.knob_vocabulary(BLIS))
             msg = str(e.exception)
             self.assertIn("one configuration per run", msg)
             self.assertNotIn("unknown key", msg)
@@ -1826,11 +1549,11 @@ class PdRunner(unittest.TestCase):
         with self.assertRaises(run_blis.ConfigError) as e:
             run_blis.classify_config(self.cfg(prefill_tp=4, prefill_dp=3,
                                               decode_tp=4, decode_dp=3,
-                                              prefill_instances=1, decode_instances=1))
+                                              prefill_instances=1, decode_instances=1), V.knob_vocabulary(BLIS))
         self.assertIn("whole", str(e.exception))
 
     def test_scenario_yaml_renders_two_pools_and_pd_transfer(self):
-        par, eng, cli, _router = run_blis.classify_config(self.cfg())
+        par, eng, cli, _router = run_blis.classify_config(self.cfg(), V.knob_vocabulary(BLIS))
         doc = run_blis.scenario_yaml("kimi-k2.5", "h200", "0.29.0", par, eng, "x",
                                      cli["num_instances"])
         self.assertIn("role: prefill", doc)
@@ -1847,7 +1570,7 @@ class PdRunner(unittest.TestCase):
 
     def test_colocated_scenario_is_unchanged(self):
         """The P/D path must not alter the colocated rendering every committed report used."""
-        par, eng, _cli, _r = run_blis.classify_config({"tp": 8, "num_instances": 2})
+        par, eng, _cli, _r = run_blis.classify_config({"tp": 8, "num_instances": 2}, V.knob_vocabulary(BLIS))
         doc = run_blis.scenario_yaml("glm-5.3-flash", "h100", "0.29.0", par, eng, "x", 2)
         self.assertIn("role: colocated", doc)
         self.assertNotIn("pd_transfer", doc)
@@ -1855,7 +1578,7 @@ class PdRunner(unittest.TestCase):
     def test_encode_and_shared_roles_are_refused(self):
         for key in ("encode_instances", "prefill_decode_instances"):
             with self.assertRaises(run_blis.ConfigError):
-                run_blis.classify_config({key: 2})
+                run_blis.classify_config({key: 2}, V.knob_vocabulary(BLIS))
 
 
 # --- assembled report -------------------------------------------------------------------------
@@ -1863,7 +1586,7 @@ class PdRunner(unittest.TestCase):
 
 class DryRunPlan(unittest.TestCase):
     def test_dry_run_plans_without_touching_blis(self):
-        report = E.run_experiment(spec(), blis=None, catalog=None, registry=None,
+        report = E.run_experiment(spec(), blis=BLIS, catalog=None, registry=None,
                                   out_root="/nonexistent-should-not-be-written",
                                   dry_run=True, verbose=False)
         self.assertEqual("t", report["name"])
@@ -1871,7 +1594,7 @@ class DryRunPlan(unittest.TestCase):
         self.assertEqual(2, report["totals"]["runs"])
         self.assertEqual(50.0, report["interactivity_floor"]["tok_per_s_per_user"])
 
-    def test_runs_and_report_use_the_pinned_engine_version(self):
+    def test_runs_and_report_use_the_simulators_engine_release(self):
         seen = []
 
         def fake_run_one(*a, **kw):
@@ -1883,10 +1606,10 @@ class DryRunPlan(unittest.TestCase):
         E.run_blis.run_one = fake_run_one
         try:
             with tempfile.TemporaryDirectory() as out:
-                report = E.run_experiment(spec(), "/opt/blis", "/c", "/r", out, verbose=False)
+                report = E.run_experiment(spec(), BLIS, "/c", "/r", out, verbose=False)
         finally:
             E.run_blis.run_one = real
-        pinned = run_blis.pinned_engine_version()
+        pinned = blis_cli.engine_release(BLIS, "vllm")
         self.assertTrue(seen)
         self.assertEqual({pinned}, set(seen))
         self.assertEqual(pinned, report["scenario"]["engine_version"])
@@ -1894,7 +1617,7 @@ class DryRunPlan(unittest.TestCase):
     def test_dry_run_of_every_committed_fixture(self):
         for path in V.spec_paths(EXPERIMENTS):
             doc, _ = V.load(path)
-            report = E.run_experiment(doc, None, None, None,
+            report = E.run_experiment(doc, BLIS, None, None,
                                       "/nonexistent-should-not-be-written",
                                       dry_run=True, verbose=False)
             self.assertGreater(report["totals"]["runs"], 0, path)
@@ -1912,7 +1635,7 @@ class DryRunPlan(unittest.TestCase):
                     " engine: {cache_dtype: [fp8]}}\n")
         self.addCleanup(os.remove, f.name)
         doc, _ = V.load(f.name)
-        report = E.run_experiment(doc, None, None, None, "/nonexistent", dry_run=True,
+        report = E.run_experiment(doc, BLIS, None, None, "/nonexistent", dry_run=True,
                                   verbose=False)
         sc = E._scenario_json(doc, report)
         self.assertEqual("qwen3-14b", sc["model"])
@@ -2013,7 +1736,7 @@ class DryRunPlan(unittest.TestCase):
         try:
             import tempfile as _tf
             with _tf.TemporaryDirectory() as out:
-                E.run_experiment(spec, "/opt/blis", None, "/r", out, verbose=False, max_parallel=4)
+                E.run_experiment(spec, BLIS, None, "/r", out, verbose=False, max_parallel=4)
         finally:
             E.run_blis.run_one, E.resolve_replay = real_run, real_resolve
         self.assertEqual(16, len(events))
@@ -2070,10 +1793,10 @@ class DryRunPlan(unittest.TestCase):
         try:
             import tempfile as _tf
             with _tf.TemporaryDirectory() as out:
-                out1 = E.run_experiment(dict(spec), "/opt/blis", "/c", "/r", out,
+                out1 = E.run_experiment(dict(spec), BLIS, "/c", "/r", out,
                                         verbose=False, max_parallel=1)
                 calls["n"] = 0
-                out8 = E.run_experiment(dict(spec), "/opt/blis", "/c", "/r", out,
+                out8 = E.run_experiment(dict(spec), BLIS, "/c", "/r", out,
                                         verbose=False, max_parallel=8)
         finally:
             E.run_blis.run_one = real
@@ -2211,13 +1934,13 @@ class PinCheck(unittest.TestCase):
             self.assertIsNone(E._blis_source_commit(fake)[1], "no main.go: not the simulator")
             open(os.path.join(d, "main.go"), "w").close()
             self.assertEqual(40, len(E._blis_source_commit(fake)[1] or ""))
-            blis = E._pinned_stack(fake, None, None)["resolved"]["blis"]
+            blis = E._pinned_stack(fake, None, None, "0.32.0")["resolved"]["blis"]
             self.assertTrue(blis.get("sha256") and blis.get("commit"))
         finally:
             shutil.rmtree(d, ignore_errors=True)
 
     def test_pinned_stack_invents_nothing_when_nothing_is_on_disk(self):
-        ps = E._pinned_stack(None, None, None)
+        ps = E._pinned_stack(None, None, None, "0.32.0")
         self.assertIn("blis", ps)
         self.assertNotIn("resolved", ps)
 

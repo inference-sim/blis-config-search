@@ -231,6 +231,22 @@ class MeasuredWindow(unittest.TestCase):
             self.assertNotIn("\\", ref["path"])
             self.assertTrue(os.path.isfile(os.path.normpath(os.path.join(run_dir or d, ref["path"]))))
 
+    def test_unreachable_result_dir_is_refused_not_rebased(self):
+        # Windows cross-drive: relpath raises; the record must never silently switch its base.
+        real = os.path.relpath
+
+        def cross_drive(path, start=os.curdir):
+            raise ValueError("path is on mount 'D:', start on mount 'C:'")
+        os.path.relpath = cross_drive
+        try:
+            with self.assertRaises(ValueError):
+                run_blis.check_result_dir("D:/results", "C:/run")
+            with self.assertRaises(ValueError):
+                run_blis.save_result("{}", tempfile.mkdtemp(), "C:/run")
+        finally:
+            os.path.relpath = real
+        run_blis.check_result_dir(os.path.join(tempfile.gettempdir(), "r"), tempfile.gettempdir())
+
 
 class ConfigKey(unittest.TestCase):
     def test_shared_across_concurrency(self):

@@ -1095,8 +1095,8 @@ def measured_window(doc):
 def save_result(stdout, result_dir, run_dir=None):
     """Gzip the raw Result document under result_dir, named by its sha256; returns its record ref.
 
-    `path` is always relative: to run_dir, else to result_dir's parent. gzip mtime is pinned to 0
-    so the same document always produces the same bytes.
+    `path` is relative to run_dir (default: result_dir's parent), never another base. gzip mtime
+    is pinned to 0 so the same document always produces the same bytes.
     """
     import gzip
     raw = stdout.encode()
@@ -1109,12 +1109,16 @@ def save_result(stdout, result_dir, run_dir=None):
         with os.fdopen(fd, "wb") as f:
             f.write(gzip.compress(raw, mtime=0))
         os.replace(tmp, path)
-    parent = os.path.dirname(os.path.abspath(result_dir))
-    try:
-        rel = os.path.relpath(path, run_dir or parent)
-    except ValueError:      # Windows: run_dir on another drive
-        rel = os.path.relpath(path, parent)
+    rel = os.path.relpath(path, run_dir or os.path.dirname(os.path.abspath(result_dir)))
     return {"path": rel.replace(os.sep, "/"), "sha256": digest}
+
+
+def check_result_dir(result_dir, run_dir):
+    """Refuse a result_dir that no relative path from run_dir can reach (Windows: another drive)."""
+    try:
+        os.path.relpath(os.path.abspath(result_dir), os.path.abspath(run_dir))
+    except ValueError:
+        raise ValueError(f"--keep-results {result_dir!r} must be on the same drive as {run_dir!r}")
 
 
 def parse_metrics(stdout):
@@ -1480,7 +1484,7 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     (ib-400g) so every existing caller is byte-identical.
 
     `result_dir`, when set, keeps each run's full Result document there (see save_result); the
-    record's `result.path` is relative to `run_dir`, else to result_dir's parent.
+    record's `result.path` is relative to `run_dir` (default: result_dir's parent).
     """
     rec = _record_shell(config, phase)
     # Which cost model priced THIS row (see row_stack): makes provenance_split's stack branch able
@@ -1691,17 +1695,19 @@ def main():
     p.add_argument("--keep-results", dest="keep_results", metavar="DIR",
                    help="also save the full Result document, gzipped, under DIR")
     args = p.parse_args()
+    run_dir = os.path.dirname(os.path.abspath(args.out)) if args.out else None
     try:
         require_env(args)
         replay = replay_from_args(args)
+        if args.keep_results and run_dir:
+            check_result_dir(args.keep_results, run_dir)
     except ValueError as e:
         sys.exit(str(e))
     rec = run_one(args.blis, args.catalog, args.registry, args.scenarios, args.model, args.hardware,
                   args.engine_version or pinned_engine_version(), args.workload, args.num_requests,
                   args.seed, args.horizon,
                   json.loads(args.config), args.phase, args.timeout, args.defaults, replay,
-                  fabric=args.fabric, result_dir=args.keep_results,
-                  run_dir=os.path.dirname(os.path.abspath(args.out)) if args.out else None)
+                  fabric=args.fabric, result_dir=args.keep_results, run_dir=run_dir)
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         with open(args.out, "a") as f:

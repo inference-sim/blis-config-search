@@ -115,7 +115,7 @@ above are derived from these. Fields that feasibility, ranking and the site read
 | `metrics` | the **whole-run** aggregate under the legacy MetricsOutput names. Every verdict, `per_user_rate` and the floor read this; `itl_*` here is the decode-step interval |
 | `metrics_all_instances` | the per-instance MetricsOutput rows, same basis |
 | `measured` | `{metrics, metric_defs}`: the BLIS `Result` document's top-level **measured-window** block, copied verbatim with BLIS's own names and definitions. Absent (not empty) when BLIS printed no such block, including every run on a pre-v0.15.0 binary. Read by nothing in this repo's verdicts |
-| `result` | `{path, sha256}` of the full `Result` document, gzipped, relative to the run dir. Present only when the sweep ran with `--keep-results` |
+| `result` | `{path, sha256}` of the full `Result` document, gzipped. `path` is always relative to the run dir (the directory holding `runs.jsonl`; for `run_blis.py` without `--out`, the parent of the `--keep-results` dir). Present only when the run used `--keep-results` |
 
 `measured.metrics` at v0.15.0 holds `output_tok_s`, `output_tok_s_per_gpu`, `request_throughput`,
 TTFT and E2E at mean/p50/p90/p95/p99, per-request ITL (TPOT excluding the first token) at

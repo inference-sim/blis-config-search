@@ -1035,7 +1035,7 @@ _WHOLE_RUN_KEYS = {k: k for k in ("tokens_per_sec", "responses_per_sec",
 # window, a genuinely different measurement. Measured on one Muse run: whole-run
 # step_interval_p99 294.03 ms against measured-window itl_p99 33.87 ms, ~9x apart because a step
 # serves the whole batch. Reading the per-request figure into itl_p99_ms would silently rebase
-# every SLO verdict and every per-user rate in the repo against 12 committed reports. The same
+# every SLO verdict and every per-user rate in the repo across the committed reports. The same
 # holds for the step_interval_* on `cluster` itself: result_inputs.go fills that copy from `sum`
 # (the measured window), so it is not a fallback for whole_run's either.
 _ITL_FROM_STEP_INTERVAL = {"itl_mean_ms": "step_interval_mean_ms", "itl_p90_ms": "step_interval_p90_ms",
@@ -1092,10 +1092,11 @@ def measured_window(doc):
     return {"metrics": m, "metric_defs": defs if isinstance(defs, dict) else {}}
 
 
-def save_result(stdout, result_dir, run_dir):
+def save_result(stdout, result_dir, run_dir=None):
     """Gzip the raw Result document under result_dir, named by its sha256; returns its record ref.
 
-    gzip mtime is pinned to 0 so the same document always produces the same bytes.
+    `path` is always relative: to run_dir, else to result_dir's parent. gzip mtime is pinned to 0
+    so the same document always produces the same bytes.
     """
     import gzip
     raw = stdout.encode()
@@ -1108,7 +1109,11 @@ def save_result(stdout, result_dir, run_dir):
         with os.fdopen(fd, "wb") as f:
             f.write(gzip.compress(raw, mtime=0))
         os.replace(tmp, path)
-    rel = os.path.relpath(path, run_dir) if run_dir else path
+    parent = os.path.dirname(os.path.abspath(result_dir))
+    try:
+        rel = os.path.relpath(path, run_dir or parent)
+    except ValueError:      # Windows: run_dir on another drive
+        rel = os.path.relpath(path, parent)
     return {"path": rel.replace(os.sep, "/"), "sha256": digest}
 
 
@@ -1475,7 +1480,7 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     (ib-400g) so every existing caller is byte-identical.
 
     `result_dir`, when set, keeps each run's full Result document there (see save_result); the
-    record's `result.path` is relative to `run_dir` when that is given.
+    record's `result.path` is relative to `run_dir`, else to result_dir's parent.
     """
     rec = _record_shell(config, phase)
     # Which cost model priced THIS row (see row_stack): makes provenance_split's stack branch able

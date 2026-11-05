@@ -217,9 +217,19 @@ class MeasuredWindow(unittest.TestCase):
             raw = f.read()
         self.assertEqual(gzip.decompress(raw).decode(), s)
         # deterministic bytes: saving again gives the same file
-        again = run_blis.save_result(s, os.path.join(d, "other"), None)
-        with open(again["path"], "rb") as f:
+        again = run_blis.save_result(s, os.path.join(d, "other"))
+        with open(os.path.join(d, again["path"]), "rb") as f:
             self.assertEqual(f.read(), raw)
+
+    def test_result_path_is_always_relative(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        s = json.dumps(MEASURED_DOC)
+        for run_dir in (None, d, os.path.join(d, "elsewhere")):
+            ref = run_blis.save_result(s, os.path.join(d, "results"), run_dir)
+            self.assertFalse(os.path.isabs(ref["path"]), ref["path"])
+            self.assertNotIn("\\", ref["path"])
+            self.assertTrue(os.path.isfile(os.path.normpath(os.path.join(run_dir or d, ref["path"]))))
 
 
 class ConfigKey(unittest.TestCase):

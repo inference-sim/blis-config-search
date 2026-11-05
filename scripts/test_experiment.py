@@ -1306,6 +1306,65 @@ class ScenarioIdentityExists(unittest.TestCase):
         for needle in ("build_catalog", "graph.yaml", "models/", "hardware/"):
             self.assertNotIn(needle, src)
 
+class RegistryFigures(unittest.TestCase):
+    """`scenario.checks` and `scenario.objective` name a metric by registry identifier and scope
+    (CFG-4, design §8.7), validated against `blis metrics`. Applied from M2; until then a real
+    run refuses them and `slo` applies."""
+
+    def errs(self, **scenario):
+        doc = spec()
+        doc["scenario"].update(scenario)
+        return V.validate(doc, BLIS, ROUTING)
+
+    def test_registry_figures_validate(self):
+        self.assertEqual([], self.errs(
+            checks=[{"metric": "ttft_p95_ms", "scope": "cluster", "max": 2000},
+                    {"metric": "ttft_p99_ms", "scope": "instance", "aggregate": "max", "max": 5000},
+                    {"metric": "interactivity_p50", "scope": "cluster", "min": 50}],
+            objective={"metric": "output_tok_s_per_gpu", "scope": "cluster",
+                       "direction": "maximize"}))
+
+    def test_an_unknown_metric_is_refused_with_a_suggestion(self):
+        errs = self.errs(checks=[{"metric": "ttft_p95", "scope": "cluster", "max": 1}])
+        self.assertTrue(any("not a metric in `blis metrics`" in e and "ttft_p95_ms" in e
+                            for e in errs), errs)
+
+    def test_an_unknown_scope_is_refused(self):
+        errs = self.errs(checks=[{"metric": "ttft_p95_ms", "scope": "node", "max": 1}])
+        self.assertTrue(any(".scope:" in e for e in errs), errs)
+
+    def test_an_instance_scope_needs_an_aggregate_and_the_cluster_takes_none(self):
+        self.assertTrue(any(".aggregate:" in e for e in self.errs(
+            checks=[{"metric": "ttft_p95_ms", "scope": "instance", "max": 1}])))
+        self.assertTrue(any(".aggregate:" in e for e in self.errs(
+            checks=[{"metric": "ttft_p95_ms", "scope": "cluster", "aggregate": "max", "max": 1}])))
+
+    def test_a_check_states_exactly_one_bound(self):
+        self.assertTrue(self.errs(checks=[{"metric": "ttft_p95_ms", "scope": "cluster"}]))
+        self.assertTrue(self.errs(checks=[{"metric": "ttft_p95_ms", "scope": "cluster",
+                                           "max": 1, "min": 0}]))
+
+    def test_an_objective_states_its_direction(self):
+        self.assertTrue(any("direction" in e for e in self.errs(
+            objective={"metric": "output_tok_s", "scope": "cluster"})))
+
+    def test_a_spec_in_the_current_format_needs_no_registry(self):
+        from unittest import mock
+        with mock.patch.object(blis_cli, "metrics", side_effect=AssertionError("called")):
+            self.assertEqual([], V.validate(spec(), BLIS, ROUTING))
+
+    def test_a_real_run_refuses_figures_until_they_are_applied(self):
+        doc = spec()
+        doc["scenario"]["checks"] = [{"metric": "ttft_p95_ms", "scope": "cluster", "max": 1}]
+        with tempfile.TemporaryDirectory() as out:
+            with self.assertRaises(SystemExit) as e:
+                E.run_experiment(doc, BLIS, None, "/r", out, verbose=False)
+        self.assertIn("M2", str(e.exception))
+        report = E.run_experiment(doc, BLIS, None, None, "/nonexistent", dry_run=True,
+                                  verbose=False)
+        self.assertGreater(report["totals"]["runs"], 0)
+
+
 class Ranking(unittest.TestCase):
     def rows(self):
         return [

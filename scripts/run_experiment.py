@@ -543,6 +543,11 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     model, hardware = sc["model"], sc["hardware"]
     workload = sc["workload"]
     concurrency = list(sc["concurrency"])
+    if not dry_run and (sc.get("checks") or sc.get("objective")):
+        # Ranking and checking on registry metrics at a scope is M2 (CFG-4); v0.1.0 ranks on the
+        # whole-run figures. Refused, so a stated check is never silently not applied.
+        raise SystemExit(f"{name}: scenario.checks and scenario.objective are validated but not "
+                         f"applied before config search's M2 release; use scenario.slo")
     slo_ms = slo_limits(sc.get("slo"))
     shared_engine = dict(sc.get("engine") or {})
     engine_version = blis_cli.engine_release(blis, run_blis.ENGINE_KIND)

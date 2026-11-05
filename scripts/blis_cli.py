@@ -87,6 +87,24 @@ def engine_release(blis, engine):
     return fields(blis, engine)["engine"]["version"]
 
 
+def metrics(blis):
+    """The metric registry (DEV-8) and the scopes it defines (design §8.7): `blis metrics`.
+
+    Returns {"metrics": {id: definition}, "scopes": [...], "aggregates": [...]}.
+    """
+    def load():
+        doc = _json(blis, ["metrics"])
+        rows = doc.get("metrics") if isinstance(doc, dict) else None
+        if not isinstance(rows, list) or not rows:
+            raise BlisCommandError("`blis metrics` printed no metrics")
+        for key in ("scopes", "aggregates"):
+            if not isinstance(doc.get(key), list) or not doc[key]:
+                raise BlisCommandError(f"`blis metrics` lists no {key} (design §8.7)")
+        return {"metrics": {m["id"]: m for m in rows}, "scopes": list(doc["scopes"]),
+                "aggregates": list(doc["aggregates"])}
+    return _cached(_key(blis, "metrics"), load)
+
+
 def schema(blis, document):
     """The JSON Schema of a BLIS document, as this build's substrate release publishes it."""
     def load():

@@ -93,6 +93,29 @@ sweeps:
   sweep all belong in a `#` comment, which stays in the spec and never reaches the report. The
   validator prints a style note (not a failure) for anything longer.
 
+## Checks and objectives on registry metrics (validated now, applied in M2)
+
+v0.1.0 ranks on whole-run figures (`tokens_per_sec`, and worst-instance ITL, TTFT and E2E p99
+read from the Result's `engine.cluster.whole_run`), and `slo` names its caps by those figures.
+From config search's M2 release, ranking and checks use the measured-window metrics of the
+metric registry, at any scope (CFG-4, design §8.7), and every report is regenerated once.
+
+A spec can already name its figures that way. Each is a registry identifier, a scope (`cluster`,
+`pool` or `instance`) and, for a pool or instance scope, the aggregate that combines them:
+
+```yaml
+scenario:
+  checks:
+    - {metric: ttft_p95_ms, scope: cluster, max: 2000}
+    - {metric: ttft_p99_ms, scope: instance, aggregate: max, max: 5000}   # the worst instance
+    - {metric: interactivity_p50, scope: cluster, min: 50}
+  objective: {metric: output_tok_s_per_gpu, scope: cluster, direction: maximize}
+```
+
+The validator checks every metric, scope and aggregate against `blis metrics`. A dry run plans
+such a spec; a real run refuses it until M2, so a check is never silently not applied. Use `slo`
+for a run today.
+
 ## Knobs are vLLM's own settings
 
 | Spec knob | vLLM setting |

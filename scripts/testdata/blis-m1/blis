@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# TEMPORARY: stands in for the inference-sim commands `fields`, `schema`, `schema validate` and
-# `catalog resolve` (inference-sim#2077, task H) in hermetic tests until a pinned build has them.
+# TEMPORARY: stands in for the inference-sim commands `fields`, `metrics`, `schema`,
+# `schema validate` and `catalog resolve` (inference-sim#2077, task H) in hermetic tests until a pinned build has them.
 # It prints files copied from blis-vllm e68846f (fields.json) and blis-substrate 800ae263
 # (contracts/schema, catalog names); see NOTE.md. Delete with this directory once #2077 merges.
 import json
@@ -26,6 +26,9 @@ def main(argv):
         if args[2] != "vllm":
             fail(f"fields: no field list for engine {args[2]!r}")
         print(json.dumps(read("fields-vllm.json")))
+        return
+    if args == ["metrics"]:
+        print(json.dumps(read("metrics.json")))
         return
     if args[:2] == ["schema", "validate"] and len(args) == 4:
         doc, path = args[2], args[3]

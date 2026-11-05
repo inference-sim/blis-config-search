@@ -417,6 +417,73 @@ def _check_router(router, where, errs, routing_dir=ROUTING_DIR):
                                 f"{', '.join(sorted(known))})")
 
 
+# The keys of a figure in `scenario.checks` and `scenario.objective` (CFG-4, design §8.7).
+FIGURE_KEYS = {"metric", "scope", "aggregate"}
+OBJECTIVE_KEYS = FIGURE_KEYS | {"direction"}
+CHECK_KEYS = FIGURE_KEYS | {"max", "min"}
+
+
+def _figure_errors(fig, where, reg):
+    """A figure names a registry metric, a scope the registry defines, and, for a scope finer
+    than the cluster, the aggregate over its pools or instances."""
+    errs = []
+    if fig.get("metric") not in reg["metrics"]:
+        errs.append(f"{where}.metric: {fig.get('metric')!r} is not a metric in `blis metrics`"
+                    f"{_suggest(fig.get('metric'), reg['metrics'])}")
+    scope = fig.get("scope")
+    if scope not in reg["scopes"]:
+        errs.append(f"{where}.scope: {scope!r} is not a scope `blis metrics` defines "
+                    f"({', '.join(reg['scopes'])})")
+    elif scope == "cluster" and "aggregate" in fig:
+        errs.append(f"{where}.aggregate: the cluster scope is one population; it takes none")
+    elif scope != "cluster" and fig.get("aggregate") not in reg["aggregates"]:
+        errs.append(f"{where}.aggregate: scope {scope!r} needs one of "
+                    f"{', '.join(reg['aggregates'])}, naming how the {scope}s combine")
+    return errs
+
+
+def figure_errors(sc, blis):
+    """`scenario.checks` and `scenario.objective`, against the metric registry (CFG-4).
+
+    Read from `blis metrics` only when a spec names one, so a spec in the current format does
+    not need the command. The sweeper refuses a real run of such a spec until M2.
+    """
+    checks, objective = sc.get("checks"), sc.get("objective")
+    if checks is None and objective is None:
+        return []
+    errs = []
+    reg = blis_cli.metrics(blis)
+    if checks is not None:
+        if not _is_list(checks) or not checks:
+            errs.append("scenario.checks: must be a non-empty list of figures with a bound")
+            checks = []
+        for i, c in enumerate(checks):
+            where = f"scenario.checks[{i}]"
+            if not isinstance(c, dict):
+                errs.append(f"{where}: must be a mapping")
+                continue
+            for k in sorted(set(c) - CHECK_KEYS):
+                errs.append(f"{where}.{k}: unknown key (allowed: {', '.join(sorted(CHECK_KEYS))})")
+            bounds = [k for k in ("max", "min") if k in c]
+            if len(bounds) != 1:
+                errs.append(f"{where}: state exactly one of max and min, in the metric's unit")
+            for k in bounds:
+                if isinstance(c[k], bool) or not isinstance(c[k], (int, float)):
+                    errs.append(f"{where}.{k}: {c[k]!r} must be a number in the metric's unit "
+                                f"({(reg['metrics'].get(c.get('metric')) or {}).get('unit', '?')})")
+            errs.extend(_figure_errors(c, where, reg))
+    if objective is not None:
+        where = "scenario.objective"
+        if not isinstance(objective, dict):
+            return errs + [f"{where}: must be a mapping"]
+        for k in sorted(set(objective) - OBJECTIVE_KEYS):
+            errs.append(f"{where}.{k}: unknown key (allowed: {', '.join(sorted(OBJECTIVE_KEYS))})")
+        if objective.get("direction") not in ("maximize", "minimize"):
+            errs.append(f"{where}.direction: must be maximize or minimize")
+        errs.extend(_figure_errors(objective, where, reg))
+    return errs
+
+
 def scenario_identity_errors(sc, blis, catalog=None):
     """`model` and `hardware` that the catalog has no entry for, by `blis catalog resolve`.
 
@@ -561,6 +628,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None):
         sc = {}
     else:
         known_sc = {"model", "hardware", "workload", "gpus", "slo", "concurrency", "seed",
+                    "checks", "objective",
                     "engine", "replay", "cluster"}
         for key in sc:
             if key not in known_sc:
@@ -619,6 +687,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None):
                     if field not in inner:
                         errs.append(f"scenario.engine.{block}.{field}: not a field of this "
                                     f"block{_suggest(field, inner) or f_valid(sorted(inner))}")
+        errs.extend(figure_errors(sc, blis))
         seed = sc.get("seed")
         if seed is not None and (not isinstance(seed, int) or isinstance(seed, bool) or seed < 0):
             errs.append("scenario.seed: must be a non-negative integer")

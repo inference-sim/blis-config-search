@@ -66,6 +66,36 @@
           }
         },
         "slo": { "$ref": "#/$defs/slo" },
+        "checks": {
+          "description": "Service-level checks as registry figures with a bound (CFG-4). Validated against `blis metrics` now; applied from config search's M2 release. Until then a real run refuses them and `slo` applies.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["metric", "scope"],
+            "properties": {
+              "metric": { "$ref": "#/$defs/figureMetric" },
+              "scope": { "$ref": "#/$defs/figureScope" },
+              "aggregate": { "$ref": "#/$defs/figureAggregate" },
+              "max": { "type": "number", "description": "Upper bound, in the metric's unit." },
+              "min": { "type": "number", "description": "Lower bound, in the metric's unit." }
+            },
+            "oneOf": [{ "required": ["max"] }, { "required": ["min"] }]
+          }
+        },
+        "objective": {
+          "description": "The figure the ranking optimises (CFG-4). Validated against `blis metrics` now; applied from config search's M2 release.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["metric", "scope", "direction"],
+          "properties": {
+            "metric": { "$ref": "#/$defs/figureMetric" },
+            "scope": { "$ref": "#/$defs/figureScope" },
+            "aggregate": { "$ref": "#/$defs/figureAggregate" },
+            "direction": { "enum": ["maximize", "minimize"] }
+          }
+        },
         "concurrency": {
           "description": "The load ladder, set once here so every sweep is measured at the same levels. Closed-loop concurrency (sessions); for a replay these are session-tree lanes.",
           "type": "array",
@@ -89,6 +119,21 @@
           "minProperties": 1
         }
       }
+    },
+    "figureMetric": {
+      "description": "A metric registry identifier, as `blis metrics` prints it, e.g. ttft_p95_ms (DEV-8).",
+      "type": "string",
+      "minLength": 1
+    },
+    "figureScope": {
+      "description": "cluster, pool or instance (design §8.7). The validator checks it against `blis metrics`.",
+      "type": "string",
+      "minLength": 1
+    },
+    "figureAggregate": {
+      "description": "How a pool or instance scope combines, e.g. max for the worst instance. Not stated for the cluster scope.",
+      "type": "string",
+      "minLength": 1
     },
     "slo": {
       "description": "The caps a config must hold to count as servable. A config that misses any of them at a load is not servable at that load.",

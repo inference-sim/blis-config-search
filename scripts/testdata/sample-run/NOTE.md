@@ -46,7 +46,7 @@ tokens and `1000/itl_p99` understates the real per-user rate. The brain emits `t
 per point; the report plots that, not a derived axis.
 
 These are **simulator predictions**. The kernel prices MLA and hybrid (KDA) attention from fitted
-per-operator coefficients (these runs are clean -- no step-time warnings); spot-check against the real
-llm-d measurements in `curvebender-tools/reports` before acting. `stderr_tail` is retained per run
+per-operator coefficients (these runs are clean -- no step-time warnings); spot-check against real
+measurements from internal experiments before acting. `stderr_tail` is retained per run
 (empty on a clean run) for any diagnostics BLIS does emit. The layout is convention-based and expected
 to evolve.

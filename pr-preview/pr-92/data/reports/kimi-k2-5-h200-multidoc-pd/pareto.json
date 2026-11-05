@@ -1,0 +1,898 @@
+{
+  "dropped": [
+    {
+      "count": 6,
+      "gpus": 8,
+      "reason": "uses 8 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 18,
+      "gpus": 16,
+      "reason": "uses 16 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 30,
+      "gpus": 32,
+      "reason": "uses 32 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 30,
+      "gpus": 128,
+      "reason": "uses 128 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 18,
+      "gpus": 256,
+      "reason": "uses 256 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 6,
+      "gpus": 512,
+      "reason": "uses 512 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 12,
+      "gpus": 24,
+      "reason": "uses 24 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 36,
+      "gpus": 32,
+      "reason": "uses 32 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 60,
+      "gpus": 40,
+      "reason": "uses 40 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 96,
+      "gpus": 48,
+      "reason": "uses 48 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 108,
+      "gpus": 56,
+      "reason": "uses 56 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 96,
+      "gpus": 72,
+      "reason": "uses 72 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 120,
+      "gpus": 80,
+      "reason": "uses 80 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 72,
+      "gpus": 88,
+      "reason": "uses 88 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 108,
+      "gpus": 96,
+      "reason": "uses 96 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 60,
+      "gpus": 104,
+      "reason": "uses 104 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 108,
+      "gpus": 112,
+      "reason": "uses 112 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 36,
+      "gpus": 120,
+      "reason": "uses 120 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 72,
+      "gpus": 128,
+      "reason": "uses 128 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 12,
+      "gpus": 136,
+      "reason": "uses 136 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 36,
+      "gpus": 144,
+      "reason": "uses 144 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 24,
+      "gpus": 160,
+      "reason": "uses 160 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 12,
+      "gpus": 176,
+      "reason": "uses 176 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 2,
+      "gpus": 24,
+      "reason": "uses 24 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 6,
+      "gpus": 32,
+      "reason": "uses 32 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 10,
+      "gpus": 40,
+      "reason": "uses 40 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 16,
+      "gpus": 48,
+      "reason": "uses 48 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 18,
+      "gpus": 56,
+      "reason": "uses 56 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 16,
+      "gpus": 72,
+      "reason": "uses 72 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 20,
+      "gpus": 80,
+      "reason": "uses 80 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 12,
+      "gpus": 88,
+      "reason": "uses 88 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 18,
+      "gpus": 96,
+      "reason": "uses 96 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 10,
+      "gpus": 104,
+      "reason": "uses 104 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 18,
+      "gpus": 112,
+      "reason": "uses 112 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 6,
+      "gpus": 120,
+      "reason": "uses 120 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 12,
+      "gpus": 128,
+      "reason": "uses 128 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 2,
+      "gpus": 136,
+      "reason": "uses 136 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 6,
+      "gpus": 144,
+      "reason": "uses 144 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 160,
+      "reason": "uses 160 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 2,
+      "gpus": 176,
+      "reason": "uses 176 GPUs, not the scenario's 64"
+    }
+  ],
+  "finalists": [
+    {
+      "at_c_use": {
+        "itl_p99_ms": 15.576,
+        "tok_per_s_per_user": 64.2,
+        "tokens_per_sec": 3605.7,
+        "tokens_per_sec_per_gpu": 56.34
+      },
+      "c_star": 64,
+      "c_use": 64,
+      "config": {
+        "concurrency": 64,
+        "dp": 2,
+        "enable_expert_parallel": true,
+        "long_prefill_token_threshold": 0,
+        "max_num_batched_tokens": 32768,
+        "num_instances": 8,
+        "tp": 4
+      },
+      "curve": [
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 9.92,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 100.8,
+          "tokens_per_sec": 723.9,
+          "ttft_p99_ms": 1413.7
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 10.946,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 91.4,
+          "tokens_per_sec": 1359.9,
+          "ttft_p99_ms": 2058.7
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 11.912,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 83.9,
+          "tokens_per_sec": 2128.7,
+          "ttft_p99_ms": 2607.3
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 15.576,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 64.2,
+          "tokens_per_sec": 3605.7,
+          "ttft_p99_ms": 4801.5
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 18.758,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 53.3,
+          "tokens_per_sec": 5216.4,
+          "ttft_p99_ms": 7415.3
+        }
+      ],
+      "gpus": 64,
+      "label": "8x TP4xDP2 + EP",
+      "sweep": "colocated",
+      "variant": "batch tokens 32,768"
+    },
+    {
+      "at_c_use": {
+        "itl_p99_ms": 19.486,
+        "tok_per_s_per_user": 51.3,
+        "tokens_per_sec": 3571.9,
+        "tokens_per_sec_per_gpu": 55.81
+      },
+      "c_star": 64,
+      "c_use": 64,
+      "config": {
+        "concurrency": 64,
+        "decode_enable_expert_parallel": true,
+        "decode_instances": 5,
+        "decode_long_prefill_token_threshold": 0,
+        "decode_tp": 8,
+        "num_instances": 8,
+        "prefill_enable_expert_parallel": true,
+        "prefill_instances": 3,
+        "prefill_max_num_batched_tokens": 32768,
+        "prefill_tp": 8,
+        "router_config": "reports/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-1b515287eb.yaml",
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 8.952,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 111.7,
+          "tokens_per_sec": 961.3,
+          "ttft_p99_ms": 2201.5
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 10.183,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 98.2,
+          "tokens_per_sec": 1672.2,
+          "ttft_p99_ms": 3891.9
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 13.346,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 74.9,
+          "tokens_per_sec": 2568.3,
+          "ttft_p99_ms": 6183.9
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 18.593,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 53.8,
+          "tokens_per_sec": 3876.3,
+          "ttft_p99_ms": 12847.1
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 26.914,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 37.2,
+          "tokens_per_sec": 5257.4,
+          "ttft_p99_ms": 20964.4
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 10.187,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 98.2,
+          "tokens_per_sec": 903.7,
+          "ttft_p99_ms": 1101.4
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 11.29,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 88.6,
+          "tokens_per_sec": 1556.9,
+          "ttft_p99_ms": 1555.4
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 13.914,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 71.9,
+          "tokens_per_sec": 2496.2,
+          "ttft_p99_ms": 2798.4
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 20.417,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 49.0,
+          "tokens_per_sec": 3531.3,
+          "ttft_p99_ms": 4589.7
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 137.735,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 7.3,
+          "tokens_per_sec": 4829.4,
+          "ttft_p99_ms": 12410.1
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 9.449,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 105.8,
+          "tokens_per_sec": 913.5,
+          "ttft_p99_ms": 1652.7
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 11.515,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 86.8,
+          "tokens_per_sec": 1506.9,
+          "ttft_p99_ms": 2107.5
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 14.827,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 67.4,
+          "tokens_per_sec": 2218.6,
+          "ttft_p99_ms": 4095.6
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 163.45,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 6.1,
+          "tokens_per_sec": 3244.1,
+          "ttft_p99_ms": 6768.8
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 332.486,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 3.0,
+          "tokens_per_sec": 4189.5,
+          "ttft_p99_ms": 12739.5
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 8.952,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 111.7,
+          "tokens_per_sec": 961.3,
+          "ttft_p99_ms": 2201.5
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 10.183,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 98.2,
+          "tokens_per_sec": 1672.2,
+          "ttft_p99_ms": 3891.9
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 13.346,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 74.9,
+          "tokens_per_sec": 2568.3,
+          "ttft_p99_ms": 6183.9
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 18.593,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 53.8,
+          "tokens_per_sec": 3876.3,
+          "ttft_p99_ms": 12847.1
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 26.914,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 37.2,
+          "tokens_per_sec": 5257.4,
+          "ttft_p99_ms": 20964.4
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 10.19,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 98.1,
+          "tokens_per_sec": 909.7,
+          "ttft_p99_ms": 1131.8
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 59.637,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 16.8,
+          "tokens_per_sec": 1556.2,
+          "ttft_p99_ms": 1556.5
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 70.951,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 14.1,
+          "tokens_per_sec": 2347.4,
+          "ttft_p99_ms": 2812.9
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 84.517,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 11.8,
+          "tokens_per_sec": 3474.0,
+          "ttft_p99_ms": 4756.6
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 95.37,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 10.5,
+          "tokens_per_sec": 4421.4,
+          "ttft_p99_ms": 12359.6
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 61.275,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 16.3,
+          "tokens_per_sec": 886.4,
+          "ttft_p99_ms": 1871.0
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 76.322,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 13.1,
+          "tokens_per_sec": 1394.7,
+          "ttft_p99_ms": 2340.8
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 83.773,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 11.9,
+          "tokens_per_sec": 2146.4,
+          "ttft_p99_ms": 4280.3
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 88.606,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 11.3,
+          "tokens_per_sec": 3135.8,
+          "ttft_p99_ms": 6946.1
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 126.77,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 7.9,
+          "tokens_per_sec": 3972.0,
+          "ttft_p99_ms": 12782.4
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 8.921,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 112.1,
+          "tokens_per_sec": 966.6,
+          "ttft_p99_ms": 2072.5
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 10.164,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 98.4,
+          "tokens_per_sec": 1680.3,
+          "ttft_p99_ms": 3680.8
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 14.609,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 68.5,
+          "tokens_per_sec": 2492.4,
+          "ttft_p99_ms": 5887.3
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 20.255,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 49.4,
+          "tokens_per_sec": 3731.2,
+          "ttft_p99_ms": 12062.7
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 31.42,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 31.8,
+          "tokens_per_sec": 5066.7,
+          "ttft_p99_ms": 19801.4
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 10.187,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 98.2,
+          "tokens_per_sec": 904.4,
+          "ttft_p99_ms": 1031.8
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 10.827,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 92.4,
+          "tokens_per_sec": 1596.0,
+          "ttft_p99_ms": 1463.2
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 13.853,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 72.2,
+          "tokens_per_sec": 2475.1,
+          "ttft_p99_ms": 2651.6
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 19.486,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 51.3,
+          "tokens_per_sec": 3571.9,
+          "ttft_p99_ms": 4589.7
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 326.098,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 3.1,
+          "tokens_per_sec": 4787.3,
+          "ttft_p99_ms": 11956.7
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 9.449,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 105.8,
+          "tokens_per_sec": 913.5,
+          "ttft_p99_ms": 1652.7
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 11.515,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 86.8,
+          "tokens_per_sec": 1506.9,
+          "ttft_p99_ms": 2107.5
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 14.827,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 67.4,
+          "tokens_per_sec": 2218.9,
+          "ttft_p99_ms": 4095.6
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 167.231,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 6.0,
+          "tokens_per_sec": 3361.3,
+          "ttft_p99_ms": 6764.0
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 330.274,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 3.0,
+          "tokens_per_sec": 4196.2,
+          "ttft_p99_ms": 12740.2
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 8.921,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 112.1,
+          "tokens_per_sec": 966.6,
+          "ttft_p99_ms": 2072.5
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 10.164,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 98.4,
+          "tokens_per_sec": 1680.3,
+          "ttft_p99_ms": 3680.8
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 14.609,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 68.5,
+          "tokens_per_sec": 2492.4,
+          "ttft_p99_ms": 5887.3
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 20.255,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 49.4,
+          "tokens_per_sec": 3731.2,
+          "ttft_p99_ms": 12062.7
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 31.42,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 31.8,
+          "tokens_per_sec": 5066.7,
+          "ttft_p99_ms": 19801.4
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 10.189,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 98.1,
+          "tokens_per_sec": 896.1,
+          "ttft_p99_ms": 1108.2
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 10.821,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 92.4,
+          "tokens_per_sec": 1545.3,
+          "ttft_p99_ms": 1519.0
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 73.741,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 13.6,
+          "tokens_per_sec": 2375.2,
+          "ttft_p99_ms": 2656.3
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 79.826,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 12.5,
+          "tokens_per_sec": 3424.0,
+          "ttft_p99_ms": 4758.8
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 91.518,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 10.9,
+          "tokens_per_sec": 4656.9,
+          "ttft_p99_ms": 11956.7
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 61.275,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 16.3,
+          "tokens_per_sec": 886.4,
+          "ttft_p99_ms": 1871.0
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 76.322,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 13.1,
+          "tokens_per_sec": 1394.7,
+          "ttft_p99_ms": 2340.8
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 83.509,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 12.0,
+          "tokens_per_sec": 2148.7,
+          "ttft_p99_ms": 4268.2
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 90.299,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 11.1,
+          "tokens_per_sec": 3063.7,
+          "ttft_p99_ms": 6946.1
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 125.141,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 8.0,
+          "tokens_per_sec": 4040.1,
+          "ttft_p99_ms": 12782.4
+        }
+      ],
+      "gpus": 64,
+      "label": "3P/5D TP8 + EP",
+      "sweep": "pd-dp1",
+      "variant": ""
+    },
+    {
+      "at_c_use": {
+        "itl_p99_ms": 17.819,
+        "tok_per_s_per_user": 56.1,
+        "tokens_per_sec": 2297.8,
+        "tokens_per_sec_per_gpu": 35.9
+      },
+      "c_star": 32,
+      "c_use": 32,
+      "config": {
+        "concurrency": 32,
+        "decode_enable_expert_parallel": true,
+        "decode_instances": 4,
+        "decode_tp": 8,
+        "num_instances": 8,
+        "prefill_enable_expert_parallel": true,
+        "prefill_instances": 4,
+        "prefill_max_num_batched_tokens": 8192,
+        "prefill_tp": 8,
+        "router_config": "routing/pd-always.yaml",
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 10.762,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 92.9,
+          "tokens_per_sec": 913.8,
+          "ttft_p99_ms": 1665.9
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 13.913,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 71.9,
+          "tokens_per_sec": 1522.1,
+          "ttft_p99_ms": 2139.8
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 17.819,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 56.1,
+          "tokens_per_sec": 2297.8,
+          "ttft_p99_ms": 4328.7
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 25.642,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 39.0,
+          "tokens_per_sec": 3378.5,
+          "ttft_p99_ms": 9113.2
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 36.396,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 27.5,
+          "tokens_per_sec": 4540.9,
+          "ttft_p99_ms": 15213.3
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 10.83,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 92.3,
+          "tokens_per_sec": 907.4,
+          "ttft_p99_ms": 1626.0
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 13.889,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 72.0,
+          "tokens_per_sec": 1465.8,
+          "ttft_p99_ms": 2031.9
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 17.898,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 55.9,
+          "tokens_per_sec": 2271.2,
+          "ttft_p99_ms": 4205.1
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 25.41,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 39.4,
+          "tokens_per_sec": 3447.2,
+          "ttft_p99_ms": 8633.6
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 36.411,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 27.5,
+          "tokens_per_sec": 4710.4,
+          "ttft_p99_ms": 14464.0
+        }
+      ],
+      "gpus": 64,
+      "label": "4P/4D TP8 + EP",
+      "sweep": "pd-always",
+      "variant": ""
+    }
+  ],
+  "run_id": "kimi-k2-5-h200-multidoc-pd",
+  "winner": {
+    "chosen": "8x TP4xDP2 + EP (batch tokens 32,768)",
+    "label": "8x TP4xDP2 + EP",
+    "reason": "8x TP4xDP2 + EP (batch tokens 32,768) in sweep 'colocated' gives the most tok/s/accelerator (56.34 tok/s/accelerator, 3605.7 tok/s fleet) while holding the scenario's SLOs, at concurrency 64.",
+    "sweep": "colocated",
+    "variant": "batch tokens 32,768"
+  }
+}

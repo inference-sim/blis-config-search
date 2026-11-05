@@ -101,3 +101,33 @@ Assembled in `scripts/explore_data.py`. Knobs the engine doesn't vary come throu
 `cl (=tokens_per_sec), itl (=mean ITL ms), ttft (=ttft_p99_ms),`
 `hit (prefix hit or null), to (timed out), drop (unservable), p95 (=e2e_p95_ms),`
 `ok (met completion+floor+SLOs; absent SLO metric = violation), status, viol[] (reasons when not ok)`
+
+## `runs.jsonl` record fields (the raw ledger)
+
+One JSON object per BLIS run, written by `scripts/run_blis.py` `run_one`. The explorer's `RECORDS`
+above are derived from these. Fields that feasibility, ranking and the site read:
+
+| field | what it is |
+|---|---|
+| `config` | the knob dict this run was given, `concurrency` included |
+| `config_hash` | sha1 (12 hex) of `config`: one run at one load |
+| `config_key` | the same hash over `config` without `concurrency`: one configuration, shared by its records at every load. Group on it to get one config's curve |
+| `metrics` | the **whole-run** aggregate under the legacy MetricsOutput names. Every verdict, `per_user_rate` and the floor read this; `itl_*` here is the decode-step interval |
+| `metrics_all_instances` | the per-instance MetricsOutput rows, same basis |
+| `measured` | `{metrics, metric_defs}`: the BLIS `Result` document's top-level **measured-window** block, copied verbatim with BLIS's own names and definitions. Absent (not empty) when BLIS printed no such block, including every run on a pre-v0.15.0 binary. Read by nothing in this repo's verdicts |
+| `result` | `{path, sha256}` of the full `Result` document, gzipped, relative to the run dir. Present only when the sweep ran with `--keep-results` |
+
+`measured.metrics` at v0.15.0 holds `output_tok_s`, `output_tok_s_per_gpu`, `request_throughput`,
+TTFT and E2E at mean/p50/p90/p95/p99, per-request ITL (TPOT excluding the first token) at
+mean/p50/p90/p99, and per-request output tok/s per user as `interactivity_mean`,
+`interactivity_p50` and `interactivity_p90`. These are a different population from `metrics`:
+per request over the measured window, not per decode step over the whole run, so the two
+`itl_p99_ms` values can differ by several times on the same run.
+
+BLIS's `interactivity_p90` is `1000 / itl_p90_ms` (`sim/metrics_measured.go`), so it is the
+**slow tail** of the per-user rate distribution (aiperf's per-user p10), not its p90.
+`interactivity_mean` is the mean of each request's own output tok/s, which is the figure to
+compare with aiperf's `output_token_throughput_per_user`.
+
+Records written before this change (every committed report at the time, issue #97) have
+`config_key`, which was backfilled, but no `measured` or `result`; those need a rerun.

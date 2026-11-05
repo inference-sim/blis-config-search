@@ -1023,7 +1023,7 @@ def _result_doc(stdout):
 # and what the committed ledgers therefore hold; top-level `metrics` is the MEASURED WINDOW, a
 # different population (result_build.go standardMetrics). Mixing the two would make this bump a
 # silent re-baselining of every latency in the repo, so the whole-run block is the source and the
-# measured window is left to the Result document's own readers.
+# measured window is recorded verbatim beside it under `measured` (measured_window).
 _WHOLE_RUN_KEYS = {k: k for k in ("tokens_per_sec", "responses_per_sec",
                                    "ttft_mean_ms", "ttft_p90_ms", "ttft_p95_ms", "ttft_p99_ms",
                                    "e2e_mean_ms", "e2e_p90_ms", "e2e_p95_ms", "e2e_p99_ms")}
@@ -1080,6 +1080,38 @@ def _flatten_result(doc):
     return out
 
 
+def measured_window(doc):
+    """The Result document's measured-window `metrics` + `metric_defs`, copied verbatim, or None.
+
+    Kept apart from `metrics` (whole-run, legacy names) so no verdict or committed number moves.
+    """
+    m = (doc or {}).get("metrics")
+    if not isinstance(m, dict) or not m:
+        return None
+    defs = doc.get("metric_defs")
+    return {"metrics": m, "metric_defs": defs if isinstance(defs, dict) else {}}
+
+
+def save_result(stdout, result_dir, run_dir):
+    """Gzip the raw Result document under result_dir, named by its sha256; returns its record ref.
+
+    gzip mtime is pinned to 0 so the same document always produces the same bytes.
+    """
+    import gzip
+    raw = stdout.encode()
+    digest = hashlib.sha256(raw).hexdigest()
+    os.makedirs(result_dir, exist_ok=True)
+    path = os.path.join(result_dir, f"{digest[:16]}.gz")
+    if not os.path.exists(path):
+        # unique temp per writer: --max-parallel threads share one pid
+        fd, tmp = tempfile.mkstemp(dir=result_dir, suffix=".tmp")
+        with os.fdopen(fd, "wb") as f:
+            f.write(gzip.compress(raw, mtime=0))
+        os.replace(tmp, path)
+    rel = os.path.relpath(path, run_dir) if run_dir else path
+    return {"path": rel.replace(os.sep, "/"), "sha256": digest}
+
+
 def parse_metrics(stdout):
     doc = _result_doc(stdout)
     if doc is not None:
@@ -1091,12 +1123,16 @@ def parse_metrics(stdout):
     return cands[0] if cands else {}
 
 
+def _instances_of(doc):
+    inst = (doc.get("engine") or {}).get("instances") or {}
+    # Each value is a verbatim MetricsOutput, already carrying its own instance_id.
+    return [v for _, v in sorted(inst.items()) if isinstance(v, dict)]
+
+
 def parse_all_instances(stdout):
     doc = _result_doc(stdout)
     if doc is not None:
-        inst = (doc.get("engine") or {}).get("instances") or {}
-        # Each value is a verbatim MetricsOutput, already carrying its own instance_id.
-        return [v for _, v in sorted(inst.items()) if isinstance(v, dict)]
+        return _instances_of(doc)
     return [o for o in _all_metrics(stdout) if o.get("instance_id") not in (None, "cluster")]
 
 
@@ -1399,9 +1435,18 @@ def row_stack(blis, catalog, registry):
     return out
 
 
+def _config_digest(config):
+    return hashlib.sha1(json.dumps(config, sort_keys=True).encode()).hexdigest()[:12]
+
+
+def config_key(config):
+    """config_hash without `concurrency`: one value per configuration across its load points."""
+    return _config_digest({k: v for k, v in config.items() if k != "concurrency"})
+
+
 def _record_shell(config, phase):
     return {"config": config, "concurrency": config.get("concurrency"),
-            "config_hash": hashlib.sha1(json.dumps(config, sort_keys=True).encode()).hexdigest()[:12],
+            "config_hash": _config_digest(config), "config_key": config_key(config),
             "phase": phase}
 
 
@@ -1418,7 +1463,7 @@ def _failure_line(stderr):
 
 def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_version,
             workload, num_requests, seed, horizon, config, phase="probe", timeout=120, defaults=None,
-            replay=None, fabric=DEFAULT_FABRIC):
+            replay=None, fabric=DEFAULT_FABRIC, result_dir=None, run_dir=None):
     """Run one kernel-priced BLIS config and return a record dict. No runs.jsonl I/O (caller writes).
 
     `replay` selects the trace-REPLAY path (`blis replay --agentic-scenario`) instead of
@@ -1428,6 +1473,9 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     `fabric` is the cluster's inter-node interconnect (a catalog networks/ class); it prices
     cross-node traffic for a multi-node run and is ignored on a single node. A trailing default
     (ib-400g) so every existing caller is byte-identical.
+
+    `result_dir`, when set, keeps each run's full Result document there (see save_result); the
+    record's `result.path` is relative to `run_dir` when that is given.
     """
     rec = _record_shell(config, phase)
     # Which cost model priced THIS row (see row_stack): makes provenance_split's stack branch able
@@ -1506,7 +1554,15 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
         stdout, stderr, rc = pr.stdout, pr.stderr, pr.returncode
     except subprocess.TimeoutExpired:
         stdout, stderr, rc = "", "timeout", -1
-    metrics = parse_metrics(stdout) if rc == 0 else {}
+    # Parse once: a YAML Result document is the slow part of reading a run.
+    doc = _result_doc(stdout) if rc == 0 else None
+    if doc is not None:
+        metrics = _flatten_result(doc)
+        instances = _instances_of(doc)
+    else:
+        metrics = parse_metrics(stdout) if rc == 0 else {}
+        instances = parse_all_instances(stdout) if rc == 0 else []
+    measured = measured_window(doc)
     if rc != 0:
         error = _failure_line(stderr) or f"rc={rc}"
     elif not metrics:
@@ -1534,9 +1590,14 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                        "workload": ({"kind": "replay", **replay} if replay
                                     else {"kind": "shape", "preset": workload})},
         "cmd": cmd, "returncode": rc, "wall_s": round(time.time() - t0, 3),
-        "metrics": metrics, "metrics_all_instances": parse_all_instances(stdout) if rc == 0 else [],
+        "metrics": metrics, "metrics_all_instances": instances,
         "error": error, "stdout_tail": stdout[-2000:], "stderr_tail": stderr[-2000:],
     })
+    # Absent rather than empty when BLIS printed no measured window (e.g. a pre-v0.15.0 binary).
+    if measured is not None:
+        rec["measured"] = measured
+    if result_dir and doc is not None:
+        rec["result"] = save_result(stdout, result_dir, run_dir)
     return rec
 
 
@@ -1622,6 +1683,8 @@ def main():
     add_common_args(p)
     p.add_argument("--config", required=True, help='JSON knob dict, e.g. {"tp":8,"enable_expert_parallel":true,"num_instances":2,"concurrency":32}')
     p.add_argument("--out", help="optional runs.jsonl to append to (single-run use only)")
+    p.add_argument("--keep-results", dest="keep_results", metavar="DIR",
+                   help="also save the full Result document, gzipped, under DIR")
     args = p.parse_args()
     try:
         require_env(args)
@@ -1632,7 +1695,8 @@ def main():
                   args.engine_version or pinned_engine_version(), args.workload, args.num_requests,
                   args.seed, args.horizon,
                   json.loads(args.config), args.phase, args.timeout, args.defaults, replay,
-                  fabric=args.fabric)
+                  fabric=args.fabric, result_dir=args.keep_results,
+                  run_dir=os.path.dirname(os.path.abspath(args.out)) if args.out else None)
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         with open(args.out, "a") as f:

@@ -537,7 +537,7 @@ def best_of(rows):
 
 
 def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dry_run=False,
-                   run_timeout=600, max_parallel=1, verbose=True):
+                   run_timeout=600, max_parallel=1, verbose=True, keep_results=False):
     """Expand, filter, run and rank one spec. Returns the assembled report dict."""
     routing_dir = routing_dir or os.path.join(ROOT, "routing")
     sc = spec["scenario"]
@@ -654,7 +654,9 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                                    None, cfg, phase=sname, timeout=run_timeout,
                                    replay={k: v for k, v in replay.items()
                                            if k != "_overrides"} if replay else None,
-                                   fabric=fabric)
+                                   fabric=fabric,
+                                   result_dir=os.path.join(out_dir, "results") if keep_results else None,
+                                   run_dir=out_dir)
             rec["sweep"] = sname
             _relativize_cmd(rec, out_dir)
             ok, why = servable(rec, slo_ms, gpus)
@@ -1206,6 +1208,8 @@ def main(argv=None):
                          "expansion order, so a spec reproduces byte-for-byte at any setting.")
     ap.add_argument("--json", action="store_true", dest="as_json",
                     help="print the assembled report to stdout")
+    ap.add_argument("--keep-results", action="store_true", dest="keep_results",
+                    help="save each run's full Result document, gzipped, under <out>/<name>/results/")
     args = ap.parse_args(argv)
 
     spec, err = validator.load(args.spec)
@@ -1223,7 +1227,8 @@ def main(argv=None):
     t0 = time.time()
     report = run_experiment(spec, args.blis, args.catalog, args.registry, args.out,
                             routing_dir=args.routing, dry_run=args.dry_run,
-                            run_timeout=args.timeout, max_parallel=args.max_parallel)
+                            run_timeout=args.timeout, max_parallel=args.max_parallel,
+                            keep_results=args.keep_results)
     if args.as_json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:

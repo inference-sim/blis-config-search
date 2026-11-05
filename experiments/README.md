@@ -437,7 +437,7 @@ red-underline a spec CI accepts.
 
 | File | Contents |
 |---|---|
-| `runs.jsonl` | one row per BLIS run: config, deployment, metrics, per-instance metrics, errors |
+| `runs.jsonl` | one row per BLIS run: config, `config_key`, deployment, metrics, per-instance metrics, the measured window (`measured`), errors; fields in `report/schema.md` |
 | `experiment.json` | per-sweep results, narratives, the best config per sweep and overall |
 | `scenario.json` | the resolved scenario + pinned stack, as `report.py` / `build_gallery.py` read it |
 | `pareto.json` | finalists (one per sweep), the winner and the reason, and dropped combos |

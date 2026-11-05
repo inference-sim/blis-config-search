@@ -5,7 +5,10 @@ import { SPEC_DOC, fnum } from '../lib'
 
 const REPO = 'https://github.com/inference-sim/blis-config-search'
 const SKILL_DOC = `${REPO}/blob/main/.claude/skills/blis-experiment/SKILL.md`
-// Per-instance footprints stay within one 8-GPU node, so no shape straddles a node boundary.
+// An H100-specific hint, not a rule: the picker is not chip-aware. An instance of up to 8 GPUs
+// fits one 8-GPU HGX node, so no shape straddles a node boundary there. On a chip whose catalog
+// entry packages GPUs differently (GB200 NVL72: 4 per tray, 72 per rack) it does not hold, and
+// the spec leaves the node size to the catalog (the entry's GPUsPerNode) rather than stating 8.
 const TP_CHOICES = [8, 4, 2, 1]
 const ROUTERS = ['random.yaml', 'queue.yaml', 'load-aware.yaml', 'queue-kv.yaml', 'prefix-affinity.yaml']
 

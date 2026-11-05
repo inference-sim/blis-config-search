@@ -70,7 +70,11 @@ SCENARIO_ROUTER = ("router_config",)
 PARALLEL_DEFAULTS = {"tp": 1, "pp": 1, "dp": 1, "enable_expert_parallel": False}
 
 
-GPUS_PER_NODE = 8   # single-node H100; a per-instance footprint beyond this spans nodes (needs a fabric)
+# --- the cluster's packaging: GPUs per node and per rack (design §2.2, SUB-3) ---------------------
+# This module holds no node size of its own. A chip's catalog entry fixes its packaging when the
+# product does (GB200 NVL72: 4 GPUs per tray, 72 per NVLink rack); for any other chip the node
+# size is the user's, stated in the spec as scenario.cluster.gpus_per_node (an HGX H100 server:
+# 8). packaging() resolves the two; every reader below takes its result.
 # Cross-node cost resolves from the fabric (a catalog networks/ entry), required once nodes > 1.
 DEFAULT_FABRIC = "ib-400g"   # InfiniBand NDR 400 Gb/s; the standard H100 multi-node interconnect
 # NON-PRECISION engine defaults only. quantization/cache_dtype are intentionally NOT defaulted: an
@@ -186,11 +190,64 @@ class ConfigError(ValueError):
     pass
 
 
-def classify_config(config, vocab):
+# The packaging every scenario this module wrote before it resolved packaging, so a scenario
+# with it keeps its name (scenario_name) and an old ledger row, which records none, reconstructs
+# to the file it ran (explore_data). It is a record of what those runs used, not a default:
+# packaging() never returns it unless the spec states 8 for a chip whose entry fixes nothing.
+LEGACY_PACKAGING = {"gpus_per_node": 8, "gpus_per_node_source": "stated", "gpus_per_rack": None}
+
+
+def packaging(blis, hardware, stated_gpus_per_node=None, catalog=None):
+    """The cluster's packaging for `hardware`: {gpus_per_node, gpus_per_node_source, gpus_per_rack}.
+
+    The chip's catalog entry is read through `blis catalog resolve --chip` (blis_cli.packaging).
+    A value the entry fixes is the cluster's, source "catalog", and the generated scenario
+    states neither field: BLIS resolves them from the entry. A value the entry leaves open is
+    the spec's, source "stated", and is written. `stated_gpus_per_node` is the spec's
+    scenario.cluster.gpus_per_node, None when the spec states none.
+
+    Raises ConfigError when the spec states no node size for a chip whose entry fixes none (no
+    default is assumed, X19), or states one that contradicts the entry. The second is BLIS's own
+    refusal (scenario.Cluster.Packaging), raised here so a whole sweep is refused once rather than
+    per run; TEMPORARY until `blis schema validate scenario` resolves packaging itself (X15).
+    """
+    fixed = blis_cli.packaging(blis, hardware, catalog)
+    gpn, gpr = fixed["gpus_per_node"], fixed["gpus_per_rack"]
+    if gpn is not None:
+        if stated_gpus_per_node is not None and stated_gpus_per_node != gpn:
+            raise ConfigError(
+                f"scenario.cluster.gpus_per_node is {stated_gpus_per_node}, but the catalog entry "
+                f"hardware/{hardware}.yaml fixes GPUsPerNode at {gpn}: the product packages {gpn} "
+                f"GPUs in a node. Omit gpus_per_node, or state {gpn}")
+        return {"gpus_per_node": gpn, "gpus_per_node_source": "catalog", "gpus_per_rack": gpr}
+    if stated_gpus_per_node is None:
+        raise ConfigError(
+            f"scenario.cluster.gpus_per_node: required, because the catalog entry "
+            f"hardware/{hardware}.yaml states no GPUsPerNode, so the node size is the "
+            f"deployment's (an HGX server holds 8). State it in the spec")
+    if not isinstance(stated_gpus_per_node, int) or isinstance(stated_gpus_per_node, bool) \
+            or stated_gpus_per_node < 1:
+        raise ConfigError(f"scenario.cluster.gpus_per_node: must be a positive integer, got "
+                          f"{stated_gpus_per_node!r}")
+    return {"gpus_per_node": stated_gpus_per_node, "gpus_per_node_source": "stated",
+            "gpus_per_rack": gpr}
+
+
+def _check_whole_nodes(fp, gpn, what):
+    """A footprint past one node must fill whole nodes of `gpn` GPUs."""
+    if fp > gpn and fp % gpn:
+        raise ConfigError(
+            f"{what} tp*pp*dp={fp} spans {fp / gpn:.2g} nodes: a multi-node instance must fill "
+            f"whole {gpn}-GPU nodes (use a footprint that is a multiple of {gpn}, or scale out "
+            f"with num_instances instead)")
+
+
+def classify_config(config, vocab, gpus_per_node):
     """Split a candidate into (parallel, engine, cli, router); raise ConfigError on unknown keys.
 
     `vocab` is the settings.Vocabulary of the simulator that will run the candidate: its pool-
-    layout keys go to `parallel`, its engine settings to `engine`.
+    layout keys go to `parallel`, its engine settings to `engine`. `gpus_per_node` is the
+    cluster's resolved node size (packaging()), which the whole-node checks read.
 
     The speculative keys are folded into engine["speculative"], the nested block the schema wants,
     and the acceptance selectors go to the CLI.
@@ -273,12 +330,8 @@ def classify_config(config, vocab):
     # 332.3 GiB per rank at tp=8 on a 141 GiB device and only fits from tp=32 (4 nodes) up.
     # What is still refused is a footprint that STRADDLES a node boundary: pools are allocated in
     # whole nodes, so the remainder would sit idle and the cross-node term would be mispriced.
-    if fp > GPUS_PER_NODE and fp % GPUS_PER_NODE:
-        raise ConfigError(
-            f"per-instance footprint tp*pp*dp={fp} spans {fp / GPUS_PER_NODE:.2g} nodes: a "
-            f"multi-node instance must fill whole {GPUS_PER_NODE}-GPU nodes (use a footprint that "
-            f"is a multiple of {GPUS_PER_NODE}, or scale out with num_instances instead)")
-    pd = resolve_pd(cli, pd_parallel, pd_engine, parallel, engine)
+    _check_whole_nodes(fp, gpus_per_node, "per-instance footprint")
+    pd = resolve_pd(cli, pd_parallel, pd_engine, parallel, engine, gpus_per_node)
     if pd:
         parallel = {**parallel, "pd": pd}
     return parallel, engine, cli, router
@@ -297,7 +350,7 @@ def _pd_requested(cli, pd_parallel, pd_engine):
                 or any(pd_parallel.values()) or any(pd_engine.values()))
 
 
-def resolve_pd(cli, pd_parallel, pd_engine, base_parallel, base_engine):
+def resolve_pd(cli, pd_parallel, pd_engine, base_parallel, base_engine, gpus_per_node):
     """Resolve a disaggregated candidate into {role: {parallel, engine, instances}}, or {}.
 
     Each role's layout is the shared `parallel`/`engine` overridden by that role's own
@@ -346,10 +399,7 @@ def resolve_pd(cli, pd_parallel, pd_engine, base_parallel, base_engine):
         # pp>1 is priced from kernel v0.5.0 on each side of a disaggregated run too; see the
         # colocated site in classify_config for what moved and what still refuses.
         fp = footprint_gpus(par)
-        if fp > GPUS_PER_NODE and fp % GPUS_PER_NODE:
-            raise ConfigError(
-                f"{role} pool footprint tp*pp*dp={fp} straddles a node boundary: a multi-node "
-                f"pool must fill whole {GPUS_PER_NODE}-GPU nodes")
+        _check_whole_nodes(fp, gpus_per_node, f"{role} pool footprint")
         out[role] = {"parallel": par, "engine": eng, "instances": instances,
                      "footprint_gpus_per_instance": fp}
     # The pools must agree on everything a handoff depends on. Each of these is a hard refusal
@@ -962,19 +1012,26 @@ def _completion_issue(m):
     return None
 
 
-def pool_nodes(parallel, num_instances=1):
+def pool_nodes(parallel, num_instances, gpus_per_node):
     """Nodes the colocated pool must hold for `num_instances` copies of this instance shape.
 
     BLIS v0.10.0 validates `--num-instances` against the pool's rank capacity: a pool of
-    `nodes` x 8 GPUs holds floor(nodes*8 / footprint) instances, and asking for more is refused
+    `nodes` x gpus_per_node GPUs holds floor(nodes*gpus_per_node / footprint) instances, and
+    asking for more is refused
     ("N instance(s) requested, but ...'s colocated pool holds M rank(s) at its layout"). Sizing
     the pool from ONE instance's footprint therefore capped every search at a single node's
     worth of instances; size it for the whole fleet instead."""
     total = footprint_gpus(parallel) * max(1, num_instances)
-    return max(1, -(-total // GPUS_PER_NODE))           # ceil(total / 8)
+    return max(1, -(-total // gpus_per_node))           # ceil(total / gpus_per_node)
 
 
-def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router):
+def _packaging_lines(pk):
+    """The cluster lines a packaging writes: gpus_per_node when the spec stated it, nothing for
+    a value the chip's catalog entry fixes, which BLIS resolves from the entry (SUB-3)."""
+    return f"\n  gpus_per_node: {pk['gpus_per_node']}" if pk["gpus_per_node_source"] == "stated" else ""
+
+
+def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router, pk):
     """Render a DISAGGREGATED Scenario+Deployment: one pool per role plus `pd_transfer`.
 
     Pools never share a node (blis-vllm places each role on its own nodes and asserts they do
@@ -984,7 +1041,7 @@ def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, 
     pools, total_nodes = [], 0
     for role in PD_ROLES:
         spec = pd[role]
-        nodes = pool_nodes(spec["parallel"], spec["instances"])
+        nodes = pool_nodes(spec["parallel"], spec["instances"], pk["gpus_per_node"])
         total_nodes += nodes
         pools.append(
             f"  - role: {role}\n"
@@ -1005,8 +1062,7 @@ coefficients: [{", ".join(COEFFICIENTS)}]
 cluster:
   hardware: {hardware}
   fabric: {fabric}
-  nodes: {total_nodes}
-  gpus_per_node: {GPUS_PER_NODE}
+  nodes: {total_nodes}{_packaging_lines(pk)}
 ---
 kind: Deployment
 name: {name}
@@ -1018,12 +1074,15 @@ pd_transfer:
 
 
 def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances=1,
-                  fabric=DEFAULT_FABRIC, router=None):
+                  fabric=DEFAULT_FABRIC, router=None, *, packaging):
     """Render a two-doc Scenario+Deployment YAML (no external yaml dep). Omitted engine keys (e.g.
     quantization when unset) let the checkpoint/engine govern.
 
     A `pd` block on `parallel` (written by resolve_pd) renders a DISAGGREGATED deployment: two
     role pools plus the `pd_transfer` connector, instead of one colocated pool.
+
+    `packaging` is the cluster's (packaging()): it sizes the pools in nodes and decides which
+    packaging fields the scenario states.
     """
     def block(d, indent):
         """Render a flat mapping, plus the one NESTED value the engine takes (`speculative`).
@@ -1044,8 +1103,9 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
         return "\n".join(out)
     pd = (parallel or {}).get("pd")
     if pd:
-        return _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router)
-    nodes = pool_nodes(parallel, num_instances)
+        return _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router,
+                                 packaging)
+    nodes = pool_nodes(parallel, num_instances, packaging["gpus_per_node"])
     # A multi-node cluster MUST name a fabric: BLIS resolves cross-node cost from the fabric,
     # not the chip, and refuses the scenario otherwise ("scenario.cluster.fabric: required for
     # a N-node cluster"). Single-node clusters omit it (no cross-node traffic to price).
@@ -1066,8 +1126,7 @@ model: {model}
 coefficients: [{", ".join(COEFFICIENTS)}]
 cluster:
   hardware: {hardware}{fabric_line}
-  nodes: {nodes}
-  gpus_per_node: 8
+  nodes: {nodes}{_packaging_lines(packaging)}
 ---
 kind: Deployment
 name: {name}
@@ -1082,16 +1141,22 @@ pools:
 
 
 def scenario_name(model, hardware, engine_version, parallel, engine, num_instances=1,
-                  fabric=DEFAULT_FABRIC, router=None):
+                  fabric=DEFAULT_FABRIC, router=None, *, packaging):
     """The hashed file name (no .yaml) of a deployment's scenario; the router is part of the key
-    because two routing arms differ ONLY in their `router:` block."""
-    key = json.dumps([model, hardware, engine_version, parallel, engine, num_instances, fabric,
-                      router or {}], sort_keys=True)
+    because two routing arms differ ONLY in their `router:` block.
+
+    The packaging is part of the key, since it sets the node count and which fields the file
+    states. LEGACY_PACKAGING is left out of it, so every scenario written before packaging was
+    resolved (all of which stated 8 GPUs per node and no rack) keeps its name and bytes."""
+    parts = [model, hardware, engine_version, parallel, engine, num_instances, fabric, router or {}]
+    if packaging != LEGACY_PACKAGING:
+        parts.append(packaging)
+    key = json.dumps(parts, sort_keys=True)
     return f"{model}-{hardware}-{hashlib.sha1(key.encode()).hexdigest()[:10]}"
 
 
 def write_scenario(blis, scenarios_dir, model, hardware, engine_version, parallel, engine,
-                   num_instances=1, fabric=DEFAULT_FABRIC, router=None):
+                   num_instances=1, fabric=DEFAULT_FABRIC, router=None, *, packaging):
     """Write a scenario ATOMICALLY (temp + os.replace) so concurrent pool workers never read a
     half-written file for the same hashed deployment; return its file name.
 
@@ -1101,12 +1166,13 @@ def write_scenario(blis, scenarios_dir, model, hardware, engine_version, paralle
     `num_instances` participates in the hash because it sets the pool's node count — two runs
     that differ only in instance count need DIFFERENT scenario files, or the second reuses a
     pool too small for it and BLIS refuses the run."""
-    name = scenario_name(model, hardware, engine_version, parallel, engine, num_instances, fabric, router)
+    name = scenario_name(model, hardware, engine_version, parallel, engine, num_instances, fabric, router,
+                         packaging=packaging)
     os.makedirs(scenarios_dir, exist_ok=True)
     path = os.path.join(scenarios_dir, name + ".yaml")
     if not os.path.exists(path):
         body = scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances,
-                             fabric, router)
+                             fabric, router, packaging=packaging)
         fd, tmp = tempfile.mkstemp(dir=scenarios_dir, prefix=".tmp-", suffix=".yaml")
         try:
             with os.fdopen(fd, "w") as f:
@@ -1276,7 +1342,7 @@ def _failure_line(stderr):
 
 def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_version,
             workload, num_requests, seed, horizon, config, phase="probe", timeout=120, defaults=None,
-            replay=None, fabric=DEFAULT_FABRIC):
+            replay=None, fabric=DEFAULT_FABRIC, gpus_per_node=None):
     """Run one kernel-priced BLIS config and return a record dict. No runs.jsonl I/O (caller writes).
 
     `replay` selects the trace-REPLAY path (`blis replay --agentic-scenario`) instead of
@@ -1286,13 +1352,18 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     `fabric` is the cluster's inter-node interconnect (a catalog networks/ class); it prices
     cross-node traffic for a multi-node run and is ignored on a single node. A trailing default
     (ib-400g) so every existing caller is byte-identical.
+
+    `gpus_per_node` is the spec's scenario.cluster.gpus_per_node, None when it states none; it
+    is resolved with the chip's catalog entry by packaging().
     """
     rec = _record_shell(config, phase)
     # Which cost model priced THIS row (see row_stack): makes provenance_split's stack branch able
     # to fire on real data instead of guarding an unreachable path.
     rec["pinned_stack"] = row_stack(blis, catalog, registry)
     try:
-        parallel, engine, cli, router = classify_config(config, settings.vocabulary(blis))
+        pk = packaging(blis, hardware, gpus_per_node, catalog)
+        parallel, engine, cli, router = classify_config(config, settings.vocabulary(blis),
+                                                        pk["gpus_per_node"])
         # Resolve the preset's token shape so a closed-loop run actually prices the traffic it
         # names (see WORKLOAD_IGNORED). A replay carries its lengths in the corpus, so no shape.
         shape = {} if replay else load_workload_shape(catalog, workload)
@@ -1348,11 +1419,12 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                               al_src and hardware and f"({hardware})" not in al_src)}
     # Fabric only reaches a multi-node YAML, so normalize it to the default on a single node:
     # the scenario hash then matches what the explorer reconstructs from the recorded fabric.
-    multinode = bool(pd) or pool_nodes(parallel, num_instances) > 1
+    multinode = bool(pd) or pool_nodes(parallel, num_instances, pk["gpus_per_node"]) > 1
     fabric = fabric if multinode else DEFAULT_FABRIC
     try:
         scenario_name = write_scenario(blis, scenarios_dir, model, hardware, engine_version,
-                                       parallel, engine, num_instances, fabric, router)
+                                       parallel, engine, num_instances, fabric, router,
+                                       packaging=pk)
     except blis_cli.DocumentInvalid as e:
         rec.update({"deployment": None, "cmd": None, "returncode": None, "wall_s": 0.0,
                     "metrics": {}, "metrics_all_instances": [],
@@ -1395,6 +1467,10 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                        # real interconnect instead of assuming IB. None on a single node, which
                        # prices no cross-node traffic (fabric was normalized to the default above).
                        "fabric": fabric if multinode else None,
+                       # The cluster's packaging and the source of each value (stated by the
+                       # spec, or the chip's catalog entry), so a row says what it ran on (X19)
+                       # and its scenario reconstructs (explore_data).
+                       "packaging": pk,
                        "scenario": scenario_name, "router": router or None,
                        # The acceptance the drafting run was priced with, so the report can
                        # derive a correct per-token rate instead of a per-STEP one.
@@ -1418,6 +1494,9 @@ def add_common_args(p):
     p.add_argument("--fabric", default=DEFAULT_FABRIC,
                    help=f"inter-node fabric (catalog networks/ class) for a multi-node run; "
                         f"ignored on a single node (default: {DEFAULT_FABRIC})")
+    p.add_argument("--gpus-per-node", type=int, dest="gpus_per_node",
+                   help="GPUs per node, for a chip whose catalog entry states none (an HGX H100 "
+                        "server: 8); omit it for one whose entry fixes it (GB200 NVL72)")
     p.add_argument("--workload")
     p.add_argument("--num-requests", type=int, dest="num_requests")
     p.add_argument("--seed", type=int, default=0)
@@ -1498,7 +1577,7 @@ def main():
                   blis_cli.engine_release(args.blis, ENGINE_KIND), args.workload, args.num_requests,
                   args.seed, args.horizon,
                   json.loads(args.config), args.phase, args.timeout, args.defaults, replay,
-                  fabric=args.fabric)
+                  fabric=args.fabric, gpus_per_node=args.gpus_per_node)
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         with open(args.out, "a") as f:

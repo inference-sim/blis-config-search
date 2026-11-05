@@ -10,6 +10,7 @@ name: muse-spark-open-816b-a42b-h100-agentx-8gpu
 scenario:
   model: muse-spark-open-816b-a42b-nvfp4
   hardware: h100
+  cluster: {gpus_per_node: 8}             # an 8-GPU HGX server; the catalog entry leaves the node size to the deployment
   workload: agentx-mvp
   gpus: 8
   engine:

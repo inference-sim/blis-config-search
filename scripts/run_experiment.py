@@ -555,6 +555,9 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     # The cluster's inter-node fabric, defaulting to IB so a spec that states none is byte-identical.
     # Only a multi-node run prices cross-node traffic; run_blis ignores it on a single node.
     fabric = (sc.get("cluster") or {}).get("fabric") or run_blis.DEFAULT_FABRIC
+    # The node size the spec states, for a chip whose catalog entry fixes none; run_blis resolves
+    # it with the entry (run_blis.packaging), which owns it where the product fixes it (SUB-3).
+    gpus_per_node = (sc.get("cluster") or {}).get("gpus_per_node")
 
     out_dir = os.path.join(out_root, name)
     scenarios_dir = os.path.join(out_dir, "scenarios")
@@ -655,7 +658,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                                    None, cfg, phase=sname, timeout=run_timeout,
                                    replay={k: v for k, v in replay.items()
                                            if k != "_overrides"} if replay else None,
-                                   fabric=fabric)
+                                   fabric=fabric, gpus_per_node=gpus_per_node)
             rec["sweep"] = sname
             _relativize_cmd(rec, out_dir)
             ok, why = servable(rec, slo_ms, gpus)

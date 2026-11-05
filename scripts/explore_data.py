@@ -365,11 +365,14 @@ def _scenario(run_dir, exp, dep, unset=None):
     # The fabric the run was priced over (issue #71): part of the scenario hash, so regenerating
     # with the wrong one would never match the recorded name. A record predating the field used IB.
     fabric = dep.get("fabric") or run_blis.DEFAULT_FABRIC
+    # The packaging the run was priced on, also part of the hash. A record predating the field
+    # ran on 8 GPUs per node, stated, with no rack: what the runner then wrote for every chip.
+    pk = dep.get("packaging") or run_blis.LEGACY_PACKAGING
     # the engine release the ledger recorded; a ledger that records none cannot be reconstructed
     recorded = (exp.get("pinned_stack") or {}).get("engine_version")
     for ev in dict.fromkeys([v for v in (recorded, sc.get("engine_version")) if v]):
         if run_blis.scenario_name(model, hw, ev, dep["parallel"], dep["engine"], dep["num_instances"],
-                                  fabric, router) + ".yaml" != name:
+                                  fabric, router, packaging=pk) + ".yaml" != name:
             continue
         shown = {}
         if router.get("router_config"):
@@ -380,7 +383,7 @@ def _scenario(run_dir, exp, dep, unset=None):
             shown = {"router_config": "__ROUTER__"}
         text = run_blis.scenario_yaml(model, hw, ev, json.loads(json.dumps(dep["parallel"])),
                                       dict(dep["engine"]), name[:-5], dep["num_instances"],
-                                      fabric, shown or None)
+                                      fabric, shown or None, packaging=pk)
         if shown:
             text = text.replace(json.dumps(os.path.abspath("__ROUTER__")), json.dumps("../" + rel))
         return name, _note_unset(text, unset or {})

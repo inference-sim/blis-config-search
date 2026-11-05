@@ -499,7 +499,7 @@ def _local_router(path, root, run_id):
 
 
 def _run_context(entry, root, blis, catalog, corpus, corpus_cache):
-    """(model, hardware, engine_version, workload, seed, replay, nreq_of, fabric) for a report's
+    """(model, hardware, engine_version, workload, seed, replay, nreq_of, fabric, gpus_per_node) for a report's
     source, built the way its runner builds them, so a smoke run is a run the regeneration would
     make -- including the cluster fabric, or a multi-node RoCE report re-prices on IB."""
     import run_experiment
@@ -516,7 +516,8 @@ def _run_context(entry, root, blis, catalog, corpus, corpus_cache):
     return (sc["model"], sc["hardware"],
             run_experiment.blis_cli.engine_release(blis, run_experiment.run_blis.ENGINE_KIND),
             sc["workload"], int(sc.get("seed", 42)), replay,
-            (lambda c: None) if replay else (lambda c: max(80, c * 4)), fabric)
+            (lambda c: None) if replay else (lambda c: max(80, c * 4)), fabric,
+            (sc.get("cluster") or {}).get("gpus_per_node"))
 
 
 def _same_measurement(a, b):
@@ -566,7 +567,7 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
     if not pairs:   # a ledger with no knob pairs: still prove its cheapest row runs
         ok = sorted((r for r in runs if _ok(r)), key=lambda r: r["config"].get("concurrency") or 0)
         pairs = [{"knob": "", "base": ok[0], "row": None, "moved": False}] if ok else []
-    model, hardware, ev, workload, seed, replay, nreq_of, fabric = _run_context(
+    model, hardware, ev, workload, seed, replay, nreq_of, fabric, gpus_per_node = _run_context(
         entry, root, blis, catalog, corpus, corpus_cache)
     scen_dir = tempfile.mkdtemp(prefix="pin-smoke-")
     todo = {}
@@ -582,7 +583,8 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
         c = cfg.get("concurrency") or 1
         return key, run_blis.run_one(blis, catalog, registry, scen_dir, model, hardware, ev,
                                      workload, nreq_of(c), seed, None, cfg, phase="pin-smoke",
-                                     timeout=timeout, replay=replay, fabric=fabric)
+                                     timeout=timeout, replay=replay, fabric=fabric,
+                                     gpus_per_node=gpus_per_node)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, max_parallel)) as ex:
         new = dict(ex.map(_one, sorted(todo)))
     shutil.rmtree(scen_dir, ignore_errors=True)

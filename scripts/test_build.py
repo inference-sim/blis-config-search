@@ -772,7 +772,7 @@ def test_explore_data():
         # nothing. A record predating the field falls back to IB, which is what it was priced on.
         par16 = {"tp": 8, "pp": 1, "dp": 1}
         for fab, dep_extra in (("roce-200g", {"fabric": "roce-200g"}), ("ib-400g", {})):
-            nm = run_blis.scenario_name("m", "h100", "0.32.0", par16, {"block_size": 16}, 16, fab) + ".yaml"
+            nm = run_blis.scenario_name("m", "h100", "0.32.0", par16, {"block_size": 16}, 16, fab, packaging=run_blis.LEGACY_PACKAGING) + ".yaml"
             dep16 = {"scenario": nm, "parallel": par16, "engine": {"block_size": 16},
                      "num_instances": 16, **dep_extra}
             exp16 = {"name": "m-h100-x", "pinned_stack": {"engine_version": "0.32.0"},
@@ -786,7 +786,7 @@ def test_explore_data():
         # _scenario -- which reconstructs from the recorded fabric: None -- must still match it.
         par1 = {"tp": 8, "pp": 1, "dp": 1}
         nm1 = run_blis.scenario_name("m", "h100", "0.32.0", par1, {"block_size": 16}, 1,
-                                     run_blis.DEFAULT_FABRIC) + ".yaml"
+                                     run_blis.DEFAULT_FABRIC, packaging=run_blis.LEGACY_PACKAGING) + ".yaml"
         dep1 = {"scenario": nm1, "parallel": par1, "engine": {"block_size": 16},
                 "num_instances": 1, "fabric": None}
         got1 = explore_data._scenario(rd, {"name": "m-h100-x", "pinned_stack": {"engine_version": "0.32.0"},
@@ -843,7 +843,7 @@ def test_explore_data():
         # A ledger that records no engine release cannot be reconstructed: no release is assumed,
         # in particular not the vLLM 0.29.0 that ledgers from before #57 were swept with.
         old = run_blis.scenario_name("m", "h100", "0.29.0", par1, {"block_size": 16}, 1,
-                                     run_blis.DEFAULT_FABRIC) + ".yaml"
+                                     run_blis.DEFAULT_FABRIC, packaging=run_blis.LEGACY_PACKAGING) + ".yaml"
         ghost = explore_data._scenario(rd, {"name": "m-h100-x", "pinned_stack": {},
                                             "scenario": {"model": "m", "hardware": "h100"}},
                                        dict(dep1, scenario=old))

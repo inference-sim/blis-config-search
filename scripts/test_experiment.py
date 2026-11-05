@@ -42,7 +42,8 @@ def spec(**over):
     base = {
         "name": "t",
         "scenario": {"model": "qwen3-14b", "hardware": "h100", "workload": "chatbot",
-                     "gpus": 16, "slo": {"itl_p99": "20ms"}, "concurrency": [1, 2]},
+                     "gpus": 16, "slo": {"itl_p99": "20ms"}, "concurrency": [1, 2],
+                     "cluster": {"gpus_per_node": 8}},
         "sweeps": [{"name": "s", "num-instances": [2], "parallel": {"tp": [8]}}],
     }
     base.update(over)
@@ -283,6 +284,65 @@ class SchemaAgreesWithValidator(unittest.TestCase):
 
 
 # --- validator --------------------------------------------------------------------------------
+
+
+class ClusterPackaging(unittest.TestCase):
+    """The spec's node size against the chip's catalog entry (design §2.2, SUB-3), read through
+    `blis catalog resolve --chip` (TEMPORARY fixture, inference-sim#2077). The GPU arithmetic
+    reads the resolved node size."""
+
+    def errs(self, doc):
+        return V.validate(doc, BLIS, ROUTING)
+
+    def gb200(self, cluster=None, tp=8):
+        doc = spec()
+        doc["scenario"]["hardware"] = "gb200-nvl72"
+        doc["scenario"].pop("cluster")
+        if cluster is not None:
+            doc["scenario"]["cluster"] = cluster
+        doc["sweeps"] = [{"name": "s", "num-instances": [2], "parallel": {"tp": [tp]}}]
+        return doc
+
+    def test_gb200_needs_no_node_size(self):
+        self.assertEqual([], self.errs(self.gb200()))
+        self.assertEqual([], self.errs(self.gb200({"gpus_per_node": 4})))   # restated unchanged
+
+    def test_gb200_contradicting_its_catalog_entry_is_refused(self):
+        errs = self.errs(self.gb200({"gpus_per_node": 8}))
+        self.assertTrue(any("hardware/gb200-nvl72.yaml" in e and "at 4" in e for e in errs), errs)
+
+    def test_a_rack_is_never_the_specs(self):
+        errs = self.errs(self.gb200({"gpus_per_rack": 72}))
+        self.assertTrue(any("scenario.cluster.gpus_per_rack: unknown key" in e for e in errs), errs)
+
+    def test_h100_without_a_node_size_is_refused(self):
+        doc = spec()
+        doc["scenario"].pop("cluster")
+        errs = self.errs(doc)
+        self.assertTrue(any("scenario.cluster.gpus_per_node: required" in e for e in errs), errs)
+        self.assertEqual([], self.errs(spec()))                               # 8, stated
+
+    def test_whole_node_arithmetic_reads_the_resolved_node_size(self):
+        # 2 x TP6 = 12 GPUs on 4-GPU trays straddles a tray; on stated 8-GPU nodes TP6 fits one.
+        bad = self.gb200(tp=6)
+        bad["scenario"]["gpus"] = 12
+        self.assertTrue(any("straddles a node boundary" in e and "4-GPU" in e for e in self.errs(bad)))
+        ok = spec(sweeps=[{"name": "s", "num-instances": [2], "parallel": {"tp": [6]}}])
+        ok["scenario"]["gpus"] = 12
+        self.assertFalse([e for e in self.errs(ok) if "straddles" in e])
+
+    def test_committed_specs_state_the_node_size_only_where_the_catalog_does_not(self):
+        """X19's stated-values test for the cluster: a generated scenario's packaging is either
+        the spec's statement or the catalog's, so a GB200 spec states neither field and every
+        other spec states its node size."""
+        for path in V.spec_paths(EXPERIMENTS):
+            doc, _ = V.load(path)
+            cluster = doc["scenario"].get("cluster") or {}
+            fixed = blis_cli.packaging(BLIS, doc["scenario"]["hardware"])["gpus_per_node"]
+            if fixed is not None:
+                self.assertNotIn("gpus_per_node", cluster, path)
+            else:
+                self.assertIsInstance(cluster.get("gpus_per_node"), int, path)
 
 
 class ValidatorRejects(unittest.TestCase):
@@ -696,9 +756,9 @@ class KnobSurfaceComesFromTheSimulator(unittest.TestCase):
         """A name the validator accepts is one the runner can carry, and the converse."""
         vocab = V.knob_vocabulary(BLIS)
         for name in sorted(vocab.flat)[:200]:
-            run_blis.classify_config({"tp": 8, name: 1}, vocab)
+            run_blis.classify_config({"tp": 8, name: 1}, vocab, 8)
         with self.assertRaises(run_blis.ConfigError):
-            run_blis.classify_config({"tp": 8, "max_num_seq": 1}, vocab)
+            run_blis.classify_config({"tp": 8, "max_num_seq": 1}, vocab, 8)
 
     def test_the_repository_holds_no_copied_settings_list(self):
         """CFG-3's check: no hand-kept list of engine settings, and no vllm_arg_policy.yaml."""
@@ -1550,7 +1610,7 @@ class PdRunner(unittest.TestCase):
         return base
 
     def test_pools_resolve_with_instance_counts_and_footprints(self):
-        par, _eng, cli, _router = run_blis.classify_config(self.cfg(), V.knob_vocabulary(BLIS))
+        par, _eng, cli, _router = run_blis.classify_config(self.cfg(), V.knob_vocabulary(BLIS), 8)
         pd = par["pd"]
         self.assertEqual(3, pd["prefill"]["instances"])
         self.assertEqual(5, pd["decode"]["instances"])
@@ -1559,39 +1619,39 @@ class PdRunner(unittest.TestCase):
 
     def test_counts_must_add_up_to_num_instances(self):
         with self.assertRaises(run_blis.ConfigError) as e:
-            run_blis.classify_config(self.cfg(num_instances=7), V.knob_vocabulary(BLIS))
+            run_blis.classify_config(self.cfg(num_instances=7), V.knob_vocabulary(BLIS), 8)
         self.assertIn("must add up", str(e.exception))
 
     def test_pool_without_counterpart_is_refused(self):
         with self.assertRaises(run_blis.ConfigError):
-            run_blis.classify_config({"prefill_instances": 2, "prefill_tp": 8}, V.knob_vocabulary(BLIS))
+            run_blis.classify_config({"prefill_instances": 2, "prefill_tp": 8}, V.knob_vocabulary(BLIS), 8)
 
     def test_pools_must_agree_on_dp(self):
         with self.assertRaises(run_blis.ConfigError) as e:
             run_blis.classify_config(self.cfg(prefill_dp=2, decode_dp=1,
-                                              prefill_instances=1, decode_instances=1), V.knob_vocabulary(BLIS))
+                                              prefill_instances=1, decode_instances=1), V.knob_vocabulary(BLIS), 8)
         self.assertIn("replica factor", str(e.exception))
 
     def test_pools_must_agree_on_block_size(self):
         with self.assertRaises(run_blis.ConfigError) as e:
-            run_blis.classify_config(self.cfg(prefill_block_size=64, decode_block_size=16), V.knob_vocabulary(BLIS))
+            run_blis.classify_config(self.cfg(prefill_block_size=64, decode_block_size=16), V.knob_vocabulary(BLIS), 8)
         self.assertIn("whole KV blocks", str(e.exception))
 
     def test_pools_must_agree_on_cache_dtype(self):
         with self.assertRaises(run_blis.ConfigError) as e:
             run_blis.classify_config(self.cfg(prefill_cache_dtype="fp8",
-                                              decode_cache_dtype="auto"), V.knob_vocabulary(BLIS))
+                                              decode_cache_dtype="auto"), V.knob_vocabulary(BLIS), 8)
         self.assertIn("cache formats must agree", str(e.exception))
 
     def test_only_nixl_connectors_are_accepted(self):
         with self.assertRaises(run_blis.ConfigError) as e:
-            run_blis.classify_config(self.cfg(pd_connector="LMCache"), V.knob_vocabulary(BLIS))
+            run_blis.classify_config(self.cfg(pd_connector="LMCache"), V.knob_vocabulary(BLIS), 8)
         self.assertIn("NIXL", str(e.exception))
-        par, _e, _c, _r = run_blis.classify_config(self.cfg(pd_connector="NixlPullConnector"), V.knob_vocabulary(BLIS))
+        par, _e, _c, _r = run_blis.classify_config(self.cfg(pd_connector="NixlPullConnector"), V.knob_vocabulary(BLIS), 8)
         self.assertEqual("NixlPullConnector", par["pd"]["connector"])
 
     def test_connector_is_not_emitted_as_a_cli_flag(self):
-        _p, _e, cli, _r = run_blis.classify_config(self.cfg(pd_connector="NixlConnector"), V.knob_vocabulary(BLIS))
+        _p, _e, cli, _r = run_blis.classify_config(self.cfg(pd_connector="NixlConnector"), V.knob_vocabulary(BLIS), 8)
         self.assertNotIn("pd_connector", cli)
 
     def test_per_pool_drafting_is_refused_with_the_real_reason(self):
@@ -1599,7 +1659,7 @@ class PdRunner(unittest.TestCase):
         misunderstanding of where drafting lives -- it must say so, not "unknown key"."""
         for key in ("prefill_num_speculative_tokens", "decode_speculative_method"):
             with self.assertRaises(run_blis.ConfigError) as e:
-                run_blis.classify_config(self.cfg(**{key: 3}), V.knob_vocabulary(BLIS))
+                run_blis.classify_config(self.cfg(**{key: 3}), V.knob_vocabulary(BLIS), 8)
             msg = str(e.exception)
             self.assertIn("one configuration per run", msg)
             self.assertNotIn("unknown key", msg)
@@ -1608,13 +1668,13 @@ class PdRunner(unittest.TestCase):
         with self.assertRaises(run_blis.ConfigError) as e:
             run_blis.classify_config(self.cfg(prefill_tp=4, prefill_dp=3,
                                               decode_tp=4, decode_dp=3,
-                                              prefill_instances=1, decode_instances=1), V.knob_vocabulary(BLIS))
+                                              prefill_instances=1, decode_instances=1), V.knob_vocabulary(BLIS), 8)
         self.assertIn("whole", str(e.exception))
 
     def test_scenario_yaml_renders_two_pools_and_pd_transfer(self):
-        par, eng, cli, _router = run_blis.classify_config(self.cfg(), V.knob_vocabulary(BLIS))
+        par, eng, cli, _router = run_blis.classify_config(self.cfg(), V.knob_vocabulary(BLIS), 8)
         doc = run_blis.scenario_yaml("kimi-k2.5", "h200", "0.29.0", par, eng, "x",
-                                     cli["num_instances"])
+                                     cli["num_instances"], packaging=run_blis.LEGACY_PACKAGING)
         self.assertIn("role: prefill", doc)
         self.assertIn("role: decode", doc)
         self.assertIn("pd_transfer", doc)
@@ -1629,15 +1689,15 @@ class PdRunner(unittest.TestCase):
 
     def test_colocated_scenario_is_unchanged(self):
         """The P/D path must not alter the colocated rendering every committed report used."""
-        par, eng, _cli, _r = run_blis.classify_config({"tp": 8, "num_instances": 2}, V.knob_vocabulary(BLIS))
-        doc = run_blis.scenario_yaml("glm-5.3-flash", "h100", "0.29.0", par, eng, "x", 2)
+        par, eng, _cli, _r = run_blis.classify_config({"tp": 8, "num_instances": 2}, V.knob_vocabulary(BLIS), 8)
+        doc = run_blis.scenario_yaml("glm-5.3-flash", "h100", "0.29.0", par, eng, "x", 2, packaging=run_blis.LEGACY_PACKAGING)
         self.assertIn("role: colocated", doc)
         self.assertNotIn("pd_transfer", doc)
 
     def test_encode_and_shared_roles_are_refused(self):
         for key in ("encode_instances", "prefill_decode_instances"):
             with self.assertRaises(run_blis.ConfigError):
-                run_blis.classify_config({key: 2}, V.knob_vocabulary(BLIS))
+                run_blis.classify_config({key: 2}, V.knob_vocabulary(BLIS), 8)
 
 
 # --- assembled report -------------------------------------------------------------------------

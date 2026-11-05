@@ -46,7 +46,7 @@ scenario:                       # shared by EVERY sweep
   gpus: 32                      # EVERY run uses exactly 32 GPUs
   slo: {itl_p99: 20ms}          # latency caps need units; throughput_per_gpu is a tok/s floor
   concurrency: [4, 8, 16, 32, 64, 128]
-  cluster: {fabric: ib-400g}    # inter-node interconnect; omit for the ib-400g default (H100 on RoCE: roce-200g)
+  cluster: {fabric: ib-400g, gpus_per_node: 8}   # interconnect (omit for ib-400g); an HGX server's 8 GPUs
 
 sweeps:
   # Both sweeps share this topology grid, so every drafting row has an exact K=0 twin at the
@@ -87,6 +87,14 @@ sweeps:
   `roce-200g`, or it is silently priced on InfiniBand at ~2× the real cross-node bandwidth. The
   validator checks the name against the catalog. Single-node runs have no cross-node traffic, so
   the fabric is ignored.
+- **Packaging belongs to the chip's catalog entry where the product fixes it.** GB200 NVL72's entry
+  states 4 GPUs per tray and a 72-GPU NVLink rack, so a GB200 spec states neither; the sweeper
+  writes neither into its scenarios, and BLIS takes both from the entry. For a chip whose entry
+  states no node size (H100, H200, B200: the HGX baseboard is a deployment's choice), the spec
+  states `scenario.cluster.gpus_per_node`, and a spec without it is refused rather than given a
+  default. A value that contradicts the entry is refused. A rack is never the spec's. The
+  validator reads the entry through `blis catalog resolve --chip`, and checks whole-node
+  footprints against the resolved node size.
 - **Each sweep needs a `narrative`** — **one sentence**, at most two, under ~200 characters.
   It is the single line the report prints above that sweep's measured result, so it states the
   prediction and nothing else. Grid rationale, prior measurements, and why you skipped some other

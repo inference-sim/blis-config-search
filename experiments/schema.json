@@ -53,7 +53,7 @@
           "maximum": 100000
         },
         "cluster": {
-          "description": "The cluster the scenario runs on. Today the one knob is the inter-node fabric, which prices cross-node traffic for a multi-node run. Omitted means ib-400g, so existing specs are byte-identical.",
+          "description": "The cluster the scenario runs on: its inter-node fabric, and the GPUs per node of a chip whose catalog entry leaves the node size open. A chip whose product fixes its packaging (GB200 NVL72: 4 per tray, 72 per NVLink rack) takes both from its catalog entry. Omitted fabric means ib-400g.",
           "type": "object",
           "additionalProperties": false,
           "minProperties": 1,
@@ -62,6 +62,11 @@
               "description": "A blis-catalog networks/ class (ib-400g, roce-200g, ethernet-100gbe). A property of the cluster, not the GPU die -- an H100 fleet on RoCE must say so, or it is priced on InfiniBand. The validator checks the name against the sibling blis-catalog checkout.",
               "type": "string",
               "minLength": 1
+            },
+            "gpus_per_node": {
+              "description": "GPUs per node, required for a chip whose catalog entry states no GPUsPerNode (an 8-GPU HGX H100 server: 8). For a chip whose entry fixes it, omit it or state the entry's value; any other is refused. The validator reads the entry through `blis catalog resolve --chip`.",
+              "type": "integer",
+              "minimum": 1
             }
           }
         },

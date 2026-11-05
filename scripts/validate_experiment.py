@@ -44,6 +44,7 @@ except ImportError:
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blis_cli  # noqa: E402
+import run_blis  # noqa: E402
 import settings  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
@@ -79,7 +80,6 @@ CATALOG_OWNED_REPLAY_FIELDS = frozenset({
     "split_flattened_agents",
 })
 DURATION_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(us|ms|s)$")
-GPUS_PER_NODE = 8          # a per-instance footprint past this spans nodes (run_blis.GPUS_PER_NODE)
 
 # ---------------------------------------------------------------------------------------------
 # Knob names. None is kept here. Engine setting names are the engine's own, read from the
@@ -317,7 +317,7 @@ def f_valid(fields):
     return " (valid: " + ", ".join(fields) + ")"
 
 
-def _check_gpu_math_colocated(sweep, gpus, where, errs):
+def _check_gpu_math_colocated(sweep, gpus, where, errs, gpus_per_node):
     """At least one combo must total EXACTLY `gpus`, and report what the survivors are.
 
     `gpus` is the experiment's like-for-like guarantee, so a grid that cannot reach it is not
@@ -330,11 +330,12 @@ def _check_gpu_math_colocated(sweep, gpus, where, errs):
     ok = [(fp, ni) for fp in fps for ni in insts
           if isinstance(ni, int) and fp * ni == gpus]
     if ok:
-        straddling = [fp for fp, _ in ok if fp > GPUS_PER_NODE and fp % GPUS_PER_NODE]
+        straddling = [fp for fp, _ in ok
+                      if gpus_per_node and fp > gpus_per_node and fp % gpus_per_node]
         if len(straddling) == len(ok):
             errs.append(f"{where}: every surviving combo has a per-instance footprint that "
                         f"straddles a node boundary ({sorted(set(straddling))} GPUs on "
-                        f"{GPUS_PER_NODE}-GPU nodes); a multi-node instance must fill whole nodes")
+                        f"{gpus_per_node}-GPU nodes); a multi-node instance must fill whole nodes")
         return
     combos = sorted({f"{fp}x{ni}={fp * ni}" for fp in fps for ni in insts
                      if isinstance(ni, int)})
@@ -504,8 +505,12 @@ def scenario_identity_errors(sc, blis, catalog=None):
     return errs
 
 
+CLUSTER_KEYS = ("fabric", "gpus_per_node")
+
+
 def cluster_errors(sc):
-    """`scenario.cluster` structure: a mapping whose only key is `fabric`, a non-empty string.
+    """`scenario.cluster` structure: a mapping of `fabric` (a non-empty string) and
+    `gpus_per_node` (checked with the chip's entry by packaging_errors).
 
     The fabric's name is not checked here: no simulator command resolves a network name yet, and
     this repository reads no catalog file (design §5). BLIS refuses an unknown fabric on every
@@ -519,14 +524,35 @@ def cluster_errors(sc):
         errs.append("scenario.cluster: must be a non-empty mapping, e.g. {fabric: roce-200g}")
         return errs
     for key in cluster:
-        if key != "fabric":
-            errs.append(f"scenario.cluster.{key}: unknown key (the only cluster knob is `fabric`)")
+        if key not in CLUSTER_KEYS:
+            errs.append(f"scenario.cluster.{key}: unknown key (allowed: {', '.join(CLUSTER_KEYS)}; "
+                        f"a rack is the chip's catalog entry's, never the spec's)")
     fabric = cluster.get("fabric")
     if "fabric" in cluster and (not isinstance(fabric, str) or not fabric):
         errs.append("scenario.cluster.fabric: must be a non-empty string naming a networks/ class "
                     "(ib-400g, roce-200g, ethernet-100gbe)")
         return errs
     return errs
+
+
+def packaging_errors(sc, blis, catalog=None):
+    """(errors, gpus_per_node): the cluster's packaging resolved as the runner resolves it.
+
+    run_blis.packaging reads what the chip's catalog entry fixes through `blis catalog resolve`
+    and takes the spec's scenario.cluster.gpus_per_node for the rest, so the GPU arithmetic below
+    reads the node size every run will be placed on. gpus_per_node is None when it cannot be
+    resolved, and the errors say why.
+    """
+    hw = sc.get("hardware")
+    if not hw:
+        return [], None
+    stated = (sc.get("cluster") or {}).get("gpus_per_node") if isinstance(sc.get("cluster"), dict) else None
+    try:
+        return [], run_blis.packaging(blis, hw, stated, catalog)["gpus_per_node"]
+    except run_blis.ConfigError as e:
+        return [str(e)], None
+    except blis_cli.BlisCommandError as e:
+        return [f"scenario.hardware: {e}"], None
 
 
 def header_comment_lines(path):
@@ -623,6 +649,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None):
             errs.append(f"{key}: unknown top-level key (allowed: {', '.join(sorted(known_top))})")
 
     sc = spec.get("scenario")
+    gpus_per_node = None     # the cluster's resolved node size; None when it cannot be resolved
     if not isinstance(sc, dict):
         errs.append("scenario: required mapping (model, hardware, workload, gpus, concurrency)")
         sc = {}
@@ -640,6 +667,9 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None):
         # Present AND real: a name the catalog does not define cannot run anywhere.
         errs.extend(scenario_identity_errors(sc, blis, catalog))
         errs.extend(cluster_errors(sc))
+        if not any(e.startswith("scenario.hardware") for e in errs):
+            pk_errs, gpus_per_node = packaging_errors(sc, blis, catalog)
+            errs.extend(pk_errs)
         gpus = sc.get("gpus")
         if not isinstance(gpus, int) or isinstance(gpus, bool) or gpus < 1:
             errs.append("scenario.gpus: required positive integer -- the budget EVERY run uses")
@@ -795,7 +825,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None):
             if disagg:
                 _check_gpu_math_pd(sw, sc["gpus"], where, errs)
             elif colocated:
-                _check_gpu_math_colocated(sw, sc["gpus"], where, errs)
+                _check_gpu_math_colocated(sw, sc["gpus"], where, errs, gpus_per_node)
         # Cross-knob and model-aware constraints LAST: they read the sweep as a whole, so they
         # run once the individual knobs are known to be well-formed.
         if isinstance(sc, dict):

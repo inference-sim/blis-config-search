@@ -11,6 +11,7 @@ name: deepseek-v4-1-flash-h200-agentx-4node
 scenario:
   model: deepseek-v4.1-flash
   hardware: h200
+  cluster: {gpus_per_node: 8}             # an 8-GPU HGX server; the catalog entry leaves the node size to the deployment
   workload: agentx-mvp
   gpus: 32
   slo: {itl_p99: 20ms}

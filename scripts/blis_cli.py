@@ -136,6 +136,30 @@ def resolve(blis, model=None, chip=None, catalog=None):
     return _cached(_key(blis, *args), load)
 
 
+def packaging(blis, chip, catalog=None):
+    """{"gpus_per_node": int|None, "gpus_per_rack": int|None}: what the chip's catalog entry fixes.
+
+    Read from `blis catalog resolve --chip`, which reports the packaging of a resolved chip
+    (blis-substrate scenario.Cluster.Packaging, design SUB-3). A value is the product's, such
+    as GB200 NVL72's 4 GPUs per tray and 72 per NVLink rack; None means the entry leaves it to
+    the scenario (an HGX H100 server's node size). Raises BlisCommandError when the chip does
+    not resolve or the build reports no packaging.
+    """
+    args = ["catalog", "resolve", "--chip", chip]
+    if catalog:
+        args += ["--catalog", catalog]
+
+    def load():
+        doc = _json(blis, args)
+        if not isinstance(doc, dict) or doc.get("identity") is None:
+            raise BlisCommandError(f"`blis {' '.join(args)}`: {(doc or {}).get('reason') or 'no identity'}")
+        pk = doc.get("packaging")
+        if not isinstance(pk, dict) or not {"gpus_per_node", "gpus_per_rack"} <= set(pk):
+            raise BlisCommandError(f"`blis {' '.join(args)}` reports no packaging; this build predates it")
+        return {"gpus_per_node": pk["gpus_per_node"], "gpus_per_rack": pk["gpus_per_rack"]}
+    return _cached(_key(blis, *args, "packaging"), load)
+
+
 def validate_document(blis, document, path):
     """Validate the file at `path` as a BLIS `document` with the Go validators.
 

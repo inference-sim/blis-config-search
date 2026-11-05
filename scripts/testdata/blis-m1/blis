@@ -54,7 +54,11 @@ def main(argv):
         reason = ("a catalog entry has this name" if hit else
                   "no catalog entry has this name" if kind == "--model" else
                   "the catalog has no hardware entry of this name")
-        print(json.dumps({"query": query, "identity": hit, "reason": reason}))
+        out = {"query": query, "identity": hit, "reason": reason}
+        if hit and kind == "--chip":
+            out["packaging"] = read("catalog.json")["packaging"].get(
+                hit, {"gpus_per_node": None, "gpus_per_rack": None})
+        print(json.dumps(out))
         return
     fail(f"fixture blis: unsupported arguments {argv}", 2)
 

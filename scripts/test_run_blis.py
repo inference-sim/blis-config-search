@@ -21,7 +21,7 @@ VOCAB = settings.vocabulary(FIXTURE_BLIS)
 
 
 def classify(config):
-    return run_blis.classify_config(config, VOCAB)
+    return run_blis.classify_config(config, VOCAB, 8)
 
 
 class ParseMetrics(unittest.TestCase):
@@ -212,7 +212,7 @@ class ClassifyConfig(unittest.TestCase):
         par = {"tp": 8, "pp": 1, "dp": 1, "enable_expert_parallel": True}
         eng = dict(run_blis.ENGINE_DEFAULTS, block_size=64)
         self.assertIn("block_size: 64", run_blis.scenario_yaml("glm-5.3", "h200", "0.32.0", par,
-                                                               eng, "n", 1))
+                                                               eng, "n", 1, packaging=run_blis.LEGACY_PACKAGING))
 
     def test_precision_passes_through_when_set(self):
         _, eng, _, _ = classify({"tp": 8, "quantization": "fp8", "cache_dtype": "fp8"})
@@ -263,7 +263,7 @@ class ClassifyConfig(unittest.TestCase):
         trimmed = dict(doc, fields=[f for f in doc["fields"] if f["name"] != "max_num_seqs"])
         vocab = settings.vocabulary_from(trimmed, blis_cli.schema(FIXTURE_BLIS, "deployment"))
         with self.assertRaises(run_blis.ConfigError) as e:
-            run_blis.classify_config({"tp": 8, "max_num_seqs": 64}, vocab)
+            run_blis.classify_config({"tp": 8, "max_num_seqs": 64}, vocab, 8)
         self.assertIn("unknown key", str(e.exception))
 
     def test_layout_names_come_from_the_deployment_schema(self):
@@ -275,7 +275,7 @@ class ClassifyConfig(unittest.TestCase):
         trimmed = {"$defs": {"deployment.Parallelism": {"properties": props}}}
         vocab = settings.vocabulary_from(blis_cli.fields(FIXTURE_BLIS, "vllm"), trimmed)
         with self.assertRaises(run_blis.ConfigError):
-            run_blis.classify_config({"tp": 8, "dcp": 2}, vocab)
+            run_blis.classify_config({"tp": 8, "dcp": 2}, vocab, 8)
 
     def test_accepts_long_prefill(self):
         """`long_prefill_token_threshold` IS a field of the pinned blis-schemas (v0.5.0) Engine
@@ -307,7 +307,7 @@ class ClassifyConfig(unittest.TestCase):
         """
         y = run_blis.scenario_yaml("muse-spark-open-816b-a42b-nvfp4", "h100", "0.32.0",
                                    {"tp": 8, "pp": 2, "dp": 1, "enable_expert_parallel": True},
-                                   {"max_model_len": 262144}, "muse-pp2tp8")
+                                   {"max_model_len": 262144}, "muse-pp2tp8", packaging=run_blis.LEGACY_PACKAGING)
         self.assertIn("pp: 2", y)
         self.assertIn("nodes: 2", y)          # tp8 x pp2 = 16 GPUs = 2 whole nodes
         self.assertIn("fabric:", y)           # multi-node, so a fabric is required
@@ -340,7 +340,7 @@ class ClassifyConfig(unittest.TestCase):
         par, engine, _cli, _r = classify(
             {"tp": 8, "enable_prefix_caching": False, "async_scheduling": True,
              "cudagraph_capture_sizes": [1, 2, 4]})
-        doc = run_blis.scenario_yaml("qwen3-14b", "h100", "0.32.0", par, engine, "x", 1)
+        doc = run_blis.scenario_yaml("qwen3-14b", "h100", "0.32.0", par, engine, "x", 1, packaging=run_blis.LEGACY_PACKAGING)
         self.assertIn("enable_prefix_caching: false", doc)
         self.assertIn("async_scheduling: true", doc)
         self.assertIn("cudagraph_capture_sizes: [1, 2, 4]", doc)
@@ -378,7 +378,7 @@ class Footprint(unittest.TestCase):
         # cluster that does not name one.
         par, eng, _, _ = classify({"tp": 32, "enable_expert_parallel": True})
         eng.setdefault("block_size", 64)
-        y = run_blis.scenario_yaml("kimi-k3", "h200", "0.32.0", par, eng, "s", 1)
+        y = run_blis.scenario_yaml("kimi-k3", "h200", "0.32.0", par, eng, "s", 1, packaging=run_blis.LEGACY_PACKAGING)
         self.assertIn("fabric:", y)
         self.assertIn("nodes: 4", y)                                    # 32 GPUs / 8 per node
 
@@ -386,7 +386,7 @@ class Footprint(unittest.TestCase):
 class ScenarioYaml(unittest.TestCase):
     def test_omits_unset_precision_lists_memory_coeff(self):
         par, eng, _, _ = classify({"tp": 8})
-        y = run_blis.scenario_yaml("qwen3-14b", "h100", "0.32.0", par, eng, "s")
+        y = run_blis.scenario_yaml("qwen3-14b", "h100", "0.32.0", par, eng, "s", packaging=run_blis.LEGACY_PACKAGING)
         self.assertIn("kind: Deployment", y)
         self.assertNotIn("quantization", y)          # BF16 checkpoint governs -- no forced FP8
         self.assertIn("cost-model-memory", y)
@@ -398,17 +398,17 @@ class PoolSizing(unittest.TestCase):
 
     def test_pool_nodes_covers_all_instances(self):
         par = {"tp": 4, "pp": 1, "dp": 1}
-        self.assertEqual(run_blis.pool_nodes(par, 1), 1)    # 4 GPUs -> 1 node
-        self.assertEqual(run_blis.pool_nodes(par, 2), 1)    # 8 GPUs -> 1 node
-        self.assertEqual(run_blis.pool_nodes(par, 8), 4)    # 32 GPUs -> 4 nodes
-        self.assertEqual(run_blis.pool_nodes({"tp": 8, "pp": 1, "dp": 1}, 16), 16)  # 128 GPUs
+        self.assertEqual(run_blis.pool_nodes(par, 1, 8), 1)    # 4 GPUs -> 1 node
+        self.assertEqual(run_blis.pool_nodes(par, 2, 8), 1)    # 8 GPUs -> 1 node
+        self.assertEqual(run_blis.pool_nodes(par, 8, 8), 4)    # 32 GPUs -> 4 nodes
+        self.assertEqual(run_blis.pool_nodes({"tp": 8, "pp": 1, "dp": 1}, 16, 8), 16)  # 128 GPUs
 
     def test_multinode_scenario_names_a_fabric(self):
         par, eng = {"tp": 8, "pp": 1, "dp": 1}, {"block_size": 16}
-        many = run_blis.scenario_yaml("m", "h100", "0.32.0", par, eng, "n", num_instances=16)
+        many = run_blis.scenario_yaml("m", "h100", "0.32.0", par, eng, "n", num_instances=16, packaging=run_blis.LEGACY_PACKAGING)
         self.assertIn("nodes: 16", many)
         self.assertIn("fabric: ", many)                     # required once nodes > 1
-        one = run_blis.scenario_yaml("m", "h100", "0.32.0", par, eng, "n", num_instances=1)
+        one = run_blis.scenario_yaml("m", "h100", "0.32.0", par, eng, "n", num_instances=1, packaging=run_blis.LEGACY_PACKAGING)
         self.assertIn("nodes: 1", one)
         self.assertNotIn("fabric:", one)                    # single node prices no cross-node traffic
 
@@ -418,8 +418,8 @@ class PoolSizing(unittest.TestCase):
         import tempfile
         d = tempfile.mkdtemp()
         par, eng = {"tp": 4, "pp": 1, "dp": 1}, {"block_size": 16}
-        a = run_blis.write_scenario(FIXTURE_BLIS, d, "m", "h100", "0.32.0", par, eng, 1)
-        b = run_blis.write_scenario(FIXTURE_BLIS, d, "m", "h100", "0.32.0", par, eng, 8)
+        a = run_blis.write_scenario(FIXTURE_BLIS, d, "m", "h100", "0.32.0", par, eng, 1, packaging=run_blis.LEGACY_PACKAGING)
+        b = run_blis.write_scenario(FIXTURE_BLIS, d, "m", "h100", "0.32.0", par, eng, 8, packaging=run_blis.LEGACY_PACKAGING)
         self.assertNotEqual(a, b)
 
 
@@ -430,12 +430,12 @@ class FabricSelection(unittest.TestCase):
     def test_chosen_fabric_reaches_the_scenario_yaml(self):
         par, eng = {"tp": 8, "pp": 1, "dp": 1}, {"block_size": 16}
         y = run_blis.scenario_yaml("m", "h100", "0.32.0", par, eng, "n", num_instances=16,
-                                   fabric="roce-200g")
+                                   fabric="roce-200g", packaging=run_blis.LEGACY_PACKAGING)
         self.assertIn("fabric: roce-200g", y)
 
     def test_default_fabric_is_ib_400g(self):
         par, eng = {"tp": 8, "pp": 1, "dp": 1}, {"block_size": 16}
-        y = run_blis.scenario_yaml("m", "h100", "0.32.0", par, eng, "n", num_instances=16)
+        y = run_blis.scenario_yaml("m", "h100", "0.32.0", par, eng, "n", num_instances=16, packaging=run_blis.LEGACY_PACKAGING)
         self.assertIn(f"fabric: {run_blis.DEFAULT_FABRIC}", y)
         self.assertEqual(run_blis.DEFAULT_FABRIC, "ib-400g")
 
@@ -445,8 +445,8 @@ class FabricSelection(unittest.TestCase):
         import tempfile
         d = tempfile.mkdtemp()
         par, eng = {"tp": 8, "pp": 1, "dp": 1}, {"block_size": 16}
-        a = run_blis.write_scenario(FIXTURE_BLIS, d, "m", "h100", "0.32.0", par, eng, 16, "ib-400g")
-        b = run_blis.write_scenario(FIXTURE_BLIS, d, "m", "h100", "0.32.0", par, eng, 16, "roce-200g")
+        a = run_blis.write_scenario(FIXTURE_BLIS, d, "m", "h100", "0.32.0", par, eng, 16, "ib-400g", packaging=run_blis.LEGACY_PACKAGING)
+        b = run_blis.write_scenario(FIXTURE_BLIS, d, "m", "h100", "0.32.0", par, eng, 16, "roce-200g", packaging=run_blis.LEGACY_PACKAGING)
         self.assertNotEqual(a, b)
 
     def test_cli_exposes_fabric_with_the_ib_default(self):
@@ -477,14 +477,88 @@ class BuildCmd(unittest.TestCase):
 class RunOneRejects(unittest.TestCase):
     def test_unsupported_config_is_an_error_row_not_a_crash(self):
         rec = run_blis.run_one(FIXTURE_BLIS, "cat", "reg", "/tmp/scn-x", "m", "h100", "0.32.0",
-                               None, None, 0, None, {"tp": 8, "prefill_tp": 4})
+                               None, None, 0, None, {"tp": 8, "prefill_tp": 4}, gpus_per_node=8)
         self.assertIsNone(rec["returncode"])
         self.assertIn("unsupported config", rec["error"])
+        self.assertIn("prefill", rec["error"])      # refused for its pool key, not its packaging
         self.assertEqual(rec["metrics"], {})
         # same row SHAPE as a real run so the sweeper and the report never trip on missing keys
         for k in ("wall_s", "deployment", "metrics_all_instances", "stderr_tail", "cmd"):
             self.assertIn(k, rec)
         self.assertEqual(rec["wall_s"], 0.0)
+
+
+class Packaging(unittest.TestCase):
+    """The cluster's packaging (design §2.2, SUB-3): a chip's catalog entry owns its GPUs per node
+    and per rack where the product fixes them, and the spec states the node size where it does
+    not. Read through `blis catalog resolve --chip` (the TEMPORARY fixture until #2077's build is
+    pinned); this module keeps no node size of its own (X19)."""
+
+    def yaml_for(self, hardware, pk, parallel=None, num_instances=18):
+        par = dict(parallel or {"tp": 4, "pp": 1, "dp": 1})
+        return run_blis.scenario_yaml("m", hardware, "0.32.0", par, {"block_size": 16}, "s",
+                                      num_instances, packaging=pk)
+
+    def test_gb200_nvl72_resolves_to_4_and_72_and_writes_neither(self):
+        pk = run_blis.packaging(FIXTURE_BLIS, "gb200-nvl72")
+        self.assertEqual(pk, {"gpus_per_node": 4, "gpus_per_node_source": "catalog", "gpus_per_rack": 72})
+        y = self.yaml_for("gb200-nvl72", pk)
+        self.assertNotIn("gpus_per_node", y)
+        self.assertNotIn("gpus_per_rack", y)
+        self.assertIn("nodes: 18", y)                    # 18 x TP4 on 4-GPU trays: 18 trays, one rack
+        # A restatement of the entry's value is the entry's, and still writes nothing.
+        self.assertEqual(run_blis.packaging(FIXTURE_BLIS, "gb200-nvl72", 4), pk)
+
+    def test_h100_takes_its_node_size_from_the_spec_with_no_rack(self):
+        pk = run_blis.packaging(FIXTURE_BLIS, "h100", 8)
+        self.assertEqual(pk, {"gpus_per_node": 8, "gpus_per_node_source": "stated", "gpus_per_rack": None})
+        y = self.yaml_for("h100", pk, {"tp": 8, "pp": 1, "dp": 1}, 2)
+        self.assertIn("gpus_per_node: 8", y)
+        self.assertNotIn("gpus_per_rack", y)
+        self.assertIn("nodes: 2", y)
+
+    def test_a_spec_contradicting_the_catalog_is_refused(self):
+        with self.assertRaises(run_blis.ConfigError) as e:
+            run_blis.packaging(FIXTURE_BLIS, "gb200-nvl72", 8)
+        for part in ("gpus_per_node is 8", "hardware/gb200-nvl72.yaml", "at 4"):
+            self.assertIn(part, str(e.exception))
+
+    def test_a_chip_whose_entry_fixes_nothing_needs_a_stated_node_size(self):
+        # No default is assumed: an unstated node size on such a chip is refused, not taken as 8.
+        with self.assertRaises(run_blis.ConfigError) as e:
+            run_blis.packaging(FIXTURE_BLIS, "h100")
+        self.assertIn("required", str(e.exception))
+        self.assertEqual(run_blis.packaging(FIXTURE_BLIS, "h100", 4)["gpus_per_node"], 4)
+        for bad in (0, -8, True, "8"):
+            with self.assertRaises(run_blis.ConfigError):
+                run_blis.packaging(FIXTURE_BLIS, "h100", bad)
+
+    def test_whole_node_checks_read_the_resolved_node_size(self):
+        # TP8 fills two 4-GPU trays exactly; TP6 straddles them. On 8-GPU nodes TP6 fits one node.
+        run_blis.classify_config({"tp": 8}, VOCAB, 4)
+        with self.assertRaises(run_blis.ConfigError):
+            run_blis.classify_config({"tp": 6}, VOCAB, 4)
+        run_blis.classify_config({"tp": 6}, VOCAB, 8)
+        self.assertEqual(run_blis.pool_nodes({"tp": 8, "pp": 1, "dp": 1}, 9, 4), 18)
+
+    def test_a_run_records_its_packaging_and_names_a_new_scenario(self):
+        with tempfile.TemporaryDirectory() as d:
+            # The fixture binary cannot simulate, so the run itself fails; the scenario it was
+            # handed, and the row's packaging, are what this checks.
+            rec = run_blis.run_one(FIXTURE_BLIS, d, d, d, "m", "gb200-nvl72", "0.32.0", None,
+                                   None, 0, None, {"tp": 4, "num_instances": 2, "block_size": 16},
+                                   replay={"scenario": "s", "corpus": "c", "corpus_sha256": "0" * 64})
+            self.assertEqual(rec["deployment"]["packaging"]["gpus_per_node_source"], "catalog")
+            with open(os.path.join(d, rec["deployment"]["scenario"]), encoding="utf-8") as f:
+                body = f.read()
+            self.assertNotIn("gpus_per_node", body)
+            self.assertIn("nodes: 2", body)
+        # The legacy packaging keeps every earlier scenario's name; any other changes it.
+        args = ("m", "h100", "0.32.0", {"tp": 8, "pp": 1, "dp": 1}, {"block_size": 16}, 1)
+        legacy = run_blis.scenario_name(*args, packaging=run_blis.LEGACY_PACKAGING)
+        old = f"m-h100-{__import__('hashlib').sha1(json.dumps(list(args) + ['ib-400g', {}], sort_keys=True).encode()).hexdigest()[:10]}"
+        self.assertEqual(legacy, old)
+        self.assertNotEqual(legacy, run_blis.scenario_name(*args, packaging=run_blis.packaging(FIXTURE_BLIS, "h100", 4)))
 
 
 def _write_catalog(root, model, arch=None, sparse_mla=False, hardware=None, cc=None,
@@ -667,13 +741,13 @@ class RouterBlockInScenario(unittest.TestCase):
         with tempfile.NamedTemporaryFile(suffix=".yaml") as epp:
             y = run_blis.scenario_yaml("m", "h100", "0.32.0", dict(run_blis.PARALLEL_DEFAULTS),
                                        {"block_size": 64}, "n", 1, run_blis.DEFAULT_FABRIC,
-                                       {"router_config": epp.name})
+                                       {"router_config": epp.name}, packaging=run_blis.LEGACY_PACKAGING)
         self.assertRegex(y, r"(?m)^router:$")
         self.assertRegex(y, r"(?m)^  endpoint_picker_config: ")
 
     def test_absent_router_emits_no_block(self):
         y = run_blis.scenario_yaml("m", "h100", "0.32.0", dict(run_blis.PARALLEL_DEFAULTS),
-                                   {"block_size": 16}, "n")
+                                   {"block_size": 16}, "n", packaging=run_blis.LEGACY_PACKAGING)
         self.assertNotIn("router:", y)
 
     def test_router_participates_in_the_scenario_hash(self):
@@ -686,9 +760,9 @@ class RouterBlockInScenario(unittest.TestCase):
                  tempfile.NamedTemporaryFile(suffix=".yaml") as b:
                 args = ("m", "h100", "0.32.0", dict(run_blis.PARALLEL_DEFAULTS),
                         {"block_size": 64}, 1, run_blis.DEFAULT_FABRIC)
-                n1 = run_blis.write_scenario(FIXTURE_BLIS, d, *args, {"router_config": a.name})
-                n2 = run_blis.write_scenario(FIXTURE_BLIS, d, *args, {"router_config": b.name})
-                n0 = run_blis.write_scenario(FIXTURE_BLIS, d, *args, None)
+                n1 = run_blis.write_scenario(FIXTURE_BLIS, d, *args, {"router_config": a.name}, packaging=run_blis.LEGACY_PACKAGING)
+                n2 = run_blis.write_scenario(FIXTURE_BLIS, d, *args, {"router_config": b.name}, packaging=run_blis.LEGACY_PACKAGING)
+                n0 = run_blis.write_scenario(FIXTURE_BLIS, d, *args, None, packaging=run_blis.LEGACY_PACKAGING)
             self.assertEqual(len({n0, n1, n2}), 3)
         finally:
             shutil.rmtree(d)
@@ -729,7 +803,7 @@ class SpeculativeDecoding(unittest.TestCase):
         y = run_blis.scenario_yaml("m", "b200", "0.32.0", dict(run_blis.PARALLEL_DEFAULTS),
                                    {"block_size": 128,
                                     "speculative": {"method": "dspark", "num_spec_tokens": 5}},
-                                   "n")
+                                   "n", packaging=run_blis.LEGACY_PACKAGING)
         self.assertIn("      speculative:\n", y)
         self.assertIn('        method: "dspark"', y)
         self.assertIn("        num_spec_tokens: 5", y)
@@ -801,7 +875,7 @@ class GeneratedScenario(unittest.TestCase):
         """A generated scenario names its engine as engine: {kind, version} (SIM-1), and the
         version is the release the simulator's field list describes, not a pin of our own."""
         par, eng, _, _ = classify({"tp": 8})
-        y = run_blis.scenario_yaml("qwen3-14b", "h100", VOCAB.release, par, eng, "s")
+        y = run_blis.scenario_yaml("qwen3-14b", "h100", VOCAB.release, par, eng, "s", packaging=run_blis.LEGACY_PACKAGING)
         self.assertIn('engine:\n  kind: vllm\n  version: "0.32.0"\n', y)
         self.assertNotIn("engine_version", y)
         self.assertEqual("0.32.0", blis_cli.engine_release(FIXTURE_BLIS, "vllm"))
@@ -812,10 +886,10 @@ class GeneratedScenario(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(blis_cli.DocumentInvalid):
                 run_blis.write_scenario(FIXTURE_BLIS, d, "INVALID-FOR-TEST", "h100", "0.32.0",
-                                        par, eng)
+                                        par, eng, packaging=run_blis.LEGACY_PACKAGING)
             self.assertEqual([], [f for f in os.listdir(d) if not f.startswith(".")])
             name = run_blis.write_scenario(FIXTURE_BLIS, d, "qwen3-14b", "h100", "0.32.0",
-                                           par, eng)
+                                           par, eng, packaging=run_blis.LEGACY_PACKAGING)
             self.assertTrue(os.path.exists(os.path.join(d, name)))
 
     def test_a_refused_result_is_an_error_row(self):

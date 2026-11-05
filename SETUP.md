@@ -6,16 +6,20 @@ same stack from `pins.env`; the clone lines below are kept in step by `scripts/b
 ## 1. Build the pinned BLIS binary (kernel backend)
 
 ```bash
-git clone --branch v0.15.0 --depth 1 https://github.com/inference-sim/inference-sim.git
+git clone --branch m1/substrate --depth 1 https://github.com/inference-sim/inference-sim.git
 cd inference-sim
-# The v0.15.0 tag is NOT configured immutable upstream, so verify it still resolves
+# The m1/substrate tag is NOT configured immutable upstream, so verify it still resolves
 # to the pinned commit before building; fail loudly if the tag has been moved.
-EXPECT=762f1605ff27cd825d6b2cb2d9e991cd4b864c91   # release v0.15.0, the Muse-Spark release (kernel v0.5.0, schemas v0.10.0, blis-vllm v0.32.0-blis.1 in go.mod)
-test "$(git rev-parse HEAD)" = "$EXPECT" || { echo "v0.15.0 no longer resolves to $EXPECT -- aborting" >&2; exit 1; }
+EXPECT=9eaaf748541fce624e88ab7ef87c0019afaca0c3   # inference-sim m1/substrate, the M1 draft's branch (inference-sim#2077); v0.16.0 when tagged
+test "$(git rev-parse HEAD)" = "$EXPECT" || { echo "m1/substrate no longer resolves to $EXPECT -- aborting" >&2; exit 1; }
 go build -o blis main.go
 ```
 
-Pass this `./blis` to the sweeper as `--blis`. The kernel cost-model
+Pass this `./blis` to the validator and the sweeper as `--blis`. Both read the engine's
+settings with `blis fields --engine vllm`, the pool-layout keys with `blis schema deployment`,
+and model and chip names with `blis catalog resolve`; the sweeper validates each generated
+scenario and each Result with `blis schema validate`. This repository keeps no copy of any of
+them. The kernel cost-model
 backend is selected by the scenario's `coefficients:` list (the generated scenario names the seven
 `cost-model-*` sets), so **no `--latency-model` CLI flag is passed** — v0.10.0 removed that flag
 and rejects it as unknown. `run_blis.py` writes the coefficients into the generated scenario.

@@ -42,7 +42,7 @@ jobs:
     outputs:
       specs: ${{ steps.pick.outputs.specs }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0       # diff against the commit before the push, however far back
 
@@ -70,7 +70,7 @@ jobs:
             # Only the specs this push touched (all its commits, not just the last one).
             old=HEAD^
             if [ -n "${BEFORE:-}" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then old="$BEFORE"; fi
-            specs="$(git diff --name-only --diff-filter=d "$old" HEAD -- 'experiments/*.yaml' || true)"
+            specs="$(git diff --name-only --diff-filter=d "$old" HEAD -- 'experiments/*.yaml')"
           fi
           echo "will run:"; echo "${specs:-none}"
           # JSON list for the sweep matrix: one job (runner, timeout, PR) per spec.
@@ -95,7 +95,7 @@ jobs:
     env:
       SPEC: ${{ matrix.spec }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Name the report
         id: name
@@ -103,27 +103,9 @@ jobs:
         run: |
           echo "name=$(sed -n 's/^name: *//p' "$SPEC" | head -1)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with: { python-version: "3.12" }
-      - run: pip install pyyaml
-
-      - name: Clone the catalog the specs are validated against
-        run: |
-          set -euo pipefail
-          # Cloned BEFORE validation rather than with the rest of the stack, so the existence
-          # check on scenario.model/hardware/workload runs while it can still save the expensive
-          # step. A typo'd identifier validates clean and dry-runs clean with no catalog, then
-          # fails EVERY run after the Go build -- the wasted CI job the validator exists to
-          # prevent (susiejojo review). A shallow catalog clone costs seconds, the build minutes.
-          set -a; . ./pins.env; set +a
-          git clone --branch "$CATALOG_REF" --depth 1 https://github.com/inference-sim/blis-catalog.git
-          echo "BLIS_CATALOG=$PWD/blis-catalog" >> "$GITHUB_ENV"
-
-      - name: Validate before building anything
-        run: |
-          set -euo pipefail
-          python3 -I scripts/validate_experiment.py "$SPEC" --catalog "$BLIS_CATALOG"
-          python3 -I scripts/run_experiment.py "$SPEC" --dry-run --catalog "$BLIS_CATALOG"
+      - run: pip install --require-hashes -r requirements.txt
 
       - name: Clone the pinned simulator
         run: |
@@ -135,16 +117,24 @@ jobs:
           # The tag is not immutable upstream; refuse to build a moved tag (same check as SETUP.md).
           test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
             echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with: { go-version-file: upstream/go.mod, cache-dependency-path: upstream/go.sum }
       - name: Build BLIS and clone the rest of the stack
         run: |
           set -euo pipefail
           set -a; . ./pins.env; set +a
           ( cd upstream && go build -o blis main.go )
+          git clone --branch "$CATALOG_REF" --depth 1 https://github.com/inference-sim/blis-catalog.git
+          echo "BLIS_CATALOG=$PWD/blis-catalog" >> "$GITHUB_ENV"
           git clone --branch "$REGISTRY_REF" --depth 1 https://github.com/inference-sim/blis-registry.git
           echo "BLIS_REGISTRY=$PWD/blis-registry" >> "$GITHUB_ENV"
           echo "BLIS_BIN=$PWD/upstream/blis"      >> "$GITHUB_ENV"
+
+      - name: Validate before running anything
+        run: |
+          set -euo pipefail
+          python3 -I scripts/validate_experiment.py "$SPEC" --blis "$BLIS_BIN" --catalog "$BLIS_CATALOG"
+          python3 -I scripts/run_experiment.py "$SPEC" --dry-run --blis "$BLIS_BIN" --catalog "$BLIS_CATALOG"
 
       - name: Fetch the replay corpus
         run: |
@@ -167,7 +157,7 @@ jobs:
       - name: Build the site to validate the new reports
         run: python3 -I scripts/build_gallery.py --out /tmp/site-check
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: report-${{ steps.name.outputs.name }}
           path: reports/${{ steps.name.outputs.name }}
@@ -191,7 +181,7 @@ jobs:
     env:
       SPEC: ${{ matrix.spec }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         # Branch from current main: a long sweep can outlive workflow edits, and a branch
         # carrying stale workflow files is refused to GITHUB_TOKEN (no `workflows` scope).
         with:
@@ -208,7 +198,7 @@ jobs:
 
       # A pattern, not a name: a failed sweep leaves no artifact, and that must not error here.
       # v8 extracts a lone match straight into `path`, so name the report's own dir there.
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: report-${{ steps.name.outputs.name }}
           path: ${{ runner.temp }}/artifacts/report-${{ steps.name.outputs.name }}

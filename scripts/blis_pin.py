@@ -4,7 +4,7 @@
 Three workflows drive this:
 
     upstream release --bump-blis-pin.yml-->  DRAFT pin PR
-        pin-compat.yml gates it (drift + smoke on the new binary); compatibility fixes are
+        pin-compat.yml gates it (spec validation + smoke on the new binary); compatibility fixes are
         pushed onto that same branch until the gate is green
     --merge-->  regen-reports.yml  --one job per report-->  one PR per batch  --merge-->  published
 
@@ -19,7 +19,6 @@ the pin is what starts hours of regeneration against it.
   python3 -I scripts/blis_pin.py plan [--only ID,...]         # what to regenerate, in batches
   python3 -I scripts/blis_pin.py regen ID --blis B --catalog C --registry R --out DIR
   python3 -I scripts/blis_pin.py summary --old DIR --new DIR ID [ID ...]
-  python3 -I scripts/blis_pin.py drift --siblings DIR         # knob tables vs the new stack
   python3 -I scripts/blis_pin.py smoke [ID ...] --blis B --catalog C --registry R [--corpus F]
 
 Why every report, and why not in place: a report's numbers are a function of (its source, the
@@ -54,7 +53,7 @@ UPSTREAM = "inference-sim/inference-sim"
 TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 # The keys whose VALUE says which stack priced a report. A comment-only edit to pins.env moves
 # none of them and must not queue hours of sweeps.
-STACK_KEYS = ("BLIS_REF", "BLIS_SHA", "KERNEL_REF", "VLLM_REF", "SCHEMAS_REF", "ROUTER_REF",
+STACK_KEYS = ("BLIS_REF", "BLIS_SHA", "SUBSTRATE_REF", "VLLM_REF", "ROUTER_REF",
               "CATALOG_REF", "REGISTRY_REF")
 # A batch is one PR. Small enough to review the numbers, large enough not to open a PR per report.
 MAX_BATCH = 4
@@ -330,7 +329,7 @@ def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1):
     if e["kind"] != "experiment":
         raise SystemExit(f"{run_id} has no experiment spec to regenerate from")
     spec = e["source"]
-    _run([py, "-I", "scripts/validate_experiment.py", spec, "--catalog", catalog])
+    _run([py, "-I", "scripts/validate_experiment.py", spec, "--blis", blis, "--catalog", catalog])
     if e["replay"]:
         _run([py, "-I", "scripts/fetch_corpus.py", spec, "--catalog", catalog])
     _run([py, "-I", "scripts/run_experiment.py", spec, "--blis", blis, "--catalog", catalog,
@@ -408,10 +407,9 @@ def summary(old_root, new_root, ids, failed=()):
 #               knobs (PR #25): they decoded, and measured identical numbers to the baseline, so a
 #               sweep over them reported "no effect" as if it were a finding.
 # Neither shows up in a dry run. Both have to be fixed on the pin PR -- as code changes to the
-# validator's knob tables / run_blis.py -- BEFORE it merges, because merging is what starts the
-# regeneration. So the gate runs on the pin PR, against the new binary:
-#   drift  -- the validator's PINNED knob tables (what CI validates with) vs the blis-vllm and
-#             blis-schemas the release's go.mod names. Any difference is code to change.
+# runner -- BEFORE it merges, because merging is what starts the regeneration. Setting names are
+# read from the new binary itself (`blis fields`), so there is no table to drift. The gate runs on
+# the pin PR, against the new binary:
 #   smoke  -- a handful of rows from each committed report's own ledger, re-run on the new
 #             binary through the same run_blis.run_one the regeneration uses. A row that ran
 #             before and fails now is LOUD; a knob that moved the numbers before and is now
@@ -500,7 +498,7 @@ def _local_router(path, root, run_id):
                      f"nor routing/")
 
 
-def _run_context(entry, root, catalog, corpus, corpus_cache):
+def _run_context(entry, root, blis, catalog, corpus, corpus_cache):
     """(model, hardware, engine_version, workload, seed, replay, nreq_of, fabric) for a report's
     source, built the way its runner builds them, so a smoke run is a run the regeneration would
     make -- including the cluster fabric, or a multi-node RoCE report re-prices on IB."""
@@ -515,7 +513,8 @@ def _run_context(entry, root, catalog, corpus, corpus_cache):
                                                dict(sc.get("replay") or {}, **local))
         replay = {k: v for k, v in replay.items() if k != "_overrides"}
     fabric = (sc.get("cluster") or {}).get("fabric") or run_experiment.run_blis.DEFAULT_FABRIC
-    return (sc["model"], sc["hardware"], run_experiment.run_blis.pinned_engine_version(),
+    return (sc["model"], sc["hardware"],
+            run_experiment.blis_cli.engine_release(blis, run_experiment.run_blis.ENGINE_KIND),
             sc["workload"], int(sc.get("seed", 42)), replay,
             (lambda c: None) if replay else (lambda c: max(80, c * 4)), fabric)
 
@@ -568,7 +567,7 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
         ok = sorted((r for r in runs if _ok(r)), key=lambda r: r["config"].get("concurrency") or 0)
         pairs = [{"knob": "", "base": ok[0], "row": None, "moved": False}] if ok else []
     model, hardware, ev, workload, seed, replay, nreq_of, fabric = _run_context(
-        entry, root, catalog, corpus, corpus_cache)
+        entry, root, blis, catalog, corpus, corpus_cache)
     scen_dir = tempfile.mkdtemp(prefix="pin-smoke-")
     todo = {}
     for p in pairs:
@@ -610,8 +609,8 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
             failures.append(
                 f"SILENT: {run_id} `{p['knob']}` moved throughput {_tps(p['base']):.1f} -> "
                 f"{_tps(p['row']):.1f} on the old stack and now measures IDENTICALLY to its "
-                f"baseline ({_tps(b):.1f}) -- the new release no longer models it. Move it to the "
-                f"validator's inert table (validate_experiment.py) so specs stop sweeping it.")
+                f"baseline ({_tps(b):.1f}) -- the new release no longer models it. Its field-list "
+                f"entry in the engine repository should say so (VLM-3).")
     return {"id": run_id, "checks": checks, "failures": failures, "warnings": warnings,
             "pairs": [{"knob": p["knob"], "moved": p["moved"]} for p in pairs]}
 
@@ -621,69 +620,6 @@ def _cfg_phrase(cfg):
                            if k != "router_config") + \
         (f", router={os.path.basename(cfg['router_config'])}" if cfg.get("router_config") else "") \
         + "}"
-
-
-def drift(siblings, modules=None):
-    """Differences between the validator's PINNED knob tables and the upstream checkouts in
-    `siblings` (blis-vllm/, blis-schemas/ at the versions the release's go.mod names).
-
-    CI validates every spec against the pinned tables (it has no sibling checkouts), so a table
-    that lags the stack either refuses a knob the new engine accepts or passes one it refuses.
-    Returns a list of human-readable problems; empty means the tables match the stack.
-
-    `modules` is the release's go.mod requirements ({"blis-vllm": "v0.32.0-blis.1", ...}). A
-    module the release does not require has nothing to drift FROM -- v0.12.0 builds without
-    blis-vllm -- so its checks are skipped rather than reported as an unreadable upstream. A
-    module it DOES require whose file cannot be read is still a failure: that is the reader
-    going stale. None (no go.mod given) checks everything."""
-    import validate_experiment as V
-    saved = V.SIBLINGS
-    V.SIBLINGS = os.path.abspath(siblings)
-    try:
-        par, eng = V._names_from_blis_schemas(), V._names_from_blis_vllm()
-        enums = V._enums_from_blis_vllm()
-    finally:
-        V.SIBLINGS = saved
-    def required(mod):
-        return modules is None or mod in modules
-    out = []
-    for what, live, pinned, table, mod in (
-            ("parallel", par, V.PARALLEL_KNOBS, "PARALLEL_KNOBS", "blis-schemas"),
-            ("engine", eng, V.ENGINE_KNOBS, "ENGINE_KNOBS", "blis-vllm")):
-        if not required(mod):
-            continue
-        if live is None:
-            out.append(f"the {what} knob reader found nothing upstream -- the upstream file moved "
-                       f"or changed shape; fix its reader in validate_experiment.py")
-            continue
-        if live - pinned:
-            out.append(f"{table} lacks {sorted(live - pinned)}: knobs the new stack defines. Add "
-                       f"them (and decide whether run_blis.py carries them, or they belong in a "
-                       f"not-wired table)")
-        if pinned - live:
-            out.append(f"{table} still lists {sorted(pinned - live)}, which the new stack no "
-                       f"longer defines: a spec using them validates and then fails every run")
-    if not required("blis-vllm"):
-        return out
-    if enums is None:
-        out.append(f"the engine value reader found no rules/{V.RULES_PACK}/pack.go upstream; the "
-                   f"release may model a newer vLLM -- move RULES_PACK and re-read the value sets")
-    else:
-        for knob, values in sorted(enums.items()):
-            pinned = tuple(V.ENGINE_ENUMS.get(knob, ()))
-            if set(values) != set(pinned):
-                add, gone = sorted(set(values) - set(pinned)), sorted(set(pinned) - set(values))
-                out.append(f"ENGINE_ENUMS[{knob!r}]: " + "; ".join(
-                    x for x in ((f"new values {add}" if add else ""),
-                                (f"values no longer accepted {gone}" if gone else "")) if x))
-    rules = os.path.join(siblings, "blis-vllm", "rules")
-    packs = sorted((d for d in (os.listdir(rules) if os.path.isdir(rules) else ())
-                    if re.fullmatch(r"v\d+_\d+", d)),
-                   key=lambda d: tuple(int(x) for x in d[1:].split("_")))
-    if packs and packs[-1] != V.RULES_PACK:
-        out.append(f"blis-vllm now carries rules/{packs[-1]} (newer than the {V.RULES_PACK} the "
-                   f"validator reads): check which vLLM the release models, and move RULES_PACK")
-    return out
 
 
 def smoke_markdown(results):
@@ -736,10 +672,6 @@ def main(argv=None):
     r.add_argument("--max-parallel", type=int, default=1)
     m = sub.add_parser("modules", help="print the blis-* modules a go.mod requires, one per line")
     m.add_argument("go_mod")
-    d = sub.add_parser("drift", help="pinned knob tables vs upstream checkouts; exit 1 on drift")
-    d.add_argument("--siblings", required=True,
-                   help="dir holding blis-vllm/ and blis-schemas/ at the release's go.mod versions")
-    d.add_argument("--go-mod", help="the release's go.mod: a module it does not require is skipped")
     k = sub.add_parser("smoke", help="re-run a few ledger rows per report on a new binary")
     k.add_argument("ids", nargs="*", help="report ids (default: every committed report)")
     k.add_argument("--blis", required=True)
@@ -782,20 +714,6 @@ def main(argv=None):
         with open(a.go_mod) as f:
             for mod, ver in sorted(go_mod_versions(f.read()).items()):
                 print(mod, ver)
-    elif a.cmd == "drift":
-        mods = None
-        if a.go_mod:
-            with open(a.go_mod) as f:
-                mods = go_mod_versions(f.read())
-            for mod in ("blis-schemas", "blis-vllm"):
-                print(f"{mod}: " + (mods[mod] if mod in mods else
-                                    "not required by this release -- its checks do not apply"))
-        problems = drift(a.siblings, mods)
-        for p_ in problems:
-            print(f"DRIFT: {p_}")
-        print("knob tables match the stack" if not problems else
-              f"{len(problems)} drift(s): change the tables on this PR before merging")
-        return 1 if problems else 0
     elif a.cmd == "smoke":
         results = [smoke(i, os.path.abspath(a.blis), os.path.abspath(a.catalog),
                          os.path.abspath(a.registry), corpus=a.corpus, corpus_cache=a.corpus_cache,

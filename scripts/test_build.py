@@ -300,7 +300,7 @@ def test_derived_pins_match_gomod():
         return
 
     pins = bc.read_pins()
-    ref = pins.get("BLIS_REF")
+    ref = pins.get("BLIS_SHA")
     try:
         derived = sync_pins.derive(ref, repo)
     except LookupError:
@@ -317,20 +317,6 @@ def test_derived_pins_match_gomod():
         if key in pins:
             check(key in derived,
                   f"pins.env states {key} but go.mod at {ref} has no such dependency")
-
-    # The engine allowlist must match the binary's, or a compat-engine version would pass.
-    sys.path.insert(0, os.path.join(ROOT, "scripts"))
-    import re, subprocess, run_blis
-    go = subprocess.run(["git", "-C", repo, "show", f"{ref}:cmd/engine_driver_build.go"],
-                        capture_output=True, text=True, timeout=30).stdout
-    m = re.search(r"coreEngineVersions\s*=\s*map\[string\]bool\{([^}]*)\}", go)
-    if m:
-        core = set(re.findall(r'"([^"]+)"\s*:\s*true', m.group(1)))
-        check(core == set(run_blis.CORE_ENGINE_VERSIONS),
-              f"run_blis.CORE_ENGINE_VERSIONS {sorted(run_blis.CORE_ENGINE_VERSIONS)} but "
-              f"{ref} coreEngineVersions is {sorted(core)}")
-    else:
-        print(f"  (engine allowlist not checked: no coreEngineVersions at {ref})")
 
     # The block must be machine-generated, so the markers have to survive edits to the file.
     with open(os.path.join(ROOT, "pins.env"), encoding="utf-8") as f:
@@ -379,8 +365,7 @@ def test_displayed_stack_survives_a_fresh_clone():
         # pin, because they describe the stack that pin resolves to. Both halves still have to
         # come from pins.env rather than a sibling describe, which is this test's subject.
         "inference-sim": bc._priced_by(pins),
-        "blis-latency-kernel": pins.get("KERNEL_REF"),
-        "blis-schemas": pins.get("SCHEMAS_REF"),
+        "blis-substrate": pins.get("SUBSTRATE_REF"),
         "blis-vllm": pins.get("VLLM_REF"),
         "llm-d-router": pins.get("ROUTER_REF"),
         "blis-catalog": pins.get("CATALOG_REF"),
@@ -404,8 +389,8 @@ def test_displayed_stack_survives_a_fresh_clone():
     # BLIS is the root; the rest are what it resolves to, never peers of it
     check(stack["root"]["name"] == "inference-sim",
           "the simulator binary is the root dependency, not one of several peers")
-    check("blis-latency-kernel" in [d["name"] for d in stack["deps"]],
-          "the latency kernel prices every run; it must appear in the stack")
+    check("blis-substrate" in [d["name"] for d in stack["deps"]],
+          "the substrate's cost model prices every run; it must appear in the stack")
 
 
 def test_pins_are_the_single_source_of_the_sim_version():
@@ -519,17 +504,15 @@ def test_pins_are_the_single_source_of_the_sim_version():
     check(bool(run_experiment.blis_pin_warning(off, pins)),
           "a binary built from another commit must warn")
 
-    # The catalog must be cloned BEFORE the validate step, or the existence check on
-    # scenario.model/hardware/workload silently no-ops and a typo'd identifier still reaches the
-    # Go build before failing every run (susiejojo review on #22). Ordering is the whole point,
-    # so assert the positions, not just the presence.
-    clone_at = exp_wf.find("blis-catalog.git")
+    # The validator reads setting names and catalog identities from the pinned binary, so the
+    # binary must be built BEFORE the validate step, and the step must pass it.
+    build_at = exp_wf.find("go build -o blis main.go")
     validate_at = exp_wf.find("validate_experiment.py")
-    check(clone_at != -1 and validate_at != -1 and clone_at < validate_at,
-          "run-experiment.yml must clone blis-catalog BEFORE validating, so the "
-          "model/hardware/workload existence check can run")
-    check('validate_experiment.py "$SPEC" --catalog' in exp_wf,
-          "run-experiment.yml should validate WITH --catalog, or the existence check no-ops")
+    check(build_at != -1 and validate_at != -1 and build_at < validate_at,
+          "run-experiment.yml must build the simulator BEFORE validating, so the validator can "
+          "read the setting names and catalog identities from it")
+    check('validate_experiment.py "$SPEC" --blis "$BLIS_BIN"' in exp_wf,
+          "run-experiment.yml should validate WITH --blis")
 
     # The schema/validator agreement tests SKIP when jsonschema is absent, so the job that runs
     # them has to install it -- otherwise the drift guard quietly becomes a no-op and the
@@ -539,15 +522,12 @@ def test_pins_are_the_single_source_of_the_sim_version():
     with open(os.path.join(ROOT, ".github", "workflows", "checks.yml")) as f:
         checks_wf = f.read()
     installs = [ln.strip() for ln in checks_wf.splitlines() if "pip install" in ln]
-    # The `python` job is the one that runs test_experiment.py, so that is the install line that
-    # has to carry it -- and the fork-safe `experiments` job must NOT need a new dependency.
-    py_job = checks_wf.split("experiments:")[0]
-    py_installs = [ln.strip() for ln in py_job.splitlines() if "pip install" in ln]
-    check(any("jsonschema" in ln for ln in py_installs),
-          "checks.yml's `python` job must `pip install jsonschema`, or "
-          "SchemaAgreesWithValidator skips in CI and the schema/validator drift guard never runs")
-    check(all("pyyaml" in ln for ln in installs),
-          "every checks.yml job still needs pyyaml")
+    check(installs and all("--require-hashes -r requirements.txt" in ln for ln in installs),
+          "every checks.yml job installs the hash-locked requirements.txt (X21)")
+    with open(os.path.join(ROOT, "requirements.txt")) as f:
+        locked = f.read()
+    check("jsonschema==" in locked and "pyyaml==" in locked,
+          "requirements.txt locks pyyaml and jsonschema, or SchemaAgreesWithValidator skips in CI")
 
     # GUIDANCE must not restate a superseded version. A doc that tells a contributor to clone a
     # ref the stack no longer uses is worse than one saying nothing: SETUP.md was correct at
@@ -792,10 +772,10 @@ def test_explore_data():
         # nothing. A record predating the field falls back to IB, which is what it was priced on.
         par16 = {"tp": 8, "pp": 1, "dp": 1}
         for fab, dep_extra in (("roce-200g", {"fabric": "roce-200g"}), ("ib-400g", {})):
-            nm = run_blis.scenario_name("m", "h100", "0.29.0", par16, {"block_size": 16}, 16, fab) + ".yaml"
+            nm = run_blis.scenario_name("m", "h100", "0.32.0", par16, {"block_size": 16}, 16, fab) + ".yaml"
             dep16 = {"scenario": nm, "parallel": par16, "engine": {"block_size": 16},
                      "num_instances": 16, **dep_extra}
-            exp16 = {"name": "m-h100-x", "pinned_stack": {"engine_version": "0.29.0"},
+            exp16 = {"name": "m-h100-x", "pinned_stack": {"engine_version": "0.32.0"},
                      "scenario": {"model": "m", "hardware": "h100"}}
             got = explore_data._scenario(rd, exp16, dep16)
             check(got is not None and got[0] == nm,
@@ -805,18 +785,18 @@ def test_explore_data():
         # hashing (single node prices no cross-node traffic), so the recorded name is the IB one and
         # _scenario -- which reconstructs from the recorded fabric: None -- must still match it.
         par1 = {"tp": 8, "pp": 1, "dp": 1}
-        nm1 = run_blis.scenario_name("m", "h100", "0.29.0", par1, {"block_size": 16}, 1,
+        nm1 = run_blis.scenario_name("m", "h100", "0.32.0", par1, {"block_size": 16}, 1,
                                      run_blis.DEFAULT_FABRIC) + ".yaml"
         dep1 = {"scenario": nm1, "parallel": par1, "engine": {"block_size": 16},
                 "num_instances": 1, "fabric": None}
-        got1 = explore_data._scenario(rd, {"name": "m-h100-x", "pinned_stack": {"engine_version": "0.29.0"},
+        got1 = explore_data._scenario(rd, {"name": "m-h100-x", "pinned_stack": {"engine_version": "0.32.0"},
                                            "scenario": {"model": "m", "hardware": "h100"}}, dep1)
         check(got1 is not None and got1[0] == nm1,
               "a single-node run in a non-IB spec still regenerates (fabric normalized to default)")
         check("fabric:" not in got1[1], "a single-node scenario names no fabric")
         # A run whose spec omits knobs the sweep sets elsewhere (issue #68): the shown file names
         # the default it ran at, as a comment, so it still parses to exactly what BLIS read.
-        noted = explore_data._scenario(rd, {"name": "m-h100-x", "pinned_stack": {"engine_version": "0.29.0"},
+        noted = explore_data._scenario(rd, {"name": "m-h100-x", "pinned_stack": {"engine_version": "0.32.0"},
                                             "scenario": {"model": "m", "hardware": "h100"}}, dep1,
                                        {"max_num_seqs": 256, "speculative_method": "off", "block_size": 16})
         check(noted[0] == nm1 and '# max_num_seqs: 256' in noted[1] and '# speculative_method: "off"' in noted[1]
@@ -856,11 +836,18 @@ def test_explore_data():
               "reproducing the sweep runs the report's own spec into repro/, not over reports/")
         check(explore_data.setup({}) is None, "a ledger with no pinned_stack ships no setup")
         pins = explore_data._PINS
-        now = {"blis": pins["BLIS_REF"], "catalog": pins["CATALOG_REF"], "registry": pins["REGISTRY_REF"],
-               "engine_version": explore_data.run_blis.pinned_engine_version()}
+        now = {"blis": pins["BLIS_REF"], "catalog": pins["CATALOG_REF"], "registry": pins["REGISTRY_REF"]}
         check(not explore_data.setup({"pinned_stack": now})["pins_moved"]
-              and explore_data.setup({"pinned_stack": dict(now, engine_version=None)})["pins_moved"],
+              and explore_data.setup({"pinned_stack": dict(now, blis="v0.0.1")})["pins_moved"],
               "the sweep tab says when today's pins would sweep a different stack than the report's")
+        # A ledger that records no engine release cannot be reconstructed: no release is assumed,
+        # in particular not the vLLM 0.29.0 that ledgers from before #57 were swept with.
+        old = run_blis.scenario_name("m", "h100", "0.29.0", par1, {"block_size": 16}, 1,
+                                     run_blis.DEFAULT_FABRIC) + ".yaml"
+        ghost = explore_data._scenario(rd, {"name": "m-h100-x", "pinned_stack": {},
+                                            "scenario": {"model": "m", "hardware": "h100"}},
+                                       dict(dep1, scenario=old))
+        check(ghost is None, "a ledger with no recorded engine release names no scenario")
         rid, gone = explore_data._router_entry("routing/renamed-away.yaml", rd)
         check(rid == "renamed-away" and gone["chain"] is None,
               "a shared router file removed since the sweep degrades instead of failing the build")

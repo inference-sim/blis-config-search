@@ -271,6 +271,6 @@ for the ≥2-topology rule that keeps a coordinate sweep honest.
 Always check:
 
 ```
-python3 -I scripts/validate_experiment.py experiments/<name>.yaml
-python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run
+python3 -I scripts/validate_experiment.py experiments/<name>.yaml --blis ./blis
+python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run --blis ./blis
 ```

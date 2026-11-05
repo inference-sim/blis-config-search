@@ -48,17 +48,13 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import run_blis            # noqa: E402
 import topologies          # noqa: E402
+import blis_cli            # noqa: E402
 import build_catalog       # noqa: E402
 import validate_experiment as validator   # noqa: E402
 
-# Knob names in a spec are the SCHEMA's (blis-vllm / blis-schemas) names; run_blis's candidate
-# keys are flat. These are the only two that differ, and they differ because run_blis folds
+# Setting names in a spec are the engine block's names; run_blis's candidate keys are flat. These are the only two that differ, and they differ because run_blis folds
 # drafting into a nested `speculative` block itself.
 SPEC_TO_CANDIDATE = {"num_spec_tokens": "num_speculative_tokens", "method": "speculative_method"}
-# Nested engine blocks that stay nested (unlike `speculative`, which flattens): the runner
-# renders them as sub-blocks of the scenario's engine. Sourced from the runner so the two cannot
-# disagree about which keys are blocks.
-NESTED_ENGINE_BLOCKS = tuple(k for k in run_blis.NESTED_ENGINE_FIELDS if k != "speculative")
 
 
 def _flag(role, knob):
@@ -95,8 +91,8 @@ def _engine_candidates(engine):
     """
     engine = dict(engine or {})
     spec = engine.pop("speculative", None)
-    nested = {k: engine.pop(k) for k in list(engine)
-              if k in NESTED_ENGINE_BLOCKS and isinstance(engine[k], dict)}
+    # Any other mapping is a nested block (the validator checked its inner names).
+    nested = {k: engine.pop(k) for k in list(engine) if isinstance(engine[k], dict)}
     out = grid(engine)
     for block, fields in sorted(nested.items()):
         combos = grid(fields)
@@ -549,7 +545,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     concurrency = list(sc["concurrency"])
     slo_ms = slo_limits(sc.get("slo"))
     shared_engine = dict(sc.get("engine") or {})
-    engine_version = run_blis.pinned_engine_version()
+    engine_version = blis_cli.engine_release(blis, run_blis.ENGINE_KIND)
     replay = dict(sc.get("replay") or {}) or None
     # The cluster's inter-node fabric, defaulting to IB so a spec that states none is byte-identical.
     # Only a multi-node run prices cross-node traffic; run_blis ignores it on a single node.
@@ -720,7 +716,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
         "objective": "max output tok/s per accelerator subject to the scenario's SLOs",
         "sweeps": sweep_results,
         "best_overall": best_of(all_rows),
-        "pinned_stack": _pinned_stack(blis, catalog, registry),
+        "pinned_stack": _pinned_stack(blis, catalog, registry, engine_version),
         "model_arch": (entry or {}).get("arch"),
         "totals": {"configs": sum(s["configs"] for s in sweep_results),
                    "runs": len(runs) if not dry_run else
@@ -955,13 +951,14 @@ def _blis_source_commit(blis):
     return (desc, commit) if commit else (None, None)
 
 
-def _pinned_stack(blis, catalog, registry):
-    """What priced these runs: the pins.env refs, plus the commits and binary digest that ran."""
+def _pinned_stack(blis, catalog, registry, engine_version):
+    """What priced these runs: the pins.env refs, the engine release the simulator ran, and the
+    commits and binary digest that ran."""
     pins = build_catalog.read_pins()
     out = {"blis": pins.get("BLIS_REF", "unpinned"),
            "kernel": pins.get("KERNEL_REF", "unpinned"),
            "router": pins.get("ROUTER_REF", "unpinned"),
-           "engine_version": run_blis.pinned_engine_version(),
+           "engine_version": engine_version,
            "catalog": pins.get("CATALOG_REF", "unpinned"),
            "registry": pins.get("REGISTRY_REF", "unpinned")}
     resolved = {}
@@ -1009,7 +1006,7 @@ def blis_pin_warning(stack, pins=None):
 def _blis_pin_warning(blis, catalog, registry):
     """blis_pin_warning for the binary about to run; never the thing that breaks a sweep."""
     try:
-        return blis_pin_warning(_pinned_stack(blis, catalog, registry))
+        return blis_pin_warning(_pinned_stack(blis, catalog, registry, None))
     except Exception:
         return ""
 
@@ -1211,14 +1208,18 @@ def main(argv=None):
     spec, err = validator.load(args.spec)
     if err:
         raise SystemExit(f"{args.spec}: {err}")
-    # Pass the catalog through: it is what lets the validator check that scenario.model/hardware/
-    # workload actually EXIST. Without it a typo'd identifier reaches BLIS and fails every run.
-    errs = validator.validate(spec, args.routing, None, args.catalog)
+    if not args.blis:
+        raise SystemExit("--blis is required: the simulator's commands supply the setting names, "
+                         "the catalog identities and the engine release, even for --dry-run")
+    if not args.dry_run and not args.registry:
+        raise SystemExit("--registry is required for a real run "
+                         "(use --dry-run to expand the grids only)")
+    try:
+        errs = validator.validate(spec, args.blis, args.routing, args.catalog)
+    except blis_cli.BlisCommandError as e:
+        raise SystemExit(f"{args.spec}: {e}")
     if errs:
         raise SystemExit(f"invalid spec {args.spec}:\n  - " + "\n  - ".join(errs))
-    if not args.dry_run and not (args.blis and args.registry):
-        raise SystemExit("--blis and --registry are required for a real run "
-                         "(use --dry-run to expand the grids only)")
 
     t0 = time.time()
     report = run_experiment(spec, args.blis, args.catalog, args.registry, args.out,

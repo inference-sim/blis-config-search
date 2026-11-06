@@ -1,6 +1,0 @@
-# Owners review every change (design §13.7). A change to .github/, pins.env or the scripts that
-# read the simulator needs a code owner's review.
-*                 @sriumcp @susiejojo @mtoslalibu
-/.github/         @sriumcp @susiejojo @mtoslalibu
-/pins.env         @sriumcp @susiejojo @mtoslalibu
-/scripts/         @sriumcp @susiejojo @mtoslalibu

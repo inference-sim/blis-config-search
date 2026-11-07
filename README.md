@@ -22,13 +22,17 @@ spec; everything after it is deterministic and runs in CI.
 | `web/` | the Vite + React site, static on GitHub Pages |
 | `.claude/skills/blis-experiment/` | the skill that *designs* a spec; the only LLM in the path |
 
+Rankings in this release use the simulator's whole-run figures. From the M2 release they use the
+measured-window metrics of the metric registry, at a stated scope, and every report is
+regenerated once ([`experiments/README.md`](experiments/README.md#checks-and-objectives-on-registry-metrics-validated-now-applied-in-m2)).
+
 ## Submit an experiment
 
 Write `experiments/<name>.yaml` (the site's Submit tab drafts one), then:
 
 ```bash
-python3 -I scripts/validate_experiment.py experiments/<name>.yaml
-python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run   # check the run budget
+python3 -I scripts/validate_experiment.py experiments/<name>.yaml --blis ./blis
+python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run --blis ./blis   # check the run budget
 ```
 
 and open a PR. CI validates it (no secrets, safe for forks); after merge the sweeper runs and a

@@ -47,9 +47,8 @@ END = "# <<< end derived block <<<"
 
 # go.mod module path -> the pins.env key it becomes.
 DERIVED = {
-    "github.com/inference-sim/blis-schemas": "SCHEMAS_REF",
+    "github.com/inference-sim/blis-substrate": "SUBSTRATE_REF",
     "github.com/inference-sim/blis-vllm": "VLLM_REF",
-    "github.com/inference-sim/blis-latency-kernel": "KERNEL_REF",
     # The router fork keeps upstream's module path, so go.mod reaches it via `replace`.
     "github.com/inference-sim/llm-d-router": "ROUTER_REF",
 }
@@ -143,9 +142,10 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     pins = read_pins()
-    ref = pins.get("BLIS_REF")
+    # The commit, not the ref: a ref can move, and BLIS_SHA is what every workflow checks out.
+    ref = pins.get("BLIS_SHA")
     if not ref:
-        print("pins.env has no BLIS_REF; nothing to derive from", file=sys.stderr)
+        print("pins.env has no BLIS_SHA; nothing to derive from", file=sys.stderr)
         return 2
     repo = os.path.abspath(args.repo)
     if not os.path.isdir(os.path.join(repo, ".git")):

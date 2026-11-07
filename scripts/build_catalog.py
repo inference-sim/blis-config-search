@@ -310,8 +310,8 @@ def _stack(pins, versions):
     by this repo. So `root` is BLIS and `deps` is what it resolves to, and the webpage can show
     the root alone until asked to expand.
 
-    KERNEL_REF is carried through even though `versions` never had it: it prices every run (it
-    is the cost model), so omitting it from the displayed stack understated what pins a number.
+    SUBSTRATE_REF is carried through even though `versions` never had it: the substrate holds
+    the cost model that prices every run, so omitting it would understate what pins a number.
 
     Every row is sourced from pins.env, NOT from _git_describe of a sibling checkout, and that
     is a bug fix rather than a preference. `versions` reads the catalog and registry off
@@ -329,7 +329,7 @@ def _stack(pins, versions):
 
     The rows come from two kinds of pin, which is why some are conditional:
 
-      * DERIVED (kernel, schemas, vllm, router) -- Go dependencies compiled into the binary, written to
+      * DERIVED (substrate, vllm, router) -- Go dependencies compiled into the binary, written to
         pins.env from inference-sim's go.mod by scripts/sync_pins.py. A derived key can be legally
         ABSENT: blis-vllm is not a dependency before BLIS v0.14.0, so at an older pin there is no
         row for it rather than a row reading "absent". Omitting beats inventing.
@@ -339,20 +339,18 @@ def _stack(pins, versions):
     def dep(name, version, note):
         return {"name": name, "version": version or "absent", "note": note}
 
-    deps = [dep("blis-latency-kernel", pins.get("KERNEL_REF"),
-                "cost model, derived from inference-sim's go.mod at the pinned ref")]
-    # Present only from BLIS v0.14.0, where the engine surface moved into blis-vllm and it became
-    # a real dependency; before that it is a reference consulted at authoring time, not something
-    # that priced a run, so it earns no provenance row.
+    deps = []
+    # blis-substrate holds the cost model, the contracts and the embedded data from inference-sim
+    # v0.16.0 on; an older pin names no SUBSTRATE_REF and gets no row.
+    if pins.get("SUBSTRATE_REF"):
+        deps.append(dep("blis-substrate", pins["SUBSTRATE_REF"],
+                        "cost model, contracts and embedded data, derived from go.mod"))
     if pins.get("VLLM_REF"):
         deps.append(dep("blis-vllm", pins["VLLM_REF"],
                         "engine config surface (vLLM's startup rules), derived from go.mod"))
     if pins.get("ROUTER_REF"):
         deps.append(dep("llm-d-router", pins["ROUTER_REF"],
                         "embedded router that places every request, derived from go.mod"))
-    if pins.get("SCHEMAS_REF"):
-        deps.append(dep("blis-schemas", pins["SCHEMAS_REF"],
-                        "deployment/engine structs the scenario decodes against, derived from go.mod"))
     deps += [
         dep("blis-catalog", pins.get("CATALOG_REF") or versions.get("blis-catalog"),
             "models, hardware, workloads the binary is run against"),

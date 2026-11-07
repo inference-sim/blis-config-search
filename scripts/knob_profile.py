@@ -5,17 +5,18 @@
         --workload agentx-mvp
 
 Prints, per knob: whether it APPLIES to this combination, the values that are legal HERE, and
-why. Exists because the three facts that decide a grid live in three different places, and none
+why. Exists because the facts that decide a grid live in several places, and none
 of them is the catalog summary a designer tends to read:
 
   * the catalog's model row      -- arch, experts, top_k, attn_kind, context, quant
   * the model's graph.yaml       -- the declared speculator and its max depth, the KV
                                     bytes_by_cache_dtype table (which dtypes this model prices
                                     at all), sliding window
-  * blis-vllm's rules pack       -- the ARCHITECTURE-keyed rules: which cache dtype a request
-                                    resolves to on this chip's capability family, which draft
-                                    methods the architecture refuses, whether Engram applies
-  * the hardware entry           -- ComputeCapability, which selects among those resolutions
+  * the hardware entry           -- ComputeCapability, which gates the per-dtype KV table
+
+The engine's own architecture rules (which cache dtype `auto` resolves to, which draft methods an
+architecture refuses, whether Engram applies) are blis-vllm's, and no simulator command publishes
+them yet, so this script does not report them; the engine refuses a setting they forbid.
 
 A designer reading only the catalog row gets no speculator, no sliding window, no dtype table
 and no capability gating -- so they either guess or omit a real axis. This reports them.
@@ -38,7 +39,6 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 SIBLINGS = os.path.abspath(os.path.join(ROOT, os.pardir))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import build_catalog                      # noqa: E402
-import validate_experiment as validator   # noqa: E402
 
 
 def _load(path, default=None):
@@ -134,63 +134,6 @@ def hardware_facts(catalog, hardware):
             "tflops_nvfp4": doc.get("TFlopsNVFP4")}
 
 
-def _pack_source():
-    path = os.path.join(SIBLINGS, "blis-vllm", "rules", "v0_32", "pack.go")
-    try:
-        with open(path, encoding="utf-8") as f:
-            return f.read()
-    except OSError:
-        return ""
-
-
-_ARCH_CONSTS = {"ArchDeepseekV41": "DeepseekV41ForCausalLM",
-                "ArchDeepseekV4": "DeepseekV4ForCausalLM"}
-
-
-def arch_rules(architecture):
-    """Architecture-keyed rules from blis-vllm's pack, for `architecture`.
-
-    These are the rules a per-model grid most needs and the catalog cannot express:
-      * CacheDTypeResolutions -- what `auto`/`fp8` actually RESOLVE to on a given capability
-        family, which is why nvfp4_ds_mla is a B200-only axis for DeepSeek-V4.1.
-      * the MTP refusal        -- DeepSeek-V4.1 refuses every MTP-family draft method.
-      * EngramArchitectures    -- whether engram_config applies at all.
-    """
-    src = _pack_source()
-    out = {"cache_dtype_resolutions": [], "refuses_mtp": False, "engram": False,
-            "source": "../blis-vllm rules pack" if src else "unavailable"}
-    if not src or not architecture:
-        return out
-    const = next((k for k, v in _ARCH_CONSTS.items() if v == architecture), None)
-    if const:
-        # The map is `CacheDTypeResolutions: map[...]{ rules.<Arch>: { {row}, {row}, ... }, }`.
-        # Take everything from this architecture's key to the closing `},` of ITS list -- an
-        # earlier attempt cut at the first `},` and so saw only the first row, losing the
-        # family-9 fp8_ds_mla resolution entirely.
-        block = re.search(r"CacheDTypeResolutions:\s*map\[[^\]]*\][^{]*\{(.*?)\n\t\t\},", src,
-                          re.S)
-        if block and f"rules.{const}:" in block.group(1):
-            seg = block.group(1).split(f"rules.{const}:", 1)[1]
-            seg = seg.split("\n\t\t\t},", 1)[0]
-            for row in re.finditer(
-                    r"CapabilityFamily:\s*(\d+),\s*Requested:\s*\[\]string\{([^}]*)\},"
-                    r"\s*ResolvesTo:\s*\"([^\"]+)\"(?:,\s*TPDivides:\s*(\d+))?", seg):
-                out["cache_dtype_resolutions"].append({
-                    "capability_family": int(row.group(1)),
-                    "requested": re.findall(r'"([^"]+)"', row.group(2)),
-                    "resolves_to": row.group(3),
-                    "tp_divides": int(row.group(4)) if row.group(4) else None})
-        if const == "ArchDeepseekV41" and "deepseek-v41-refuses-mtp" in src:
-            out["refuses_mtp"] = True
-    eng = re.search(r"EngramArchitectures:\s*set\(([^)]*)\)", src, re.S)
-    if eng:
-        names = re.findall(r'"([^"]+)"', eng.group(1))
-        consts = re.findall(r"rules\.(Arch\w+)", eng.group(1))
-        names += [_ARCH_CONSTS.get(c, c) for c in consts]
-        out["engram"] = architecture in names
-    return out
-
-
 def workload_facts(catalog, workload):
     """Whether the workload is a replay, and the traffic facts a grid depends on."""
     doc = _load(os.path.join(catalog, "workloads", f"{workload}.yaml"), {}) or {}
@@ -212,9 +155,7 @@ def profile(model, hardware, workload, catalog):
         raise SystemExit(f"{model!r} is not in the catalog at {catalog}")
     g = graph_facts(catalog, model)
     hw = hardware_facts(catalog, hardware)
-    ar = arch_rules(g.get("architecture"))
     wl = workload_facts(catalog, workload)
-    enums, _src = validator.engine_enums()
     moe = row.get("arch") == "MoE"
     fam = hw.get("capability_family")
 
@@ -224,7 +165,7 @@ def profile(model, hardware, workload, catalog):
         knobs.append({"knob": knob, "applies": applies, "values": values, "why": why})
 
     # --- always applicable -----------------------------------------------------------------
-    add("cudagraph_mode", True, list(enums["cudagraph_mode"]),
+    add("cudagraph_mode", True, ["NONE", "PIECEWISE", "FULL", "FULL_AND_PIECEWISE"],
         "per-step host launch cost; applies to every model and chip")
     add("max_num_seqs", True, [16, 32, 64, 128, 256, 512],
         "binds downward; INTERACTS with instance count (per-instance session share)")
@@ -248,22 +189,7 @@ def profile(model, hardware, workload, catalog):
     here = [d for d, fams in (g.get("kv_dtype_families") or {}).items()
             if not fams or fam in fams]
     elsewhere = [d for d in priced if d not in here]
-    gated = [r for r in ar["cache_dtype_resolutions"] if r["capability_family"] == fam]
-    if gated:
-        legal = sorted({r["resolves_to"] for r in gated})
-        why = (f"{g['architecture']} rewrites auto/fp8 on capability family {fam} to "
-               f"{', '.join(legal)}")
-        tpd = [r["tp_divides"] for r in gated if r.get("tp_divides")]
-        if tpd:
-            why += (f"; the richest ({legal[-1] if len(legal) > 1 else legal[0]}) additionally "
-                    f"needs tp divisible by {tpd[0]}")
-        if here:
-            why += f". The graph prices {', '.join(here)} on this chip"
-        if elsewhere:
-            why += (f", and {', '.join(elsewhere)} only on another capability family -- so that "
-                    f"is not an axis here")
-        add("cache_dtype", True, legal, why)
-    elif here:
+    if here:
         add("cache_dtype", True, ["auto"] + here,
             f"the graph prices {', '.join(here)} on this chip (capability family {fam})"
             + (f"; {', '.join(elsewhere)} is priced only on another family, so it is not an "
@@ -285,7 +211,7 @@ def profile(model, hardware, workload, catalog):
             ["allgather_reducescatter", "deepep_high_throughput", "deepep_low_latency",
              "deepep_v2", "pplx"],
             "MoE dispatch; a real lever (33% measured) but ONLY with expert parallelism on")
-        add("moe_backend", True, list(enums["moe_backend"])[:8] + ["..."],
+        add("moe_backend", True, [],
             "expert kernel; measured inert on the reference part, so keep a control")
         e = row.get("experts")
         add("eplb", True, [f"num_redundant_experts making ({e} + r) divisible by tp*dp"],
@@ -301,9 +227,6 @@ def profile(model, hardware, workload, catalog):
         depths = [k for k in (1, 2, 3, 4, 5, 6, 8) if k <= (g.get("max_spec_tokens") or 0)]
         why = (f"the graph declares speculator {g['speculator']!r} with num_spec_tokens "
                f"{g.get('max_spec_tokens')}, so K must not exceed it")
-        if ar["refuses_mtp"]:
-            why += f". {g['architecture']} REFUSES every MTP-family method, so only " \
-                   f"{g['speculator']!r} is legal"
         add("speculative", True,
             [f"method: [{g['speculator']}]", f"num_spec_tokens: {depths or [1]}"], why)
     else:
@@ -319,14 +242,6 @@ def profile(model, hardware, workload, catalog):
             "only DeepSeek-V4.1 with a sliding window reads this field")
 
     # --- engram ----------------------------------------------------------------------------
-    if ar["engram"]:
-        add("engram_config", True, ["cpu_offload: [true,false]"],
-            f"{g['architecture']} is an Engram architecture; the engine refuses the block on "
-            f"models without Engram layers")
-    else:
-        add("engram_config", False, [],
-            f"{g.get('architecture')} is not an Engram architecture; the engine refuses the "
-            f"block at startup")
 
     # --- recurrent -------------------------------------------------------------------------
     kind = str(row.get("attn_kind") or "")
@@ -354,7 +269,7 @@ def profile(model, hardware, workload, catalog):
         f"must stay <= max_model_len; competes with decode for a per-instance token budget")
 
     return {"model": model, "hardware": hardware, "workload": workload,
-            "catalog_row": row, "graph": g, "hardware_facts": hw, "arch_rules": ar,
+            "catalog_row": row, "graph": g, "hardware_facts": hw,
             "workload_facts": wl, "knobs": knobs}
 
 
@@ -385,7 +300,6 @@ def main(argv=None):
     print(f"  workload: {wl.get('kind')}"
           + (f" ({wl.get('scenario')}, category={wl.get('category')}, "
              f"thinking={wl.get('thinking')})" if wl.get("kind") == "replay" else ""))
-    print(f"  rules   : {p['arch_rules']['source']}")
     print()
     yes = [k for k in p["knobs"] if k["applies"]]
     no = [k for k in p["knobs"] if not k["applies"]]

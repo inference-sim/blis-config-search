@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+# TEMPORARY: stands in for the inference-sim commands `fields`, `metrics`, `schema`,
+# `schema validate` and `catalog resolve` (inference-sim#2077, task H) in hermetic tests until a pinned build has them.
+# It prints files copied from blis-vllm e68846f (fields.json) and blis-substrate 800ae263
+# (contracts/schema, catalog names); see NOTE.md. Delete with this directory once #2077 merges.
+import json
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def read(name):
+    with open(os.path.join(HERE, name), encoding="utf-8") as f:
+        return json.load(f)
+
+
+def fail(msg, code=1):
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def main(argv):
+    args = [a for a in argv if a != "--json"]
+    if args[:1] == ["fields"] and args[1:2] == ["--engine"] and len(args) == 3:
+        if args[2] != "vllm":
+            fail(f"fields: no field list for engine {args[2]!r}")
+        print(json.dumps(read("fields-vllm.json")))
+        return
+    if args == ["metrics"]:
+        print(json.dumps(read("metrics.json")))
+        return
+    if args[:2] == ["schema", "validate"] and len(args) == 4:
+        doc, path = args[2], args[3]
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+        except OSError as e:
+            fail(str(e), 2)
+        # The fixture refuses a document that carries the marker below; the real command runs
+        # the Go validators.
+        if "INVALID-FOR-TEST" in text:
+            fail(f"{doc}: refused by the test fixture")
+        return
+    if args[:1] == ["schema"] and len(args) == 2:
+        if args[1] not in ("deployment", "scenario", "result"):
+            fail(f"no schema for document {args[1]!r}", 2)
+        print(json.dumps(read(f"{args[1]}.schema.json")))
+        return
+    if args[:2] == ["catalog", "resolve"] and len(args) >= 4:
+        kind, query = args[2], args[3]
+        names = read("catalog.json")["models" if kind == "--model" else "chips"]
+        hit = query if query in names else None
+        reason = ("a catalog entry has this name" if hit else
+                  "no catalog entry has this name" if kind == "--model" else
+                  "the catalog has no hardware entry of this name")
+        print(json.dumps({"query": query, "identity": hit, "reason": reason}))
+        return
+    fail(f"fixture blis: unsupported arguments {argv}", 2)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

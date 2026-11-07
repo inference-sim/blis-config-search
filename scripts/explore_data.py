@@ -266,9 +266,9 @@ def setup(exp, run_dir=None):
                             ("router", "llm-d-router", router)):
         if ref and ref != "unpinned":
             stack.append({"name": name, "repo": repo, "ref": ref, "commit": None})
-    # a fresh checkout sweeps at today's pins.env; ledgers from before #57 record no engine (0.29.0)
-    then = (ps["blis"], ps.get("catalog"), ps.get("registry"), ps.get("engine_version") or "0.29.0")
-    now = (_PINS.get("BLIS_REF"), _PINS.get("CATALOG_REF"), _PINS.get("REGISTRY_REF"), run_blis.pinned_engine_version())
+    # a fresh checkout sweeps at today's pins.env, whose simulator fixes the engine release
+    then = (ps["blis"], ps.get("catalog"), ps.get("registry"))
+    now = (_PINS.get("BLIS_REF"), _PINS.get("CATALOG_REF"), _PINS.get("REGISTRY_REF"))
     return {"stack": stack, "script": "\n".join(sh) + "\n", "sweep": "\n".join(sweep) + "\n",
             "pins_moved": then != now,
             "runs": (exp.get("totals") or {}).get("runs"), "hours": _wall_hours(run_dir) if run_dir else None}
@@ -365,9 +365,9 @@ def _scenario(run_dir, exp, dep, unset=None):
     # The fabric the run was priced over (issue #71): part of the scenario hash, so regenerating
     # with the wrong one would never match the recorded name. A record predating the field used IB.
     fabric = dep.get("fabric") or run_blis.DEFAULT_FABRIC
-    # the version a ledger recorded, else the pre-#57 default every older ledger was swept with
+    # the engine release the ledger recorded; a ledger that records none cannot be reconstructed
     recorded = (exp.get("pinned_stack") or {}).get("engine_version")
-    for ev in dict.fromkeys([v for v in (recorded, sc.get("engine_version"), "0.29.0") if v]):
+    for ev in dict.fromkeys([v for v in (recorded, sc.get("engine_version")) if v]):
         if run_blis.scenario_name(model, hw, ev, dep["parallel"], dep["engine"], dep["num_instances"],
                                   fabric, router) + ".yaml" != name:
             continue

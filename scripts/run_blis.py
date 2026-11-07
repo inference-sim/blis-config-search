@@ -18,6 +18,11 @@
 # must carry the 7 coefficient sets named below, incl cost-model-memory and cost-model-fabric.
 import argparse, hashlib, json, os, subprocess, sys, tempfile, time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import blis_cli  # noqa: E402
+import settings  # noqa: E402
+from settings import ENGINE_KIND  # noqa: E402
+
 # cost-model-fabric is the cross-node/cross-rack interconnect term, and it is the set REGISTRY_REF
 # v0.3.0 adds (v0.2.0 has no such file, which is why the registry pin had to move with the BLIS
 # one). Every one of upstream's 40 Muse scenarios names it, so a scenario this script generates
@@ -34,115 +39,10 @@ COEFFICIENTS = ["cost-model-primitives", "cost-model-collectives", "cost-model-h
                 "cost-model-fabric"]
 
 # --- candidate-key classification (allowlist; anything else is rejected, never silently ignored) ---
-SCENARIO_PARALLEL = ("tp", "pp", "dp", "enable_expert_parallel")       # -> scenario Deployment.parallel
-# Engine fields the generated scenario may carry. The authority IS blis-vllm v0.32.0's
-# rules/engineconfig.Engine (51 top-level yaml tags), because the pinned BLIS (pins.env) makes a
-# pool's `engine:` an opaque block (deployment.EngineBlock) opened by the engine model that
-# the scenario's `engine_version` names. Before v0.14.0 the authority was blis-schemas' own
-# 31-field struct, and the 20 names below this comment's old cut-off were hard decode failures
-# ("field max_num_active_seqs not found in type deployment.Engine"); they decode now.
-#
-# The scenario still decodes STRICTLY, so a key outside those 51 fails every run of a sweep. The
-# seven that decode but are not priced (or are priced only in one shape) are refused by name in
-# UNSUPPORTED below, with the measured reason, rather than being omitted from this list.
-#
-# Valid VALUES for the enumerated ones come from blis-vllm's rules pack
-# (rules/v0_32/pack.go Pack(): CUDAGraphModes, CacheDTypes, All2AllBackends, MoEBackends,
-# SchedulerPolicies, MambaDTypes, DCPCommBackends) -- see scripts/validate_experiment.py, which
-# checks a swept value against them so a typo fails before the sweep rather than per run.
-SCENARIO_ENGINE = (
-    # --- the original eight (every committed report was produced with these) ---
-    "quantization", "cache_dtype", "block_size", "max_num_batched_tokens",
-    "max_num_seqs", "max_model_len", "cudagraph_mode", "gpu_memory_utilization",
-    # --- scheduling / admission ---
-    # `long_prefill_token_threshold` was previously listed as UNSUPPORTED ("not a kernel
-    # scenario field"). That is stale: it IS a field of the v0.5.0 Engine struct, and a run
-    # naming it completes and moves the number (measured: 1983.2 -> 1973.9 tok/s at 256 on
-    # chatbot tp8 c=8). It is the chunked-prefill cap a prefill-bound deployment is forced onto.
-    "long_prefill_token_threshold",
-    "scheduling_policy",                  # fcfs (default) | priority
-    "async_scheduling",                   # tri-state bool
-    # --- CUDA graph capture: the biggest engine lever measured on the pinned stack ---
-    # chatbot tp8 c=8: PIECEWISE 1983.2, FULL 2086.1 (+5%), FULL_AND_PIECEWISE 2085.1,
-    # FULL_DECODE_ONLY 2074.2; NONE costs 44% (605.9 vs 1083.2 at c=4).
-    "max_cudagraph_capture_size", "cudagraph_capture_sizes",
-    # --- attention / prefix reuse ---
-    "enable_prefix_caching",              # tri-state bool; inert on synthetic shapes (see blis-experiment knobs.md)
-    "disable_cascade_attn", "swa_bounded_replay",
-    # --- MoE dispatch. all2all_backend is a real lever, but ONLY with expert parallelism on
-    # (measured tp4/dp2/EP: 928.2 -> 619.5 with deepep_low_latency, a 33% drop; with EP off it
-    # is byte-identical), so only sweep it with EP on.
-    "all2all_backend", "moe_backend",
-    # --- collectives ---
-    "allreduce_backend", "disable_custom_all_reduce",
-    # --- context parallelism ---
-    "dcp_comm_backend", "dcp_q_replicate", "cp_kv_cache_interleave_size",
-    # --- recurrent (Mamba-family) state caches ---
-    "mamba_cache_dtype", "mamba_ssm_cache_dtype", "mamba_cache_mode",
-    # --- NESTED blocks (rendered as sub-blocks, like `speculative`) ---
-    # `eplb` is the interesting one: expert-load balancing adds redundant experts to even out a
-    # skewed routing distribution, which is an MoE-only lever with a real memory cost.
-    # `dbo` is dual-batch overlap; `engram_config` places Engram's host-side tables.
-    "eplb", "dbo", "engram_config",
-    # --- opened up by the v0.12.0 -> v0.14.0 pin bump ---
-    # These were hard decode failures under blis-schemas v0.5.0's fixed Engine struct and were
-    # listed in UNSUPPORTED for that reason. v0.14.0 reads `engine:` as an opaque block against
-    # blis-vllm v0.32.0's engineconfig.Engine, which carries all 21 of them.
-    #
-    # Only the three below are PRICED, and that was established by running each against the
-    # pinned binary with two contrasting values, not by reading the struct. `max_num_active_seqs`
-    # is a large lever where it binds (deepseek-v4-pro/h200 tp2 dp4 chatbot: 2405.3 tok/s at
-    # c=256 falls to 808.4 at 8 active seqs, 1684.0 at 32) and inert at c=8, which is the usual
-    # admission-cap shape. The other eleven decode and run but are byte-identical on every
-    # scenario measured -- see ENGINE_DECODED_BUT_INERT below for what that means for a sweep.
-    "max_num_active_seqs", "max_num_scheduled_tokens", "frontend",
-)
-# Carried by the pinned engine model, accepted at run time, and measured BYTE-IDENTICAL: sweeping
-# one burns runs to produce a column of equal numbers that reads as "this knob does nothing".
-#
-# Measured on deepseek-v4-pro/h200 (tp2 dp4, chatbot, c=8 and c=256), qwen3-14b/h100 (tp4) and
-# deepseek-v4.1-flash/h200 (tp2 dp4), two contrasting values each, against a `max_num_seqs`
-# control that moved as expected on every one. The kernel cost model has no term for them; the
-# engine carries them as launch provenance.
-#
-# `frontend` is deliberately NOT here: it is inert on v4-pro and qwen3-14b but DOES move
-# deepseek-v4.1-flash (4656.6 -> 4563.5 python->rust), so it is a real if narrow host-overhead
-# lever and belongs in SCENARIO_ENGINE above.
-#
-# These are refused rather than silently carried, for the reason experiments/README.md gives under
-# "Not every accepted knob is a lever": the sweep that teaches nothing is the expensive failure,
-# because it looks like a result. A spec that genuinely wants one recorded can state it as a
-# fixed engine default rather than a swept knob.
-ENGINE_DECODED_BUT_INERT = {
-    "watermark": "the KV-watermark fraction",
-    "stream_interval": "how often decoded tokens are flushed to the client",
-    "kv_cache_memory_bytes": "an explicit KV pool size (gpu_memory_utilization is the live knob)",
-    "max_loras": "the LoRA slot count",
-    "custom_ops": "the custom-op enable/disable list",
-    "use_trtllm_attention": "the TRT-LLM attention path",
-    "mla_prefill_backend": "the MLA prefill kernel choice",
-    "indexer_kv_dtype": "the DSA indexer's KV dtype",
-    "linear_backend": "the linear-layer kernel choice",
-    "long_prefill_token_threshold_adaptive": "adaptive chunked-prefill sizing",
-    "decoder_replay_cudagraph_capture_sizes": "the decode-replay capture plan",
-}
-# Nested engine blocks and the fields each accepts, from the pinned engine model's structs
-# (blis-vllm v0.32.0 rules/engineconfig). A spec states these as a mapping, e.g.
-# `eplb: {enable_eplb: [true], num_redundant_experts: [0, 32]}`; the runner renders them as
-# sub-blocks and the validator checks their inner field names.
-#
-# `speculative` gained five fields at the v0.14.0 pin (it was method + num_spec_tokens under
-# blis-schemas v0.5.0). Only method and num_spec_tokens select an acceptance profile and so move
-# a number; the rest are recorded provenance -- validate_experiment.SPECULATIVE_RECORDED_ONLY
-# refuses a sweep over them, with that reason.
-NESTED_ENGINE_FIELDS = {
-    "eplb": ("enable_eplb", "num_redundant_experts", "window_size", "step_interval"),
-    "dbo": ("enable_dbo", "dbo_decode_token_threshold", "dbo_prefill_token_threshold"),
-    "engram_config": ("cpu_offload", "dp_shared_memory", "use_thp"),
-    "speculative": ("method", "num_spec_tokens", "draft_model", "kv_cache_dtype",
-                    "draft_sample_method", "rejection_sample_method",
-                    "enable_adaptive_verification"),
-}
+# A candidate's keys are classified by the names the simulator publishes (settings.Vocabulary):
+# a pool-layout key goes to the scenario's `parallel:` block, an engine setting to its `engine:`
+# block. This module keeps no list of settings (CFG-3). An unknown key is REJECTED (recorded as an
+# error row), never silently dropped.
 # Speculative decoding IS priced by the kernel (since BLIS v0.12.0 + registry v0.2.0; v0.14.0 added
 # only the five extra fields above). It is a nested `speculative: {method, num_spec_tokens}` block
 # on the pool's engine (the pinned engine model's engineconfig.Engine.Speculative), so the two
@@ -168,25 +68,6 @@ CLI_FLAGS = {"num_instances": "--num-instances", "concurrency": "--concurrency",
 # pins.env) -- see ROUTING_MOVED below for why this replaced the former --routing-policy flag.
 SCENARIO_ROUTER = ("router_config",)
 PARALLEL_DEFAULTS = {"tp": 1, "pp": 1, "dp": 1, "enable_expert_parallel": False}
-
-
-# inference-sim cmd/engine_driver_build.go coreEngineVersions at BLIS_REF: any other version runs
-# on the compat engine at rc=0. test_build.py checks this against the pinned source.
-CORE_ENGINE_VERSIONS = frozenset({"0.32.0"})
-
-
-def pinned_engine_version(pins_path=None):
-    """The vLLM release the pinned blis-vllm models: pins.env's VLLM_REF, e.g. v0.32.0-blis.1 -> 0.32.0."""
-    import build_catalog
-    pins_path = pins_path or build_catalog.PINS
-    ref = build_catalog.read_pins(pins_path).get("VLLM_REF", "")
-    version, _, suffix = ref.lstrip("v").partition("-")
-    if not version or (suffix and not suffix.startswith("blis.")):
-        raise SystemExit(f"{pins_path}: VLLM_REF={ref!r} names no vLLM release to model")
-    if version not in CORE_ENGINE_VERSIONS:
-        raise SystemExit(f"{pins_path}: VLLM_REF={ref!r} models {version}, which BLIS would price "
-                         f"on its compat engine (core: {', '.join(sorted(CORE_ENGINE_VERSIONS))})")
-    return version
 
 
 GPUS_PER_NODE = 8   # single-node H100; a per-instance footprint beyond this spans nodes (needs a fabric)
@@ -261,8 +142,6 @@ ROUTING_MOVED = (
 PD_ROLES = ("prefill", "decode")
 # Per-role layout/engine knobs, as `<role>_<knob>` candidate keys (prefill_tp, decode_block_size).
 # Flat rather than nested so a candidate dict stays one level deep, like every other config.
-PD_PARALLEL = tuple(f"{r}_{k}" for r in PD_ROLES for k in SCENARIO_PARALLEL)
-PD_ENGINE = tuple(f"{r}_{k}" for r in PD_ROLES for k in SCENARIO_ENGINE)
 # Per-role DRAFTING keys exist only to be refused with the real reason. BLIS applies one
 # speculative configuration to the whole run ("one speculative configuration applies to the run,
 # so the pools must agree"), so `prefill_num_speculative_tokens` is not a narrower knob than
@@ -287,7 +166,7 @@ DEFAULT_PD_CONNECTOR = "NixlConnector"
 PD_MUST_MATCH = ("dp", "block_size", "cache_dtype", "mamba_cache_dtype",
                  "mamba_ssm_cache_dtype", "mamba_cache_mode")
 
-# Deliberately unsupported in this runner -> fail loudly with the reason (do not silently drop).
+# Candidate keys this runner refuses, with the reason (do not silently drop).
 UNSUPPORTED = {
     "routing_policy": ROUTING_MOVED,
     "routing_scorers": ROUTING_MOVED,
@@ -300,52 +179,6 @@ UNSUPPORTED = {
     "encode_instances":
         "--encode-instances is not supported: there is no encode role in a blis-schemas "
         "deployment",
-    # Engine fields the pinned stack DECODES but its engine model does not price, and ones it
-    # prices only in a particular shape. Under BLIS v0.12.0 this covered 21 names and was about
-    # decoding (blis-schemas v0.5.0's Engine was a fixed 31-field struct); v0.14.0 makes `engine:`
-    # an opaque block opened by blis-vllm v0.32.0's engineconfig.Engine, so all 21 decode and 3
-    # are swept normally. These seven are refused because a sweep over them reports noise; the
-    # other eleven are refused as ENGINE_DECODED_BUT_INERT, for measuring identical.
-    #
-    # Kept in sync with validate_experiment.ENGINE_NOT_WIRED by test_experiment.py.
-    "prefix_match_unit":
-        "prefix_match_unit decodes under the pinned engine model but is not priced by it: prefix "
-        "matching is modelled at block granularity, so sweeping the unit reports noise "
-        "(upstream blis-vllm#7)",
-    "max_cpu_loras":
-        "max_cpu_loras decodes under the pinned engine model but is not priced by it: there is no "
-        "CPU-side LoRA swap term in the cost model (upstream blis-vllm#5)",
-    "prefix_cache_retention_interval":
-        "prefix_cache_retention_interval decodes under the pinned engine model but is not priced "
-        "by it: the prefix cache is modelled without eviction over time, so retention has no "
-        "effect on any run",
-    # These three are refused OUTRIGHT, not gated on their condition. The condition is stated so
-    # the reason is auditable, but do not read it as "satisfy it and the sweep runs" -- the runner
-    # refuses every shape. Gating on dp / model family / env key would be a real improvement and
-    # is deliberately not in this change.
-    "prefill_schedule_interval":
-        "prefill_schedule_interval is refused: it is priced only when the pool has dp > 1 (with a "
-        "single data-parallel rank there is no cross-rank prefill schedule to interval), and the "
-        "runner does not gate on dp -- it refuses the knob in every shape",
-    "disable_hybrid_kv_cache_manager":
-        "disable_hybrid_kv_cache_manager is refused: the binary rejects it on a sliding-window "
-        "MLA model (the DeepSeek-V4 family), where the hybrid manager is what models the sliding "
-        "window, and the runner refuses it on every model rather than gating on the family",
-    "env":
-        "env is refused: the pinned engine model reads exactly one variable, "
-        "VLLM_USE_V2_MODEL_RUNNER, and any other key is carried but never read, so a sweep over "
-        "it reports noise -- the runner refuses the block rather than gating on the key",
-    "kv_events":
-        "kv_events is a struct under the pinned engine model (publisher/topic/buffer), not a "
-        "bool, and none of its inner fields is sweepable at this pin either (no spec can express "
-        "them) -- so it is not sweepable at all here, in any form",
-    # Decoded and accepted, but measured byte-identical on every scenario tried.
-    **{k: (f"{k} ({what}) is carried by the pinned engine model but the kernel cost model has no "
-           f"term for it: measured byte-identical on deepseek-v4-pro/h200, qwen3-14b/h100 and "
-           f"deepseek-v4.1-flash/h200 with two contrasting values each, so a sweep over it "
-           f"returns a column of equal numbers. State it as a fixed engine default if the run "
-           f"should record it.")
-       for k, what in ENGINE_DECODED_BUT_INERT.items()},
 }
 
 
@@ -353,8 +186,11 @@ class ConfigError(ValueError):
     pass
 
 
-def classify_config(config):
+def classify_config(config, vocab):
     """Split a candidate into (parallel, engine, cli, router); raise ConfigError on unknown keys.
+
+    `vocab` is the settings.Vocabulary of the simulator that will run the candidate: its pool-
+    layout keys go to `parallel`, its engine settings to `engine`.
 
     The speculative keys are folded into engine["speculative"], the nested block the schema wants,
     and the acceptance selectors go to the CLI.
@@ -369,9 +205,12 @@ def classify_config(config):
     pd_parallel = {r: {} for r in PD_ROLES}
     pd_engine = {r: {} for r in PD_ROLES}
     for k, v in config.items():
-        if k in SCENARIO_PARALLEL:
+        role, _, knob = k.partition("_")
+        if k in UNSUPPORTED:
+            raise ConfigError(f"{k!r}: {UNSUPPORTED[k]}")
+        elif k in vocab.parallel:
             parallel[k] = v
-        elif k in SCENARIO_ENGINE:
+        elif k in vocab.engine_names():
             engine[k] = v
         elif k in SCENARIO_SPECULATIVE:
             spec[k] = v
@@ -381,23 +220,17 @@ def classify_config(config):
             router[k] = v
         elif k in PD_CLI or k in PD_DEPLOYMENT:
             cli[k] = v
-        elif k in PD_PARALLEL:
-            role, knob = k.split("_", 1)
-            pd_parallel[role][knob] = v
-        elif k in PD_ENGINE or k in PD_SPECULATIVE:
-            role, knob = k.split("_", 1)
-            pd_engine[role][knob] = v
         elif k in CLI_FLAGS:
             cli[k] = v
-        elif k in UNSUPPORTED:
-            raise ConfigError(f"{k!r}: {UNSUPPORTED[k]}")
+        elif role in PD_ROLES and knob in vocab.parallel:
+            pd_parallel[role][knob] = v
+        elif role in PD_ROLES and (knob in vocab.engine_names() or k in PD_SPECULATIVE):
+            pd_engine[role][knob] = v
         else:
-            supported = (sorted(SCENARIO_PARALLEL) + sorted(SCENARIO_ENGINE)
-                         + sorted(SCENARIO_SPECULATIVE) + sorted(SPECULATIVE_CLI)
-                         + sorted(SCENARIO_ROUTER) + sorted(CLI_FLAGS)
-                         + sorted(PD_CLI) + sorted(PD_DEPLOYMENT) + sorted(PD_PARALLEL)
-                         + sorted(PD_ENGINE))
-            raise ConfigError(f"{k!r}: unknown key; supported = {supported}")
+            raise ConfigError(
+                f"{k!r}: unknown key: not a pool-layout key or engine setting in {vocab.source}, "
+                f"and not one of this runner's own keys "
+                f"({', '.join(sorted([*SCENARIO_SPECULATIVE, *SPECULATIVE_CLI, *SCENARIO_ROUTER, *CLI_FLAGS, *PD_CLI, *PD_DEPLOYMENT]))})")
     if spec:
         k = int(spec.get("num_speculative_tokens") or 0)
         if k > 0:
@@ -1080,6 +913,23 @@ def _flatten_result(doc):
     return out
 
 
+def result_invalid(blis, stdout):
+    """Why `blis schema validate result` refuses the Result on stdout, or None (SUB-19).
+
+    The document is written to a temporary file because the command validates a file.
+    """
+    fd, tmp = tempfile.mkstemp(prefix="blis-result-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(stdout)
+        blis_cli.validate_document(blis, "result", tmp)
+        return None
+    except blis_cli.DocumentInvalid as e:
+        return str(e)
+    finally:
+        os.unlink(tmp)
+
+
 def parse_metrics(stdout):
     doc = _result_doc(stdout)
     if doc is not None:
@@ -1147,7 +997,9 @@ def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, 
         router_block = f"\nrouter:\n  endpoint_picker_config: {json.dumps(os.path.abspath(rc))}"
     return f"""kind: Scenario
 name: {name}
-engine_version: "{engine_version}"
+engine:
+  kind: {ENGINE_KIND}
+  version: "{engine_version}"
 model: {model}
 coefficients: [{", ".join(COEFFICIENTS)}]
 cluster:
@@ -1207,7 +1059,9 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
         router_block = f"\nrouter:\n  endpoint_picker_config: {json.dumps(os.path.abspath(rc))}"
     return f"""kind: Scenario
 name: {name}
-engine_version: "{engine_version}"
+engine:
+  kind: {ENGINE_KIND}
+  version: "{engine_version}"
 model: {model}
 coefficients: [{", ".join(COEFFICIENTS)}]
 cluster:
@@ -1236,10 +1090,13 @@ def scenario_name(model, hardware, engine_version, parallel, engine, num_instanc
     return f"{model}-{hardware}-{hashlib.sha1(key.encode()).hexdigest()[:10]}"
 
 
-def write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine, num_instances=1,
-                   fabric=DEFAULT_FABRIC, router=None):
+def write_scenario(blis, scenarios_dir, model, hardware, engine_version, parallel, engine,
+                   num_instances=1, fabric=DEFAULT_FABRIC, router=None):
     """Write a scenario ATOMICALLY (temp + os.replace) so concurrent pool workers never read a
     half-written file for the same hashed deployment; return its file name.
+
+    The file is validated with `blis schema validate scenario` before it is published (SUB-19),
+    so a scenario the Go validators refuse is never written; blis_cli.DocumentInvalid says why.
 
     `num_instances` participates in the hash because it sets the pool's node count — two runs
     that differ only in instance count need DIFFERENT scenario files, or the second reuses a
@@ -1254,6 +1111,7 @@ def write_scenario(scenarios_dir, model, hardware, engine_version, parallel, eng
         try:
             with os.fdopen(fd, "w") as f:
                 f.write(body)
+            blis_cli.validate_document(blis, "scenario", tmp)
             os.replace(tmp, path)           # atomic publish; a concurrent writer's replace is idempotent
         finally:
             if os.path.exists(tmp):
@@ -1434,7 +1292,7 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     # to fire on real data instead of guarding an unreachable path.
     rec["pinned_stack"] = row_stack(blis, catalog, registry)
     try:
-        parallel, engine, cli, router = classify_config(config)
+        parallel, engine, cli, router = classify_config(config, settings.vocabulary(blis))
         # Resolve the preset's token shape so a closed-loop run actually prices the traffic it
         # names (see WORKLOAD_IGNORED). A replay carries its lengths in the corpus, so no shape.
         shape = {} if replay else load_workload_shape(catalog, workload)
@@ -1492,8 +1350,15 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     # the scenario hash then matches what the explorer reconstructs from the recorded fabric.
     multinode = bool(pd) or pool_nodes(parallel, num_instances) > 1
     fabric = fabric if multinode else DEFAULT_FABRIC
-    scenario_name = write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine,
-                                   num_instances, fabric, router)
+    try:
+        scenario_name = write_scenario(blis, scenarios_dir, model, hardware, engine_version,
+                                       parallel, engine, num_instances, fabric, router)
+    except blis_cli.DocumentInvalid as e:
+        rec.update({"deployment": None, "cmd": None, "returncode": None, "wall_s": 0.0,
+                    "metrics": {}, "metrics_all_instances": [],
+                    "error": f"generated scenario refused: {e}",
+                    "stdout_tail": "", "stderr_tail": ""})
+        return rec
     if replay:
         cmd = build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed,
                                defaults, cli, replay)
@@ -1506,9 +1371,12 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
         stdout, stderr, rc = pr.stdout, pr.stderr, pr.returncode
     except subprocess.TimeoutExpired:
         stdout, stderr, rc = "", "timeout", -1
-    metrics = parse_metrics(stdout) if rc == 0 else {}
+    invalid = result_invalid(blis, stdout) if rc == 0 else None
+    metrics = parse_metrics(stdout) if rc == 0 and not invalid else {}
     if rc != 0:
         error = _failure_line(stderr) or f"rc={rc}"
+    elif invalid:
+        error = f"Result refused: {invalid}"
     elif not metrics:
         error = "rc=0 but no cluster metrics parsed from stdout (output format changed?)"
     else:
@@ -1550,8 +1418,6 @@ def add_common_args(p):
     p.add_argument("--fabric", default=DEFAULT_FABRIC,
                    help=f"inter-node fabric (catalog networks/ class) for a multi-node run; "
                         f"ignored on a single node (default: {DEFAULT_FABRIC})")
-    p.add_argument("--engine-version", dest="engine_version", default=None,
-                   help="vLLM release to model (default: pins.env VLLM_REF)")
     p.add_argument("--workload")
     p.add_argument("--num-requests", type=int, dest="num_requests")
     p.add_argument("--seed", type=int, default=0)
@@ -1629,7 +1495,7 @@ def main():
     except ValueError as e:
         sys.exit(str(e))
     rec = run_one(args.blis, args.catalog, args.registry, args.scenarios, args.model, args.hardware,
-                  args.engine_version or pinned_engine_version(), args.workload, args.num_requests,
+                  blis_cli.engine_release(args.blis, ENGINE_KIND), args.workload, args.num_requests,
                   args.seed, args.horizon,
                   json.loads(args.config), args.phase, args.timeout, args.defaults, replay,
                   fabric=args.fabric)

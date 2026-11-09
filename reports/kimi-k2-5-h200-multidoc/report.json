@@ -10,11 +10,11 @@
     },
     {
       "h": "What was found",
-      "html": "<strong>64x TP8 + EP (batch tokens 32,768 \u00b7 KV dtype fp8)</strong>, from the <em>kv-capacity</em> sweep, reached 96.96 tok/s/accelerator (49646 tok/s across the fleet) at concurrency 1024 while holding the scenario's SLOs."
+      "html": "<strong>64x TP8 + EP (batch tokens 32,768 \u00b7 KV dtype fp8)</strong>, from the <em>kv-capacity</em> sweep, reached 95.91 tok/s/accelerator (49105.1 tok/s across the fleet) at concurrency 1024 while holding the scenario's SLOs."
     },
     {
       "h": "What to run",
-      "html": "64x TP8 + EP (batch tokens 32,768 \u00b7 KV dtype fp8) at concurrency 1024. 137 of 352 runs held the SLOs.",
+      "html": "64x TP8 + EP (batch tokens 32,768 \u00b7 KV dtype fp8) at concurrency 1024. 138 of 352 runs held the SLOs.",
       "run": true
     }
   ],
@@ -34,7 +34,7 @@
       "num": 2,
       "prose": [
         "Expert parallelism should win at every width, and wider tp should beat wider dp on 10k-token prompts.",
-        "Measured: best was <strong>64x TP8 + EP</strong> at 41.96 tok/s/accelerator (concurrency 256)."
+        "Measured: best was <strong>64x TP4xDP2 + EP</strong> at 79.9 tok/s/accelerator (concurrency 1024)."
       ],
       "title": "Sweep: topology-ep"
     },
@@ -43,7 +43,7 @@
       "num": 3,
       "prose": [
         "The per-step token cap should set ITL, and chunking long prefills should trade throughput for ITL below it.",
-        "Measured: best was <strong>64x TP8 + EP (batch tokens 16,384)</strong> at 42.07 tok/s/accelerator (concurrency 256)."
+        "Measured: best was <strong>64x TP8 + EP (batch tokens 32,768)</strong> at 42.85 tok/s/accelerator (concurrency 256)."
       ],
       "title": "Sweep: batch-prefill"
     },
@@ -52,7 +52,7 @@
       "num": 4,
       "prose": [
         "fp8 KV should pay most where many resident 10k-token sequences make KV the binding resource.",
-        "Measured: best was <strong>64x TP8 + EP (batch tokens 32,768 \u00b7 KV dtype fp8)</strong> at 96.96 tok/s/accelerator (concurrency 1024)."
+        "Measured: best was <strong>64x TP8 + EP (batch tokens 32,768 \u00b7 KV dtype fp8)</strong> at 95.91 tok/s/accelerator (concurrency 1024)."
       ],
       "title": "Sweep: kv-capacity"
     },
@@ -61,7 +61,7 @@
       "num": 5,
       "prose": [
         "The all2all gap should widen with EP width and per-step tokens, since 10k prompts push heavy dispatch volume.",
-        "Measured: best was <strong>64x TP8 + EP (batch tokens 32,768)</strong> at 41.96 tok/s/accelerator (concurrency 256)."
+        "Measured: best was <strong>64x TP8 + EP (batch tokens 32,768)</strong> at 42.85 tok/s/accelerator (concurrency 256)."
       ],
       "title": "Sweep: moe-collective"
     },
@@ -70,7 +70,7 @@
       "num": 6,
       "prose": [
         "FULL capture should edge PIECEWISE and NONE should lose heavily, by a similar margin at both fleet ends.",
-        "Measured: best was <strong>64x TP8 + EP (graph capture full)</strong> at 44.59 tok/s/accelerator (concurrency 256)."
+        "Measured: best was <strong>64x TP8 + EP (graph capture full)</strong> at 43.31 tok/s/accelerator (concurrency 256)."
       ],
       "title": "Sweep: cudagraph"
     },
@@ -79,7 +79,7 @@
       "num": 7,
       "prose": [
         "Load- and KV-aware routing should beat random by more on 64 instances than on 8, as long prompts land unevenly.",
-        "Measured: best was <strong>64x TP8 + EP (queue-kv routing)</strong> at 41.96 tok/s/accelerator (concurrency 256)."
+        "Measured: best was <strong>64x TP8 + EP (queue-kv routing)</strong> at 42.85 tok/s/accelerator (concurrency 256)."
       ],
       "title": "Sweep: routing"
     }

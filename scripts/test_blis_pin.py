@@ -424,8 +424,10 @@ def test_workflow_wiring():
           "a pushed branch with no PR (a failed create) is resumed, not skipped forever")
     check("github.event.before" in regen and "fetch-depth: 0" in regen,
           "pins are compared across the whole push: a rebase-merged pin PR ends in its fixes")
-    check("../blis-catalog" not in regen and "--catalog blis-catalog" in regen,
-          "regen clones the catalog inside the checkout, so ledger cmds stay relative")
+    check("../blis-substrate" not in regen and "--catalog blis-substrate/catalog" in regen
+          and "--data-override" not in regen,
+          "regen clones the substrate inside the checkout, so ledger cmds stay relative, and "
+          "prices with the simulator's embedded data")
     check('paths: ["pins.env"]' in regen and "branches: [main]" in regen,
           "regeneration triggers on a pins.env change reaching main")
     check("scripts/blis_pin.py changed" in regen,

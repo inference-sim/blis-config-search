@@ -6,6 +6,7 @@ scenario:
   gpus: 64
   cluster:
     fabric: roce-200g
+    gpus_per_node: 8
   engine:
     max_model_len: 262144
     gpu_memory_utilization: 0.95
@@ -17,7 +18,7 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-muse-h100-8node
-    grace_period: inf
+    grace_period: 87600h
 sweeps:
 - name: topology
   narrative: Eight single-node TP8 instances should peak highest, since a 64-wide

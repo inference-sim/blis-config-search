@@ -482,7 +482,8 @@ def test_workflow_wiring():
           "a dispatched pin-compat still compares against the base and comments on the PR")
     for name, text in (("bump-blis-pin.yml", bump), ("regen-reports.yml", regen)):
         check("actions: write" in text and "gh workflow run checks.yml" in text
-              and "gh workflow run pin-compat.yml" in text and "-f base=main" in text,
+              and "gh workflow run pin-compat.yml" in text
+              and ("-f base=main" in text or '-f base="$BASE_BRANCH"' in text),
               f"{name} dispatches CI on its own PR, so the required gate reports without a PAT")
 
 

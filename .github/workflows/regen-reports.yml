@@ -47,7 +47,7 @@ on:
         type: boolean
         default: true
       base:
-        description: "branch the batch PRs are cut from and opened against (blank = the default branch). Set it to a pull request's branch to regenerate the reports that branch needs, before it merges"
+        description: "branch the batch PRs are cut from and opened against (blank = the default branch). Set it to a pull request's branch to regenerate the reports that branch needs, before it merges. The branch's workflow files must equal the default branch's, or the push is refused to GITHUB_TOKEN (the PR job checks this and says so)"
         required: false
 
 permissions:
@@ -225,6 +225,21 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with: { python-version: "3.12" }
       - run: pip install --require-hashes -r requirements.txt
+      - name: Refuse a base whose workflow files differ from the default branch's
+        # A branch cut from such a base carries workflow files GITHUB_TOKEN may not push (it lost
+        # three batch PRs after a 10h sweep once). Say so now, not after the push is refused.
+        run: |
+          set -euo pipefail
+          default="${{ github.event.repository.default_branch }}"
+          if [ "$BASE_BRANCH" != "$default" ]; then
+            git fetch --quiet origin "$default"
+            if ! git diff --quiet "origin/$default" HEAD -- .github/workflows; then
+              echo "::error::base $BASE_BRANCH changes .github/workflows relative to $default, so a branch cut from it cannot be pushed with GITHUB_TOKEN. Set the PIN_BOT_TOKEN secret (a token with the workflows scope), or dispatch with base blank after the workflow changes merge." >&2
+              [ -n "${PIN_BOT_TOKEN:-}" ] || exit 1
+            fi
+          fi
+        env:
+          PIN_BOT_TOKEN: ${{ secrets.PIN_BOT_TOKEN }}
       - name: Is the swept stack still the pinned one?
         id: stack
         run: |

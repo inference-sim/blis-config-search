@@ -688,8 +688,14 @@ def test_workflows_sane():
             if not any("git push origin" in (st.get("run") or "") for st in steps):
                 continue
             co = next((st for st in steps if st.get("uses", "").startswith("actions/checkout@")), {})
-            check((co.get("with") or {}).get("ref") == "${{ github.event.repository.default_branch }}",
-                  f"{fn} job {jname} pushes a branch, so it must branch from the default branch")
+            ref = (co.get("with") or {}).get("ref")
+            # The default branch, or (regen-reports.yml only) the dispatch's `base`, which that job
+            # refuses unless its workflow files equal the default branch's.
+            ok = ref == "${{ github.event.repository.default_branch }}" or (
+                fn == "regen-reports.yml"
+                and ref == "${{ github.event.inputs.base || github.event.repository.default_branch }}"
+                and "Refuse a base whose workflow files differ" in open(os.path.join(wfdir, fn)).read())
+            check(ok, f"{fn} job {jname} pushes a branch, so it must branch from the default branch")
 
     ck = os.path.join(ROOT, ".github", "workflows", "checks.yml")
     ctxt = open(ck).read()

@@ -20,7 +20,8 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-h100
-    grace_period: inf                  # 30s default misreads saturated loads as incomplete
+    grace_period: 87600h   # = never ends within a run (ten years). TEMPORARY: `inf` is refused by the strict Result loader until blis-substrate#28 ships (M2); restore `inf` then (blis-config-search#102)
+    # 30s default misreads saturated loads as incomplete
 
 sweeps:
   - name: topology

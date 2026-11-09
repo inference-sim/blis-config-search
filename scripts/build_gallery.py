@@ -194,8 +194,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Build the site data from reports/.")
     ap.add_argument("--reports", default=os.path.join(ROOT, "reports"), help="parent of run dirs")
     ap.add_argument("--out", default=os.path.join(ROOT, "site"), help="output directory")
-    ap.add_argument("--siblings", default=os.path.join(ROOT, os.pardir),
-                    help="dir with blis-catalog/blis-registry/inference-sim for the catalog tabs")
+    ap.add_argument("--siblings", default=os.path.join(ROOT, os.pardir, "blis-substrate"),
+                    help="the blis-substrate checkout at the pinned release, for the catalog tabs")
     args = ap.parse_args(argv)
     try:
         rows = build(args.reports, args.out)

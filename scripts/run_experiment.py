@@ -36,7 +36,9 @@ import hashlib
 import itertools
 import json
 import os
+import shutil
 import sys
+import tempfile
 import time
 
 try:
@@ -48,17 +50,13 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import run_blis            # noqa: E402
 import topologies          # noqa: E402
+import blis_cli            # noqa: E402
 import build_catalog       # noqa: E402
 import validate_experiment as validator   # noqa: E402
 
-# Knob names in a spec are the SCHEMA's (blis-vllm / blis-schemas) names; run_blis's candidate
-# keys are flat. These are the only two that differ, and they differ because run_blis folds
+# Setting names in a spec are the engine block's names; run_blis's candidate keys are flat. These are the only two that differ, and they differ because run_blis folds
 # drafting into a nested `speculative` block itself.
 SPEC_TO_CANDIDATE = {"num_spec_tokens": "num_speculative_tokens", "method": "speculative_method"}
-# Nested engine blocks that stay nested (unlike `speculative`, which flattens): the runner
-# renders them as sub-blocks of the scenario's engine. Sourced from the runner so the two cannot
-# disagree about which keys are blocks.
-NESTED_ENGINE_BLOCKS = tuple(k for k in run_blis.NESTED_ENGINE_FIELDS if k != "speculative")
 
 
 def _flag(role, knob):
@@ -95,8 +93,8 @@ def _engine_candidates(engine):
     """
     engine = dict(engine or {})
     spec = engine.pop("speculative", None)
-    nested = {k: engine.pop(k) for k in list(engine)
-              if k in NESTED_ENGINE_BLOCKS and isinstance(engine[k], dict)}
+    # Any other mapping is a nested block (the validator checked its inner names).
+    nested = {k: engine.pop(k) for k in list(engine) if isinstance(engine[k], dict)}
     out = grid(engine)
     for block, fields in sorted(nested.items()):
         combos = grid(fields)
@@ -537,8 +535,17 @@ def best_of(rows):
 
 
 def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dry_run=False,
-                   run_timeout=600, max_parallel=1, verbose=True):
-    """Expand, filter, run and rank one spec. Returns the assembled report dict."""
+                   run_timeout=600, max_parallel=1, verbose=True, fields=None, data_override=False):
+    """Expand, filter, run and rank one spec. Returns the assembled report dict.
+
+    `catalog` and `registry` are where the scripts read files from (a blis-substrate checkout at
+    the pinned release). The simulator prices with its embedded data unless `data_override` names
+    them to it, which makes the report experimental and refuses a committed reports/ directory
+    (CFG-1)."""
+    if data_override and not dry_run and _is_committed_reports(out_root):
+        raise SystemExit(f"--data-override prices with data other than the pinned release's embedded "
+                         f"data, so its report is experimental and never committed: --out {out_root} is the "
+                         f"repository's reports/ directory. Choose another --out.")
     routing_dir = routing_dir or os.path.join(ROOT, "routing")
     sc = spec["scenario"]
     name = spec["name"]
@@ -549,13 +556,20 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     concurrency = list(sc["concurrency"])
     slo_ms = slo_limits(sc.get("slo"))
     shared_engine = dict(sc.get("engine") or {})
-    engine_version = run_blis.pinned_engine_version()
+    engine_version = blis_cli.engine_release(blis, run_blis.ENGINE_KIND, fields)
     replay = dict(sc.get("replay") or {}) or None
     # The cluster's inter-node fabric, defaulting to IB so a spec that states none is byte-identical.
     # Only a multi-node run prices cross-node traffic; run_blis ignores it on a single node.
     fabric = (sc.get("cluster") or {}).get("fabric") or run_blis.DEFAULT_FABRIC
+    # The node size the specification states, for a chip whose catalog entry fixes none (#96).
+    gpus_per_node = (sc.get("cluster") or {}).get("gpus_per_node")
 
-    out_dir = os.path.join(out_root, name)
+    final_dir = os.path.join(out_root, name)
+    # Into the committed reports/, a sweep is staged outside the tree: only the Results can say
+    # whether it was priced by a tagged release on its embedded data (CFG-1), and a refusal must
+    # leave an existing report byte for byte as it was. Nothing is copied in until the gate passes.
+    stage = tempfile.mkdtemp(prefix="sweep-") if (not dry_run and _is_committed_reports(out_root)) else None
+    out_dir = os.path.join(stage, name) if stage else final_dir
     scenarios_dir = os.path.join(out_dir, "scenarios")
     generated_routing = os.path.join(out_dir, "routing")
     if not dry_run:
@@ -654,7 +668,8 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                                    None, cfg, phase=sname, timeout=run_timeout,
                                    replay={k: v for k, v in replay.items()
                                            if k != "_overrides"} if replay else None,
-                                   fabric=fabric)
+                                   fabric=fabric, gpus_per_node=gpus_per_node, fields=fields,
+                                   data_override=data_override)
             rec["sweep"] = sname
             _relativize_cmd(rec, out_dir)
             ok, why = servable(rec, slo_ms, gpus)
@@ -720,7 +735,9 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
         "objective": "max output tok/s per accelerator subject to the scenario's SLOs",
         "sweeps": sweep_results,
         "best_overall": best_of(all_rows),
-        "pinned_stack": _pinned_stack(blis, catalog, registry),
+        "pinned_stack": _pinned_stack(blis, catalog, registry, engine_version,
+                                      _priced_with_other_data(runs, data_override)),
+        "experimental": _priced_with_other_data(runs, data_override),
         "model_arch": (entry or {}).get("arch"),
         "totals": {"configs": sum(s["configs"] for s in sweep_results),
                    "runs": len(runs) if not dry_run else
@@ -728,7 +745,21 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                    "servable": sum(1 for r in all_rows if r.get("servable"))},
     }
     if not dry_run:
+        # The refusal above covers a requested override. This one covers what the Results say: a
+        # report priced with other data, or by an untagged build, is never written to reports/.
+        if stage and report["experimental"]:
+            shutil.rmtree(stage, ignore_errors=True)       # the staged sweep only; reports/ is untouched
+            raise SystemExit(f"{name}: the Results say this sweep was priced with data or a build other than "
+                             f"a tagged release's embedded data ({_other_data_reason(runs)}), so its report is "
+                             f"experimental and never committed: --out {out_root} is the repository's "
+                             f"reports/ directory. Choose another --out, or run the pinned release.")
         _write_run_dir(out_dir, spec, report, runs)
+        if stage:
+            # The gate passed and the whole report is assembled: replace the report directory as a
+            # whole, so a file the new sweep no longer writes does not survive from an older one
+            # and the tree depends only on this sweep (the sweeper is deterministic).
+            _replace_dir(out_dir, final_dir)
+            shutil.rmtree(stage, ignore_errors=True)
     return report
 
 
@@ -955,20 +986,62 @@ def _blis_source_commit(blis):
     return (desc, commit) if commit else (None, None)
 
 
-def _pinned_stack(blis, catalog, registry):
-    """What priced these runs: the pins.env refs, plus the commits and binary digest that ran."""
+def _is_committed_reports(out_root):
+    return os.path.realpath(out_root) == os.path.realpath(os.path.join(ROOT, "reports"))
+
+
+def _priced_with_other_data(runs, data_override):
+    """True when the sweep asked for other data, or any run's Result says it was priced with data
+    other than a tagged release's own embedded data (CFG-1): the report is then experimental,
+    whatever the command line said. A Result names its data sources and whether the build is a
+    tagged release (`released_data`); an untagged or off-pin build is experimental too."""
+    return bool(data_override) or any(
+        r.get("data") not in (None, "embedded") or r.get("released_build") is False for r in runs)
+
+
+def _replace_dir(src, dst):
+    """Make `dst` hold exactly what `src` holds. The old `dst`, if any, is moved aside first and
+    removed only after the new one is in place, so a failure part way leaves the old report."""
+    os.makedirs(os.path.dirname(os.path.abspath(dst)), exist_ok=True)
+    old = None
+    if os.path.lexists(dst):
+        old = dst + ".old-" + os.path.basename(src)
+        os.rename(dst, old)
+    try:
+        shutil.copytree(src, dst)
+    except BaseException:
+        shutil.rmtree(dst, ignore_errors=True)
+        if old:
+            os.rename(old, dst)
+        raise
+    if old:
+        shutil.rmtree(old, ignore_errors=True)
+
+
+def _other_data_reason(runs):
+    """One line naming why a sweep's Results are not a tagged release's embedded data."""
+    if any(r.get("data") not in (None, "embedded") for r in runs):
+        return "a Result names a data source other than embedded"
+    return "a Result names a build that is not a tagged release"
+
+
+def _pinned_stack(blis, catalog, registry, engine_version, data_override=False):
+    """What priced these runs: the pins.env refs, the engine release the simulator ran, and the
+    commits and binary digest that ran. The catalog and registry are the simulator's embedded data
+    (the substrate release in pins.env) unless the run overrode them."""
     pins = build_catalog.read_pins()
     out = {"blis": pins.get("BLIS_REF", "unpinned"),
            "kernel": pins.get("KERNEL_REF", "unpinned"),
            "router": pins.get("ROUTER_REF", "unpinned"),
-           "engine_version": run_blis.pinned_engine_version(),
-           "catalog": pins.get("CATALOG_REF", "unpinned"),
-           "registry": pins.get("REGISTRY_REF", "unpinned")}
+           "substrate": pins.get("SUBSTRATE_REF", "unpinned"),
+           "engine_version": engine_version,
+           "data": "override" if data_override else "embedded"}
     resolved = {}
-    for name, path in (("catalog", catalog), ("registry", registry)):
-        desc, commit = _git_identity(path)
-        if desc or commit:
-            resolved[name] = {"describe": desc, "commit": commit}
+    if data_override:
+        for name, path in (("catalog", catalog), ("registry", registry)):
+            desc, commit = _git_identity(path)
+            if desc or commit:
+                resolved[name] = {"describe": desc, "commit": commit}
     digest = _file_digest(blis)
     if digest:
         resolved["blis"] = {"sha256": digest}
@@ -1009,7 +1082,7 @@ def blis_pin_warning(stack, pins=None):
 def _blis_pin_warning(blis, catalog, registry):
     """blis_pin_warning for the binary about to run; never the thing that breaks a sweep."""
     try:
-        return blis_pin_warning(_pinned_stack(blis, catalog, registry))
+        return blis_pin_warning(_pinned_stack(blis, catalog, registry, None))
     except Exception:
         return ""
 
@@ -1195,6 +1268,11 @@ def main(argv=None):
     ap.add_argument("spec", help="experiments/<name>.yaml")
     ap.add_argument("--out", default=os.path.join(ROOT, "reports"))
     ap.add_argument("--blis"); ap.add_argument("--catalog"); ap.add_argument("--registry")
+    ap.add_argument("--data-override", action="store_true", dest="data_override",
+                    help="EXPERIMENTAL: price with --catalog/--registry instead of the simulator's embedded "
+                         "data. The report is marked experimental and may not be written to reports/")
+    ap.add_argument("--fields", help="the engine's field list: the pinned blis-vllm release's fields.json, "
+                                     "until the binary has `blis fields` (default: ask the binary)")
     ap.add_argument("--routing", default=os.path.join(ROOT, "routing"))
     ap.add_argument("--dry-run", action="store_true", dest="dry_run",
                     help="expand and filter the grids and print the run plan; run no BLIS")
@@ -1211,19 +1289,24 @@ def main(argv=None):
     spec, err = validator.load(args.spec)
     if err:
         raise SystemExit(f"{args.spec}: {err}")
-    # Pass the catalog through: it is what lets the validator check that scenario.model/hardware/
-    # workload actually EXIST. Without it a typo'd identifier reaches BLIS and fails every run.
-    errs = validator.validate(spec, args.routing, None, args.catalog)
+    if not args.blis:
+        raise SystemExit("--blis is required: the simulator's commands supply the setting names, "
+                         "the catalog identities and the engine release, even for --dry-run")
+    if not args.dry_run and not args.registry:
+        raise SystemExit("--registry is required for a real run "
+                         "(use --dry-run to expand the grids only)")
+    try:
+        errs = validator.validate(spec, args.blis, args.routing, args.catalog, args.fields)
+    except blis_cli.BlisCommandError as e:
+        raise SystemExit(f"{args.spec}: {e}")
     if errs:
         raise SystemExit(f"invalid spec {args.spec}:\n  - " + "\n  - ".join(errs))
-    if not args.dry_run and not (args.blis and args.registry):
-        raise SystemExit("--blis and --registry are required for a real run "
-                         "(use --dry-run to expand the grids only)")
 
     t0 = time.time()
     report = run_experiment(spec, args.blis, args.catalog, args.registry, args.out,
                             routing_dir=args.routing, dry_run=args.dry_run,
-                            run_timeout=args.timeout, max_parallel=args.max_parallel)
+                            run_timeout=args.timeout, max_parallel=args.max_parallel, fields=args.fields,
+                            data_override=args.data_override)
     if args.as_json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:

@@ -81,8 +81,7 @@ It prints, per knob: whether it **applies** to this exact combination, the value
 |---|---|
 | catalog model row | `arch`, `experts`, `top_k`, `attn_kind`, `context`, `quant` |
 | the model's **`graph.yaml`** | the **declared speculator and its max depth** (so whether drafting is legal at all, and the K ceiling), the sliding window, and the `bytes_by_cache_dtype` tables — *which KV dtypes this model is priced for* |
-| **blis-vllm's rules pack** | the **architecture-keyed** rules: what `auto`/`fp8` resolve to on this chip's capability family, which draft methods the architecture refuses, whether `engram_config` applies |
-| the hardware entry | `ComputeCapability` → the capability family that selects among those resolutions, plus memory for the footprint floor |
+| the hardware entry | `ComputeCapability` → the capability family that gates the per-dtype KV table, plus memory for the footprint floor |
 
 **The catalog row alone is not enough**, and this is the trap: it carries no speculator, no
 sliding window, no KV-dtype table and no capability gating. Design from the row only and you will
@@ -250,7 +249,7 @@ Total runs = (configs surviving the GPU filter) x `len(scenario.concurrency)`, s
 Check it before you hand the spec over:
 
 ```
-python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run
+python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run --blis ./blis
 ```
 
 It prints per-sweep config and run counts and how many combos the GPU filter dropped. If it is
@@ -261,8 +260,9 @@ and note in a `#` comment that the grid was bounded. Do not silently drop a cont
 
 - **Every knob value is a list.** `tp: [8]`, never `tp: 8`.
 - **An omitted knob takes the vLLM default.** Do not restate defaults.
-- **Knob names are BLIS's exact names** — `engine:` keys are blis-vllm engine-block keys (== vLLM's
-  own config field names), `parallel:` keys are blis-schemas pool fields. Nothing invented.
+- **Knob names are the engine's own** — `engine:` keys are the entries of `blis fields --engine
+  vllm` (vLLM's own config field names), `parallel:` keys are the deployment document's pool
+  fields (`blis schema deployment`). Nothing invented.
 - **Every run uses exactly `scenario.gpus`.** For a colocated sweep
   `tp x dp x num-instances == gpus`; for a disaggregated one both pools count together.
 - **Concurrency is set once, in `scenario`,** so every sweep is measured at the same loads.
@@ -273,7 +273,7 @@ and note in a `#` comment that the grid was bounded. Do not silently drop a cont
 
 ### Replay workloads: state the corpus path, nothing else
 
-`blis-catalog/workloads/<name>.yaml` **is** the workload. For `agentx-mvp` it states the harness
+The catalog's `workloads/<name>.yaml` **is** the workload. For `agentx-mvp` it states the harness
 scenario id (`inferencex-agentx-mvp`), the corpus loader with its pinned HF revision, the
 `sha256`, `random_seed`, `benchmark_duration_s`, `grace_period_s`, `max_context_length`, the
 cache-bust and trajectory settings, and the `category`/`thinking` pair that selects the
@@ -301,11 +301,11 @@ descriptor is recorded as an override, so the report can say the run departed fr
 Run the validator and fix every error — a spec that fails is not a deliverable:
 
 ```
-python3 -I scripts/validate_experiment.py experiments/<name>.yaml
+python3 -I scripts/validate_experiment.py experiments/<name>.yaml --blis ./blis
 ```
 
-It checks knob names against the sibling `blis-vllm` / `blis-schemas` checkouts when present,
-the GPU arithmetic per sweep, SLO units, and that every router file exists. Then run `--dry-run`
+It checks setting names against `blis fields` and `blis schema deployment` from the binary it is
+given, model and hardware names with `blis catalog resolve`, the GPU arithmetic per sweep, SLO units, and that every router file exists. Then run `--dry-run`
 to confirm the grids expand to the run count you intended. Return the spec path, the run count,
 and a short plain-language summary of the experiment's story.
 

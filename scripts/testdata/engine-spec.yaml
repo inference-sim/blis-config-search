@@ -6,7 +6,7 @@
 name: glm-5-3-flash-h100-chatbot-engine
 
 scenario: {model: glm-5.3-flash, hardware: h100, workload: chatbot, gpus: 16,
-           slo: {itl_p99: 20ms}, concurrency: [1, 2, 4, 8, 16, 32, 64, 128, 256]}
+           cluster: {gpus_per_node: 8}, slo: {itl_p99: 20ms}, concurrency: [1, 2, 4, 8, 16, 32, 64, 128, 256]}
 
 sweeps:
   - name: batching

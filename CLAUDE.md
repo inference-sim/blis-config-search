@@ -25,8 +25,9 @@ cd scripts && python3 -m unittest test_experiment.GridExpansion   # or .GridExpa
 # the others are plain-function runners; call the function from the __main__ block
 
 # Experiment specs
-python3 -I scripts/validate_experiment.py experiments/<name>.yaml   # or experiments/
-python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run
+python3 -I scripts/fetch_fields.py fields.json      # the pinned engine's field list, until `blis fields` exists
+python3 -I scripts/validate_experiment.py experiments/<name>.yaml --blis ./blis --fields fields.json   # or experiments/
+python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run --blis ./blis --fields fields.json
 
 # Site data + web app
 python3 -I scripts/build_gallery.py                                 # reports/ -> site/
@@ -50,19 +51,23 @@ One pipeline feeds one static site:
   The SPA is the only report surface; the former standalone HTML report was retired (#69).
 
 Spec rules worth knowing: every knob value is a list; omitted knobs take the vLLM default; only
-combos with `tp × dp × num-instances == scenario.gpus` are run; knob names must be BLIS's exact
-names (validated against sibling checkouts). Routing policies live in `routing/*.yaml`.
+combos with `tp × dp × num-instances == scenario.gpus` are run; knob names are read from the
+simulator (`blis fields`, `blis schema deployment`; `scripts/settings.py`), never kept here.
+Routing policies live in `routing/*.yaml`.
 `report/lexicon.json` is mirrored byte-for-byte at `web/src/lexicon.json`; edit the first, copy it over.
 
 ### Pinned stack and siblings
 
-`pins.env` is the single source of truth for which BLIS produced the reports. `BLIS_REF`/`BLIS_SHA`,
-`CATALOG_REF`, `REGISTRY_REF` are hand-pinned; the block at the end is generated from
+`pins.env` is the single source of truth for which BLIS produced the reports. `BLIS_REF`/`BLIS_SHA`
+are hand-pinned; the block at the end is generated from
 inference-sim's `go.mod` by `scripts/sync_pins.py` — don't edit it by hand. `test_build.py` checks
 the pins against `SETUP.md`, the workflows, and `go.mod`.
 
-Several scripts read sibling checkouts in `../` (`inference-sim`, `blis-catalog`, `blis-registry`,
-`blis-schemas`, `blis-vllm`, `blis-latency-kernel`) and degrade gracefully when absent.
+The validator and runner reach the simulator only through its commands (`scripts/blis_cli.py`):
+`blis schema`, `blis schema validate` and `blis catalog resolve`, and the field list in the file `--fields` names (`blis fields` replaces the file when it exists). Tests use the
+TEMPORARY stand-in `scripts/testdata/blis-m1/blis` until a pinned build has the commands. The
+site build (`build_catalog.py`), `knob_profile.py` and `fetch_corpus.py` still read a catalog
+checkout; see the M1 pull request for why. `test_build.py` reads `../inference-sim`'s go.mod.
 
 ### CI (`.github/workflows/`)
 

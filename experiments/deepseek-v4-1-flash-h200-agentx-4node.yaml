@@ -11,6 +11,7 @@ name: deepseek-v4-1-flash-h200-agentx-4node
 scenario:
   model: deepseek-v4.1-flash
   hardware: h200
+  cluster: {gpus_per_node: 8}   # an 8-GPU HGX server; the catalog fixes no node size for this chip
   workload: agentx-mvp
   gpus: 32
   slo: {itl_p99: 20ms}
@@ -21,7 +22,8 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-h200
-    grace_period: inf            # the descriptor's 30s marks saturated loads as incomplete
+    grace_period: 87600h   # = never ends within a run (ten years). TEMPORARY: `inf` is refused by the strict Result loader until blis-substrate#28 ships (M2); restore `inf` then (blis-config-search#102)
+    # the descriptor's 30s marks saturated loads as incomplete
 
 sweeps:
   - name: topology-ep

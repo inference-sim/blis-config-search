@@ -357,7 +357,7 @@ export function Submit({ catalog }: { catalog: Catalog }) {
             <summary>Check it before you submit</summary>
             <p>CI runs these on every PR. Aim for under about 3 hours of serial runtime.</p>
             <pre className="yaml cmd">{`python3 -I scripts/validate_experiment.py ${file}\npython3 -I scripts/run_experiment.py ${file} --dry-run`}</pre>
-            <pre className="yaml cmd">{`python3 -I scripts/run_experiment.py ${file} --blis /path/to/blis --catalog "$BLIS_CATALOG" --registry "$BLIS_REGISTRY"`}</pre>
+            <pre className="yaml cmd">{`python3 -I scripts/run_experiment.py ${file} --blis /path/to/blis --catalog "$SUBSTRATE_CATALOG" --registry "$SUBSTRATE_REGISTRY"`}</pre>
             <p>
               Need help with knobs? The <a href={SKILL_DOC} target="_blank" rel="noreferrer"><span className="mono">blis-experiment</span></a> skill drafts a spec from a one-line question; the <a href={SPEC_DOC} target="_blank" rel="noreferrer">spec guide</a> lists every rule.
             </p>

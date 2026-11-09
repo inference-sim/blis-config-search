@@ -30,15 +30,15 @@ def check(cond, msg):
         print(f"  FAIL: {msg}")
 
 
+# TEMPORARY: the inference-sim commands, from scripts/testdata/blis-m1 (inference-sim#2077).
+FIXTURE_BLIS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata", "blis-m1",
+                            "blis")
+
 GO_MOD = """module github.com/inference-sim/inference-sim
 
 require (
-\tgithub.com/inference-sim/blis-schemas v0.10.0
-\tgithub.com/inference-sim/blis-vllm v0.32.0-blis.1
-)
-
-require (
-\tgithub.com/inference-sim/blis-latency-kernel v0.5.0 // indirect
+\tgithub.com/inference-sim/blis-substrate v0.11.0
+\tgithub.com/inference-sim/blis-vllm v0.32.0-blis.2
 )
 
 replace github.com/llm-d/llm-d-router => github.com/inference-sim/llm-d-router v1.0.0-blis.2
@@ -58,9 +58,8 @@ def test_version_ordering():
 def test_go_mod_versions():
     print("test_go_mod_versions")
     mods = B.go_mod_versions(GO_MOD)
-    check(mods.get("blis-latency-kernel") == "v0.5.0",
-          "the kernel is read from go.mod even when it is an indirect requirement")
-    check(mods.get("blis-schemas") == "v0.10.0", "schemas version is read")
+    check(mods.get("blis-substrate") == "v0.11.0", "the substrate version is read")
+    check(mods.get("blis-vllm") == "v0.32.0-blis.2", "the engine version is read")
     check(mods.get("llm-d-router") == "v1.0.0-blis.2", "the router fork is read from its replace")
 
 
@@ -68,7 +67,7 @@ def test_sync_pins_reads_replace():
     print("test_sync_pins_reads_replace")
     import sync_pins
     got = sync_pins.derive_from_text(GO_MOD)
-    check(got == {"SCHEMAS_REF": "v0.10.0", "VLLM_REF": "v0.32.0-blis.1", "KERNEL_REF": "v0.5.0",
+    check(got == {"SUBSTRATE_REF": "v0.11.0", "VLLM_REF": "v0.32.0-blis.2",
                   "ROUTER_REF": "v1.0.0-blis.2"}, f"derived pins: {got}")
     block = sync_pins.derive_from_text("replace (\n\tgithub.com/llm-d/llm-d-router v0.0.0 => "
                                        "github.com/inference-sim/llm-d-router v1.0.0-blis.3\n)\n")
@@ -89,11 +88,11 @@ def test_smoke_skips_dropped_sweeps():
 
 def test_rewrite_pins_keeps_comments():
     print("test_rewrite_pins_keeps_comments")
-    text = "# BLIS_REF=v0.0.1 is a comment\nBLIS_REF=v0.14.0\nBLIS_SHA=aaa\n\nCATALOG_REF=0.4.0\n"
+    text = "# BLIS_REF=v0.0.1 is a comment\nBLIS_REF=v0.14.0\nBLIS_SHA=aaa\n\nSUBSTRATE_REF=v0.13.0\n"
     out = B.rewrite_pins(text, {"BLIS_REF": "v0.15.0", "BLIS_SHA": "bbb"})
     check("BLIS_REF=v0.15.0\n" in out and "BLIS_SHA=bbb\n" in out, "assignments move")
     check("# BLIS_REF=v0.0.1 is a comment" in out, "a comment naming the key is left alone")
-    check("CATALOG_REF=0.4.0" in out, "keys not named in the update are untouched")
+    check("SUBSTRATE_REF=v0.13.0" in out, "keys not named in the update are untouched")
     try:
         B.rewrite_pins(text, {"NEW_PIN": "x"})
         check(False, "inventing a pin that pins.env does not assign must be refused")
@@ -101,65 +100,62 @@ def test_rewrite_pins_keeps_comments():
         check(True, "")
 
 
-def test_rewrite_setup_moves_only_instructions():
-    print("test_rewrite_setup_moves_only_instructions")
-    with open(B.SETUP) as f:
+def test_setup_md_sources_the_pins():
+    print("test_setup_md_sources_the_pins")
+    with open(os.path.join(B.ROOT, "SETUP.md")) as f:
         setup = f.read()
     pins = B.read_pins()
-    old, sha = pins["BLIS_REF"], pins["BLIS_SHA"]
-    out = B.rewrite_setup(setup, old, "v9.9.9", "f" * 40, "release v9.9.9")
-    check(f"git clone --branch v9.9.9 --depth 1 https://github.com/inference-sim/inference-sim.git"
-          in out, "the clone line moves")
-    check(f"EXPECT={'f' * 40}" in out and sha not in out, "the EXPECT sha moves")
-    check("v9.9.9 no longer resolves to $EXPECT" in out, "the abort message moves")
-    # Historical mentions of the old version are statements of fact and must survive the bump.
-    hist = setup.count(old) - 4
-    check(out.count(old) == hist,
-          f"only the 4 instructional lines move; {hist} historical mention(s) of {old} remain")
-    try:
-        B.rewrite_setup("no clone block here\n", old, "v9.9.9", "f" * 40, "x")
-        check(False, "a SETUP.md whose clone block changed shape must fail loudly")
-    except ValueError:
-        check(True, "")
+    check(". ./pins.env" in setup and '--branch "$BLIS_REF"' in setup
+          and '"$(git rev-parse HEAD)" = "$BLIS_SHA"' in setup,
+          "the clone recipe sources pins.env and uses $BLIS_REF and $BLIS_SHA")
+    check(pins["BLIS_REF"] not in setup and pins["BLIS_SHA"] not in setup,
+          "SETUP.md copies neither the pinned release nor its commit (X23): a bump has nothing to rewrite there")
+    check(not hasattr(B, "rewrite_setup"), "bump edits pins.env only")
 
 
 def test_bump_end_to_end_on_copies():
     print("test_bump_end_to_end_on_copies")
     tmp = tempfile.mkdtemp()
     try:
-        pins, setup = os.path.join(tmp, "pins.env"), os.path.join(tmp, "SETUP.md")
+        pins = os.path.join(tmp, "pins.env")
         shutil.copy(B.PINS, pins)
-        shutil.copy(B.SETUP, setup)
         cur = B.read_pins(pins)
-        moved = B.bump("v99.0.0", sha="e" * 40, go_mod=GO_MOD, release_name="v99.0.0: big",
-                       pins_path=pins, setup_path=setup)
+        if not B.semver(cur["BLIS_REF"]):
+            # A draft pins a branch commit; the bot orders only release tags, so start the copy
+            # from one.
+            with open(pins) as f:
+                text = B.rewrite_pins(f.read(), {"BLIS_REF": "v0.15.0"})
+            with open(pins, "w") as f:
+                f.write(text)
+            cur = B.read_pins(pins)
+        setup_before = open(os.path.join(B.ROOT, "SETUP.md"), "rb").read()
+        moved = B.bump("v99.0.0", sha="e" * 40, go_mod=GO_MOD, release_name="v99.0.0: big", pins_path=pins)
         after = B.read_pins(pins)
         check(after["BLIS_REF"] == "v99.0.0" and after["BLIS_SHA"] == "e" * 40, "pin moved")
-        check(after["KERNEL_REF"] == "v0.5.0", "KERNEL_REF follows the release's go.mod")
-        check(after["VLLM_REF"] == "v0.32.0-blis.1" and after["SCHEMAS_REF"] == "v0.10.0"
-              and after["ROUTER_REF"] == "v1.0.0-blis.2",
-              "every derived pin follows the release's go.mod, not just the kernel")
-        check(after["CATALOG_REF"] == cur["CATALOG_REF"]
-              and after["REGISTRY_REF"] == cur["REGISTRY_REF"],
-              "catalog/registry are NOT guessed -- the PR asks a reviewer")
+        check(after["SUBSTRATE_REF"] == "v0.11.0", "SUBSTRATE_REF follows the release's go.mod")
+        check(after["VLLM_REF"] == "v0.32.0-blis.2" and after["ROUTER_REF"] == "v1.0.0-blis.2",
+              "every derived pin follows the release's go.mod")
+        check("CATALOG_REF" not in after and "REGISTRY_REF" not in after,
+              "the catalog and registry are embedded in the release: no pin of their own")
         check(set(moved) >= {"BLIS_REF", "BLIS_SHA"}, f"bump reports what moved: {moved}")
-        with open(setup) as f:
-            check('"v99.0.0: big"' in f.read(), "the release title is recorded beside the sha")
+        check(open(os.path.join(B.ROOT, "SETUP.md"), "rb").read() == setup_before,
+              "a bump leaves SETUP.md alone: it sources pins.env and holds no version")
         try:
-            B.bump(cur["BLIS_REF"], sha="e" * 40, go_mod=GO_MOD, pins_path=pins, setup_path=setup)
+            B.bump(cur["BLIS_REF"], sha="e" * 40, go_mod=GO_MOD, pins_path=pins)
             check(False, "bumping to a tag that is not newer must refuse")
         except SystemExit:
             check(True, "")
     finally:
         shutil.rmtree(tmp)
 
-
 def test_changed_ignores_comments():
     print("test_changed_ignores_comments")
-    a = {"BLIS_REF": "v1.0.0", "BLIS_SHA": "a", "CATALOG_REF": "0.4.0"}
+    a = {"BLIS_REF": "v1.0.0", "BLIS_SHA": "a", "SUBSTRATE_REF": "v0.12.0"}
     check(B.changed(a, dict(a)) == {}, "identical values -> nothing to regenerate")
-    check(B.changed(a, dict(a, CATALOG_REF="0.5.0")) == {"CATALOG_REF": ("0.4.0", "0.5.0")},
-          "a catalog-only move still regenerates: the catalog prices runs too")
+    check(B.changed(a, dict(a, SUBSTRATE_REF="v0.13.0")) == {"SUBSTRATE_REF": ("v0.12.0", "v0.13.0")},
+          "a substrate move regenerates: its embedded data prices the runs")
+    check(B.changed(a, dict(a, CATALOG_REF="0.5.0")) == {},
+          "a catalog ref is not a stack pin: the data is the release's embedded data")
     check(B.changed(a, dict(a, SOMETHING_ELSE="x")) == {},
           "a key outside the stack pins does not queue a campaign")
 
@@ -364,25 +360,25 @@ def test_smoke_verdicts():
         try:
             run_blis.run_one = fake(lambda c: _rec(c, 81.0 if c.get("max_num_seqs") else
                                                    91.0 if c.get("router_config") else 101.0))
-            r = B.smoke("r", "blis", "cat", "reg", root=root)
+            r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
             check(not r["failures"], f"numbers moved but knobs still act: no failure {r['failures']}")
             check(any(c.get("router_config") == os.path.join(root, "routing", "queue.yaml")
                       for c in seen), "a ledger's absolute router path is mapped to this checkout")
             run_blis.run_one = fake(lambda c: _rec(c, 100.0))
-            r = B.smoke("r", "blis", "cat", "reg", root=root)
+            r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
             check(any(f.startswith("SILENT") and "max_num_seqs" in f for f in r["failures"]),
                   f"a knob that moved before and is identical now is SILENT: {r['failures']}")
             run_blis.run_one = fake(lambda c: _rec(c, 99.0, error="overloaded: still_queued=3"))
-            r = B.smoke("r", "blis", "cat", "reg", root=root)
+            r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
             check(not r["failures"] and len(r["warnings"]) == 3,
                   f"a row that runs but tips into overload is a warning, not LOUD: {r}")
             check("**Warnings**" in B.smoke_markdown([r]), "the comment lists the warnings")
             run_blis.run_one = fake(lambda c: _rec(c, 0, error="unsupported config: x"))
-            r = B.smoke("r", "blis", "cat", "reg", root=root)
+            r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
             check(sum(f.startswith("LOUD") for f in r["failures"]) == 3,
                   "a config the new stack refuses is LOUD")
             run_blis.run_one = fake(lambda c: _rec(c, 0, rc=1, error="field x not found"))
-            r = B.smoke("r", "blis", "cat", "reg", root=root)
+            r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
             check(sum(f.startswith("LOUD") for f in r["failures"]) == 3,
                   "every row that ran before and fails now is LOUD")
             check("field x not found" in r["failures"][0], "the engine's own reason is quoted")
@@ -390,53 +386,6 @@ def test_smoke_verdicts():
             check("**FAIL**" in md and "fix these on this PR" in md, "the comment says what to do")
         finally:
             run_blis.run_one = real
-    finally:
-        shutil.rmtree(root)
-
-
-def test_drift():
-    print("test_drift")
-    import validate_experiment as V
-    root = tempfile.mkdtemp()
-    try:
-        def put(rel, text):
-            path = os.path.join(root, rel)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w") as f:
-                f.write(text)
-        eng = sorted(V.ENGINE_KNOBS)
-        put("blis-vllm/rules/engineconfig/fieldnames_test.go",
-            "want := map[string]string{\n" + "".join(f'\t"{n}": "x",\n' for n in eng) + "}\n")
-        put("blis-schemas/spec/deployment/deployment.go",
-            "type Parallelism struct {\n" + "".join(f'\tX int `yaml:"{n},omitempty"`\n'
-                                                   for n in sorted(V.PARALLEL_KNOBS)) + "}\n")
-        pack = "".join(f'\t{f}: set({", ".join(chr(34) + v + chr(34) for v in V.ENGINE_ENUMS[k])}),\n'
-                       for f, k in (("CUDAGraphModes", "cudagraph_mode"),
-                                    ("CacheDTypes", "cache_dtype")))
-        put(f"blis-vllm/rules/{V.RULES_PACK}/pack.go", pack)
-        check(B.drift(root) == [], f"tables that match the stack: no drift {B.drift(root)}")
-        put("blis-vllm/rules/engineconfig/fieldnames_test.go",
-            "want := map[string]string{\n" + "".join(f'\t"{n}": "x",\n' for n in eng[1:])
-            + '\t"brand_new_knob": "x",\n}\n')
-        d = B.drift(root)
-        check(any("brand_new_knob" in x for x in d), "a knob the stack added is reported")
-        check(any(eng[0] in x and "no longer defines" in x for x in d),
-              "a knob the stack removed is reported")
-        put(f"blis-vllm/rules/{V.RULES_PACK}/pack.go", pack.replace('"FULL"', '"FULL", "NEW_MODE"'))
-        check(any("NEW_MODE" in x for x in B.drift(root)), "a new enum value is reported")
-        put("blis-vllm/rules/v0_99/pack.go", pack)
-        check(any("v0_99" in x for x in B.drift(root)),
-              "a newer rules pack upstream means the reader is reading a stale vLLM")
-        check(len(B.drift(os.path.join(root, "nothing-here"))) >= 3,
-              "missing upstream files fail loudly, never read as 'no drift'")
-        nothing = os.path.join(root, "nothing-here")
-        check(B.drift(nothing, {"blis-latency-kernel": "v0.3.0"}) == [],
-              "a module the release does not require (v0.12.0 has no blis-vllm) is not drift")
-        req = B.drift(nothing, {"blis-vllm": "v0.32.0", "blis-schemas": "v0.8.0"})
-        check(len(req) >= 3, "a REQUIRED module whose files cannot be read still fails loudly")
-        only_schemas = B.drift(nothing, {"blis-schemas": "v0.5.0"})
-        check(len(only_schemas) == 1 and "parallel" in only_schemas[0],
-              f"only the required module's checks run: {only_schemas}")
     finally:
         shutil.rmtree(root)
 
@@ -460,8 +409,10 @@ def test_workflow_wiring():
           "a pushed branch with no PR (a failed create) is resumed, not skipped forever")
     check("github.event.before" in regen and "fetch-depth: 0" in regen,
           "pins are compared across the whole push: a rebase-merged pin PR ends in its fixes")
-    check("../blis-catalog" not in regen and "--catalog blis-catalog" in regen,
-          "regen clones the catalog inside the checkout, so ledger cmds stay relative")
+    check("../blis-substrate" not in regen and "--catalog blis-substrate/catalog" in regen
+          and "--data-override" not in regen,
+          "regen clones the substrate inside the checkout, so ledger cmds stay relative, and "
+          "prices with the simulator's embedded data")
     check('paths: ["pins.env"]' in regen and "branches: [main]" in regen,
           "regeneration triggers on a pins.env change reaching main")
     check("scripts/blis_pin.py changed" in regen,
@@ -476,6 +427,9 @@ def test_workflow_wiring():
     check("always()" in regen, "batch PRs open even when some report jobs failed")
     check("scripts/test_blis_pin.py" in open(os.path.join(wf, "checks.yml")).read(),
           "checks.yml must run these tests")
+    ck = open(os.path.join(wf, "checks.yml")).read()
+    check("FETCH_HEAD^{commit}" in ck and 'rev-parse FETCH_HEAD)' not in ck,
+          "an annotated tag fetches as the tag object: checks.yml compares the commit it points at")
     compat = open(os.path.join(wf, "pin-compat.yml")).read()
     check("pull_request:" in compat and "paths:" not in compat.split("\njobs:")[0].replace(
               "without a `paths:` filter", ""),
@@ -485,11 +439,14 @@ def test_workflow_wiring():
     gate = compat.split("\n  gate:", 1)[-1]
     check("if: always()" in gate and "needs: [changed, build, smoke]" in gate,
           "`gate` always reports, so it is the one check that can be marked required")
-    check("--go-mod upstream/go.mod" in compat and "--go-mod upstream/go.mod" in regen,
-          "drift is told which modules the release requires")
+    for name, text in (("pin-compat.yml", compat), ("regen-reports.yml", regen)):
+        check("validate_experiment.py experiments/ --blis upstream/blis" in text,
+              f"{name} validates every spec against the new binary's commands")
+        check("blis_pin.py drift" not in text and "blis-schemas" not in text,
+              f"{name} compares no copied settings table against sibling checkouts")
     check(sha not in compat and ". ./pins.env" in compat and "$BLIS_SHA" in compat,
           "pin-compat.yml reads the pin from pins.env and refuses a moved tag")
-    for step in ("blis_pin.py drift", "blis_pin.py smoke", "blis_pin.py modules"):
+    for step in ("blis_pin.py smoke",):
         check(step in compat, f"the gate runs `{step}`")
     check("fail-fast: false" in compat, "one report's smoke failure must not hide the others'")
     check("<!-- pin-compat -->" in compat and "comment \"$PR\" --edit-last" not in compat,
@@ -509,8 +466,6 @@ def test_workflow_wiring():
         check("gh label create auto-update --force" in text and f"gh label create {kind} --force" in text,
               f"{name} creates its labels first: `gh pr create --label` fails on a missing label")
         check("issues: write" in text, f"{name} needs issues: write to create labels")
-    check("blis_pin.py drift" in regen,
-          "regeneration re-checks drift, so a pin that skipped the gate cannot start a campaign")
     checks_yml = open(os.path.join(wf, "checks.yml")).read()
     check("workflow_dispatch:" in checks_yml.split("\njobs:")[0],
           "checks.yml is dispatchable: a GITHUB_TOKEN PR event starts no workflows")
@@ -518,7 +473,8 @@ def test_workflow_wiring():
           "a dispatched pin-compat still compares against the base and comments on the PR")
     for name, text in (("bump-blis-pin.yml", bump), ("regen-reports.yml", regen)):
         check("actions: write" in text and "gh workflow run checks.yml" in text
-              and "gh workflow run pin-compat.yml" in text and "-f base=main" in text,
+              and "gh workflow run pin-compat.yml" in text
+              and ("-f base=main" in text or '-f base="$BASE_BRANCH"' in text),
               f"{name} dispatches CI on its own PR, so the required gate reports without a PAT")
 
 
@@ -528,7 +484,7 @@ if __name__ == "__main__":
     test_sync_pins_reads_replace()
     test_smoke_skips_dropped_sweeps()
     test_rewrite_pins_keeps_comments()
-    test_rewrite_setup_moves_only_instructions()
+    test_setup_md_sources_the_pins()
     test_bump_end_to_end_on_copies()
     test_changed_ignores_comments()
     test_same_stack()
@@ -537,7 +493,6 @@ if __name__ == "__main__":
     test_summary_table()
     test_smoke_pairs()
     test_smoke_verdicts()
-    test_drift()
     test_workflow_wiring()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

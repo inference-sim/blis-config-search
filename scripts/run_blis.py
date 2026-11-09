@@ -18,9 +18,13 @@
 # must carry the 7 coefficient sets named below, incl cost-model-memory and cost-model-fabric.
 import argparse, hashlib, json, os, subprocess, sys, tempfile, time
 
-# cost-model-fabric is the cross-node/cross-rack interconnect term, and it is the set REGISTRY_REF
-# v0.3.0 adds (v0.2.0 has no such file, which is why the registry pin had to move with the BLIS
-# one). Every one of upstream's 40 Muse scenarios names it, so a scenario this script generates
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import blis_cli  # noqa: E402
+import settings  # noqa: E402
+from settings import ENGINE_KIND  # noqa: E402
+
+# cost-model-fabric is the cross-node/cross-rack interconnect term, and it is a coefficient set of
+# the pinned simulator release's embedded registry. Every one of upstream's 40 Muse scenarios names it, so a scenario this script generates
 # names it too.
 #
 # It is NOT a hard requirement -- a scenario omitting it runs rc=0 -- which is exactly why it is
@@ -34,115 +38,10 @@ COEFFICIENTS = ["cost-model-primitives", "cost-model-collectives", "cost-model-h
                 "cost-model-fabric"]
 
 # --- candidate-key classification (allowlist; anything else is rejected, never silently ignored) ---
-SCENARIO_PARALLEL = ("tp", "pp", "dp", "enable_expert_parallel")       # -> scenario Deployment.parallel
-# Engine fields the generated scenario may carry. The authority IS blis-vllm v0.32.0's
-# rules/engineconfig.Engine (51 top-level yaml tags), because the pinned BLIS (pins.env) makes a
-# pool's `engine:` an opaque block (deployment.EngineBlock) opened by the engine model that
-# the scenario's `engine_version` names. Before v0.14.0 the authority was blis-schemas' own
-# 31-field struct, and the 20 names below this comment's old cut-off were hard decode failures
-# ("field max_num_active_seqs not found in type deployment.Engine"); they decode now.
-#
-# The scenario still decodes STRICTLY, so a key outside those 51 fails every run of a sweep. The
-# seven that decode but are not priced (or are priced only in one shape) are refused by name in
-# UNSUPPORTED below, with the measured reason, rather than being omitted from this list.
-#
-# Valid VALUES for the enumerated ones come from blis-vllm's rules pack
-# (rules/v0_32/pack.go Pack(): CUDAGraphModes, CacheDTypes, All2AllBackends, MoEBackends,
-# SchedulerPolicies, MambaDTypes, DCPCommBackends) -- see scripts/validate_experiment.py, which
-# checks a swept value against them so a typo fails before the sweep rather than per run.
-SCENARIO_ENGINE = (
-    # --- the original eight (every committed report was produced with these) ---
-    "quantization", "cache_dtype", "block_size", "max_num_batched_tokens",
-    "max_num_seqs", "max_model_len", "cudagraph_mode", "gpu_memory_utilization",
-    # --- scheduling / admission ---
-    # `long_prefill_token_threshold` was previously listed as UNSUPPORTED ("not a kernel
-    # scenario field"). That is stale: it IS a field of the v0.5.0 Engine struct, and a run
-    # naming it completes and moves the number (measured: 1983.2 -> 1973.9 tok/s at 256 on
-    # chatbot tp8 c=8). It is the chunked-prefill cap a prefill-bound deployment is forced onto.
-    "long_prefill_token_threshold",
-    "scheduling_policy",                  # fcfs (default) | priority
-    "async_scheduling",                   # tri-state bool
-    # --- CUDA graph capture: the biggest engine lever measured on the pinned stack ---
-    # chatbot tp8 c=8: PIECEWISE 1983.2, FULL 2086.1 (+5%), FULL_AND_PIECEWISE 2085.1,
-    # FULL_DECODE_ONLY 2074.2; NONE costs 44% (605.9 vs 1083.2 at c=4).
-    "max_cudagraph_capture_size", "cudagraph_capture_sizes",
-    # --- attention / prefix reuse ---
-    "enable_prefix_caching",              # tri-state bool; inert on synthetic shapes (see blis-experiment knobs.md)
-    "disable_cascade_attn", "swa_bounded_replay",
-    # --- MoE dispatch. all2all_backend is a real lever, but ONLY with expert parallelism on
-    # (measured tp4/dp2/EP: 928.2 -> 619.5 with deepep_low_latency, a 33% drop; with EP off it
-    # is byte-identical), so only sweep it with EP on.
-    "all2all_backend", "moe_backend",
-    # --- collectives ---
-    "allreduce_backend", "disable_custom_all_reduce",
-    # --- context parallelism ---
-    "dcp_comm_backend", "dcp_q_replicate", "cp_kv_cache_interleave_size",
-    # --- recurrent (Mamba-family) state caches ---
-    "mamba_cache_dtype", "mamba_ssm_cache_dtype", "mamba_cache_mode",
-    # --- NESTED blocks (rendered as sub-blocks, like `speculative`) ---
-    # `eplb` is the interesting one: expert-load balancing adds redundant experts to even out a
-    # skewed routing distribution, which is an MoE-only lever with a real memory cost.
-    # `dbo` is dual-batch overlap; `engram_config` places Engram's host-side tables.
-    "eplb", "dbo", "engram_config",
-    # --- opened up by the v0.12.0 -> v0.14.0 pin bump ---
-    # These were hard decode failures under blis-schemas v0.5.0's fixed Engine struct and were
-    # listed in UNSUPPORTED for that reason. v0.14.0 reads `engine:` as an opaque block against
-    # blis-vllm v0.32.0's engineconfig.Engine, which carries all 21 of them.
-    #
-    # Only the three below are PRICED, and that was established by running each against the
-    # pinned binary with two contrasting values, not by reading the struct. `max_num_active_seqs`
-    # is a large lever where it binds (deepseek-v4-pro/h200 tp2 dp4 chatbot: 2405.3 tok/s at
-    # c=256 falls to 808.4 at 8 active seqs, 1684.0 at 32) and inert at c=8, which is the usual
-    # admission-cap shape. The other eleven decode and run but are byte-identical on every
-    # scenario measured -- see ENGINE_DECODED_BUT_INERT below for what that means for a sweep.
-    "max_num_active_seqs", "max_num_scheduled_tokens", "frontend",
-)
-# Carried by the pinned engine model, accepted at run time, and measured BYTE-IDENTICAL: sweeping
-# one burns runs to produce a column of equal numbers that reads as "this knob does nothing".
-#
-# Measured on deepseek-v4-pro/h200 (tp2 dp4, chatbot, c=8 and c=256), qwen3-14b/h100 (tp4) and
-# deepseek-v4.1-flash/h200 (tp2 dp4), two contrasting values each, against a `max_num_seqs`
-# control that moved as expected on every one. The kernel cost model has no term for them; the
-# engine carries them as launch provenance.
-#
-# `frontend` is deliberately NOT here: it is inert on v4-pro and qwen3-14b but DOES move
-# deepseek-v4.1-flash (4656.6 -> 4563.5 python->rust), so it is a real if narrow host-overhead
-# lever and belongs in SCENARIO_ENGINE above.
-#
-# These are refused rather than silently carried, for the reason experiments/README.md gives under
-# "Not every accepted knob is a lever": the sweep that teaches nothing is the expensive failure,
-# because it looks like a result. A spec that genuinely wants one recorded can state it as a
-# fixed engine default rather than a swept knob.
-ENGINE_DECODED_BUT_INERT = {
-    "watermark": "the KV-watermark fraction",
-    "stream_interval": "how often decoded tokens are flushed to the client",
-    "kv_cache_memory_bytes": "an explicit KV pool size (gpu_memory_utilization is the live knob)",
-    "max_loras": "the LoRA slot count",
-    "custom_ops": "the custom-op enable/disable list",
-    "use_trtllm_attention": "the TRT-LLM attention path",
-    "mla_prefill_backend": "the MLA prefill kernel choice",
-    "indexer_kv_dtype": "the DSA indexer's KV dtype",
-    "linear_backend": "the linear-layer kernel choice",
-    "long_prefill_token_threshold_adaptive": "adaptive chunked-prefill sizing",
-    "decoder_replay_cudagraph_capture_sizes": "the decode-replay capture plan",
-}
-# Nested engine blocks and the fields each accepts, from the pinned engine model's structs
-# (blis-vllm v0.32.0 rules/engineconfig). A spec states these as a mapping, e.g.
-# `eplb: {enable_eplb: [true], num_redundant_experts: [0, 32]}`; the runner renders them as
-# sub-blocks and the validator checks their inner field names.
-#
-# `speculative` gained five fields at the v0.14.0 pin (it was method + num_spec_tokens under
-# blis-schemas v0.5.0). Only method and num_spec_tokens select an acceptance profile and so move
-# a number; the rest are recorded provenance -- validate_experiment.SPECULATIVE_RECORDED_ONLY
-# refuses a sweep over them, with that reason.
-NESTED_ENGINE_FIELDS = {
-    "eplb": ("enable_eplb", "num_redundant_experts", "window_size", "step_interval"),
-    "dbo": ("enable_dbo", "dbo_decode_token_threshold", "dbo_prefill_token_threshold"),
-    "engram_config": ("cpu_offload", "dp_shared_memory", "use_thp"),
-    "speculative": ("method", "num_spec_tokens", "draft_model", "kv_cache_dtype",
-                    "draft_sample_method", "rejection_sample_method",
-                    "enable_adaptive_verification"),
-}
+# A candidate's keys are classified by the names the simulator publishes (settings.Vocabulary):
+# a pool-layout key goes to the scenario's `parallel:` block, an engine setting to its `engine:`
+# block. This module keeps no list of settings (CFG-3). An unknown key is REJECTED (recorded as an
+# error row), never silently dropped.
 # Speculative decoding IS priced by the kernel (since BLIS v0.12.0 + registry v0.2.0; v0.14.0 added
 # only the five extra fields above). It is a nested `speculative: {method, num_spec_tokens}` block
 # on the pool's engine (the pinned engine model's engineconfig.Engine.Speculative), so the two
@@ -170,26 +69,29 @@ SCENARIO_ROUTER = ("router_config",)
 PARALLEL_DEFAULTS = {"tp": 1, "pp": 1, "dp": 1, "enable_expert_parallel": False}
 
 
-# inference-sim cmd/engine_driver_build.go coreEngineVersions at BLIS_REF: any other version runs
-# on the compat engine at rc=0. test_build.py checks this against the pinned source.
-CORE_ENGINE_VERSIONS = frozenset({"0.32.0"})
+# The GPUs in a node are the catalog entry's where it fixes them (GB200 NVL72: 4 per tray), else the
+# specification's (`scenario.cluster.gpus_per_node`). No constant: a node of 8 is a fact about an HGX
+# server, not about every chip (blis-config-search #96).
 
 
-def pinned_engine_version(pins_path=None):
-    """The vLLM release the pinned blis-vllm models: pins.env's VLLM_REF, e.g. v0.32.0-blis.1 -> 0.32.0."""
-    import build_catalog
-    pins_path = pins_path or build_catalog.PINS
-    ref = build_catalog.read_pins(pins_path).get("VLLM_REF", "")
-    version, _, suffix = ref.lstrip("v").partition("-")
-    if not version or (suffix and not suffix.startswith("blis.")):
-        raise SystemExit(f"{pins_path}: VLLM_REF={ref!r} names no vLLM release to model")
-    if version not in CORE_ENGINE_VERSIONS:
-        raise SystemExit(f"{pins_path}: VLLM_REF={ref!r} models {version}, which BLIS would price "
-                         f"on its compat engine (core: {', '.join(sorted(CORE_ENGINE_VERSIONS))})")
-    return version
+def cluster_node_size(blis, catalog, hardware, stated=None):
+    """(gpus_per_node, write_it): the node size of `hardware`, and whether the scenario states it.
+
+    A chip whose catalog entry fixes the size gets that size, and the scenario states nothing, so
+    the substrate's one resolver fills it (with the rack size) and a restated different value is
+    refused there. Any other chip needs the specification to state it.
+    """
+    fixed = blis_cli.chip_packaging(blis, hardware, catalog)["gpus_per_node"]
+    if fixed:
+        if stated is not None and stated != fixed:
+            raise ConfigError(f"scenario.cluster.gpus_per_node is {stated}, but the catalog fixes {hardware} "
+                              f"at {fixed}: omit it")
+        return int(fixed), False
+    if not stated:
+        raise ConfigError(f"the catalog fixes no node size for {hardware}: state scenario.cluster.gpus_per_node")
+    return int(stated), True
 
 
-GPUS_PER_NODE = 8   # single-node H100; a per-instance footprint beyond this spans nodes (needs a fabric)
 # Cross-node cost resolves from the fabric (a catalog networks/ entry), required once nodes > 1.
 DEFAULT_FABRIC = "ib-400g"   # InfiniBand NDR 400 Gb/s; the standard H100 multi-node interconnect
 # NON-PRECISION engine defaults only. quantization/cache_dtype are intentionally NOT defaulted: an
@@ -261,8 +163,6 @@ ROUTING_MOVED = (
 PD_ROLES = ("prefill", "decode")
 # Per-role layout/engine knobs, as `<role>_<knob>` candidate keys (prefill_tp, decode_block_size).
 # Flat rather than nested so a candidate dict stays one level deep, like every other config.
-PD_PARALLEL = tuple(f"{r}_{k}" for r in PD_ROLES for k in SCENARIO_PARALLEL)
-PD_ENGINE = tuple(f"{r}_{k}" for r in PD_ROLES for k in SCENARIO_ENGINE)
 # Per-role DRAFTING keys exist only to be refused with the real reason. BLIS applies one
 # speculative configuration to the whole run ("one speculative configuration applies to the run,
 # so the pools must agree"), so `prefill_num_speculative_tokens` is not a narrower knob than
@@ -287,7 +187,7 @@ DEFAULT_PD_CONNECTOR = "NixlConnector"
 PD_MUST_MATCH = ("dp", "block_size", "cache_dtype", "mamba_cache_dtype",
                  "mamba_ssm_cache_dtype", "mamba_cache_mode")
 
-# Deliberately unsupported in this runner -> fail loudly with the reason (do not silently drop).
+# Candidate keys this runner refuses, with the reason (do not silently drop).
 UNSUPPORTED = {
     "routing_policy": ROUTING_MOVED,
     "routing_scorers": ROUTING_MOVED,
@@ -300,52 +200,6 @@ UNSUPPORTED = {
     "encode_instances":
         "--encode-instances is not supported: there is no encode role in a blis-schemas "
         "deployment",
-    # Engine fields the pinned stack DECODES but its engine model does not price, and ones it
-    # prices only in a particular shape. Under BLIS v0.12.0 this covered 21 names and was about
-    # decoding (blis-schemas v0.5.0's Engine was a fixed 31-field struct); v0.14.0 makes `engine:`
-    # an opaque block opened by blis-vllm v0.32.0's engineconfig.Engine, so all 21 decode and 3
-    # are swept normally. These seven are refused because a sweep over them reports noise; the
-    # other eleven are refused as ENGINE_DECODED_BUT_INERT, for measuring identical.
-    #
-    # Kept in sync with validate_experiment.ENGINE_NOT_WIRED by test_experiment.py.
-    "prefix_match_unit":
-        "prefix_match_unit decodes under the pinned engine model but is not priced by it: prefix "
-        "matching is modelled at block granularity, so sweeping the unit reports noise "
-        "(upstream blis-vllm#7)",
-    "max_cpu_loras":
-        "max_cpu_loras decodes under the pinned engine model but is not priced by it: there is no "
-        "CPU-side LoRA swap term in the cost model (upstream blis-vllm#5)",
-    "prefix_cache_retention_interval":
-        "prefix_cache_retention_interval decodes under the pinned engine model but is not priced "
-        "by it: the prefix cache is modelled without eviction over time, so retention has no "
-        "effect on any run",
-    # These three are refused OUTRIGHT, not gated on their condition. The condition is stated so
-    # the reason is auditable, but do not read it as "satisfy it and the sweep runs" -- the runner
-    # refuses every shape. Gating on dp / model family / env key would be a real improvement and
-    # is deliberately not in this change.
-    "prefill_schedule_interval":
-        "prefill_schedule_interval is refused: it is priced only when the pool has dp > 1 (with a "
-        "single data-parallel rank there is no cross-rank prefill schedule to interval), and the "
-        "runner does not gate on dp -- it refuses the knob in every shape",
-    "disable_hybrid_kv_cache_manager":
-        "disable_hybrid_kv_cache_manager is refused: the binary rejects it on a sliding-window "
-        "MLA model (the DeepSeek-V4 family), where the hybrid manager is what models the sliding "
-        "window, and the runner refuses it on every model rather than gating on the family",
-    "env":
-        "env is refused: the pinned engine model reads exactly one variable, "
-        "VLLM_USE_V2_MODEL_RUNNER, and any other key is carried but never read, so a sweep over "
-        "it reports noise -- the runner refuses the block rather than gating on the key",
-    "kv_events":
-        "kv_events is a struct under the pinned engine model (publisher/topic/buffer), not a "
-        "bool, and none of its inner fields is sweepable at this pin either (no spec can express "
-        "them) -- so it is not sweepable at all here, in any form",
-    # Decoded and accepted, but measured byte-identical on every scenario tried.
-    **{k: (f"{k} ({what}) is carried by the pinned engine model but the kernel cost model has no "
-           f"term for it: measured byte-identical on deepseek-v4-pro/h200, qwen3-14b/h100 and "
-           f"deepseek-v4.1-flash/h200 with two contrasting values each, so a sweep over it "
-           f"returns a column of equal numbers. State it as a fixed engine default if the run "
-           f"should record it.")
-       for k, what in ENGINE_DECODED_BUT_INERT.items()},
 }
 
 
@@ -353,8 +207,11 @@ class ConfigError(ValueError):
     pass
 
 
-def classify_config(config):
+def classify_config(config, vocab, node_size=None):
     """Split a candidate into (parallel, engine, cli, router); raise ConfigError on unknown keys.
+
+    `vocab` is the settings.Vocabulary of the simulator that will run the candidate: its pool-
+    layout keys go to `parallel`, its engine settings to `engine`.
 
     The speculative keys are folded into engine["speculative"], the nested block the schema wants,
     and the acceptance selectors go to the CLI.
@@ -369,9 +226,12 @@ def classify_config(config):
     pd_parallel = {r: {} for r in PD_ROLES}
     pd_engine = {r: {} for r in PD_ROLES}
     for k, v in config.items():
-        if k in SCENARIO_PARALLEL:
+        role, _, knob = k.partition("_")
+        if k in UNSUPPORTED:
+            raise ConfigError(f"{k!r}: {UNSUPPORTED[k]}")
+        elif k in vocab.parallel:
             parallel[k] = v
-        elif k in SCENARIO_ENGINE:
+        elif k in vocab.engine_names():
             engine[k] = v
         elif k in SCENARIO_SPECULATIVE:
             spec[k] = v
@@ -381,23 +241,17 @@ def classify_config(config):
             router[k] = v
         elif k in PD_CLI or k in PD_DEPLOYMENT:
             cli[k] = v
-        elif k in PD_PARALLEL:
-            role, knob = k.split("_", 1)
-            pd_parallel[role][knob] = v
-        elif k in PD_ENGINE or k in PD_SPECULATIVE:
-            role, knob = k.split("_", 1)
-            pd_engine[role][knob] = v
         elif k in CLI_FLAGS:
             cli[k] = v
-        elif k in UNSUPPORTED:
-            raise ConfigError(f"{k!r}: {UNSUPPORTED[k]}")
+        elif role in PD_ROLES and knob in vocab.parallel:
+            pd_parallel[role][knob] = v
+        elif role in PD_ROLES and (knob in vocab.engine_names() or k in PD_SPECULATIVE):
+            pd_engine[role][knob] = v
         else:
-            supported = (sorted(SCENARIO_PARALLEL) + sorted(SCENARIO_ENGINE)
-                         + sorted(SCENARIO_SPECULATIVE) + sorted(SPECULATIVE_CLI)
-                         + sorted(SCENARIO_ROUTER) + sorted(CLI_FLAGS)
-                         + sorted(PD_CLI) + sorted(PD_DEPLOYMENT) + sorted(PD_PARALLEL)
-                         + sorted(PD_ENGINE))
-            raise ConfigError(f"{k!r}: unknown key; supported = {supported}")
+            raise ConfigError(
+                f"{k!r}: unknown key: not a pool-layout key or engine setting in {vocab.source}, "
+                f"and not one of this runner's own keys "
+                f"({', '.join(sorted([*SCENARIO_SPECULATIVE, *SPECULATIVE_CLI, *SCENARIO_ROUTER, *CLI_FLAGS, *PD_CLI, *PD_DEPLOYMENT]))})")
     if spec:
         k = int(spec.get("num_speculative_tokens") or 0)
         if k > 0:
@@ -440,12 +294,12 @@ def classify_config(config):
     # 332.3 GiB per rank at tp=8 on a 141 GiB device and only fits from tp=32 (4 nodes) up.
     # What is still refused is a footprint that STRADDLES a node boundary: pools are allocated in
     # whole nodes, so the remainder would sit idle and the cross-node term would be mispriced.
-    if fp > GPUS_PER_NODE and fp % GPUS_PER_NODE:
+    if node_size and fp > node_size and fp % node_size:
         raise ConfigError(
-            f"per-instance footprint tp*pp*dp={fp} spans {fp / GPUS_PER_NODE:.2g} nodes: a "
-            f"multi-node instance must fill whole {GPUS_PER_NODE}-GPU nodes (use a footprint that "
-            f"is a multiple of {GPUS_PER_NODE}, or scale out with num_instances instead)")
-    pd = resolve_pd(cli, pd_parallel, pd_engine, parallel, engine)
+            f"per-instance footprint tp*pp*dp={fp} spans {fp / node_size:.2g} nodes: a "
+            f"multi-node instance must fill whole {node_size}-GPU nodes (use a footprint that "
+            f"is a multiple of {node_size}, or scale out with num_instances instead)")
+    pd = resolve_pd(cli, pd_parallel, pd_engine, parallel, engine, node_size)
     if pd:
         parallel = {**parallel, "pd": pd}
     return parallel, engine, cli, router
@@ -464,7 +318,7 @@ def _pd_requested(cli, pd_parallel, pd_engine):
                 or any(pd_parallel.values()) or any(pd_engine.values()))
 
 
-def resolve_pd(cli, pd_parallel, pd_engine, base_parallel, base_engine):
+def resolve_pd(cli, pd_parallel, pd_engine, base_parallel, base_engine, node_size=None):
     """Resolve a disaggregated candidate into {role: {parallel, engine, instances}}, or {}.
 
     Each role's layout is the shared `parallel`/`engine` overridden by that role's own
@@ -513,10 +367,10 @@ def resolve_pd(cli, pd_parallel, pd_engine, base_parallel, base_engine):
         # pp>1 is priced from kernel v0.5.0 on each side of a disaggregated run too; see the
         # colocated site in classify_config for what moved and what still refuses.
         fp = footprint_gpus(par)
-        if fp > GPUS_PER_NODE and fp % GPUS_PER_NODE:
+        if node_size and fp > node_size and fp % node_size:
             raise ConfigError(
                 f"{role} pool footprint tp*pp*dp={fp} straddles a node boundary: a multi-node "
-                f"pool must fill whole {GPUS_PER_NODE}-GPU nodes")
+                f"pool must fill whole {node_size}-GPU nodes")
         out[role] = {"parallel": par, "engine": eng, "instances": instances,
                      "footprint_gpus_per_instance": fp}
     # The pools must agree on everything a handoff depends on. Each of these is a hard refusal
@@ -1042,18 +896,27 @@ _ITL_FROM_STEP_INTERVAL = {"itl_mean_ms": "step_interval_mean_ms", "itl_p90_ms":
                            "itl_p95_ms": "step_interval_p95_ms", "itl_p99_ms": "step_interval_p99_ms"}
 
 # Counters that moved out of the metrics dict into the document's own `requests` block, under
-# shorter names. _completion_issue reads all five, so without this remapping an incomplete or
+# the Result's names (generated, queued_at_horizon, in_flight_at_horizon). _completion_issue reads all five, so without this remapping an incomplete or
 # overloaded run is ranked as a clean capacity point.
-_REQUEST_COUNTS = {"injected_requests": "injected", "completed_requests": "completed",
-                   "still_queued": "still_queued", "still_running": "still_running",
-                   "dropped_unservable": "dropped_unservable", "timed_out_requests": "timed_out",
-                   "length_capped_requests": "length_capped"}
+_REQUEST_COUNTS = {"injected_requests": "generated", "completed_requests": "completed",
+                   "still_queued": "queued_at_horizon", "still_running": "in_flight_at_horizon",
+                   "timed_out_requests": "timed_out", "length_capped_requests": "length_capped"}
 
 # Counters that stayed on the cluster aggregate but outside whole_run.
 _CLUSTER_KEYS = {**{k: k for k in ("total_input_tokens", "total_output_tokens",
                                     "scheduling_delay_p99_ms", "kv_allocation_failures")},
                  "preemption_count": "preemptions",
                  "vllm_estimated_duration_s": "simulated_duration_s"}
+
+
+def _engine_report(doc):
+    """The engine's own report in a Result: `reports.engine` (cluster aggregate, instances).
+
+    The top-level `engine` of a schema 2 Result names the engine ({kind, version}) and nothing
+    else; the aggregate and the per-instance rows moved under `reports`, which carries each
+    component's report as that component made it.
+    """
+    return ((doc.get("reports") or {}).get("engine")) or {}
 
 
 def _flatten_result(doc):
@@ -1065,7 +928,7 @@ def _flatten_result(doc):
     run resolves normally off the per-instance rows. That asymmetry is why it reads as a finding
     rather than a crash: a sweep reports 0 servable, or judges only its multi-instance arms.
     """
-    cluster = ((doc.get("engine") or {}).get("cluster")) or {}
+    cluster = _engine_report(doc).get("cluster") or {}
     whole = cluster.get("whole_run") or {}
     if not whole:
         return {}   # no whole-run aggregate: fail as "no cluster metrics parsed", not later
@@ -1077,7 +940,66 @@ def _flatten_result(doc):
         for legacy, new in mapping.items():
             if new in src:
                 out[legacy] = src[new]
+    # `dropped` is a map by reason; the overload check wants the number dropped as unservable.
+    dropped = (doc.get("requests") or {}).get("dropped") or {}
+    out["dropped_unservable"] = sum(v for v in dropped.values() if isinstance(v, (int, float)))
     return out
+
+
+# The simulator reads these two variables as whole-data replacement paths (a flag wins over them).
+# The scripts name the blis-substrate checkout they read FILES from SUBSTRATE_CATALOG and
+# SUBSTRATE_REGISTRY, so they never collide; and a default run still removes these two from the
+# simulator's environment, so a caller's export cannot make it price with a path and not with its
+# embedded data (CFG-1).
+SIM_DATA_ENV = ("BLIS_CATALOG", "BLIS_REGISTRY")
+
+
+def sim_env(data_override):
+    """The environment the simulator runs in: the caller's, without SIM_DATA_ENV unless the run
+    overrides the data on purpose."""
+    env = dict(os.environ)
+    if not data_override:
+        for k in SIM_DATA_ENV:
+            env.pop(k, None)
+    return env
+
+
+def data_of(doc):
+    """What data a Result says it was priced with: "embedded" when the catalog and the registry
+    both come from the simulator build's embedded data, else "override". None when the document
+    records no data block. Whether the build is a tagged release (`released_data`) is a separate
+    fact, read by `released_build`: a development binary prices with embedded data too."""
+    d = (doc or {}).get("data")
+    if not isinstance(d, dict):
+        return None
+    cat, reg = d.get("catalog") or {}, d.get("registry") or {}
+    if cat.get("source") == "embedded" and reg.get("source") == "embedded":
+        return "embedded"
+    return "override"
+
+
+def released_build(doc):
+    """True when the Result says the build is a tagged release run on its own embedded data
+    (`data.released_data`); None when it records no data block."""
+    d = (doc or {}).get("data")
+    return d.get("released_data") if isinstance(d, dict) else None
+
+
+def result_invalid(blis, stdout):
+    """Why `blis schema validate result` refuses the Result on stdout, or None (SUB-19).
+
+    The document is written to a temporary file because the command validates a file.
+    """
+    fd, tmp = tempfile.mkstemp(prefix="blis-result-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(stdout)
+        blis_cli.validate_document(blis, "result", tmp)
+        return None
+    except blis_cli.DocumentInvalid as e:
+        return str(e)
+    finally:
+        os.unlink(tmp)
 
 
 def parse_metrics(stdout):
@@ -1094,7 +1016,7 @@ def parse_metrics(stdout):
 def parse_all_instances(stdout):
     doc = _result_doc(stdout)
     if doc is not None:
-        inst = (doc.get("engine") or {}).get("instances") or {}
+        inst = _engine_report(doc).get("instances") or {}
         # Each value is a verbatim MetricsOutput, already carrying its own instance_id.
         return [v for _, v in sorted(inst.items()) if isinstance(v, dict)]
     return [o for o in _all_metrics(stdout) if o.get("instance_id") not in (None, "cluster")]
@@ -1112,7 +1034,7 @@ def _completion_issue(m):
     return None
 
 
-def pool_nodes(parallel, num_instances=1):
+def pool_nodes(parallel, num_instances=1, node_size=8):
     """Nodes the colocated pool must hold for `num_instances` copies of this instance shape.
 
     BLIS v0.10.0 validates `--num-instances` against the pool's rank capacity: a pool of
@@ -1121,10 +1043,11 @@ def pool_nodes(parallel, num_instances=1):
     the pool from ONE instance's footprint therefore capped every search at a single node's
     worth of instances; size it for the whole fleet instead."""
     total = footprint_gpus(parallel) * max(1, num_instances)
-    return max(1, -(-total // GPUS_PER_NODE))           # ceil(total / 8)
+    return max(1, -(-total // node_size))           # ceil(total / the node size)
 
 
-def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router):
+def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router,
+                      node_size, states_node_size):
     """Render a DISAGGREGATED Scenario+Deployment: one pool per role plus `pd_transfer`.
 
     Pools never share a node (blis-vllm places each role on its own nodes and asserts they do
@@ -1134,7 +1057,7 @@ def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, 
     pools, total_nodes = [], 0
     for role in PD_ROLES:
         spec = pd[role]
-        nodes = pool_nodes(spec["parallel"], spec["instances"])
+        nodes = pool_nodes(spec["parallel"], spec["instances"], node_size)
         total_nodes += nodes
         pools.append(
             f"  - role: {role}\n"
@@ -1145,16 +1068,18 @@ def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, 
     router_block = ""
     if rc:
         router_block = f"\nrouter:\n  endpoint_picker_config: {json.dumps(os.path.abspath(rc))}"
+    node_size_line = f"\n  gpus_per_node: {node_size}" if states_node_size else ""
     return f"""kind: Scenario
 name: {name}
-engine_version: "{engine_version}"
+engine:
+  kind: {ENGINE_KIND}
+  version: "{engine_version}"
 model: {model}
 coefficients: [{", ".join(COEFFICIENTS)}]
 cluster:
   hardware: {hardware}
   fabric: {fabric}
-  nodes: {total_nodes}
-  gpus_per_node: {GPUS_PER_NODE}
+  nodes: {total_nodes}{node_size_line}
 ---
 kind: Deployment
 name: {name}
@@ -1166,7 +1091,7 @@ pd_transfer:
 
 
 def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances=1,
-                  fabric=DEFAULT_FABRIC, router=None):
+                  fabric=DEFAULT_FABRIC, router=None, node_size=8, states_node_size=True):
     """Render a two-doc Scenario+Deployment YAML (no external yaml dep). Omitted engine keys (e.g.
     quantization when unset) let the checkpoint/engine govern.
 
@@ -1192,8 +1117,10 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
         return "\n".join(out)
     pd = (parallel or {}).get("pd")
     if pd:
-        return _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router)
-    nodes = pool_nodes(parallel, num_instances)
+        return _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router,
+                                 node_size, states_node_size)
+    nodes = pool_nodes(parallel, num_instances, node_size)
+    node_size_line = f"\n  gpus_per_node: {node_size}" if states_node_size else ""
     # A multi-node cluster MUST name a fabric: BLIS resolves cross-node cost from the fabric,
     # not the chip, and refuses the scenario otherwise ("scenario.cluster.fabric: required for
     # a N-node cluster"). Single-node clusters omit it (no cross-node traffic to price).
@@ -1207,13 +1134,14 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
         router_block = f"\nrouter:\n  endpoint_picker_config: {json.dumps(os.path.abspath(rc))}"
     return f"""kind: Scenario
 name: {name}
-engine_version: "{engine_version}"
+engine:
+  kind: {ENGINE_KIND}
+  version: "{engine_version}"
 model: {model}
 coefficients: [{", ".join(COEFFICIENTS)}]
 cluster:
   hardware: {hardware}{fabric_line}
-  nodes: {nodes}
-  gpus_per_node: 8
+  nodes: {nodes}{node_size_line}
 ---
 kind: Deployment
 name: {name}
@@ -1228,32 +1156,42 @@ pools:
 
 
 def scenario_name(model, hardware, engine_version, parallel, engine, num_instances=1,
-                  fabric=DEFAULT_FABRIC, router=None):
+                  fabric=DEFAULT_FABRIC, router=None, node_size=8, states_node_size=True):
     """The hashed file name (no .yaml) of a deployment's scenario; the router is part of the key
     because two routing arms differ ONLY in their `router:` block."""
-    key = json.dumps([model, hardware, engine_version, parallel, engine, num_instances, fabric,
-                      router or {}], sort_keys=True)
+    parts = [model, hardware, engine_version, parallel, engine, num_instances, fabric, router or {}]
+    # Part of the key only when it differs from what every earlier scenario used (8 GPUs a node,
+    # stated), so a committed report on an HGX server keeps the file name it was recorded under.
+    if (node_size, states_node_size) != (8, True):
+        parts += [node_size, states_node_size]
+    key = json.dumps(parts, sort_keys=True)
     return f"{model}-{hardware}-{hashlib.sha1(key.encode()).hexdigest()[:10]}"
 
 
-def write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine, num_instances=1,
-                   fabric=DEFAULT_FABRIC, router=None):
+def write_scenario(blis, scenarios_dir, model, hardware, engine_version, parallel, engine,
+                   num_instances=1, fabric=DEFAULT_FABRIC, router=None, node_size=8,
+                   states_node_size=True):
     """Write a scenario ATOMICALLY (temp + os.replace) so concurrent pool workers never read a
     half-written file for the same hashed deployment; return its file name.
+
+    The file is validated with `blis schema validate scenario` before it is published (SUB-19),
+    so a scenario the Go validators refuse is never written; blis_cli.DocumentInvalid says why.
 
     `num_instances` participates in the hash because it sets the pool's node count — two runs
     that differ only in instance count need DIFFERENT scenario files, or the second reuses a
     pool too small for it and BLIS refuses the run."""
-    name = scenario_name(model, hardware, engine_version, parallel, engine, num_instances, fabric, router)
+    name = scenario_name(model, hardware, engine_version, parallel, engine, num_instances, fabric, router,
+                         node_size, states_node_size)
     os.makedirs(scenarios_dir, exist_ok=True)
     path = os.path.join(scenarios_dir, name + ".yaml")
     if not os.path.exists(path):
         body = scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances,
-                             fabric, router)
+                             fabric, router, node_size, states_node_size)
         fd, tmp = tempfile.mkstemp(dir=scenarios_dir, prefix=".tmp-", suffix=".yaml")
         try:
             with os.fdopen(fd, "w") as f:
                 f.write(body)
+            blis_cli.validate_document(blis, "scenario", tmp)
             os.replace(tmp, path)           # atomic publish; a concurrent writer's replace is idempotent
         finally:
             if os.path.exists(tmp):
@@ -1284,6 +1222,18 @@ def _cli_flag(key):
 INF_NEEDS_YAML = ("inf", ".inf")
 
 
+def _data_args(catalog, registry):
+    """The simulator's data-override flags. A committed report uses the pinned release's embedded
+    catalog and registry (CFG-1), so the callers hand this None for both and no flag is passed;
+    only an exploratory run (--data-override) names directories."""
+    out = []
+    if catalog:
+        out += ["--catalog", catalog]
+    if registry:
+        out += ["--registry", registry]
+    return out
+
+
 def build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed, defaults, cli,
                      replay):
     """The `blis replay --agentic-scenario` command for a trace-REPLAY workload.
@@ -1298,15 +1248,14 @@ def build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed
     drives a whole agentic trajectory whose sub-requests fan out from it.
     """
     cmd = [blis, "replay",
-           "--scenario", scenario_name, "--scenarios", scenarios_dir, "--registry", registry,
+           "--scenario", scenario_name, "--scenarios", scenarios_dir,
            "--agentic-scenario", replay["scenario"],
            "--corpus", replay["corpus"],
            # Required: the harness reads the dataset's default branch rather than a pinned
            # revision, so only the file's digest ties a run to its bytes. BLIS refuses a replay
            # that states no sha256, and refuses a corpus whose digest does not match.
            "--corpus-sha256", replay["corpus_sha256"]]
-    if catalog:
-        cmd += ["--catalog", catalog]
+    cmd += _data_args(catalog, registry)
     if resolve_defaults(blis, defaults):
         cmd += ["--defaults-filepath", resolve_defaults(blis, defaults)]
     # max_model_len: the deployment's own resolved window. Every trace whose peak prompt + output
@@ -1335,9 +1284,8 @@ def build_cmd(blis, catalog, registry, scenarios_dir, scenario_name, workload, n
     # into the generated scenario), not a CLI flag: the old `--latency-model blis-latency-kernel`
     # flag was removed in v0.10.0 and is rejected ("unknown flag"), so it must not be passed.
     cmd = [blis, "run",
-           "--scenario", scenario_name, "--scenarios", scenarios_dir, "--registry", registry]
-    if catalog:
-        cmd += ["--catalog", catalog]
+           "--scenario", scenario_name, "--scenarios", scenarios_dir]
+    cmd += _data_args(catalog, registry)
     if resolve_defaults(blis, defaults):
         cmd += ["--defaults-filepath", resolve_defaults(blis, defaults)]
     if workload:
@@ -1418,7 +1366,8 @@ def _failure_line(stderr):
 
 def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_version,
             workload, num_requests, seed, horizon, config, phase="probe", timeout=120, defaults=None,
-            replay=None, fabric=DEFAULT_FABRIC):
+            replay=None, fabric=DEFAULT_FABRIC, gpus_per_node=None, fields=None,
+            data_override=False):
     """Run one kernel-priced BLIS config and return a record dict. No runs.jsonl I/O (caller writes).
 
     `replay` selects the trace-REPLAY path (`blis replay --agentic-scenario`) instead of
@@ -1428,13 +1377,26 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     `fabric` is the cluster's inter-node interconnect (a catalog networks/ class); it prices
     cross-node traffic for a multi-node run and is ignored on a single node. A trailing default
     (ib-400g) so every existing caller is byte-identical.
+
+    `gpus_per_node` is what the specification states for a chip whose catalog entry fixes no node
+    size; a chip that does fix one (GB200 NVL72) takes the catalog's and the scenario states none.
+
+    `catalog` and `registry` are the directories the runner reads files from (a blis-substrate
+    checkout at the pinned release). The simulator is told about them only when `data_override` is
+    true: otherwise it prices with its embedded data (CFG-1) and the record says so.
+
+    `fields` is the file holding the engine's field list (--fields), or None to ask the binary.
     """
     rec = _record_shell(config, phase)
+    rec["data"] = "override" if data_override else "embedded"
+    sim_catalog = catalog if data_override else None
+    sim_registry = registry if data_override else None
     # Which cost model priced THIS row (see row_stack): makes provenance_split's stack branch able
     # to fire on real data instead of guarding an unreachable path.
-    rec["pinned_stack"] = row_stack(blis, catalog, registry)
+    rec["pinned_stack"] = row_stack(blis, sim_catalog, sim_registry)
     try:
-        parallel, engine, cli, router = classify_config(config)
+        node_size, states_node_size = cluster_node_size(blis, sim_catalog, hardware, gpus_per_node)
+        parallel, engine, cli, router = classify_config(config, settings.vocabulary(blis, fields), node_size)
         # Resolve the preset's token shape so a closed-loop run actually prices the traffic it
         # names (see WORKLOAD_IGNORED). A replay carries its lengths in the corpus, so no shape.
         shape = {} if replay else load_workload_shape(catalog, workload)
@@ -1490,29 +1452,50 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                               al_src and hardware and f"({hardware})" not in al_src)}
     # Fabric only reaches a multi-node YAML, so normalize it to the default on a single node:
     # the scenario hash then matches what the explorer reconstructs from the recorded fabric.
-    multinode = bool(pd) or pool_nodes(parallel, num_instances) > 1
+    multinode = bool(pd) or pool_nodes(parallel, num_instances, node_size) > 1
     fabric = fabric if multinode else DEFAULT_FABRIC
-    scenario_name = write_scenario(scenarios_dir, model, hardware, engine_version, parallel, engine,
-                                   num_instances, fabric, router)
+    try:
+        scenario_name = write_scenario(blis, scenarios_dir, model, hardware, engine_version,
+                                       parallel, engine, num_instances, fabric, router,
+                                       node_size, states_node_size)
+    except blis_cli.DocumentInvalid as e:
+        rec.update({"deployment": None, "cmd": None, "returncode": None, "wall_s": 0.0,
+                    "metrics": {}, "metrics_all_instances": [],
+                    "error": f"generated scenario refused: {e}",
+                    "stdout_tail": "", "stderr_tail": ""})
+        return rec
     if replay:
-        cmd = build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed,
+        cmd = build_replay_cmd(blis, sim_catalog, sim_registry, scenarios_dir, scenario_name, seed,
                                defaults, cli, replay)
     else:
-        cmd = build_cmd(blis, catalog, registry, scenarios_dir, scenario_name, workload,
+        cmd = build_cmd(blis, sim_catalog, sim_registry, scenarios_dir, scenario_name, workload,
                         num_requests, seed, horizon, defaults, cli, shape)
     t0 = time.time()
     try:
-        pr = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        pr = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=sim_env(data_override))
         stdout, stderr, rc = pr.stdout, pr.stderr, pr.returncode
     except subprocess.TimeoutExpired:
         stdout, stderr, rc = "", "timeout", -1
-    metrics = parse_metrics(stdout) if rc == 0 else {}
+    invalid = result_invalid(blis, stdout) if rc == 0 else None
+    metrics = parse_metrics(stdout) if rc == 0 and not invalid else {}
+    seen = data_of(_result_doc(stdout)) if rc == 0 and not invalid else None
     if rc != 0:
         error = _failure_line(stderr) or f"rc={rc}"
+    elif invalid:
+        error = f"Result refused: {invalid}"
     elif not metrics:
         error = "rc=0 but no cluster metrics parsed from stdout (output format changed?)"
     else:
         error = _completion_issue(metrics)
+    # The record states the data the Result says priced the run, not the flag that asked for it.
+    # A default run whose Result is not the release's embedded data is an error row: it would
+    # otherwise be committed as a report priced with data it was not (CFG-1).
+    if seen is not None:
+        rec["data"] = seen
+        rec["released_build"] = released_build(_result_doc(stdout))
+        if not data_override and seen != "embedded" and not error:
+            error = ("priced with other data than the simulator release's embedded data "
+                     "(the Result's data block does not name catalog and registry source embedded)")
     rec.update({
         # `router` and `workload` are recorded so a ledger row states the WHOLE deployment and the
         # traffic it was priced on. Without the workload field a replay row and a generated-shape
@@ -1527,6 +1510,10 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                        # real interconnect instead of assuming IB. None on a single node, which
                        # prices no cross-node traffic (fabric was normalized to the default above).
                        "fabric": fabric if multinode else None,
+                       # The node size the scenario was priced with, and whether the scenario states
+                       # it (a chip whose catalog entry fixes it states none), so the explorer
+                       # rebuilds the same scenario text and file name (#96).
+                       "gpus_per_node": node_size, "states_gpus_per_node": states_node_size,
                        "scenario": scenario_name, "router": router or None,
                        # The acceptance the drafting run was priced with, so the report can
                        # derive a correct per-token rate instead of a per-STEP one.
@@ -1542,16 +1529,22 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
 
 def add_common_args(p):
     p.add_argument("--blis", default="./blis")
-    p.add_argument("--catalog", default=os.environ.get("BLIS_CATALOG"))
-    p.add_argument("--registry", default=os.environ.get("BLIS_REGISTRY"), help="blis-registry v0.1.1 clone root")
+    p.add_argument("--fields",
+                   help="the engine's field list: the pinned blis-vllm release's fields.json, until the "
+                        "binary has `blis fields` (default: ask the binary)")
+    p.add_argument("--catalog", default=os.environ.get("SUBSTRATE_CATALOG"),
+                   help="the catalog/ of a blis-substrate checkout at the pinned release: the runner reads files from it")
+    p.add_argument("--registry", default=os.environ.get("SUBSTRATE_REGISTRY"),
+                   help="the registry/ of the same checkout")
+    p.add_argument("--data-override", action="store_true", dest="data_override",
+                   help="EXPERIMENTAL: price with --catalog/--registry instead of the simulator's embedded data; "
+                        "the record is marked and the run is never a committed report")
     p.add_argument("--scenarios", required=True, help="dir to write/read generated scenario YAMLs")
     p.add_argument("--model", required=True, help="catalog short-name, e.g. glm-5.3-flash")
     p.add_argument("--hardware", required=True, help="scenario hardware key, e.g. h100")
     p.add_argument("--fabric", default=DEFAULT_FABRIC,
                    help=f"inter-node fabric (catalog networks/ class) for a multi-node run; "
                         f"ignored on a single node (default: {DEFAULT_FABRIC})")
-    p.add_argument("--engine-version", dest="engine_version", default=None,
-                   help="vLLM release to model (default: pins.env VLLM_REF)")
     p.add_argument("--workload")
     p.add_argument("--num-requests", type=int, dest="num_requests")
     p.add_argument("--seed", type=int, default=0)
@@ -1610,9 +1603,9 @@ def require_env(args):
     main() catch it and exit."""
     missing = []
     if not args.catalog:
-        missing.append("--catalog or BLIS_CATALOG (NS-6)")
+        missing.append("--catalog or SUBSTRATE_CATALOG (NS-6)")
     if not args.registry:
-        missing.append("--registry or BLIS_REGISTRY (blis-latency-kernel needs it)")
+        missing.append("--registry or SUBSTRATE_REGISTRY (the runner reads acceptance profiles from it)")
     if missing:
         raise ValueError("missing required: " + "; ".join(missing))
 
@@ -1629,10 +1622,10 @@ def main():
     except ValueError as e:
         sys.exit(str(e))
     rec = run_one(args.blis, args.catalog, args.registry, args.scenarios, args.model, args.hardware,
-                  args.engine_version or pinned_engine_version(), args.workload, args.num_requests,
+                  blis_cli.engine_release(args.blis, ENGINE_KIND, args.fields), args.workload, args.num_requests,
                   args.seed, args.horizon,
                   json.loads(args.config), args.phase, args.timeout, args.defaults, replay,
-                  fabric=args.fabric)
+                  fabric=args.fabric, fields=args.fields, data_override=args.data_override)
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         with open(args.out, "a") as f:

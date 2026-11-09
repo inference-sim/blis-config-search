@@ -1,0 +1,7 @@
+# Version literals that predate X23's lint, one "path: literal" per line. The list only shrinks:
+# prcheck versions fails on a literal not listed here and on an entry that no longer occurs.
+# Each is a historical statement about a past release, not a pin.
+scripts/run_blis.py: blis-vllm v0.32.0
+scripts/run_blis.py: inference-sim v0.12.0
+scripts/sync_pins.py: inference-sim v0.15.0
+web/src/app.test.tsx: inference-sim v0.12.0

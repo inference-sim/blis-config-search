@@ -21,8 +21,8 @@ name: bump-blis-pin
 # require this repo's tests to pass: a release that needs code changes here must still get its
 # PR, because that PR is where the changes go. pin-compat.yml says what to change.
 #
-# What it deliberately leaves to the reviewer: CATALOG_REF and REGISTRY_REF. They are separate
-# repos and nothing upstream states which ones a release needs, so they are flagged, not guessed.
+# The catalog and registry need no pin: the release embeds them (CFG-1), and the substrate pin is
+# derived from go.mod with the rest.
 #
 # Token: a PR opened with the default GITHUB_TOKEN triggers no workflows, so after opening it this
 # job dispatches checks.yml and pin-compat.yml on its branch. An optional PIN_BOT_TOKEN secret
@@ -59,13 +59,13 @@ jobs:
       HAS_BOT_TOKEN: ${{ secrets.PIN_BOT_TOKEN != '' }}
     steps:
       # A pushed branch must carry main's workflow files, or GITHUB_TOKEN's push is refused.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           token: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with: { python-version: "3.12" }
-      - run: pip install pyyaml jsonschema
+      - run: pip install --require-hashes -r requirements.txt
 
       - name: Decide the target release
         id: target
@@ -123,7 +123,7 @@ jobs:
 
       # The release's own go.mod names its toolchain, so a release that needs a newer Go builds
       # without anyone editing this file.
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         if: steps.target.outputs.skip == 'false'
         with: { go-version-file: upstream/go.mod, cache-dependency-path: upstream/go.sum }
 
@@ -162,14 +162,12 @@ jobs:
                 "starts the regeneration of every report, so the code has to fit the new stack "
                 "first. `pin-compat` re-runs on every push and comments what is still broken.\n")
           print("**Before marking ready:**\n"
-                "- [ ] `pin-compat` is green: knob tables match the new modules (`drift`), the "
+                "- [ ] `pin-compat` is green: every spec validates against the new binary, the "
                 "suite passes, and each report's own rows re-run on the new binary (`smoke`) "
                 "with no LOUD (now fails) or SILENT (knob now inert) findings.\n"
-                "- [ ] Release notes read for behaviour the knob tables should learn even where "
-                "no committed report exercises it (`validate_experiment.py`, `run_blis.py`, "
+                "- [ ] Release notes read for behaviour the runner should learn even where "
+                "no committed report exercises it (`run_blis.py`, "
                 "`.claude/skills/blis-experiment/references/knobs.md`).\n"
-                "- [ ] `CATALOG_REF` / `REGISTRY_REF`: does this release need newer ones? The bot "
-                "does not guess; move them here if so (the gate re-runs).\n"
                 "- [ ] Any spec that must change to keep running (a field the new stack "
                 "refuses) is changed here, with the reason in its # comment.\n")
           print(f"**On merge**, `regen-reports.yml` regenerates all {len(plan['reports'])} committed "
@@ -189,7 +187,7 @@ jobs:
           git config user.email "bot@users.noreply.github.com"
           if [ "${{ steps.target.outputs.exists }}" != true ]; then
             git checkout -b "$branch"
-            git add pins.env SETUP.md
+            git add pins.env
             git commit -m "Bump the pinned inference-sim to $tag
 
           Opened by bump-blis-pin.yml as a draft. Code changes the release needs go on this

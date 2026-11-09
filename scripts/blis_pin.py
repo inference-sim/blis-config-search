@@ -4,7 +4,7 @@
 Three workflows drive this:
 
     upstream release --bump-blis-pin.yml-->  DRAFT pin PR
-        pin-compat.yml gates it (drift + smoke on the new binary); compatibility fixes are
+        pin-compat.yml gates it (spec validation + smoke on the new binary); compatibility fixes are
         pushed onto that same branch until the gate is green
     --merge-->  regen-reports.yml  --one job per report-->  one PR per batch  --merge-->  published
 
@@ -13,13 +13,12 @@ The pin PR is the compatibility PR on purpose: a release can need code changes h
 the pin is what starts hours of regeneration against it.
 
   python3 -I scripts/blis_pin.py latest                       # newest upstream release tag
-  python3 -I scripts/blis_pin.py bump v0.15.0                 # rewrite pins.env + SETUP.md
+  python3 -I scripts/blis_pin.py bump v0.15.0                 # rewrite pins.env
   python3 -I scripts/blis_pin.py changed OLD_PINS.env         # which pins a push moved
   python3 -I scripts/blis_pin.py same-stack DIR DIR           # exit 0 if two reports share a stack
   python3 -I scripts/blis_pin.py plan [--only ID,...]         # what to regenerate, in batches
-  python3 -I scripts/blis_pin.py regen ID --blis B --catalog C --registry R --out DIR
+  python3 -I scripts/blis_pin.py regen ID --blis B --catalog C --registry R --out DIR   # C, R: the pinned blis-substrate checkout's catalog/ and registry/
   python3 -I scripts/blis_pin.py summary --old DIR --new DIR ID [ID ...]
-  python3 -I scripts/blis_pin.py drift --siblings DIR         # knob tables vs the new stack
   python3 -I scripts/blis_pin.py smoke [ID ...] --blis B --catalog C --registry R [--corpus F]
 
 Why every report, and why not in place: a report's numbers are a function of (its source, the
@@ -49,13 +48,11 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 PINS = os.path.join(ROOT, "pins.env")
-SETUP = os.path.join(ROOT, "SETUP.md")
 UPSTREAM = "inference-sim/inference-sim"
 TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 # The keys whose VALUE says which stack priced a report. A comment-only edit to pins.env moves
 # none of them and must not queue hours of sweeps.
-STACK_KEYS = ("BLIS_REF", "BLIS_SHA", "KERNEL_REF", "VLLM_REF", "SCHEMAS_REF", "ROUTER_REF",
-              "CATALOG_REF", "REGISTRY_REF")
+STACK_KEYS = ("BLIS_REF", "BLIS_SHA", "SUBSTRATE_REF", "VLLM_REF", "ROUTER_REF")
 # A batch is one PR. Small enough to review the numbers, large enough not to open a PR per report.
 MAX_BATCH = 4
 
@@ -144,33 +141,12 @@ def rewrite_pins(text, updates):
     return "".join(out)
 
 
-def rewrite_setup(text, old_ref, new_ref, new_sha, note):
-    """SETUP.md's step-1 clone block, moved from old_ref to new_ref.
-
-    Only the four instructional lines change -- the clone, the "tag is NOT immutable" warning, the
-    EXPECT sha and the abort message. Every other mention of old_ref in SETUP.md is a historical
-    statement ("routing moved in v0.12.0") and stays true after the bump."""
-    lines, hits = text.splitlines(keepends=True), 0
-    for i, line in enumerate(lines):
-        if line.startswith("EXPECT="):
-            lines[i] = f"EXPECT={new_sha}   # {note}\n"
-            hits += 1
-        elif (line.startswith("git clone --branch ") and "inference-sim.git" in line) \
-                or "tag is NOT configured immutable" in line \
-                or "no longer resolves to $EXPECT" in line:
-            lines[i] = line.replace(old_ref, new_ref)
-            hits += 1
-    if hits != 4:
-        raise ValueError(f"SETUP.md's clone block changed shape: expected 4 pin lines, found {hits}")
-    return "".join(lines)
-
-
-def bump(tag, sha=None, go_mod=None, release_name=None, pins_path=PINS, setup_path=SETUP):
-    """Move the pin to `tag`, in pins.env and SETUP.md. Returns {key: (old, new)} for what moved.
+def bump(tag, sha=None, go_mod=None, release_name=None, pins_path=PINS):
+    """Move the pin to `tag`, in pins.env. SETUP.md sources pins.env, so it holds no version and
+    needs no edit. Returns {key: (old, new)} for what moved.
 
     The derived pins (sync_pins.DERIVED) move with it because inference-sim's go.mod pins them.
-    CATALOG_REF and REGISTRY_REF are NOT inferred: they are separate repos and no file upstream says which ones a
-    release needs, so the PR asks a reviewer instead of guessing."""
+    The catalog and registry need no pin of their own: the release embeds them (CFG-1)."""
     pins = read_pins(pins_path)
     old_ref = pins.get("BLIS_REF")
     if not newer(tag, old_ref):
@@ -178,22 +154,13 @@ def bump(tag, sha=None, go_mod=None, release_name=None, pins_path=PINS, setup_pa
     sha = sha or resolve_tag_sha(tag)
     if go_mod is None:
         go_mod = _http_text(f"https://raw.githubusercontent.com/{UPSTREAM}/{sha}/go.mod")
-    mods = go_mod_versions(go_mod)
     import sync_pins
     updates = {"BLIS_REF": tag, "BLIS_SHA": sha, **sync_pins.derive_from_text(go_mod)}
     with open(pins_path) as f:
         pins_text = f.read()
-    with open(setup_path) as f:
-        setup_text = f.read()
-    extras = ", ".join(f"{k.removeprefix('blis-')} {v}" for k, v in sorted(mods.items()))
-    note = f"release {tag}" + (f", \"{release_name}\"" if release_name and release_name != tag
-                               else "") + (f" ({extras} in go.mod)" if extras else "")
     new_pins = rewrite_pins(pins_text, updates)
-    new_setup = rewrite_setup(setup_text, old_ref, tag, sha, note)
     with open(pins_path, "w") as f:
         f.write(new_pins)
-    with open(setup_path, "w") as f:
-        f.write(new_setup)
     return {k: (pins.get(k), v) for k, v in updates.items() if pins.get(k) != v}
 
 
@@ -319,7 +286,7 @@ def _run(cmd):
     subprocess.run(cmd, check=True, cwd=ROOT)
 
 
-def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1):
+def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1, fields=None):
     """Regenerate ONE report into <out>/<run_id>/ from its source, at the pins on disk.
 
     Writes into a fresh `out` rather than over reports/: the caller swaps the directory in whole,
@@ -330,12 +297,13 @@ def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1):
     if e["kind"] != "experiment":
         raise SystemExit(f"{run_id} has no experiment spec to regenerate from")
     spec = e["source"]
-    _run([py, "-I", "scripts/validate_experiment.py", spec, "--catalog", catalog])
+    fargs = ["--fields", fields] if fields else []
+    _run([py, "-I", "scripts/validate_experiment.py", spec, "--blis", blis, "--catalog", catalog, *fargs])
     if e["replay"]:
         _run([py, "-I", "scripts/fetch_corpus.py", spec, "--catalog", catalog])
     _run([py, "-I", "scripts/run_experiment.py", spec, "--blis", blis, "--catalog", catalog,
           "--registry", registry, "--out", out, "--timeout", str(timeout),
-          "--max-parallel", str(max_parallel)])
+          "--max-parallel", str(max_parallel), *fargs])
     shutil.rmtree(os.path.join(out, run_id, "scenarios"), ignore_errors=True)
     _check_coherent(os.path.join(out, run_id))
     return os.path.join(out, run_id)
@@ -408,10 +376,9 @@ def summary(old_root, new_root, ids, failed=()):
 #               knobs (PR #25): they decoded, and measured identical numbers to the baseline, so a
 #               sweep over them reported "no effect" as if it were a finding.
 # Neither shows up in a dry run. Both have to be fixed on the pin PR -- as code changes to the
-# validator's knob tables / run_blis.py -- BEFORE it merges, because merging is what starts the
-# regeneration. So the gate runs on the pin PR, against the new binary:
-#   drift  -- the validator's PINNED knob tables (what CI validates with) vs the blis-vllm and
-#             blis-schemas the release's go.mod names. Any difference is code to change.
+# runner -- BEFORE it merges, because merging is what starts the regeneration. Setting names are
+# read from the new binary itself (`blis fields`), so there is no table to drift. The gate runs on
+# the pin PR, against the new binary:
 #   smoke  -- a handful of rows from each committed report's own ledger, re-run on the new
 #             binary through the same run_blis.run_one the regeneration uses. A row that ran
 #             before and fails now is LOUD; a knob that moved the numbers before and is now
@@ -500,8 +467,8 @@ def _local_router(path, root, run_id):
                      f"nor routing/")
 
 
-def _run_context(entry, root, catalog, corpus, corpus_cache):
-    """(model, hardware, engine_version, workload, seed, replay, nreq_of, fabric) for a report's
+def _run_context(entry, root, blis, catalog, corpus, corpus_cache, fields=None):
+    """(model, hardware, engine_version, workload, seed, replay, nreq_of, fabric, gpus_per_node) for a report's
     source, built the way its runner builds them, so a smoke run is a run the regeneration would
     make -- including the cluster fabric, or a multi-node RoCE report re-prices on IB."""
     import run_experiment
@@ -515,9 +482,11 @@ def _run_context(entry, root, catalog, corpus, corpus_cache):
                                                dict(sc.get("replay") or {}, **local))
         replay = {k: v for k, v in replay.items() if k != "_overrides"}
     fabric = (sc.get("cluster") or {}).get("fabric") or run_experiment.run_blis.DEFAULT_FABRIC
-    return (sc["model"], sc["hardware"], run_experiment.run_blis.pinned_engine_version(),
+    gpus_per_node = (sc.get("cluster") or {}).get("gpus_per_node")
+    return (sc["model"], sc["hardware"],
+            run_experiment.blis_cli.engine_release(blis, run_experiment.run_blis.ENGINE_KIND, fields),
             sc["workload"], int(sc.get("seed", 42)), replay,
-            (lambda c: None) if replay else (lambda c: max(80, c * 4)), fabric)
+            (lambda c: None) if replay else (lambda c: max(80, c * 4)), fabric, gpus_per_node)
 
 
 def _same_measurement(a, b):
@@ -547,7 +516,7 @@ def live_rows(runs, spec):
 
 
 def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=None,
-          max_pairs=SMOKE_PAIRS, timeout=1800, max_parallel=1):
+          max_pairs=SMOKE_PAIRS, timeout=1800, max_parallel=1, fields=None):
     """Re-run a few of reports/<run_id>/'s own rows on `blis`; return {id, checks, failures}."""
     import concurrent.futures
     import tempfile
@@ -567,8 +536,8 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
     if not pairs:   # a ledger with no knob pairs: still prove its cheapest row runs
         ok = sorted((r for r in runs if _ok(r)), key=lambda r: r["config"].get("concurrency") or 0)
         pairs = [{"knob": "", "base": ok[0], "row": None, "moved": False}] if ok else []
-    model, hardware, ev, workload, seed, replay, nreq_of, fabric = _run_context(
-        entry, root, catalog, corpus, corpus_cache)
+    model, hardware, ev, workload, seed, replay, nreq_of, fabric, gpus_per_node = _run_context(
+        entry, root, blis, catalog, corpus, corpus_cache, fields)
     scen_dir = tempfile.mkdtemp(prefix="pin-smoke-")
     todo = {}
     for p in pairs:
@@ -583,7 +552,8 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
         c = cfg.get("concurrency") or 1
         return key, run_blis.run_one(blis, catalog, registry, scen_dir, model, hardware, ev,
                                      workload, nreq_of(c), seed, None, cfg, phase="pin-smoke",
-                                     timeout=timeout, replay=replay, fabric=fabric)
+                                     timeout=timeout, replay=replay, fabric=fabric,
+                                     gpus_per_node=gpus_per_node, fields=fields)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, max_parallel)) as ex:
         new = dict(ex.map(_one, sorted(todo)))
     shutil.rmtree(scen_dir, ignore_errors=True)
@@ -610,8 +580,8 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
             failures.append(
                 f"SILENT: {run_id} `{p['knob']}` moved throughput {_tps(p['base']):.1f} -> "
                 f"{_tps(p['row']):.1f} on the old stack and now measures IDENTICALLY to its "
-                f"baseline ({_tps(b):.1f}) -- the new release no longer models it. Move it to the "
-                f"validator's inert table (validate_experiment.py) so specs stop sweeping it.")
+                f"baseline ({_tps(b):.1f}) -- the new release no longer models it. Its field-list "
+                f"entry in the engine repository should say so (VLM-3).")
     return {"id": run_id, "checks": checks, "failures": failures, "warnings": warnings,
             "pairs": [{"knob": p["knob"], "moved": p["moved"]} for p in pairs]}
 
@@ -621,69 +591,6 @@ def _cfg_phrase(cfg):
                            if k != "router_config") + \
         (f", router={os.path.basename(cfg['router_config'])}" if cfg.get("router_config") else "") \
         + "}"
-
-
-def drift(siblings, modules=None):
-    """Differences between the validator's PINNED knob tables and the upstream checkouts in
-    `siblings` (blis-vllm/, blis-schemas/ at the versions the release's go.mod names).
-
-    CI validates every spec against the pinned tables (it has no sibling checkouts), so a table
-    that lags the stack either refuses a knob the new engine accepts or passes one it refuses.
-    Returns a list of human-readable problems; empty means the tables match the stack.
-
-    `modules` is the release's go.mod requirements ({"blis-vllm": "v0.32.0-blis.1", ...}). A
-    module the release does not require has nothing to drift FROM -- v0.12.0 builds without
-    blis-vllm -- so its checks are skipped rather than reported as an unreadable upstream. A
-    module it DOES require whose file cannot be read is still a failure: that is the reader
-    going stale. None (no go.mod given) checks everything."""
-    import validate_experiment as V
-    saved = V.SIBLINGS
-    V.SIBLINGS = os.path.abspath(siblings)
-    try:
-        par, eng = V._names_from_blis_schemas(), V._names_from_blis_vllm()
-        enums = V._enums_from_blis_vllm()
-    finally:
-        V.SIBLINGS = saved
-    def required(mod):
-        return modules is None or mod in modules
-    out = []
-    for what, live, pinned, table, mod in (
-            ("parallel", par, V.PARALLEL_KNOBS, "PARALLEL_KNOBS", "blis-schemas"),
-            ("engine", eng, V.ENGINE_KNOBS, "ENGINE_KNOBS", "blis-vllm")):
-        if not required(mod):
-            continue
-        if live is None:
-            out.append(f"the {what} knob reader found nothing upstream -- the upstream file moved "
-                       f"or changed shape; fix its reader in validate_experiment.py")
-            continue
-        if live - pinned:
-            out.append(f"{table} lacks {sorted(live - pinned)}: knobs the new stack defines. Add "
-                       f"them (and decide whether run_blis.py carries them, or they belong in a "
-                       f"not-wired table)")
-        if pinned - live:
-            out.append(f"{table} still lists {sorted(pinned - live)}, which the new stack no "
-                       f"longer defines: a spec using them validates and then fails every run")
-    if not required("blis-vllm"):
-        return out
-    if enums is None:
-        out.append(f"the engine value reader found no rules/{V.RULES_PACK}/pack.go upstream; the "
-                   f"release may model a newer vLLM -- move RULES_PACK and re-read the value sets")
-    else:
-        for knob, values in sorted(enums.items()):
-            pinned = tuple(V.ENGINE_ENUMS.get(knob, ()))
-            if set(values) != set(pinned):
-                add, gone = sorted(set(values) - set(pinned)), sorted(set(pinned) - set(values))
-                out.append(f"ENGINE_ENUMS[{knob!r}]: " + "; ".join(
-                    x for x in ((f"new values {add}" if add else ""),
-                                (f"values no longer accepted {gone}" if gone else "")) if x))
-    rules = os.path.join(siblings, "blis-vllm", "rules")
-    packs = sorted((d for d in (os.listdir(rules) if os.path.isdir(rules) else ())
-                    if re.fullmatch(r"v\d+_\d+", d)),
-                   key=lambda d: tuple(int(x) for x in d[1:].split("_")))
-    if packs and packs[-1] != V.RULES_PACK:
-        out.append(f"blis-vllm now carries rules/{packs[-1]} (newer than the {V.RULES_PACK} the "
-                   f"validator reads): check which vLLM the release models, and move RULES_PACK")
-    return out
 
 
 def smoke_markdown(results):
@@ -715,7 +622,7 @@ def main(argv=None):
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("latest", help="print the newest upstream release as JSON, plus `newer`")
-    b = sub.add_parser("bump", help="rewrite pins.env + SETUP.md to an upstream release tag")
+    b = sub.add_parser("bump", help="rewrite pins.env to an upstream release tag")
     b.add_argument("tag")
     b.add_argument("--release-name")
     c = sub.add_parser("changed", help="print the stack pins that differ from OLD pins.env")
@@ -734,12 +641,9 @@ def main(argv=None):
     r.add_argument("--out", required=True)
     r.add_argument("--timeout", type=int, default=1800)
     r.add_argument("--max-parallel", type=int, default=1)
+    r.add_argument("--fields", help="the engine's field list (the pinned blis-vllm release's fields.json)")
     m = sub.add_parser("modules", help="print the blis-* modules a go.mod requires, one per line")
     m.add_argument("go_mod")
-    d = sub.add_parser("drift", help="pinned knob tables vs upstream checkouts; exit 1 on drift")
-    d.add_argument("--siblings", required=True,
-                   help="dir holding blis-vllm/ and blis-schemas/ at the release's go.mod versions")
-    d.add_argument("--go-mod", help="the release's go.mod: a module it does not require is skipped")
     k = sub.add_parser("smoke", help="re-run a few ledger rows per report on a new binary")
     k.add_argument("ids", nargs="*", help="report ids (default: every committed report)")
     k.add_argument("--blis", required=True)
@@ -750,6 +654,7 @@ def main(argv=None):
     k.add_argument("--max-pairs", type=int, default=SMOKE_PAIRS)
     k.add_argument("--timeout", type=int, default=1800)
     k.add_argument("--max-parallel", type=int, default=1)
+    k.add_argument("--fields", help="the engine's field list (the pinned blis-vllm release's fields.json)")
     k.add_argument("--json", dest="json_out", help="also write the full result here")
     ks = sub.add_parser("smoke-summary", help="render smoke --json files as one markdown table")
     ks.add_argument("files", nargs="+")
@@ -777,29 +682,17 @@ def main(argv=None):
         print(json.dumps(plan(only=only or None, max_batch=a.max_batch)))
     elif a.cmd == "regen":
         regen(a.id, os.path.abspath(a.blis), os.path.abspath(a.catalog),
-              os.path.abspath(a.registry), os.path.abspath(a.out), a.timeout, a.max_parallel)
+              os.path.abspath(a.registry), os.path.abspath(a.out), a.timeout, a.max_parallel,
+              os.path.abspath(a.fields) if a.fields else None)
     elif a.cmd == "modules":
         with open(a.go_mod) as f:
             for mod, ver in sorted(go_mod_versions(f.read()).items()):
                 print(mod, ver)
-    elif a.cmd == "drift":
-        mods = None
-        if a.go_mod:
-            with open(a.go_mod) as f:
-                mods = go_mod_versions(f.read())
-            for mod in ("blis-schemas", "blis-vllm"):
-                print(f"{mod}: " + (mods[mod] if mod in mods else
-                                    "not required by this release -- its checks do not apply"))
-        problems = drift(a.siblings, mods)
-        for p_ in problems:
-            print(f"DRIFT: {p_}")
-        print("knob tables match the stack" if not problems else
-              f"{len(problems)} drift(s): change the tables on this PR before merging")
-        return 1 if problems else 0
     elif a.cmd == "smoke":
         results = [smoke(i, os.path.abspath(a.blis), os.path.abspath(a.catalog),
                          os.path.abspath(a.registry), corpus=a.corpus, corpus_cache=a.corpus_cache,
-                         max_pairs=a.max_pairs, timeout=a.timeout, max_parallel=a.max_parallel)
+                         max_pairs=a.max_pairs, timeout=a.timeout, max_parallel=a.max_parallel,
+                         fields=os.path.abspath(a.fields) if a.fields else None)
                    for i in (a.ids or report_ids())]
         if a.json_out:
             with open(a.json_out, "w") as f:

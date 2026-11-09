@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Validate an Experiment Spec (RFC #21) BEFORE any BLIS run -- the contract's gatekeeper.
 
-    python3 -I scripts/validate_experiment.py experiments/foo.yaml
-    python3 -I scripts/validate_experiment.py experiments/            # every spec
-    python3 -I scripts/validate_experiment.py experiments/foo.yaml --json
+    python3 -I scripts/validate_experiment.py experiments/foo.yaml --blis ./blis
+    python3 -I scripts/validate_experiment.py experiments/ --blis ./blis    # every spec
+    python3 -I scripts/validate_experiment.py experiments/foo.yaml --blis ./blis --json
 
-Exit 0 when every spec is valid, 1 otherwise, with one `file: path: message` line per error.
-Safe for an untrusted PR: it reads YAML with safe_load, touches no network, and runs no BLIS.
+Exit 0 when every spec is valid, 1 when one is not, with one `file: path: message` line per
+error, and 2 when a simulator command fails. Safe for an untrusted PR: it reads YAML with
+safe_load, touches no network, and runs only the simulator's read-only commands.
 
 WHY THIS EXISTS SEPARATELY FROM THE SCHEMA. experiments/schema.json describes STRUCTURE (every
 value is a list, a sweep is colocated or disaggregated but not both) for a contributor's EDITOR.
@@ -14,11 +15,11 @@ This script never loads it -- the structural rules below are the ENFORCED copy, 
 test_experiment.py's SchemaAgreesWithValidator is what stops the two definitions drifting apart.
 Three classes of error no schema can reach are exactly the ones that waste a whole sweep:
 
-  1. a knob name that no engine accepts. The names are not ours to invent -- an `engine:` key
-     is a key of blis-vllm's engine block (which models vLLM v0.32.0), a `parallel:` key is a
-     blis-schemas pool-layout field. A typo like `max_num_seq` would decode-fail per run, so
-     every name is checked against the SIBLING CHECKOUTS when they are present
-     (../blis-vllm, ../blis-schemas), falling back to a pinned list when they are not.
+  1. a setting name that the engine does not have. The names are not ours to invent: an
+     `engine:` key is a field of the engine's field list, which `blis fields` prints at the
+     release the binary runs (CFG-3), and a `parallel:` key is a field of the deployment
+     document, which `blis schema deployment` prints (SUB-19). A typo like `max_num_seq` would
+     fail every run, so every name is checked against those two.
   2. GPU arithmetic that cannot be satisfied. `gpus` is the budget every run must use exactly,
      so a grid where no combination totals it expands to NOTHING. Reporting "0 runs" after a
      clone and build is a wasted CI job; reporting "no combination of tp x dp x num-instances
@@ -41,8 +42,11 @@ try:
 except ImportError:
     raise SystemExit("PyYAML required: pip install pyyaml")
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import blis_cli  # noqa: E402
+import settings  # noqa: E402
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-SIBLINGS = os.path.abspath(os.path.join(ROOT, os.pardir))
 ROUTING_DIR = os.path.join(ROOT, "routing")
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -75,197 +79,16 @@ CATALOG_OWNED_REPLAY_FIELDS = frozenset({
     "split_flattened_agents",
 })
 DURATION_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(us|ms|s)$")
-GPUS_PER_NODE = 8          # a per-instance footprint past this spans nodes (run_blis.GPUS_PER_NODE)
 
 # ---------------------------------------------------------------------------------------------
-# Knob names. Each set below has an authoritative upstream source, read when the checkout is
-# present so a spec is validated against the stack that will actually run it. The fallbacks are
-# the names verified against the stack pins.env pins, and are what CI uses, where only this repo
-# is checked out. No version literal here: the fallback must match whatever pins.env names.
+# Knob names. None is kept here. Engine setting names are the engine's own, read from the
+# simulator's field list (`blis fields`, CFG-3); pool-layout names are the deployment document's,
+# read from its published schema (`blis schema deployment`, SUB-19). Value checks belong to the
+# engine, which refuses a bad value at start-up with its own message (X15).
 
-# blis-schemas spec/deployment/deployment.go, Parallelism's yaml tags.
-PARALLEL_KNOBS = frozenset({
-    "tp", "pp", "dp", "dp_local", "pcp", "dcp", "enable_expert_parallel",
-    "data_parallel_load_balancing",
-})
-
-# blis-vllm rules/engineconfig, Engine's yaml names == vLLM's own config field names. The full
-# surface is large; this is it as pinned by that package's fieldnames test at v0.32.0.
-ENGINE_KNOBS = frozenset({
-    "all2all_backend", "disable_custom_all_reduce", "allreduce_backend", "cudagraph_mode",
-    "max_cudagraph_capture_size", "cudagraph_capture_sizes", "async_scheduling", "frontend",
-    "disable_cascade_attn", "enable_prefix_caching", "swa_bounded_replay", "block_size",
-    "max_num_batched_tokens", "max_num_seqs", "long_prefill_token_threshold", "max_model_len",
-    "quantization", "cache_dtype", "mamba_cache_dtype", "mamba_ssm_cache_dtype",
-    "mamba_cache_mode", "gpu_memory_utilization", "scheduling_policy", "dbo", "eplb",
-    "speculative", "engram_config", "moe_backend", "dcp_comm_backend", "dcp_q_replicate",
-    "cp_kv_cache_interleave_size", "long_prefill_token_threshold_adaptive",
-    "max_num_scheduled_tokens", "max_num_active_seqs", "watermark", "prefill_schedule_interval",
-    "stream_interval", "disable_hybrid_kv_cache_manager", "kv_cache_memory_bytes",
-    "prefix_match_unit", "prefix_cache_retention_interval", "kv_events", "max_loras",
-    "max_cpu_loras", "decoder_replay_cudagraph_capture_sizes", "custom_ops",
-    "use_trtllm_attention", "mla_prefill_backend", "indexer_kv_dtype", "linear_backend", "env",
-})
-
-# Engine knobs the PINNED stack decodes but its engine model REFUSES to price.
-#
-# This list used to be much longer, and was about DECODING: under BLIS v0.12.0 a pool's `engine:`
-# was a fixed 31-field struct in blis-schemas v0.5.0, so 21 real vLLM knobs failed every run with
-# "field <name> not found in type deployment.Engine". The v0.14.0 bump made `engine:` an OPAQUE
-# block opened by the engine model that `engine_version` selects -- blis-vllm's
-# rules/engineconfig.Engine -- so all 21 now decode. Only 3 of them (max_num_active_seqs,
-# max_num_scheduled_tokens, frontend) actually move a number and are swept like any other knob.
-#
-# What remains is a different refusal, and a narrower one: the field decodes, but the engine model
-# has no cost term for it, so a sweep over it would report differences that are noise. Each entry
-# below was measured by running the knob against the pinned binary, not inferred from the struct.
-#
-# Kept in sync with run_blis.UNSUPPORTED by test_experiment.py, which fails if the two drift.
-ENGINE_NOT_MODELLED = {
-    "prefix_match_unit": ("decodes under the pinned engine model but is not priced by it: "
-                          "prefix matching is modelled at block granularity, so sweeping the unit "
-                          "reports noise (upstream blis-vllm#7)"),
-    "max_cpu_loras": ("decodes under the pinned engine model but is not priced by it: there is "
-                      "no CPU-side LoRA swap term in the cost model (upstream blis-vllm#5)"),
-    "prefix_cache_retention_interval": ("decodes under the pinned engine model but is not priced "
-                                        "by it: the prefix cache is modelled without eviction "
-                                        "over time, so retention has no effect on any run"),
-}
-
-# Engine knobs priced only in some SHAPE, but refused in every shape, so no reason may read as
-# "meet the condition and it runs". Each must be the tail of run_blis.UNSUPPORTED's (tested).
-ENGINE_CONDITIONAL = {
-    "prefill_schedule_interval": ("refused: it is priced only when the pool has dp > 1 (with a "
-                                  "single data-parallel rank there is no cross-rank prefill "
-                                  "schedule to interval), and the runner does not gate on dp -- "
-                                  "it refuses the knob in every shape"),
-    "disable_hybrid_kv_cache_manager": ("refused: the binary rejects it on a sliding-window MLA "
-                                        "model (the DeepSeek-V4 family), where the hybrid manager "
-                                        "is what models the sliding window, and the runner "
-                                        "refuses it on every model rather than gating on the "
-                                        "family"),
-    "env": ("refused: the pinned engine model reads exactly one variable, "
-            "VLLM_USE_V2_MODEL_RUNNER, and any other key is carried but never read, so a sweep "
-            "over it reports noise -- the runner refuses the block rather than gating on the key"),
-    "kv_events": ("a struct under the pinned engine model (publisher/topic/buffer), not a bool, "
-                  "and none of its inner fields is sweepable at this pin either (no spec can "
-                  "express them) -- so it is not sweepable at all here, in any form"),
-}
-
-# Engine knobs the pinned stack decodes, accepts, and prices IDENTICALLY whatever you set them to.
-#
-# Measured, not inferred: each was run against the pinned binary with two contrasting values on
-# deepseek-v4-pro/h200 (tp2 dp4, chatbot, c=8 and c=256), qwen3-14b/h100 (tp4) and
-# deepseek-v4.1-flash/h200 (tp2 dp4), beside a `max_num_seqs` control that moved every time. None
-# of them shifted the throughput by a single digit.
-#
-# Refusing these is the point of the check, per experiments/README.md's "Not every accepted knob
-# is a lever": a sweep that runs to completion and reports equal numbers looks like a finding and
-# is worse than one that fails loudly. Kept in sync with run_blis.ENGINE_DECODED_BUT_INERT.
-ENGINE_INERT = {
-    k: (f"decodes and runs under the pinned engine model, but the kernel cost model has no term "
-        f"for it: measured byte-identical across three model/hardware pairs with two contrasting "
-        f"values each, so every arm of the sweep would report the same number. State it as a "
-        f"fixed engine value if a run should record it, rather than sweeping it.")
-    for k in ("watermark", "stream_interval", "kv_cache_memory_bytes", "max_loras", "custom_ops",
-              "use_trtllm_attention", "mla_prefill_backend", "indexer_kv_dtype", "linear_backend",
-              "long_prefill_token_threshold_adaptive",
-              "decoder_replay_cudagraph_capture_sizes")
-}
-
-# One lookup for the three refusals above: all report "the pins carry it, sweeping it is not
-# worth a run" rather than "no such field", which is what a typo gets.
-ENGINE_NOT_WIRED = {**ENGINE_NOT_MODELLED, **ENGINE_CONDITIONAL, **ENGINE_INERT}
-
-# Valid VALUES for the enumerated engine knobs, transcribed from blis-vllm's rules pack
-# (rules/v0_32/pack.go, `Pack()`), which models vLLM v0.32.0. Read from the sibling checkout when
-# it is present (see _enums_from_blis_vllm) so the sets track the stack rather than a copy.
-#
-# Checking VALUES matters as much as checking names: `cudagraph_mode: [full]` is a plausible
-# thing to write and the engine refuses it (the enum is upper-case), so without this the whole
-# sweep dies one identical error at a time.
-ENGINE_ENUMS = {
-    "cudagraph_mode": ("NONE", "PIECEWISE", "FULL", "FULL_DECODE_ONLY", "FULL_AND_PIECEWISE"),
-    "cache_dtype": ("auto", "float16", "bfloat16", "fp8", "fp8_e4m3", "fp8_e5m2", "fp8_inc",
-                    "fp8_ds_mla", "nvfp4_ds_mla", "turboquant_k8v4", "turboquant_4bit_nc",
-                    "turboquant_k3v4_nc", "turboquant_3bit_nc", "ultraquant_4bit",
-                    "int4_per_token_head", "int8_per_token_head", "fp8_per_token_head",
-                    "nvfp4", "nvfp4_4over6"),
-    "all2all_backend": ("naive", "allgather_reducescatter", "pplx", "deepep_high_throughput",
-                        "deepep_low_latency", "deepep_v2", "flashinfer_all2allv",
-                        "flashinfer_nvlink_one_sided", "flashinfer_nvlink_two_sided",
-                        "mori_high_throughput", "mori_low_latency", "moonep", "nixl_ep",
-                        "passthrough"),
-    "moe_backend": ("auto", "triton", "batched_triton", "deep_gemm", "deep_gemm_mega_moe",
-                    "cutlass", "flashinfer_trtllm", "flashinfer_cutlass", "flashinfer_cutedsl",
-                    "flashinfer_moe_ep_cutedsl", "flashinfer_b12x", "b12x",
-                    "flashinfer_moe_ep_mega_deep_gemm", "marlin", "humming", "triton_unfused",
-                    "aiter", "aiter_mega_moe", "aiter_triton_mxfp4_bf16", "flydsl", "hpc",
-                    "emulation", "rdna3"),
-    "allreduce_backend": ("custom", "nccl"),
-    "scheduling_policy": ("fcfs", "priority"),
-    # Draft methods, from SpeculativeMethods (the six named ones, the EAGLE family's 27
-    # multi-token-prediction names, dflash, ngram_gpu and dspark). Needed in the PINNED set and
-    # not only in the live read: CI has no ../blis-vllm checkout, so without this entry a typo'd
-    # `speculative.method` passed validation there while failing every run.
-    #
-    # Membership is necessary, not sufficient -- the method must also be the one the MODEL's
-    # graph declares (dspark for deepseek-v4.1-flash, glm5_next_mtp for glm-5.3-flash), and
-    # DeepSeek-V4.1 refuses every MTP-family name. scripts/knob_profile.py reports both.
-    "speculative_method": (
-        "bailing_hybrid_mtp", "bailing_hybrid_v3_mtp", "custom_class", "deepseek_mtp",
-        "dflash", "dots3_note_mtp", "draft_model", "dspark", "eagle", "eagle3", "ernie_mtp",
-        "exaone4_5_mtp", "exaone_moe_mtp", "extract_hidden_states", "gemma4_mtp",
-        "glm4_moe_lite_mtp", "glm4_moe_mtp", "glm5_next_mtp", "glm_ocr_mtp", "hy_v3_mtp",
-        "hy_v4_mtp", "inkling_mtp", "kimi_k3_mtp", "longcat_flash_mtp", "medusa", "mimo_mtp",
-        "mimo_v2_mtp", "minimax_m3_mtp", "mlp_speculator", "mtp", "nemotron_h_mtp", "ngram",
-        "ngram_gpu", "pangu_ultra_moe_mtp", "qwen3_5_mtp", "qwen3_next_mtp", "qwen4_exp_mtp",
-        "step3p5_mtp", "suffix"),
-    # The served WEIGHT format, which sets weight-read bytes, compute peak and the GEMM
-    # efficiency envelope at once -- a strong lever (measured 1083 bf16 -> 1271 fp8 -> 1411
-    # modelopt_fp4 tok/s). Empty/unset lets the checkpoint's own format govern.
-    "quantization": ("awq", "auto_awq", "fp8", "fbgemm_fp8", "fp_quant", "modelopt",
-                     "modelopt_fp4", "modelopt_mxfp8", "modelopt_mixed", "auto_gptq", "gptq",
-                     "gptq_marlin", "awq_marlin", "humming", "compressed-tensors",
-                     "experts_int8", "quark", "moe_wna16", "torchao", "inc", "mxfp4",
-                     "gpt_oss_mxfp4", "deepseek_v4_fp8", "online", "fp8_per_tensor",
-                     "fp8_per_block", "fp8_per_channel", "int8_per_channel_weight_only",
-                     "nvfp4_per_token", "mxfp8"),
-    "dcp_comm_backend": ("ag_rs", "a2a"),
-    "mamba_cache_dtype": ("auto", "float32", "float16", "bfloat16"),
-    "mamba_ssm_cache_dtype": ("auto", "float32", "float16", "bfloat16"),
-    "mamba_cache_mode": ("none", "align"),
-}
-
-# Engine knobs whose value is a boolean (tri-state in the schema: unstated means the engine
-# decides, which is NOT the same deployment as an explicit false).
-ENGINE_BOOLS = ("enable_prefix_caching", "disable_cascade_attn", "swa_bounded_replay",
-                "async_scheduling", "disable_custom_all_reduce", "dcp_q_replicate")
-# Engine knobs whose value is a list of ints, not a scalar. In a spec these are a list OF lists:
-# `cudagraph_capture_sizes: [[1,2,4], [1,2,4,8]]` sweeps two capture plans.
+# Engine settings whose value is a list of integers, so a spec sweeps a list of lists. Part of
+# the spec's grammar: without it `[1, 2, 4]` could be three plans or one.
 ENGINE_INT_LISTS = ("cudagraph_capture_sizes",)
-
-# Speculative's fields under the pinned engine model (blis-vllm v0.32.0 rules/engineconfig).
-# All seven DECODE. Only the first two select an acceptance profile from the registry and so
-# change a run; draft_model cannot run, and the rest are recorded provenance -- see
-# SPECULATIVE_RECORDED_ONLY.
-SPECULATIVE_FIELDS = ("method", "num_spec_tokens", "draft_model", "kv_cache_dtype",
-                      "draft_sample_method", "rejection_sample_method",
-                      "enable_adaptive_verification")
-SPECULATIVE_RECORDED_ONLY = ("draft_sample_method", "rejection_sample_method",
-                             "enable_adaptive_verification", "kv_cache_dtype")
-
-# NESTED engine blocks: a mapping whose own fields are lists, like `speculative`. Field names are
-# the pinned engine model's (blis-vllm v0.32.0 rules/engineconfig); the engine decodes strictly,
-# so an invented inner field fails every run.
-NESTED_ENGINE_FIELDS = {
-    "speculative": SPECULATIVE_FIELDS,
-    "eplb": ("enable_eplb", "num_redundant_experts", "window_size", "step_interval"),
-    "dbo": ("enable_dbo", "dbo_decode_token_threshold", "dbo_prefill_token_threshold"),
-    "engram_config": ("cpu_offload", "dp_shared_memory", "use_thp"),
-}
-# Inner fields of a nested block that take a boolean.
-NESTED_BOOL_FIELDS = ("enable_eplb", "enable_dbo", "cpu_offload", "dp_shared_memory", "use_thp")
 
 # llm-d-router plugin parameters worth sweeping, per RFC #21's table. The router itself rejects
 # an unknown parameter, so this catches a typo one step earlier with a better message. A plugin
@@ -279,124 +102,10 @@ ROUTER_PLUGIN_PARAMS = {
     "probabilistic-admitter": {"queueDepthThreshold", "kvCacheUtilThreshold", "power", "k"},
 }
 
-
-# The blis-vllm rules pack the enum reader parses (rules/<RULES_PACK>/pack.go): the vLLM version
-# the pinned stack models. A release whose blis-vllm adds a newer pack is a drift the pin-bump
-# gate reports (scripts/blis_pin.py drift), since the reader would keep reading the old one.
-RULES_PACK = "v0_32"
-
-
-def _names_from_blis_vllm():
-    """Engine field names read from a ../blis-vllm checkout, or None.
-
-    Source of truth is that package's fieldnames test, whose `want` map is one quoted field
-    name per line -- it exists precisely to pin these names, so parsing it beats guessing at
-    struct tags spread over several files.
-    """
-    path = os.path.join(SIBLINGS, "blis-vllm", "rules", "engineconfig", "fieldnames_test.go")
-    try:
-        with open(path, encoding="utf-8") as f:
-            src = f.read()
-    except OSError:
-        return None
-    body = src.split("want := map[string]string{", 1)
-    if len(body) < 2:
-        return None
-    names = set(re.findall(r'^\s*"([a-z0-9_]+)":', body[1].split("\n}", 1)[0], re.M))
-    return names or None
-
-
-def _names_from_blis_schemas():
-    """Parallelism yaml field names read from a ../blis-schemas checkout, or None."""
-    path = os.path.join(SIBLINGS, "blis-schemas", "spec", "deployment", "deployment.go")
-    try:
-        with open(path, encoding="utf-8") as f:
-            src = f.read()
-    except OSError:
-        return None
-    m = re.search(r"type Parallelism struct \{(.*?)\n\}", src, re.S)
-    if not m:
-        return None
-    names = set(re.findall(r'yaml:"([a-z0-9_]+)', m.group(1)))
-    return names or None
-
-
-def _enums_from_blis_vllm():
-    """Engine value sets read from ../blis-vllm's rules pack, or None.
-
-    The pack's `Pack()` builds each set with a `set("a", "b", ...)` call against a named field,
-    so the names and their members can be read directly rather than mirrored by hand.
-    """
-    path = os.path.join(SIBLINGS, "blis-vllm", "rules", RULES_PACK, "pack.go")
-    try:
-        with open(path, encoding="utf-8") as f:
-            src = f.read()
-    except OSError:
-        return None
-    # Field name in the pack -> knob name in a spec.
-    wanted = {"CUDAGraphModes": "cudagraph_mode", "CacheDTypes": "cache_dtype",
-              "All2AllBackends": "all2all_backend", "MoEBackends": "moe_backend",
-              "AllReduceBackends": "allreduce_backend", "SchedulerPolicies": "scheduling_policy",
-              "DCPCommBackends": "dcp_comm_backend", "MambaDTypes": "mamba_cache_dtype",
-              "MambaCacheModes": "mamba_cache_mode", "Quantizations": "quantization",
-              "SpeculativeMethods": "speculative_method"}
-    # Named `[]string{...}` vars the pack SPREADS into a set, e.g.
-    # `set(append([]string{"eagle", ...}, mtpMethods...)...)`. A spread contributes its own
-    # members, so they have to be resolved or the set reads short -- SpeculativeMethods lost all
-    # 27 MTP names (`mtp`, `deepseek_mtp`, ...) that way, and a spec naming one was rejected as
-    # "not a draft method the engine knows" although the engine accepts it.
-    spreads = {}
-    for m in re.finditer(r"\bvar\s+(\w+)\s*=\s*\[\]string\{(.*?)\}", src, re.S):
-        spreads[m.group(1)] = tuple(re.findall(r'"([^"]+)"', m.group(2)))
-    out = {}
-    for field, knob in wanted.items():
-        # Balance parentheses from `set(` so an inner append(...)/[]string{...} call does not
-        # end the match early: a non-greedy `(.*?)\)` stopped at the FIRST `)`, which for
-        # SpeculativeMethods was the end of the inline literal, before `mtpMethods...`.
-        start = re.search(rf"\b{field}:\s*set\(", src)
-        if not start:
-            continue
-        i, depth = start.end(), 1
-        while i < len(src) and depth:
-            depth += (src[i] == "(") - (src[i] == ")")
-            i += 1
-        body = src[start.end():i - 1]
-        values = tuple(re.findall(r'"([^"]+)"', body))
-        for name in re.findall(r"\b(\w+)\.\.\.", body):
-            values += spreads.get(name, ())
-        if values:
-            out[knob] = tuple(dict.fromkeys(values))
-    if "mamba_cache_dtype" in out:
-        out["mamba_ssm_cache_dtype"] = out["mamba_cache_dtype"]
-    return out or None
-
-
-def engine_enums():
-    """(enums, source) -- the valid value sets for the enumerated engine knobs."""
-    live = _enums_from_blis_vllm()
-    if live:
-        merged = dict(ENGINE_ENUMS)
-        merged.update(live)
-        return merged, "../blis-vllm rules pack"
-    return dict(ENGINE_ENUMS), "pinned value sets (blis-vllm v0.32.0)"
-
-
-def knob_vocabulary():
-    """(parallel, engine, source) -- the knob names a spec may use.
-
-    Reads the sibling checkouts when present so the validator tracks the stack rather than a
-    copy of it; falls back to the pinned sets (what CI has) otherwise. `source` says which,
-    so a failure message can tell a contributor what their names were checked against.
-    """
-    par, eng = _names_from_blis_schemas(), _names_from_blis_vllm()
-    if par and eng:
-        return par, eng, "../blis-schemas + ../blis-vllm checkouts"
-    if eng:
-        return PARALLEL_KNOBS, eng, "../blis-vllm checkout + pinned parallel names"
-    if par:
-        return par, ENGINE_KNOBS, "../blis-schemas checkout + pinned engine names"
-    # No version literal: this is printed on every CI run and would go stale on the next bump.
-    return PARALLEL_KNOBS, ENGINE_KNOBS, "pinned names (see pins.env for the stack)"
+def knob_vocabulary(blis, fields=None):
+    """The settings.Vocabulary the binary `blis` publishes, reading the engine's field list from the
+    file `fields` when one is named. Raises blis_cli.BlisCommandError."""
+    return settings.vocabulary(blis, fields)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -456,15 +165,11 @@ def _check_value_lists(block, where, errs, allow_nested=()):
 
 def _check_knob_names(block, where, vocabulary, kind, errs, source, skip=()):
     for key in (block or {}):
-        if key in skip:
+        if key in skip or key in vocabulary:
             continue
-        if key in ENGINE_NOT_WIRED and kind == "engine":
-            errs.append(f"{where}.{key}: {ENGINE_NOT_WIRED[key]}")
-        elif key not in vocabulary:
-            errs.append(f"{where}.{key}: not an {kind} knob per {source}"
-                        f"{_suggest(key, vocabulary)}" if kind == "engine" else
-                        f"{where}.{key}: not a {kind} knob per {source}"
-                        f"{_suggest(key, vocabulary)}")
+        article = "an" if kind == "engine" else "a"
+        errs.append(f"{where}.{key}: not {article} {kind} setting in {source}"
+                    f"{_suggest(key, vocabulary)}")
 
 
 def _parallel_combos(parallel):
@@ -486,47 +191,23 @@ def _parallel_combos(parallel):
     return out or [1]
 
 
-def _check_engine_values(engine, where, errs, enums=None):
-    """Check each swept engine VALUE against the engine's own accepted set.
-
-    A name check alone is not enough. `cudagraph_mode: [full]` is a natural thing to write and
-    the engine refuses it (its enum is upper-case), `cache_dtype: [fp16]` is not a member either
-    (it is `float16`), and either mistake kills every run in the sweep with the same error. The
-    suggestion matters here too: the sets are large (19 cache dtypes, 14 all2all backends).
-    """
-    enums = enums if enums is not None else ENGINE_ENUMS
-    for key, values in (engine or {}).items():
-        if key == "speculative" or not _is_list(values):
-            continue
-        if key in ENGINE_INT_LISTS:
-            # A list-valued knob is swept as a list OF lists; a flat list of ints is almost
-            # certainly one plan written without the outer brackets.
-            for v in values:
-                if not _is_list(v):
-                    errs.append(f"{where}.{key}: {key} takes a LIST of sizes, so sweeping it "
-                                f"needs a list of lists (write `{key}: [[{v}, ...]]`); got "
-                                f"{v!r}")
-                elif any(not isinstance(x, int) or isinstance(x, bool) for x in v):
-                    errs.append(f"{where}.{key}: every size must be an integer, got {v!r}")
-            continue
-        if key in ENGINE_BOOLS:
-            for v in values:
-                if not isinstance(v, bool):
-                    errs.append(f"{where}.{key}: {v!r} is not a boolean; {key} is tri-state "
-                                f"(omit it to let the engine decide, which is a DIFFERENT "
-                                f"deployment from an explicit false)")
-            continue
-        allowed = enums.get(key)
-        if not allowed:
+def _check_int_lists(engine, where, errs):
+    """A list-valued setting is swept as a list OF lists; a flat list of ints is almost certainly
+    one plan written without the outer brackets."""
+    for key in ENGINE_INT_LISTS:
+        values = (engine or {}).get(key)
+        if not _is_list(values):
             continue
         for v in values:
-            if str(v) not in allowed:
-                hint = _suggest(v, allowed) or " (valid: " + ", ".join(allowed) + ")"
-                errs.append(f"{where}.{key}: {v!r} is not a value the engine accepts{hint}")
+            if not _is_list(v):
+                errs.append(f"{where}.{key}: {key} takes a LIST of sizes, so sweeping it "
+                            f"needs a list of lists (write `{key}: [[{v}, ...]]`); got {v!r}")
+            elif any(not isinstance(x, int) or isinstance(x, bool) for x in v):
+                errs.append(f"{where}.{key}: every size must be an integer, got {v!r}")
 
 
-def _check_cross_knob(sweep, scenario, where, errs, model_entry=None):
-    """Constraints that span TWO knobs, or a knob and the model -- the ones BLIS does not catch.
+def _check_cross_knob(sweep, scenario, where, errs):
+    """Constraints that span two settings -- the ones BLIS does not catch.
 
     Measured against the pinned binary (pins.env): BLIS validates enum membership and simple
     ranges (`cudagraph_mode: BOGUS`, `cache_dtype: fp16` and `max_num_seqs: 0` are all refused
@@ -608,77 +289,12 @@ def _check_cross_knob(sweep, scenario, where, errs, model_entry=None):
             f"{where}.engine: cudagraph_mode is NONE for every run, which captures no graph, so "
             f"the stated capture sizes are ignored -- the sweep measures nothing")
 
-    # max-model-len-within-context-window, read from the catalog rather than guessed.
-    ctx = (model_entry or {}).get("context")
-    if ctx and lens and max(lens) > int(ctx):
-        errs.append(
-            f"{where}.engine.max_model_len: {max(lens):,} exceeds {scenario.get('model')}'s "
-            f"catalog context window ({int(ctx):,}); vLLM refuses a stated max_model_len above "
-            f"the window it derives from the model configuration")
-
-    # dbo-thresholds-stated-when-enabled: "an unstated threshold silently takes a default that
-    # differs by 16x between the two", so an enabled DBO sweep that states neither is measuring
-    # an engine default it did not choose.
-    dbo = engine.get("dbo") if isinstance(engine.get("dbo"), dict) else None
-    if dbo and any(v is True for v in (dbo.get("enable_dbo") or [])):
-        if not (dbo.get("dbo_decode_token_threshold") or dbo.get("dbo_prefill_token_threshold")):
-            errs.append(
-                f"{where}.engine.dbo: enables dual-batch overlap without stating "
-                f"dbo_decode_token_threshold or dbo_prefill_token_threshold; which one applies "
-                f"turns on batch uniformity and the two defaults differ by 16x, so the sweep "
-                f"would measure an engine default it did not choose")
-
-    # expert-divisibility-under-eplb: "with load balancing on, the engine asserts that the
-    # expert-parallel width divides the physical expert count". Checked against the catalog's
-    # expert count and the sweep's own tp x dp, so a bad redundancy count is caught here.
-    eplb = engine.get("eplb") if isinstance(engine.get("eplb"), dict) else None
-    experts = (model_entry or {}).get("experts")
-    if eplb and experts and any(v is True for v in (eplb.get("enable_eplb") or [])):
-        widths = {fp for fp in _parallel_combos(sweep.get("parallel") or {}) if fp > 1}
-        reds = [v for v in (eplb.get("num_redundant_experts") or [0]) if isinstance(v, int)]
-        for width in sorted(widths):
-            bad = [r for r in reds if (int(experts) + r) % width]
-            if bad and len(bad) == len(reds):
-                need = [(width - (int(experts) + r) % width) % width for r in bad]
-                errs.append(
-                    f"{where}.engine.eplb.num_redundant_experts: with expert-parallel width "
-                    f"{width}, {scenario.get('model')}'s {int(experts)} experts plus "
-                    f"{bad} redundant is not divisible by {width}; vLLM asserts divisibility "
-                    f"when load balancing is on, so an indivisible layout does not start "
-                    f"(nearest fixes: +{sorted(set(need))} redundant experts)")
-
-    # mamba-cache-mode-matches-model: "a cache mode for recurrent layers on a model with none is
-    # a setting with no effect". The catalog records the attention kind, so this is checkable.
-    kind = str((model_entry or {}).get("attn_kind") or "").lower()
-    mamba_knobs = [k for k in ("mamba_cache_dtype", "mamba_ssm_cache_dtype", "mamba_cache_mode")
-                   if values(k)]
-    if mamba_knobs and kind and "mamba" not in kind and "recurrent" not in kind:
-        errs.append(
-            f"{where}.engine: sweeps {', '.join(mamba_knobs)} on "
-            f"{scenario.get('model')}, whose attention is {kind!r} with no recurrent layers; "
-            f"these size a recurrent state that does not exist, so every arm would measure the "
-            f"same thing")
-
-    # Dense models take no expert knobs at all. BLIS refuses dp>1 on a dense model itself, but
-    # not an MoE-only ENGINE knob, which would simply do nothing.
-    if (model_entry or {}).get("arch") == "dense":
-        moe_only = [k for k in ("all2all_backend", "moe_backend") if values(k)]
-        if moe_only:
-            errs.append(
-                f"{where}.engine: sweeps {', '.join(moe_only)} on "
-                f"{scenario.get('model')}, which the catalog says is a DENSE model; there are "
-                f"no experts to dispatch, so every arm would measure the same thing")
-        if eplb:
-            errs.append(f"{where}.engine.eplb: expert-parallel load balancing on a dense model "
-                        f"has no experts to balance")
-
 
 def _check_nested_block(block, where, fields, errs):
-    """A nested engine block (`eplb`, `dbo`, `engram_config`): known inner fields, all lists.
+    """A nested engine block, such as `engram_config`: known inner fields, all lists.
 
     The engine decodes these strictly too, so an invented inner field is as fatal as an invented
-    top-level knob -- and easier to get wrong, since the inner names are not the block's name
-    repeated (`eplb` carries `enable_eplb`, not `enabled`).
+    top-level setting. The inner names are the field list's `<block>.<field>` entries.
     """
     if not isinstance(block, dict) or not block:
         errs.append(f"{where}: must be a non-empty mapping of its own fields "
@@ -694,10 +310,6 @@ def _check_nested_block(block, where, fields, errs):
                         f"(write `{field}: [{json.dumps(values)}]`)")
         elif not values:
             errs.append(f"{where}.{field}: empty list")
-        elif field in NESTED_BOOL_FIELDS:
-            for v in values:
-                if not isinstance(v, bool):
-                    errs.append(f"{where}.{field}: {v!r} is not a boolean")
 
 
 def f_valid(fields):
@@ -705,7 +317,7 @@ def f_valid(fields):
     return " (valid: " + ", ".join(fields) + ")"
 
 
-def _check_gpu_math_colocated(sweep, gpus, where, errs):
+def _check_gpu_math_colocated(sweep, gpus, where, errs, node_size=None):
     """At least one combo must total EXACTLY `gpus`, and report what the survivors are.
 
     `gpus` is the experiment's like-for-like guarantee, so a grid that cannot reach it is not
@@ -718,11 +330,11 @@ def _check_gpu_math_colocated(sweep, gpus, where, errs):
     ok = [(fp, ni) for fp in fps for ni in insts
           if isinstance(ni, int) and fp * ni == gpus]
     if ok:
-        straddling = [fp for fp, _ in ok if fp > GPUS_PER_NODE and fp % GPUS_PER_NODE]
+        straddling = [fp for fp, _ in ok if node_size and fp > node_size and fp % node_size]
         if len(straddling) == len(ok):
             errs.append(f"{where}: every surviving combo has a per-instance footprint that "
                         f"straddles a node boundary ({sorted(set(straddling))} GPUs on "
-                        f"{GPUS_PER_NODE}-GPU nodes); a multi-node instance must fill whole nodes")
+                        f"{node_size}-GPU nodes); a multi-node instance must fill whole nodes")
         return
     combos = sorted({f"{fp}x{ni}={fp * ni}" for fp in fps for ni in insts
                      if isinstance(ni, int)})
@@ -805,112 +417,77 @@ def _check_router(router, where, errs, routing_dir=ROUTING_DIR):
                                 f"{', '.join(sorted(known))})")
 
 
-_CATALOG_CACHE = {}
+def _node_size(sc, blis, catalog=None):
+    """The node size a spec's scenario runs on, or None when it cannot be told (reported elsewhere)."""
+    try:
+        fixed = blis_cli.chip_packaging(blis, sc.get("hardware"), catalog)["gpus_per_node"]
+    except blis_cli.BlisCommandError:
+        return None
+    cluster = sc.get("cluster")
+    gpn = cluster.get("gpus_per_node") if isinstance(cluster, dict) else None
+    return fixed or (gpn if isinstance(gpn, int) and not isinstance(gpn, bool) else None)
 
 
-def catalog_entry(model, catalog=None):
-    """The catalog row for `model`, or None -- `arch`, `experts`, `context`, `attn_kind`.
+def scenario_identity_errors(sc, blis, catalog=None):
+    """`model` and `hardware` that the catalog has no entry for, by `blis catalog resolve`.
 
-    Used only to CHECK a spec against the model it names (dense models take no expert knobs, a
-    non-recurrent model takes no mamba knobs, EPLB redundancy must divide into the expert count).
-    Optional on purpose: the validator must run on a PR with no catalog checkout, where it
-    simply skips the model-aware rules rather than failing.
-
-    The built catalog is cached per root: building it walks every model directory (~0.4s), and
-    validating a directory of specs would otherwise pay that once per spec.
+    EXISTENCE, not feasibility. A name the catalog has no entry for cannot run: BLIS refuses
+    every run of the sweep. Whether a KV cache fits stays BLIS's call.
     """
-    return _catalog(catalog)["models"].get(model)
-
-
-def _catalog(catalog=None):
-    """The built catalog's vocabularies, keyed `models` (name -> row), `hardware`, `workloads`,
-    `fabrics` (each name -> True), plus `present`. All empty with `present` False when there is no
-    catalog checkout.
-
-    One build serves both the model-aware rules and the existence check, and `present` is what
-    lets the caller tell "not in the catalog" apart from "no catalog to ask".
-    """
-    root = catalog or os.path.join(SIBLINGS, "blis-catalog")
-    if root not in _CATALOG_CACHE:
-        got = {"models": {}, "hardware": {}, "workloads": {}, "fabrics": {}, "present": False}
-        if os.path.isdir(root):
-            try:
-                sys.path.insert(0, os.path.join(ROOT, "scripts"))
-                import build_catalog
-                cat = build_catalog.build(os.path.join(root, os.pardir))
-                got["models"] = {m.get("name"): m for m in cat.get("models", [])}
-                for key, src in (("hardware", "hardware"), ("workloads", "workloads"),
-                                 ("fabrics", "fabrics")):
-                    got[key] = {(e.get("name") if isinstance(e, dict) else e): True
-                                for e in (cat.get(src) or [])}
-                    got[key].pop(None, None)
-                # A build that yielded no models is a broken or empty checkout, not an authority
-                # to reject names against.
-                got["present"] = bool(got["models"])
-            except Exception:
-                got = {"models": {}, "hardware": {}, "workloads": {}, "fabrics": {},
-                       "present": False}
-        _CATALOG_CACHE[root] = got
-    return _CATALOG_CACHE[root]
-
-
-def scenario_identity_errors(sc, catalog=None):
-    """`model` / `hardware` / `workload` that the catalog does not define, with a suggestion.
-
-    EXISTENCE, not feasibility. A name the catalog has no row for provably cannot run -- BLIS
-    exits rc=1 with `opening .../hardware/h200x.yaml: no such file or directory` on every run of
-    the sweep -- so catching it is the same job as the GPU arithmetic check: refuse what cannot
-    run before a clone-and-build, rather than after (susiejojo review). Verified: a spec with
-    `hardware: h200x` validated clean, dry-ran clean, planned 154 runs, and failed all of them.
-
-    Whether a KV cache FITS on that hardware stays BLIS's call -- this adds no physics.
-
-    Skipped entirely when no catalog is checked out, exactly as the model-aware rules are, so
-    fork CI (which validates with no catalog and no secrets) keeps working.
-    """
-    cat = _catalog(catalog)
-    if not cat["present"]:
-        return []
     errs = []
-    for key, bucket in (("model", "models"), ("hardware", "hardware"), ("workload", "workloads")):
+    for key, kind in (("model", "model"), ("hardware", "chip")):
         name = sc.get(key)
-        if not name or name in cat[bucket]:
+        if not name:
             continue
-        known = sorted(cat[bucket])
-        errs.append(f"scenario.{key}: {name!r} is not in the catalog{_suggest(name, known)} "
-                    f"-- known: {', '.join(known)}")
+        identity, reason = blis_cli.resolve(blis, catalog=catalog, **{kind: name})
+        if identity is None:
+            errs.append(f"scenario.{key}: {name!r}: {reason}")
+        elif identity != name:
+            errs.append(f"scenario.{key}: {name!r} is not a catalog name; the catalog calls it "
+                        f"{identity!r}")
     return errs
 
 
-def cluster_errors(sc, catalog=None):
-    """`scenario.cluster` structure, plus a fabric that the catalog's networks/ classes define.
+def cluster_errors(sc, blis=None, catalog=None):
+    """`scenario.cluster` structure: a mapping of `fabric` (a non-empty string) and
+    `gpus_per_node` (a positive integer).
 
-    STRUCTURE is checked always: `cluster` must be a mapping whose only key is `fabric`, a
-    non-empty string. The NAME is checked only when a catalog is checked out, exactly as
-    model/hardware/workload are -- BLIS resolves cross-node cost from networks/<fabric>.yaml and
-    exits rc=1 on every run of the sweep if it is missing, so a typo is as fatal as a bad hardware
-    key and worth the same before-build catch. Omitted means the runner's ib-400g default.
+    The fabric's name is not checked here: no simulator command resolves a network name yet, and
+    this repository reads no catalog file (design §5). BLIS refuses an unknown fabric on every
+    run. Omitted means the runner's ib-400g default.
     """
     cluster = sc.get("cluster")
-    if cluster is None:
-        return []
     errs = []
-    if not isinstance(cluster, dict) or not cluster:
-        errs.append("scenario.cluster: must be a non-empty mapping, e.g. {fabric: roce-200g}")
-        return errs
-    for key in cluster:
-        if key != "fabric":
-            errs.append(f"scenario.cluster.{key}: unknown key (the only cluster knob is `fabric`)")
-    fabric = cluster.get("fabric")
-    if "fabric" in cluster and (not isinstance(fabric, str) or not fabric):
-        errs.append("scenario.cluster.fabric: must be a non-empty string naming a networks/ class "
-                    "(ib-400g, roce-200g, ethernet-100gbe)")
-        return errs
-    cat = _catalog(catalog)
-    if fabric and cat["present"] and cat["fabrics"] and fabric not in cat["fabrics"]:
-        known = sorted(cat["fabrics"])
-        errs.append(f"scenario.cluster.fabric: {fabric!r} is not a catalog fabric"
-                    f"{_suggest(fabric, known)} -- known: {', '.join(known)}")
+    if cluster is not None:
+        if not isinstance(cluster, dict) or not cluster:
+            errs.append("scenario.cluster: must be a non-empty mapping, e.g. {fabric: roce-200g}")
+            return errs
+        for key in cluster:
+            if key not in ("fabric", "gpus_per_node"):
+                errs.append(f"scenario.cluster.{key}: unknown key (the cluster knobs are `fabric` "
+                            f"and `gpus_per_node`)")
+        gpn = cluster.get("gpus_per_node")
+        if "gpus_per_node" in cluster and (isinstance(gpn, bool) or not isinstance(gpn, int) or gpn < 1):
+            errs.append("scenario.cluster.gpus_per_node: must be a positive integer")
+        fabric = cluster.get("fabric")
+        if "fabric" in cluster and (not isinstance(fabric, str) or not fabric):
+            errs.append("scenario.cluster.fabric: must be a non-empty string naming a networks/ class "
+                        "(ib-400g, roce-200g, ethernet-100gbe)")
+    # The node size: the catalog's where it fixes one, else the specification's (#96).
+    gpn = (cluster or {}).get("gpus_per_node") if isinstance(cluster, dict) else None
+    if blis is not None and sc.get("hardware") and not errs:
+        try:
+            fixed = blis_cli.chip_packaging(blis, sc["hardware"], catalog)["gpus_per_node"]
+        except blis_cli.BlisCommandError:
+            fixed = None          # an unknown chip is reported by scenario_identity_errors
+        else:
+            if fixed and gpn is not None and gpn != fixed:
+                errs.append(f"scenario.cluster.gpus_per_node: {gpn} contradicts the catalog, which fixes "
+                            f"{sc['hardware']} at {fixed}; omit it")
+            elif not fixed and gpn is None:
+                errs.append(f"scenario.cluster.gpus_per_node: required, because the catalog fixes no node "
+                            f"size for {sc['hardware']} (an 8-GPU HGX server: 8)")
+    return errs
     return errs
 
 
@@ -979,8 +556,12 @@ def advisories(spec, path=None):
     return notes
 
 
-def validate(spec, routing_dir=ROUTING_DIR, vocabulary=None, catalog=None):
+def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None):
     """Every error in `spec`, as readable `path: message` strings. Empty means valid.
+
+    `blis` is the simulator binary whose commands supply the names (`blis fields`, `blis
+    schema deployment`) and the catalog identities (`blis catalog resolve`). `catalog` names a
+    catalog directory; None means the catalog the binary embeds.
 
     Collects ALL errors rather than stopping at the first: a contributor fixing a spec by hand
     should see every problem in one run, not discover them one CI round-trip at a time.
@@ -988,9 +569,8 @@ def validate(spec, routing_dir=ROUTING_DIR, vocabulary=None, catalog=None):
     errs = []
     if not isinstance(spec, dict):
         return ["spec must be a mapping"]
-    par_vocab, eng_vocab, source = vocabulary or knob_vocabulary()
-    enums, _enum_source = engine_enums()
-    entry = None
+    vocab = knob_vocabulary(blis, fields)
+    par_vocab, eng_vocab, source = vocab.parallel, vocab.engine_names(), vocab.source
 
     name = spec.get("name")
     if not name:
@@ -1018,10 +598,9 @@ def validate(spec, routing_dir=ROUTING_DIR, vocabulary=None, catalog=None):
         for key in ("model", "hardware", "workload"):
             if not sc.get(key):
                 errs.append(f"scenario.{key}: required")
-        # Present AND real: a name the catalog does not define cannot run anywhere. No-op without
-        # a catalog checkout.
-        errs.extend(scenario_identity_errors(sc, catalog))
-        errs.extend(cluster_errors(sc, catalog))
+        # Present AND real: a name the catalog does not define cannot run anywhere.
+        errs.extend(scenario_identity_errors(sc, blis, catalog))
+        errs.extend(cluster_errors(sc, blis, catalog))
         gpus = sc.get("gpus")
         if not isinstance(gpus, int) or isinstance(gpus, bool) or gpus < 1:
             errs.append("scenario.gpus: required positive integer -- the budget EVERY run uses")
@@ -1062,22 +641,16 @@ def validate(spec, routing_dir=ROUTING_DIR, vocabulary=None, catalog=None):
                             f"list (sweep it under a sweep's `engine:` instead)")
         _check_knob_names(sc.get("engine") or {}, "scenario.engine", eng_vocab, "engine", errs,
                           source)
-        # A shared setting is a single value, so wrap each in a list to reuse the same value
-        # check the swept ones get -- a bad `cudagraph_mode` is just as fatal here.
-        _check_engine_values({k: (v if _is_list(v) and k in ENGINE_INT_LISTS else [v])
-                              for k, v in (sc.get("engine") or {}).items()},
-                             "scenario.engine", errs, enums)
+        for block, inner in vocab.blocks.items():
+            val = (sc.get("engine") or {}).get(block)
+            if isinstance(val, dict):
+                for field in val:
+                    if field not in inner:
+                        errs.append(f"scenario.engine.{block}.{field}: not a field of this "
+                                    f"block{_suggest(field, inner) or f_valid(sorted(inner))}")
         seed = sc.get("seed")
         if seed is not None and (not isinstance(seed, int) or isinstance(seed, bool) or seed < 0):
             errs.append("scenario.seed: must be a non-negative integer")
-        # Read once, for the model-aware cross-knob rules below. None (no catalog checkout) just
-        # skips them.
-        entry = catalog_entry(sc.get("model"), catalog)
-        # blis-vllm v0.32.0-blis.1 (compat/kernelmodel/kvlayers.go) sizes no KV for a recurrent layer.
-        if (entry or {}).get("recurrent"):
-            errs.append(f"scenario.model: {sc.get('model')} has recurrent (linear-attention) "
-                        f"layers, which the pinned engine (vLLM 0.32.0) cannot size a KV cache "
-                        f"for, so every run refuses at startup")
 
     sweeps = spec.get("sweeps")
     if not _is_list(sweeps) or not sweeps:
@@ -1138,7 +711,7 @@ def validate(spec, routing_dir=ROUTING_DIR, vocabulary=None, catalog=None):
         _check_value_lists(sw.get("parallel") or {}, f"{where}.parallel", errs)
         _check_knob_names(sw.get("parallel") or {}, f"{where}.parallel", par_vocab, "parallel",
                           errs, source)
-        _check_engine(sw.get("engine") or {}, f"{where}.engine", eng_vocab, source, errs, enums)
+        _check_engine(sw.get("engine") or {}, f"{where}.engine", vocab, errs)
         for role in ("prefill", "decode"):
             block = sw.get(role)
             if not isinstance(block, dict):
@@ -1152,8 +725,7 @@ def validate(spec, routing_dir=ROUTING_DIR, vocabulary=None, catalog=None):
             _check_value_lists(block.get("parallel") or {}, f"{where}.{role}.parallel", errs)
             _check_knob_names(block.get("parallel") or {}, f"{where}.{role}.parallel", par_vocab,
                               "parallel", errs, source)
-            _check_engine(block.get("engine") or {}, f"{where}.{role}.engine", eng_vocab, source,
-                          errs, enums)
+            _check_engine(block.get("engine") or {}, f"{where}.{role}.engine", vocab, errs)
 
         router = sw.get("router")
         if router is not None:
@@ -1183,73 +755,37 @@ def validate(spec, routing_dir=ROUTING_DIR, vocabulary=None, catalog=None):
             if disagg:
                 _check_gpu_math_pd(sw, sc["gpus"], where, errs)
             elif colocated:
-                _check_gpu_math_colocated(sw, sc["gpus"], where, errs)
+                _check_gpu_math_colocated(sw, sc["gpus"], where, errs, _node_size(sc, blis, catalog))
         # Cross-knob and model-aware constraints LAST: they read the sweep as a whole, so they
         # run once the individual knobs are known to be well-formed.
         if isinstance(sc, dict):
-            _check_cross_knob(sw, sc, where, errs, entry)
+            _check_cross_knob(sw, sc, where, errs)
     return errs
 
 
-def _check_engine(engine, where, vocabulary, source, errs, enums=None):
-    """Engine knobs, with the nested blocks (`speculative`, `eplb`, …) handled as such."""
-    _check_value_lists(engine, where, errs,
-                       allow_nested=tuple(NESTED_ENGINE_FIELDS) + ENGINE_INT_LISTS)
-    _check_knob_names(engine, where, vocabulary, "engine", errs, source)
-    _check_engine_values(engine, where, errs, enums)
-    for block, fields in NESTED_ENGINE_FIELDS.items():
-        if block == "speculative" or block not in (engine or {}):
-            continue                        # speculative has its own stricter checks below
-        _check_nested_block(engine[block], f"{where}.{block}", fields, errs)
-    spec = engine.get("speculative")
-    if spec is None:
-        return
-
-    if not isinstance(spec, dict):
-        errs.append(f"{where}.speculative: must be a mapping with method and num_spec_tokens")
-        return
-    for key in spec:
-        if key == "draft_model":
-            # Refused because a sweep over it CANNOT RUN on any catalog model, which is worse than
-            # noise. The two halves of the catalog fail it for opposite reasons:
-            #   * the 19 of 42 models whose graph declares a speculator -- the binary refuses the
-            #     deployment ("the target graph already states a speculator; one drafter runs");
-            #   * the other 23 -- run_blis refuses drafting up front ("declares no speculator in
-            #     its catalog graph").
-            # 19 + 23 == 42, so there is no model where a draft_model arm completes. The validator
-            # never invokes the binary, so this has to be stated here or the whole sweep burns.
-            errs.append(f"{where}.speculative.draft_model: carried by the pinned stack but no "
-                        f"sweep over it can run -- a model whose graph declares a speculator is "
-                        f"refused by the simulator (one drafter runs), and a model without one "
-                        f"cannot draft at all, which covers every model in the catalog. The "
-                        f"drafter comes from the model's own graph; choose the model instead")
-        elif key in SPECULATIVE_RECORDED_ONLY:
-            # These four DECODE under the pinned engine model (blis-vllm's Speculative carries all
-            # seven fields; the pre-v0.14.0 blis-schemas struct held only two), but the
-            # struct's own doc is explicit that acceptance is calibration input: they "are carried
-            # as the launch gave them and recorded, but they do not change which drafts a
-            # simulator accepts". So a sweep over one reports noise.
-            errs.append(f"{where}.speculative.{key}: carried and recorded by the pinned stack but "
-                        f"not priced by it -- acceptance comes from the registry's measured "
-                        f"profiles, selected by method and num_spec_tokens, so sweeping this "
-                        f"reports noise")
-        elif key not in SPECULATIVE_FIELDS:
-            errs.append(f"{where}.speculative.{key}: not a field the pinned stack carries "
-                        f"{_suggest(key, SPECULATIVE_FIELDS)}")
-    methods = (enums or {}).get("speculative_method")
-    if methods and _is_list(spec.get("method")):
-        for m in spec["method"]:
-            if str(m) not in methods:
-                errs.append(f"{where}.speculative.method: {m!r} is not a draft method the "
-                            f"engine knows{_suggest(m, methods)}")
+def _check_engine(engine, where, vocab, errs):
+    """Engine settings, with the nested blocks (`speculative`, `engram_config`, ...) as such."""
+    _check_value_lists(engine, where, errs, allow_nested=tuple(vocab.blocks) + ENGINE_INT_LISTS)
+    _check_knob_names(engine, where, vocab.engine_names(), "engine", errs, vocab.source)
+    _check_int_lists(engine, where, errs)
+    for block, fields in vocab.blocks.items():
+        if block in (engine or {}):
+            _check_nested_block(engine[block], f"{where}.{block}", sorted(fields), errs)
+    # A swept setting the field list marks inert measures the same number in every arm.
+    for key, val in (engine or {}).items():
+        names = [f"{key}.{f}" for f in val] if isinstance(val, dict) else [key]
+        for name in names:
+            why = settings.inert_reason(vocab, name)
+            if why:
+                errs.append(f"{where}.{name}: {why}")
+    spec = (engine or {}).get("speculative")
     # BOTH are required: BLIS refuses a drafting scenario whose acceptance does not resolve, and
-    # acceptance is selected by the method AND the depth. Naming one without the other is the
-    # mistake RFC #21 calls out explicitly.
-    for key in ("method", "num_spec_tokens"):
-        if key not in spec:
-            errs.append(f"{where}.speculative: needs both method and num_spec_tokens "
-                        f"(missing {key})")
-    _check_value_lists(spec, f"{where}.speculative", errs)
+    # acceptance is selected by the method AND the depth.
+    if isinstance(spec, dict):
+        for key in ("method", "num_spec_tokens"):
+            if key not in spec:
+                errs.append(f"{where}.speculative: needs both method and num_spec_tokens "
+                            f"(missing {key})")
 
 
 def load(path):
@@ -1281,16 +817,26 @@ def main(argv=None):
                     help="machine-readable {file: [errors]} instead of text")
     ap.add_argument("--routing", default=ROUTING_DIR,
                     help="directory holding the EndpointPickerConfig files (default: routing/)")
+    ap.add_argument("--blis", default=os.environ.get("BLIS"),
+                    help="the simulator binary whose commands supply setting names and catalog "
+                         "identities (default: $BLIS)")
+    ap.add_argument("--fields",
+                    help="the engine's field list: the pinned blis-vllm release's fields.json, until the "
+                         "binary has `blis fields` (default: ask the binary)")
     ap.add_argument("--catalog",
-                    help="blis-catalog checkout, for checking that scenario.model/hardware/"
-                         "workload exist (default: ../blis-catalog; skipped when absent)")
+                    help="a catalog directory for `blis catalog resolve` (default: the catalog "
+                         "the binary embeds)")
     args = ap.parse_args(argv)
 
     paths = spec_paths(args.target)
     if not paths:
         print(f"no spec files under {args.target}", file=sys.stderr)
         return 1
-    vocab = knob_vocabulary()
+    try:
+        vocab = knob_vocabulary(args.blis, args.fields)
+    except blis_cli.BlisCommandError as e:
+        print(f"validate_experiment: {e}", file=sys.stderr)
+        return 2
     report, notes, failed = {}, {}, 0
     for path in paths:
         # Inside the repo a relative path is what a contributor recognises; outside it (a spec
@@ -1299,7 +845,11 @@ def main(argv=None):
         if rel.startswith(os.pardir):
             rel = path
         spec, err = load(path)
-        errs = [err] if err else validate(spec, args.routing, vocab, args.catalog)
+        try:
+            errs = [err] if err else validate(spec, args.blis, args.routing, args.catalog, args.fields)
+        except blis_cli.BlisCommandError as e:
+            print(f"validate_experiment: {rel}: {e}", file=sys.stderr)
+            return 2
         report[rel] = errs
         notes[rel] = [] if err else advisories(spec, path)
         if errs:
@@ -1316,15 +866,8 @@ def main(argv=None):
                 print(f"ok   {rel}")
             for n in notes.get(rel) or ():
                 print(f"  note: {n}")
-        # Say whether model/hardware/workload were CHECKED or skipped: "valid" means something
-        # weaker without a catalog, and a silent skip is how a typo'd identifier reaches a build.
-        cat = _catalog(args.catalog)
-        ident = (f"model/hardware/workload checked against the catalog "
-                 f"({len(cat['models'])} models, {len(cat['hardware'])} hardware, "
-                 f"{len(cat['workloads'])} workloads)") if cat["present"] else (
-                 "model/hardware/workload NOT checked -- no blis-catalog checkout")
-        print(f"\n{len(paths) - failed}/{len(paths)} valid "
-              f"(knob names checked against {vocab[2]}; {ident})")
+        print(f"\n{len(paths) - failed}/{len(paths)} valid (setting names checked against "
+              f"{vocab.source}; model and hardware checked with `blis catalog resolve`)")
         all_notes = [n for v in notes.values() for n in v]
         if all_notes:
             print(f"\n{len(all_notes)} style note(s), not failures.")

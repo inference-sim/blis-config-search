@@ -238,7 +238,7 @@ def test_catalog_workload_kinds():
     """
     tmp = tempfile.mkdtemp()
     try:
-        wdir = os.path.join(tmp, "blis-catalog", "workloads")
+        wdir = os.path.join(tmp, "catalog", "workloads")
         os.makedirs(wdir)
         with open(os.path.join(wdir, "sharegpt.yaml"), "w", encoding="utf-8") as f:
             f.write("prefix_tokens: 0\n"
@@ -300,7 +300,7 @@ def test_derived_pins_match_gomod():
         return
 
     pins = bc.read_pins()
-    ref = pins.get("BLIS_REF")
+    ref = pins.get("BLIS_SHA")
     try:
         derived = sync_pins.derive(ref, repo)
     except LookupError:
@@ -318,20 +318,6 @@ def test_derived_pins_match_gomod():
             check(key in derived,
                   f"pins.env states {key} but go.mod at {ref} has no such dependency")
 
-    # The engine allowlist must match the binary's, or a compat-engine version would pass.
-    sys.path.insert(0, os.path.join(ROOT, "scripts"))
-    import re, subprocess, run_blis
-    go = subprocess.run(["git", "-C", repo, "show", f"{ref}:cmd/engine_driver_build.go"],
-                        capture_output=True, text=True, timeout=30).stdout
-    m = re.search(r"coreEngineVersions\s*=\s*map\[string\]bool\{([^}]*)\}", go)
-    if m:
-        core = set(re.findall(r'"([^"]+)"\s*:\s*true', m.group(1)))
-        check(core == set(run_blis.CORE_ENGINE_VERSIONS),
-              f"run_blis.CORE_ENGINE_VERSIONS {sorted(run_blis.CORE_ENGINE_VERSIONS)} but "
-              f"{ref} coreEngineVersions is {sorted(core)}")
-    else:
-        print(f"  (engine allowlist not checked: no coreEngineVersions at {ref})")
-
     # The block must be machine-generated, so the markers have to survive edits to the file.
     with open(os.path.join(ROOT, "pins.env"), encoding="utf-8") as f:
         text = f.read()
@@ -342,7 +328,7 @@ def test_derived_pins_match_gomod():
     block, _, _ = rest.partition(sync_pins.END)
     assigned = {ln.partition("=")[0].strip() for ln in block.splitlines()
                 if ln.strip() and not ln.strip().startswith("#") and "=" in ln}
-    for key in ("CATALOG_REF", "REGISTRY_REF", "BLIS_REF", "BLIS_SHA"):
+    for key in ("BLIS_REF", "BLIS_SHA"):
         check(key not in assigned,
               f"{key} is hand-pinned and must live outside the generated block")
     # Conversely every assignment inside the block must be a derived key, or sync_pins would
@@ -369,8 +355,8 @@ def test_displayed_stack_survives_a_fresh_clone():
     stack = cat["stack"]
 
     # the flat `versions` map is left as it was -- it still degrades to "absent", by design
-    check(cat["versions"]["blis-catalog"] == "absent",
-          "precondition: without siblings the legacy describe yields 'absent'")
+    check(cat["versions"]["blis-substrate"] == "absent",
+          "precondition: without a checkout the describe yields 'absent'")
 
     want = {
         # The ROOT is deliberately NOT BLIS_REF. It is what PRICED the committed reports, which is
@@ -379,12 +365,9 @@ def test_displayed_stack_survives_a_fresh_clone():
         # pin, because they describe the stack that pin resolves to. Both halves still have to
         # come from pins.env rather than a sibling describe, which is this test's subject.
         "inference-sim": bc._priced_by(pins),
-        "blis-latency-kernel": pins.get("KERNEL_REF"),
-        "blis-schemas": pins.get("SCHEMAS_REF"),
+        "blis-substrate": pins.get("SUBSTRATE_REF"),
         "blis-vllm": pins.get("VLLM_REF"),
         "llm-d-router": pins.get("ROUTER_REF"),
-        "blis-catalog": pins.get("CATALOG_REF"),
-        "blis-registry": pins.get("REGISTRY_REF"),
     }
     rows = [stack["root"]] + list(stack["deps"])
     # Not a fixed count: a derived dep legally absent from go.mod at the pinned ref (blis-vllm
@@ -404,8 +387,8 @@ def test_displayed_stack_survives_a_fresh_clone():
     # BLIS is the root; the rest are what it resolves to, never peers of it
     check(stack["root"]["name"] == "inference-sim",
           "the simulator binary is the root dependency, not one of several peers")
-    check("blis-latency-kernel" in [d["name"] for d in stack["deps"]],
-          "the latency kernel prices every run; it must appear in the stack")
+    check("blis-substrate" in [d["name"] for d in stack["deps"]],
+          "the substrate's cost model prices every run; it must appear in the stack")
 
 
 def test_pins_are_the_single_source_of_the_sim_version():
@@ -481,14 +464,16 @@ def test_pins_are_the_single_source_of_the_sim_version():
     # SETUP.md documents the same pin a human would clone
     with open(os.path.join(ROOT, "SETUP.md")) as f:
         setup = f.read()
-    check(f"--branch {ref} " in setup, f"SETUP.md should clone {ref}")
-    check(sha in setup, f"SETUP.md should verify the pinned sha {sha[:7]}")
+    check(". ./pins.env" in setup and '--branch "$BLIS_REF"' in setup and '"$BLIS_SHA"' in setup,
+          "SETUP.md should clone and verify what pins.env pins, by sourcing it")
+    check(ref not in setup and sha not in setup,
+          "SETUP.md should not copy the pinned release or commit (X23): pins.env is the one place")
 
     # CI must read pins.env rather than carry its own copy of the refs.
     with open(os.path.join(ROOT, ".github", "workflows", "run-experiment.yml")) as f:
         exp_wf = f.read()
     check(". ./pins.env" in exp_wf, "run-experiment.yml should source pins.env")
-    for key in ("BLIS_REF", "CATALOG_REF", "REGISTRY_REF"):
+    for key in ("BLIS_REF", "SUBSTRATE_REF"):
         check(f'"${key}"' in exp_wf, f"run-experiment.yml should take {key} from pins.env")
     check(f"--branch {ref} " not in exp_wf,
           "run-experiment.yml hard-codes the sim ref; source it from pins.env instead")
@@ -519,17 +504,15 @@ def test_pins_are_the_single_source_of_the_sim_version():
     check(bool(run_experiment.blis_pin_warning(off, pins)),
           "a binary built from another commit must warn")
 
-    # The catalog must be cloned BEFORE the validate step, or the existence check on
-    # scenario.model/hardware/workload silently no-ops and a typo'd identifier still reaches the
-    # Go build before failing every run (susiejojo review on #22). Ordering is the whole point,
-    # so assert the positions, not just the presence.
-    clone_at = exp_wf.find("blis-catalog.git")
+    # The validator reads setting names and catalog identities from the pinned binary, so the
+    # binary must be built BEFORE the validate step, and the step must pass it.
+    build_at = exp_wf.find("go build -o blis main.go")
     validate_at = exp_wf.find("validate_experiment.py")
-    check(clone_at != -1 and validate_at != -1 and clone_at < validate_at,
-          "run-experiment.yml must clone blis-catalog BEFORE validating, so the "
-          "model/hardware/workload existence check can run")
-    check('validate_experiment.py "$SPEC" --catalog' in exp_wf,
-          "run-experiment.yml should validate WITH --catalog, or the existence check no-ops")
+    check(build_at != -1 and validate_at != -1 and build_at < validate_at,
+          "run-experiment.yml must build the simulator BEFORE validating, so the validator can "
+          "read the setting names and catalog identities from it")
+    check('validate_experiment.py "$SPEC" --blis "$BLIS_BIN"' in exp_wf,
+          "run-experiment.yml should validate WITH --blis")
 
     # The schema/validator agreement tests SKIP when jsonschema is absent, so the job that runs
     # them has to install it -- otherwise the drift guard quietly becomes a no-op and the
@@ -539,15 +522,12 @@ def test_pins_are_the_single_source_of_the_sim_version():
     with open(os.path.join(ROOT, ".github", "workflows", "checks.yml")) as f:
         checks_wf = f.read()
     installs = [ln.strip() for ln in checks_wf.splitlines() if "pip install" in ln]
-    # The `python` job is the one that runs test_experiment.py, so that is the install line that
-    # has to carry it -- and the fork-safe `experiments` job must NOT need a new dependency.
-    py_job = checks_wf.split("experiments:")[0]
-    py_installs = [ln.strip() for ln in py_job.splitlines() if "pip install" in ln]
-    check(any("jsonschema" in ln for ln in py_installs),
-          "checks.yml's `python` job must `pip install jsonschema`, or "
-          "SchemaAgreesWithValidator skips in CI and the schema/validator drift guard never runs")
-    check(all("pyyaml" in ln for ln in installs),
-          "every checks.yml job still needs pyyaml")
+    check(installs and all("--require-hashes -r requirements.txt" in ln for ln in installs),
+          "every checks.yml job installs the hash-locked requirements.txt (X21)")
+    with open(os.path.join(ROOT, "requirements.txt")) as f:
+        locked = f.read()
+    check("jsonschema==" in locked and "pyyaml==" in locked,
+          "requirements.txt locks pyyaml and jsonschema, or SchemaAgreesWithValidator skips in CI")
 
     # GUIDANCE must not restate a superseded version. A doc that tells a contributor to clone a
     # ref the stack no longer uses is worse than one saying nothing: SETUP.md was correct at
@@ -557,7 +537,7 @@ def test_pins_are_the_single_source_of_the_sim_version():
     # Historical statements are legitimate and stay: a dated measurement, a "removed in vX" note,
     # a recorded pinned_stack. So this reads only the *instructional* surfaces and asks that any
     # version they name is one pins.env actually pins.
-    pinned_refs = {pins.get(k) for k in ("BLIS_REF", "CATALOG_REF", "REGISTRY_REF", "KERNEL_REF")}
+    pinned_refs = {pins.get(k) for k in ("BLIS_REF", "SUBSTRATE_REF", "KERNEL_REF")}
     superseded = {"v0.10.0", "0.2.1", "v0.1.1"} - pinned_refs
     for rel in ("README.md", os.path.join("experiments", "README.md"),
                 os.path.join(".claude", "skills", "blis-experiment", "SKILL.md")):
@@ -569,6 +549,24 @@ def test_pins_are_the_single_source_of_the_sim_version():
         for stale in sorted(superseded):
             check(stale not in text,
                   f"{rel} names superseded ref {stale}; cite pins.env instead of a version")
+
+
+def test_pins_name_no_independent_catalog_or_registry():
+    """CFG-1: a committed report is priced with the pinned release's embedded data, so pins.env has
+    no catalog or registry pin of its own, and no workflow clones either repository."""
+    print("test_pins_name_no_independent_catalog_or_registry")
+    pins = bc.read_pins()
+    check("CATALOG_REF" not in pins and "REGISTRY_REF" not in pins,
+          "pins.env pins a catalog or registry apart from the release that embeds them")
+    check(bool(pins.get("SUBSTRATE_REF")), "pins.env has no SUBSTRATE_REF to read catalog files from")
+    wf = os.path.join(ROOT, ".github", "workflows")
+    for fn in sorted(os.listdir(wf)):
+        with open(os.path.join(wf, fn)) as f:
+            text = f.read()
+        check("blis-catalog.git" not in text and "blis-registry.git" not in text,
+              f"{fn} clones the legacy catalog or registry repository")
+        if "run_experiment.py" in text or "blis_pin.py regen" in text or "blis_pin.py smoke" in text:
+            check("--data-override" not in text, f"{fn} would price a committed report with overridden data")
 
 
 def test_lexicon_mirror_is_in_sync():
@@ -597,8 +595,8 @@ def test_lexicon_mirror_is_in_sync():
 
 def test_catalog():
     print("test_catalog")
-    cat = bc.build(os.path.join(ROOT, os.pardir))
-    # against the real sibling repos if present; else graceful empty
+    cat = bc.build(os.path.join(ROOT, os.pardir, "blis-substrate"))
+    # against a blis-substrate checkout beside this repo if present; else graceful empty
     if cat["models"]:
         names = {m["name"] for m in cat["models"]}
         check("qwen3-14b" in names, "qwen3-14b in catalog")
@@ -645,7 +643,7 @@ def test_catalog():
 
     # graceful degradation: nonexistent siblings
     empty = bc.build("/nonexistent-siblings-xyz")
-    check(empty["models"] == [] and empty["versions"]["blis-catalog"] == "absent",
+    check(empty["models"] == [] and empty["versions"]["blis-substrate"] == "absent",
           "absent siblings -> empty catalog + 'absent' version")
 
 
@@ -708,8 +706,14 @@ def test_workflows_sane():
             if not any("git push origin" in (st.get("run") or "") for st in steps):
                 continue
             co = next((st for st in steps if st.get("uses", "").startswith("actions/checkout@")), {})
-            check((co.get("with") or {}).get("ref") == "${{ github.event.repository.default_branch }}",
-                  f"{fn} job {jname} pushes a branch, so it must branch from the default branch")
+            ref = (co.get("with") or {}).get("ref")
+            # The default branch, or (regen-reports.yml only) the dispatch's `base`, which that job
+            # refuses unless its workflow files equal the default branch's.
+            ok = ref == "${{ github.event.repository.default_branch }}" or (
+                fn == "regen-reports.yml"
+                and ref == "${{ github.event.inputs.base || github.event.repository.default_branch }}"
+                and "Refuse a base whose workflow files differ" in open(os.path.join(wfdir, fn)).read())
+            check(ok, f"{fn} job {jname} pushes a branch, so it must branch from the default branch")
 
     ck = os.path.join(ROOT, ".github", "workflows", "checks.yml")
     ctxt = open(ck).read()
@@ -785,17 +789,17 @@ def test_explore_data():
              "--registry", "./blis-registry", "--catalog", "./blis-catalog", "--defaults-filepath",
              "./upstream/defaults.yaml", "--workload", "chatbot", "--prompt-tokens", "256"], "chatbot")
         check("upstream" not in recipe and "--workload " not in recipe and "--scenarios scenarios" in recipe
-              and '--catalog "$BLIS_CATALOG"' in recipe and "--prompt-tokens 256" in recipe,
+              and '--catalog "$SUBSTRATE_CATALOG"' in recipe and "--prompt-tokens 256" in recipe,
               "the shown command drops CI paths and inert flags, keeping what BLIS reads")
         # A multi-node run priced over a non-IB fabric (issue #71): the fabric is part of the
         # scenario hash, so _scenario must regenerate with the RECORDED fabric or the panel shows
         # nothing. A record predating the field falls back to IB, which is what it was priced on.
         par16 = {"tp": 8, "pp": 1, "dp": 1}
         for fab, dep_extra in (("roce-200g", {"fabric": "roce-200g"}), ("ib-400g", {})):
-            nm = run_blis.scenario_name("m", "h100", "0.29.0", par16, {"block_size": 16}, 16, fab) + ".yaml"
+            nm = run_blis.scenario_name("m", "h100", "0.32.0", par16, {"block_size": 16}, 16, fab) + ".yaml"
             dep16 = {"scenario": nm, "parallel": par16, "engine": {"block_size": 16},
                      "num_instances": 16, **dep_extra}
-            exp16 = {"name": "m-h100-x", "pinned_stack": {"engine_version": "0.29.0"},
+            exp16 = {"name": "m-h100-x", "pinned_stack": {"engine_version": "0.32.0"},
                      "scenario": {"model": "m", "hardware": "h100"}}
             got = explore_data._scenario(rd, exp16, dep16)
             check(got is not None and got[0] == nm,
@@ -805,18 +809,18 @@ def test_explore_data():
         # hashing (single node prices no cross-node traffic), so the recorded name is the IB one and
         # _scenario -- which reconstructs from the recorded fabric: None -- must still match it.
         par1 = {"tp": 8, "pp": 1, "dp": 1}
-        nm1 = run_blis.scenario_name("m", "h100", "0.29.0", par1, {"block_size": 16}, 1,
+        nm1 = run_blis.scenario_name("m", "h100", "0.32.0", par1, {"block_size": 16}, 1,
                                      run_blis.DEFAULT_FABRIC) + ".yaml"
         dep1 = {"scenario": nm1, "parallel": par1, "engine": {"block_size": 16},
                 "num_instances": 1, "fabric": None}
-        got1 = explore_data._scenario(rd, {"name": "m-h100-x", "pinned_stack": {"engine_version": "0.29.0"},
+        got1 = explore_data._scenario(rd, {"name": "m-h100-x", "pinned_stack": {"engine_version": "0.32.0"},
                                            "scenario": {"model": "m", "hardware": "h100"}}, dep1)
         check(got1 is not None and got1[0] == nm1,
               "a single-node run in a non-IB spec still regenerates (fabric normalized to default)")
         check("fabric:" not in got1[1], "a single-node scenario names no fabric")
         # A run whose spec omits knobs the sweep sets elsewhere (issue #68): the shown file names
         # the default it ran at, as a comment, so it still parses to exactly what BLIS read.
-        noted = explore_data._scenario(rd, {"name": "m-h100-x", "pinned_stack": {"engine_version": "0.29.0"},
+        noted = explore_data._scenario(rd, {"name": "m-h100-x", "pinned_stack": {"engine_version": "0.32.0"},
                                             "scenario": {"model": "m", "hardware": "h100"}}, dep1,
                                        {"max_num_seqs": 256, "speculative_method": "off", "block_size": 16})
         check(noted[0] == nm1 and '# max_num_seqs: 256' in noted[1] and '# speculative_method: "off"' in noted[1]
@@ -845,7 +849,7 @@ def test_explore_data():
         ps = {"blis": "v9.0.0", "catalog": "1.0.0", "registry": "v2.0.0",
               "resolved": {"blis": {"commit": "a" * 40}, "catalog": {"commit": "b" * 40}}}
         st = explore_data.setup({"pinned_stack": ps, "scenario": {"replay": {"corpus": ".corpus/t.jsonl", "corpus_sha256": "c" * 64}}})
-        check("--branch v9.0.0" in st["script"] and "a" * 40 in st["script"] and "export BLIS_REGISTRY" in st["script"]
+        check("--branch v9.0.0" in st["script"] and "a" * 40 in st["script"] and "export SUBSTRATE_REGISTRY" in st["script"]
               and "shasum -a 256 -c" in st["script"],
               "the setup script installs the report's own recorded stack, checks each tag's commit and the corpus")
         routed = explore_data.setup({"pinned_stack": dict(ps, router="v1.0.0-blis.9")})["stack"]
@@ -856,11 +860,18 @@ def test_explore_data():
               "reproducing the sweep runs the report's own spec into repro/, not over reports/")
         check(explore_data.setup({}) is None, "a ledger with no pinned_stack ships no setup")
         pins = explore_data._PINS
-        now = {"blis": pins["BLIS_REF"], "catalog": pins["CATALOG_REF"], "registry": pins["REGISTRY_REF"],
-               "engine_version": explore_data.run_blis.pinned_engine_version()}
+        now = {"blis": pins["BLIS_REF"], "substrate": pins["SUBSTRATE_REF"]}
         check(not explore_data.setup({"pinned_stack": now})["pins_moved"]
-              and explore_data.setup({"pinned_stack": dict(now, engine_version=None)})["pins_moved"],
+              and explore_data.setup({"pinned_stack": dict(now, blis="v0.0.1")})["pins_moved"],
               "the sweep tab says when today's pins would sweep a different stack than the report's")
+        # A ledger that records no engine release cannot be reconstructed: no release is assumed,
+        # in particular not the vLLM 0.29.0 that ledgers from before #57 were swept with.
+        old = run_blis.scenario_name("m", "h100", "0.29.0", par1, {"block_size": 16}, 1,
+                                     run_blis.DEFAULT_FABRIC) + ".yaml"
+        ghost = explore_data._scenario(rd, {"name": "m-h100-x", "pinned_stack": {},
+                                            "scenario": {"model": "m", "hardware": "h100"}},
+                                       dict(dep1, scenario=old))
+        check(ghost is None, "a ledger with no recorded engine release names no scenario")
         rid, gone = explore_data._router_entry("routing/renamed-away.yaml", rd)
         check(rid == "renamed-away" and gone["chain"] is None,
               "a shared router file removed since the sweep degrades instead of failing the build")
@@ -880,6 +891,7 @@ if __name__ == "__main__":
     test_pins_are_the_single_source_of_the_sim_version()
     test_derived_pins_match_gomod()
     test_displayed_stack_survives_a_fresh_clone()
+    test_pins_name_no_independent_catalog_or_registry()
     test_lexicon_mirror_is_in_sync()
     test_catalog()
     test_workflows_sane()

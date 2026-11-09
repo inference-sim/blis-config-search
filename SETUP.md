@@ -6,16 +6,22 @@ same stack from `pins.env`; the clone lines below are kept in step by `scripts/b
 ## 1. Build the pinned BLIS binary (kernel backend)
 
 ```bash
-git clone --branch v0.15.0 --depth 1 https://github.com/inference-sim/inference-sim.git
+# From a checkout of this repository: pins.env names the release and the commit it must be.
+set -a; . ./pins.env; set +a
+git clone --branch "$BLIS_REF" --depth 1 https://github.com/inference-sim/inference-sim.git
 cd inference-sim
-# The v0.15.0 tag is NOT configured immutable upstream, so verify it still resolves
-# to the pinned commit before building; fail loudly if the tag has been moved.
-EXPECT=762f1605ff27cd825d6b2cb2d9e991cd4b864c91   # release v0.15.0, the Muse-Spark release (kernel v0.5.0, schemas v0.10.0, blis-vllm v0.32.0-blis.1 in go.mod)
-test "$(git rev-parse HEAD)" = "$EXPECT" || { echo "v0.15.0 no longer resolves to $EXPECT -- aborting" >&2; exit 1; }
+# The tag is NOT configured immutable upstream, so verify it still resolves to the pinned
+# commit before building; fail loudly if the tag has been moved.
+test "$(git rev-parse HEAD)" = "$BLIS_SHA" || { echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
 go build -o blis main.go
 ```
 
-Pass this `./blis` to the sweeper as `--blis`. The kernel cost-model
+Pass this `./blis` to the validator and the sweeper as `--blis`. Both read the engine's
+settings from the pinned blis-vllm release's `fields.json`, which `scripts/fetch_fields.py FILE`
+writes and `--fields FILE` names (the simulator prints it itself once it has `blis fields`), the pool-layout keys with `blis schema deployment`,
+and model and chip names with `blis catalog resolve`; the sweeper validates each generated
+scenario and each Result with `blis schema validate`. This repository keeps no copy of any of
+them. The kernel cost-model
 backend is selected by the scenario's `coefficients:` list (the generated scenario names the seven
 `cost-model-*` sets), so **no `--latency-model` CLI flag is passed** — v0.10.0 removed that flag
 and rejects it as unknown. `run_blis.py` writes the coefficients into the generated scenario.
@@ -31,30 +37,28 @@ such policy"): the nearest configurations are a `queue-scorer` or `load-aware-sc
 `max-score-picker`, or `random-picker`. So reports that compared routing policies before v0.12.0
 cannot be reproduced arm-for-arm.
 
-## 2. Catalog + registry (both required by the kernel)
+## 2. Catalog + registry (embedded; a checkout only for the scripts' file reads)
+
+The simulator prices with the catalog and registry **embedded** in the blis-substrate release it
+pins, so a run passes neither `--catalog` nor `--registry` to it and every Result records data
+source `embedded`. A model runs only if that embedded catalog carries it (NS-6).
+
+Some scripts read catalog and registry *files* (a workload's descriptor, a model's graph, the
+speculative-decoding acceptance profiles). They read them from a checkout of the same release,
+`SUBSTRATE_REF` in `pins.env`:
 
 ```bash
-git clone --branch 0.5.0 --depth 1 https://github.com/inference-sim/blis-catalog.git
-export BLIS_CATALOG=$PWD/blis-catalog
-git clone --branch v0.3.0 --depth 1 https://github.com/inference-sim/blis-registry.git
-export BLIS_REGISTRY=$PWD/blis-registry      # MUST be v0.3.0: it adds cost-model-fabric, the
-                                             # cross-node interconnect set every generated
-                                             # scenario now names (and every upstream Muse one
-                                             # does), on top of v0.2.0's cost-model-memory and
-                                             # acceptance/, the measured speculative-decoding
-                                             # acceptance lengths (v0.1.1 has no acceptance/)
+set -a; . ./pins.env; set +a
+git clone --branch "$SUBSTRATE_REF" --depth 1 https://github.com/inference-sim/blis-substrate.git
+export SUBSTRATE_CATALOG=$PWD/blis-substrate/catalog
+export SUBSTRATE_REGISTRY=$PWD/blis-substrate/registry
 ```
 
-A model runs only if it is in the catalog (NS-6). `glm-5.3-flash`, `glm-5.3`, and `qwen3-14b` all
-ship in catalog `0.4.0`, which also adds `deepseek-v4.1-flash` and the `agentx-mvp` replay
-workload. Catalog `0.5.0` adds the three Muse-Spark entries -- `muse-spark-open-816b-a42b`, its
-`-nvfp4` twin and the `muse-spark-open-dspark` drafter -- which do not exist in `0.4.0` at all,
-so Muse needs this pin and not merely a newer binary. The runner generates kernel scenario files
-into a `--scenarios` dir you choose (e.g. `/tmp/cs-scenarios`).
-
-The catalog pin and the binary pin move **together**: catalog `0.4.0`'s model graphs use schema
-fields that v0.10.0 cannot decode (it fails with hundreds of `field ... not found in type
-model.Node` errors), and the pinned v0.15.0 needs `0.5.0` for the entries above.
+These two variables (or `--catalog` / `--registry`) name where the scripts read those files; they
+are not handed to the simulator. `--data-override` hands them to it, for an **experimental** run
+priced with other data: its report is marked experimental and the sweeper refuses to write it into
+`reports/`. The runner generates kernel scenario files into a `--scenarios` dir you choose (e.g.
+`/tmp/cs-scenarios`).
 
 ## 2b. The AgentX replay corpus (only for a replay workload)
 
@@ -92,7 +96,7 @@ Then a whole spec, without BLIS first to check its run budget:
 ```bash
 python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run
 python3 -I scripts/run_experiment.py experiments/<name>.yaml \
-  --blis /path/to/blis --catalog "$BLIS_CATALOG" --registry "$BLIS_REGISTRY"
+  --blis /path/to/blis --catalog "$SUBSTRATE_CATALOG" --registry "$SUBSTRATE_REGISTRY"
 ```
 
 ## 4. Unit tests (no BLIS / no network)

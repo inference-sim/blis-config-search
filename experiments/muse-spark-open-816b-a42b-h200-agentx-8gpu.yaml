@@ -11,6 +11,7 @@ name: muse-spark-open-816b-a42b-h200-agentx-8gpu
 scenario:
   model: muse-spark-open-816b-a42b-nvfp4
   hardware: h200
+  cluster: {gpus_per_node: 8}   # an 8-GPU HGX server; the catalog fixes no node size for this chip
   workload: agentx-mvp
   gpus: 8
   engine: {max_model_len: 262144}   # at the 32k default the replay drops every trace
@@ -18,7 +19,7 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-muse-h200
-    grace_period: inf
+    grace_period: 87600h   # = never ends within a run (ten years). TEMPORARY: `inf` is refused by the strict Result loader until blis-substrate#28 ships (M2); restore `inf` then (blis-config-search#102)
 
 sweeps:
   - name: topology-pp

@@ -183,7 +183,8 @@ def defaults(run_dir, keys):
 
 GH = "https://github.com/inference-sim"
 _PINS = build_catalog.read_pins()
-CATALOG_DIR = os.path.join(ROOT, os.pardir, "blis-catalog")
+# The catalog/ of a blis-substrate checkout at the pinned release (workload descriptors are read from it).
+CATALOG_DIR = os.environ.get("SUBSTRATE_CATALOG") or os.path.join(ROOT, os.pardir, "blis-substrate", "catalog")
 
 
 def _clone(repo, ref, commit, dest, *then):
@@ -233,8 +234,14 @@ def setup(exp, run_dir=None):
     sh += _clone("inference-sim", ps["blis"], commit("blis"), "inference-sim",
                  "(cd inference-sim && go build -o blis main.go)", 'export PATH="$PWD/inference-sim:$PATH"')
     sh.append("")
-    for key, repo, env in (("catalog", "blis-catalog", "BLIS_CATALOG"), ("registry", "blis-registry", "BLIS_REGISTRY")):
-        if ps.get(key):
+    if ps.get("substrate"):
+        # the simulator prices with the data embedded in this release (CFG-1); the checkout is only
+        # where the scripts read catalog and registry files from
+        sh += _clone("blis-substrate", ps["substrate"], None, "blis-substrate",
+                     'export SUBSTRATE_CATALOG="$PWD/blis-substrate/catalog"',
+                     'export SUBSTRATE_REGISTRY="$PWD/blis-substrate/registry"') + [""]
+    for key, repo, env in (("catalog", "blis-catalog", "SUBSTRATE_CATALOG"), ("registry", "blis-registry", "SUBSTRATE_REGISTRY")):
+        if ps.get(key) and ps.get("data") != "embedded":     # a report from before the data was embedded
             sh += _clone(repo, ps[key], commit(key), repo, f'export {env}="$PWD/{repo}"') + [""]
     sh += ["# the commands run from this repo: router configs live here, scenarios/ is where you save each scenario",
            f"git clone --depth 1 {GH}/blis-config-search.git && cd blis-config-search && mkdir -p scenarios"]
@@ -252,23 +259,24 @@ def setup(exp, run_dir=None):
     # writes to repro/, never reports/: reproducing locally does not touch the published report
     sweep = ["# in the blis-config-search checkout, after the install script",
              "python3 -m venv .venv && . .venv/bin/activate && pip install pyyaml",
-             f'python3 -I scripts/run_experiment.py {spec} --dry-run --catalog "$BLIS_CATALOG"',
+             f'python3 -I scripts/run_experiment.py {spec} --dry-run --catalog "$SUBSTRATE_CATALOG"',
              f"python3 -I scripts/run_experiment.py {spec} \\",
-             '  --blis "$(command -v blis)" --catalog "$BLIS_CATALOG" --registry "$BLIS_REGISTRY" \\',
+             '  --blis "$(command -v blis)" --catalog "$SUBSTRATE_CATALOG" --registry "$SUBSTRATE_REGISTRY" \\',
              "  --out repro/"]
     stack = [{"name": "BLIS", "repo": "inference-sim", "ref": ps["blis"], "commit": commit("blis")},
              *[{"name": n, "repo": r, "ref": ps[k], "commit": commit(k)}
-               for k, n, r in (("catalog", "catalog", "blis-catalog"), ("registry", "registry", "blis-registry"))
-               if ps.get(k)]]
+               for k, n, r in (("substrate", "substrate (embedded data)", "blis-substrate"),
+                               ("catalog", "catalog", "blis-catalog"), ("registry", "registry", "blis-registry"))
+               if ps.get(k) and not (ps.get("data") == "embedded" and k in ("catalog", "registry"))]]
     # compiled into BLIS; a ledger from before the router was recorded takes the pin of the same BLIS release
     router = ps.get("router") or (_PINS.get("ROUTER_REF") if _PINS.get("BLIS_REF") == ps["blis"] else None)
     for name, repo, ref in (("latency kernel", "blis-latency-kernel", ps.get("kernel")),
                             ("router", "llm-d-router", router)):
         if ref and ref != "unpinned":
             stack.append({"name": name, "repo": repo, "ref": ref, "commit": None})
-    # a fresh checkout sweeps at today's pins.env; ledgers from before #57 record no engine (0.29.0)
-    then = (ps["blis"], ps.get("catalog"), ps.get("registry"), ps.get("engine_version") or "0.29.0")
-    now = (_PINS.get("BLIS_REF"), _PINS.get("CATALOG_REF"), _PINS.get("REGISTRY_REF"), run_blis.pinned_engine_version())
+    # a fresh checkout sweeps at today's pins.env, whose simulator fixes the engine release
+    then = (ps["blis"], ps.get("substrate"))
+    now = (_PINS.get("BLIS_REF"), _PINS.get("SUBSTRATE_REF"))
     return {"stack": stack, "script": "\n".join(sh) + "\n", "sweep": "\n".join(sweep) + "\n",
             "pins_moved": then != now,
             "runs": (exp.get("totals") or {}).get("runs"), "hours": _wall_hours(run_dir) if run_dir else None}
@@ -365,11 +373,14 @@ def _scenario(run_dir, exp, dep, unset=None):
     # The fabric the run was priced over (issue #71): part of the scenario hash, so regenerating
     # with the wrong one would never match the recorded name. A record predating the field used IB.
     fabric = dep.get("fabric") or run_blis.DEFAULT_FABRIC
-    # the version a ledger recorded, else the pre-#57 default every older ledger was swept with
+    # The node size the run was priced with (#96); a record that predates it used 8, stated.
+    node_size = dep.get("gpus_per_node") or 8
+    states_node_size = dep.get("states_gpus_per_node", True)
+    # the engine release the ledger recorded; a ledger that records none cannot be reconstructed
     recorded = (exp.get("pinned_stack") or {}).get("engine_version")
-    for ev in dict.fromkeys([v for v in (recorded, sc.get("engine_version"), "0.29.0") if v]):
+    for ev in dict.fromkeys([v for v in (recorded, sc.get("engine_version")) if v]):
         if run_blis.scenario_name(model, hw, ev, dep["parallel"], dep["engine"], dep["num_instances"],
-                                  fabric, router) + ".yaml" != name:
+                                  fabric, router, node_size, states_node_size) + ".yaml" != name:
             continue
         shown = {}
         if router.get("router_config"):
@@ -380,7 +391,7 @@ def _scenario(run_dir, exp, dep, unset=None):
             shown = {"router_config": "__ROUTER__"}
         text = run_blis.scenario_yaml(model, hw, ev, json.loads(json.dumps(dep["parallel"])),
                                       dict(dep["engine"]), name[:-5], dep["num_instances"],
-                                      fabric, shown or None)
+                                      fabric, shown or None, node_size, states_node_size)
         if shown:
             text = text.replace(json.dumps(os.path.abspath("__ROUTER__")), json.dumps("../" + rel))
         return name, _note_unset(text, unset or {})
@@ -449,9 +460,9 @@ def _recipe(cmd, workload, dep=None):
         if flag in INERT_FLAGS:
             continue
         if flag == "--registry":
-            val = '"$BLIS_REGISTRY"'
+            val = '"$SUBSTRATE_REGISTRY"'
         elif flag == "--catalog":
-            val = '"$BLIS_CATALOG"'
+            val = '"$SUBSTRATE_CATALOG"'
         elif flag == "--scenarios":
             val = "scenarios"
         elif flag == "--max-context-length" and val == "max_model_len" and _max_model_len(dep):

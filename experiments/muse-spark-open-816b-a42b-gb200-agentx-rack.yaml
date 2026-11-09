@@ -17,7 +17,7 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-muse-gb200
-    grace_period: inf
+    grace_period: 87600h   # = never ends within a run (ten years). TEMPORARY: `inf` is refused by the strict Result loader until blis-substrate#28 ships (M2); restore `inf` then (blis-config-search#102)
 
 sweeps:
   - name: topology

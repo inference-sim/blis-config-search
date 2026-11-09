@@ -9,8 +9,8 @@ name: regen-reports
 #   push to main moving pins.env -- normally the merge of a pin PR that pin-compat.yml passed, so
 #   any code changes the release needed are already on main
 #     -> plan     classify every reports/<id>/ (experiment spec | orphan), batch by model
-#     -> build    the pinned simulator, once, shared by every report job; re-checks `drift` so a
-#                 pin that skipped the gate cannot start a campaign
+#     -> build    the pinned simulator, once, shared by every report job; validates every spec
+#                 against it so a pin that skipped the gate cannot start a campaign
 #     -> regen    ONE JOB PER REPORT (matrix): a report is hours of BLIS, so each gets its own
 #                 runner and its own timeout, and one failure costs one report, not the campaign
 #     -> pr       ONE PR PER BATCH, with a before/after table; a failed report is listed in its
@@ -46,6 +46,9 @@ on:
         description: "regenerate even though no stack pin changed"
         type: boolean
         default: true
+      base:
+        description: "branch the batch PRs are cut from and opened against (blank = the default branch). Set it to a pull request's branch to regenerate the reports that branch needs, before it merges. The branch's workflow files must equal the default branch's, or the push is refused to GITHUB_TOKEN (the PR job checks this and says so)"
+        required: false
 
 permissions:
   contents: read
@@ -63,11 +66,11 @@ jobs:
       batches: ${{ steps.plan.outputs.batches }}
       blis_ref: ${{ steps.plan.outputs.blis_ref }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { fetch-depth: 0 }
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with: { python-version: "3.12" }
-      - run: pip install pyyaml
+      - run: pip install --require-hashes -r requirements.txt
       - name: Did a stack pin move, and what is there to regenerate?
         id: plan
         env:
@@ -113,7 +116,7 @@ jobs:
     if: needs.plan.outputs.run == 'true'
     runs-on: ${{ fromJSON(vars.REGEN_RUNS_ON || '"ubuntu-latest"') }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Clone the pinned simulator
         run: |
           set -euo pipefail
@@ -122,26 +125,20 @@ jobs:
           # The tag is not immutable upstream; refuse to build a moved tag (same check as SETUP.md).
           test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
             echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with: { go-version-file: upstream/go.mod, cache-dependency-path: upstream/go.sum }
       - run: cd upstream && go build -o blis main.go
       # Belt and braces for a pins.env that reached main without the pin-compat gate (a direct
-      # push, an admin merge): hours of runs on knob tables that do not fit the stack would
+      # push, an admin merge): hours of runs on specs that do not fit the stack would
       # produce reports that are wrong in ways a reviewer cannot see. Seconds, so always run it.
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with: { python-version: "3.12" }
-      - run: pip install pyyaml
-      - name: Refuse to regenerate on knob tables that do not fit the stack
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/stack"
-          python3 -I scripts/blis_pin.py modules upstream/go.mod | while read -r mod ver; do
-            case "$mod" in blis-vllm|blis-schemas)
-              git clone --branch "$ver" --depth 1 "https://github.com/inference-sim/$mod.git" "$RUNNER_TEMP/stack/$mod" ;;
-            esac
-          done
-          python3 -I scripts/blis_pin.py drift --siblings "$RUNNER_TEMP/stack" --go-mod upstream/go.mod
-      - uses: actions/upload-artifact@v7
+      - run: pip install --require-hashes -r requirements.txt
+      - name: Fetch the pinned engine field list
+        run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
+      - name: Refuse to regenerate on specs the stack does not accept
+        run: python3 -I scripts/validate_experiment.py experiments/ --blis upstream/blis --fields "$RUNNER_TEMP/fields.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: blis
           path: upstream/blis
@@ -159,39 +156,42 @@ jobs:
         report: ${{ fromJSON(needs.plan.outputs.reports) }}
     name: regen ${{ matrix.report.id }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with: { python-version: "3.12" }
-      - run: pip install pyyaml
-      - uses: actions/download-artifact@v8
+      - run: pip install --require-hashes -r requirements.txt
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with: { name: blis, path: .build }
-      - name: Clone the pinned catalog + registry
+      - name: Clone the pinned substrate release (the files the scripts read; the simulator uses its embedded data)
         id: stack
         run: |
           set -euo pipefail
           chmod +x .build/blis
           set -a; . ./pins.env; set +a
-          # Inside the checkout, as run-experiment.yml does: a ledger's cmd records ./blis-catalog,
-          # and a path outside the repo would stay absolute (a runner path in a committed report).
-          git clone --branch "$CATALOG_REF" --depth 1 https://github.com/inference-sim/blis-catalog.git blis-catalog
-          git clone --branch "$REGISTRY_REF" --depth 1 https://github.com/inference-sim/blis-registry.git blis-registry
-          echo "catalog_ref=$CATALOG_REF" >> "$GITHUB_OUTPUT"
-      # The 568 MB replay corpus is pinned by the catalog, so one download per catalog pin serves
+          # Inside the checkout, as run-experiment.yml does, so no runner path reaches a committed report.
+          git clone --branch "$SUBSTRATE_REF" --depth 1 https://github.com/inference-sim/blis-substrate.git blis-substrate
+          test "$(git -C blis-substrate describe --tags --exact-match)" = "$SUBSTRATE_REF" || {
+            echo "blis-substrate is not $SUBSTRATE_REF -- aborting" >&2; exit 1; }
+          echo "substrate_ref=$SUBSTRATE_REF" >> "$GITHUB_OUTPUT"
+      # The 568 MB replay corpus is pinned by the release's catalog, so one download per substrate pin serves
       # every replay report in the campaign. blis_pin.py digest-checks it either way.
       - name: Restore the replay corpus
         if: matrix.report.replay
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: .corpus/traces.jsonl
-          key: replay-corpus-${{ steps.stack.outputs.catalog_ref }}
+          key: replay-corpus-${{ steps.stack.outputs.substrate_ref }}
+      - name: Fetch the pinned engine field list
+        run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
       - name: Regenerate ${{ matrix.report.id }}
         run: |
           set -euo pipefail
           python3 -I scripts/blis_pin.py regen "${{ matrix.report.id }}" \
-            --blis .build/blis --catalog blis-catalog --registry blis-registry \
+            --blis .build/blis --catalog blis-substrate/catalog --registry blis-substrate/registry \
+            --fields "$RUNNER_TEMP/fields.json" \
             --out "$RUNNER_TEMP/regen" --timeout "${{ vars.REGEN_RUN_TIMEOUT || '1800' }}" \
             --max-parallel "${{ vars.SWEEP_MAX_PARALLEL || '1' }}"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: regen-${{ matrix.report.id }}
           path: ${{ runner.temp }}/regen/${{ matrix.report.id }}
@@ -217,17 +217,34 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
       HAS_BOT_TOKEN: ${{ secrets.PIN_BOT_TOKEN != '' }}
+      BASE_BRANCH: ${{ github.event.inputs.base || github.event.repository.default_branch }}
     steps:
-      # Branch from current main: a campaign outlives workflow edits, and a branch carrying
-      # stale workflow files is refused to GITHUB_TOKEN (no `workflows` scope).
-      - uses: actions/checkout@v7
+      # Branch from the base branch (current main unless a dispatch names another): a campaign
+      # outlives workflow edits, and a branch carrying stale workflow files is refused to
+      # GITHUB_TOKEN (no `workflows` scope).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ github.event.inputs.base || github.event.repository.default_branch }}
           fetch-depth: 0       # see what main changed since the swept commit
           token: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with: { python-version: "3.12" }
-      - run: pip install pyyaml
+      - run: pip install --require-hashes -r requirements.txt
+      - name: Refuse a base whose workflow files differ from the default branch's
+        # A branch cut from such a base carries workflow files GITHUB_TOKEN may not push (it lost
+        # three batch PRs after a 10h sweep once). Say so now, not after the push is refused.
+        run: |
+          set -euo pipefail
+          default="${{ github.event.repository.default_branch }}"
+          if [ "$BASE_BRANCH" != "$default" ]; then
+            git fetch --quiet origin "$default"
+            if ! git diff --quiet "origin/$default" HEAD -- .github/workflows; then
+              echo "::error::base $BASE_BRANCH changes .github/workflows relative to $default, so a branch cut from it cannot be pushed with GITHUB_TOKEN. Set the PIN_BOT_TOKEN secret (a token with the workflows scope), or dispatch with base blank after the workflow changes merge." >&2
+              [ -n "${PIN_BOT_TOKEN:-}" ] || exit 1
+            fi
+          fi
+        env:
+          PIN_BOT_TOKEN: ${{ secrets.PIN_BOT_TOKEN }}
       - name: Is the swept stack still the pinned one?
         id: stack
         run: |
@@ -351,11 +368,11 @@ jobs:
           gh label create report-regen --force --color 0e8a16 \
             --description "Reports regenerated against a new pinned stack"
           gh pr create --title "Regenerate $BATCH reports on inference-sim $BLIS_REF" \
-            --body-file /tmp/body.md --base main --head "$branch" \
+            --body-file /tmp/body.md --base "${BASE_BRANCH}" --head "$branch" \
             --label auto-update --label report-regen
           # A PR opened with GITHUB_TOKEN starts no workflows, but a dispatch does: start its CI here.
           if [ "$HAS_BOT_TOKEN" != true ]; then
             pr="$(gh pr view "$branch" --json number --jq .number)"
             gh workflow run checks.yml --ref "$branch"
-            gh workflow run pin-compat.yml --ref "$branch" -f base=main -f pr="$pr"
+            gh workflow run pin-compat.yml --ref "$branch" -f base="$BASE_BRANCH" -f pr="$pr"
           fi

@@ -12,14 +12,14 @@ the missing provisioning step: given a spec, it reads the workload's descriptor,
 file named there at the revision named there, and refuses anything whose bytes do not match.
 
 Why a script rather than a few lines of `curl` in the workflow: the dataset, revision and digest
-belong to the catalog pin, so hard-coding them in YAML would create a second source of truth that
-could drift from `CATALOG_REF`. Reading them back out of the descriptor cannot drift. It also
+belong to the pinned release's catalog, so hard-coding them in YAML would create a second source of
+truth that could drift from it. Reading them back out of the descriptor cannot drift. It also
 makes the step testable without GitHub.
 
 Download-then-verify-then-rename, so an interrupted transfer can never masquerade as the corpus.
 A spec whose workload is a generated shape needs nothing and exits 0 without touching the network.
 
-  python3 -I scripts/fetch_corpus.py experiments/<name>.yaml --catalog ../blis-catalog
+  python3 -I scripts/fetch_corpus.py experiments/<name>.yaml --catalog ../blis-substrate/catalog
 """
 import argparse, hashlib, os, sys, urllib.request
 
@@ -86,8 +86,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("spec", help="experiments/<name>.yaml")
-    ap.add_argument("--catalog", default=os.environ.get("BLIS_CATALOG"),
-                    help="blis-catalog checkout (default: $BLIS_CATALOG)")
+    ap.add_argument("--catalog", default=os.environ.get("SUBSTRATE_CATALOG"),
+                    help="blis-catalog checkout (default: $SUBSTRATE_CATALOG)")
     ap.add_argument("--dest", help="override the destination path (default: the spec's corpus path)")
     args = ap.parse_args()
 
@@ -97,7 +97,7 @@ def main():
     workload = sc.get("workload")
 
     if not args.catalog:
-        raise SystemExit("--catalog (or $BLIS_CATALOG) is required to read the workload descriptor")
+        raise SystemExit("--catalog (or $SUBSTRATE_CATALOG) is required to read the workload descriptor")
 
     desc = _descriptor(workload, args.catalog)
     if not desc:

@@ -23,11 +23,11 @@ unattended on merge.
    [discussion #21](https://github.com/inference-sim/blis-config-search/discussions/21)'s own).
 2. Validate it:
    ```
-   python3 -I scripts/validate_experiment.py experiments/<name>.yaml
+   python3 -I scripts/validate_experiment.py experiments/<name>.yaml --blis ./blis
    ```
 3. Check the size of the campaign you are proposing:
    ```
-   python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run
+   python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run --blis ./blis
    ```
 4. Open a PR. CI validates every spec on the PR (no secrets, safe for forks). A maintainer runs
    the sweeper after merge, and a bot PR adds `reports/<name>/` and the gallery entry.
@@ -93,11 +93,11 @@ sweeps:
   sweep all belong in a `#` comment, which stays in the spec and never reaches the report. The
   validator prints a style note (not a failure) for anything longer.
 
-## Knobs map one-to-one onto blis-vllm
+## Knobs are vLLM's own settings
 
-| Spec knob | blis-vllm / vLLM v0.32.0 |
+| Spec knob | vLLM setting |
 |---|---|
-| `parallel.tp`, `dp`, `pp`, `pcp`, `dcp`, `enable_expert_parallel` | `parallel_config.*` (blis-schemas pool layout) |
+| `parallel.tp`, `dp`, `pp`, `pcp`, `dcp`, `enable_expert_parallel` | `parallel_config.*` (the deployment document's pool layout) |
 | `engine.max_num_seqs`, `max_num_batched_tokens`, `max_num_active_seqs`, `watermark`, `scheduling_policy` | `scheduler_config.*` |
 | `engine.block_size`, `enable_prefix_caching`, `gpu_memory_utilization`, `cache_dtype` | `cache_config.*` |
 | `engine.max_model_len`, `quantization` | `model_config.*` |
@@ -106,59 +106,41 @@ sweeps:
 | `num-instances`, `prefill-instances`, `decode-instances` | `blis run` replica-count flags, not engine keys |
 | `router.*` | llm-d's EndpointPickerConfig, not an engine key |
 
-The validator checks every name against the sibling `../blis-vllm` and `../blis-schemas`
-checkouts when they are present, and against the names built into the validator otherwise — the
-engine surface of the stack [`pins.env`](../pins.env) pins. A typo fails before any run — and the
-message suggests the right name.
+The validator reads every name from the simulator it is given with `--blis` (or `$BLIS`):
+engine settings from `blis fields --engine vllm`, the engine's field list at the release that
+binary runs, and pool-layout keys from `blis schema deployment`. This repository keeps no list of
+settings (CFG-3). A typo fails before any run, and the message suggests the right name. Four
+engine-block names differ from vLLM's (`cache_dtype` for `kv_cache_dtype`, `cudagraph_mode` for
+`compilation_config.cudagraph_mode`, and the `speculative` block's `method` and
+`num_spec_tokens`); `scripts/settings.py` maps them to their field-list entries until the engine
+block takes vLLM's names.
 
-**Values are checked too.** `cudagraph_mode: [full]` is refused (the enum is upper-case),
-`cache_dtype: [fp16]` is refused (it is `float16`), and `quantization: [fp_8]` suggests `fp8` —
-the valid set or the near miss is always named. The value sets are read from blis-vllm's
-`rules/v0_32/pack.go` when that checkout is present.
+A swept setting that the field list marks `proven_inert` or `inert_unproven` is refused: every
+arm of the sweep would report the same number. The message quotes the field list's evidence.
+
+**Values are the engine's.** The validator keeps no value sets. The engine refuses a bad value
+at start-up with its own message (X15), and the run records the refusal.
 
 ### Cross-knob constraints BLIS does not check
 
-blis-vllm's rules pack holds **32 named rules**, each transcribing one of vLLM's own startup
-assertions. They are **not evaluated at run time** — the pinned simulator depends on
-`blis-latency-kernel` and `blis-schemas` only, never on blis-vllm. Measured consequence: BLIS
-happily simulated a `long_prefill_token_threshold` of 999,999 against a 32k context, which real
-vLLM refuses at startup. A spec like that produces numbers for a deployment nobody could launch.
+The validator still refuses two combinations the engine accepts and real vLLM refuses at start-up:
+`long_prefill_token_threshold` above `max_model_len`, and a CUDA-graph capture plan that no
+`max_num_batched_tokens` or `cudagraph_mode` in the sweep can use. Rules that depend on the
+model (its context window, expert count or attention kind) are not checked here, because they
+would read catalog files directly (design §5); the engine refuses those runs itself.
 
-So the validator applies them pre-flight:
+### `model` and `hardware` must name something real
 
-| Constraint | Rule |
-|---|---|
-| `long_prefill_token_threshold` ≤ `max_model_len` | `long-prefill-threshold-within-max-model-len` |
-| `max_cudagraph_capture_size` = the largest `cudagraph_capture_sizes` entry; sizes above `max_num_batched_tokens` are dropped; `cudagraph_mode: NONE` ignores the plan | `cudagraph-capture-sizes` |
-| `max_model_len` ≤ the model's catalog `context` | `max-model-len-within-context-window` |
-| with EPLB on, `tp × dp` must divide `experts + num_redundant_experts` (the error names the nearest fix) | `expert-divisibility-under-eplb` |
-| enabling `dbo` without a threshold measures an unchosen default (the two differ by 16×) | `dbo-thresholds-stated-when-enabled` |
-| mamba knobs only on a recurrent model; MoE knobs and `eplb` only on an MoE model | `mamba-cache-mode-matches-model` |
-
-The model-aware rules read `../blis-catalog` when present and are skipped without it, so the
-check stays safe on a fork PR with no catalog checkout.
-
-### `model` / `hardware` / `workload` must name something real
-
-With a catalog available the validator also checks that those three **exist**, and suggests the
-nearest name when one doesn't:
+The validator asks `blis catalog resolve` for each and refuses a name the catalog has no entry
+for, with the command's reason:
 
 ```
-scenario.hardware: 'h200x' is not in the catalog (did you mean 'h200'?)
-  -- known: a100-80, a100-sxm, b200, b300, gb200-nvl72, gb300, h100, h200, l40s
+scenario.hardware: 'h200x': the catalog has no hardware entry of this name
 ```
 
-This is existence, not feasibility. A name the catalog has no row for provably cannot run — BLIS
-exits `rc=1` with `opening .../hardware/h200x.yaml: no such file or directory` on *every* run —
-so it belongs with the GPU arithmetic, caught before a clone and build rather than after. Whether
-a KV cache actually **fits** stays BLIS's call; the validator adds no physics.
-
-Point it at a catalog with `--catalog`, or let it find `../blis-catalog`. Without one the check is
-skipped like the model-aware rules, and the summary line says so rather than implying it passed:
-
-```
-7/7 valid (knob names checked against ...; model/hardware/workload NOT checked -- no blis-catalog checkout)
-```
+This is existence, not feasibility. Whether a KV cache actually **fits** stays BLIS's call; the
+validator adds no physics. `--catalog` names a catalog directory; without it the binary's
+embedded catalog answers.
 
 ### What the pinned stack can actually carry
 
@@ -244,7 +226,7 @@ measured leverage and each knob's precondition — worth reading before choosing
 
 ## Replay workloads: the catalog already describes them
 
-`blis-catalog/workloads/<name>.yaml` **is** the workload. For `agentx-mvp` it states the harness
+The catalog's `workloads/<name>.yaml` **is** the workload. For `agentx-mvp` it states the harness
 scenario id, the corpus loader with its pinned HF revision, the `sha256`, `random_seed`,
 `benchmark_duration_s`, `grace_period_s`, `max_context_length`, the cache-bust and trajectory
 settings, and the `category`/`thinking` pair that selects the acceptance profile. The sweeper
@@ -272,7 +254,7 @@ report can say the run departed from the catalog.
 revision and the digest:
 
 ```
-python3 -I scripts/fetch_corpus.py experiments/<name>.yaml --catalog ../blis-catalog
+python3 -I scripts/fetch_corpus.py experiments/<name>.yaml --catalog "$SUBSTRATE_CATALOG"
 ```
 
 It downloads to the path the spec states, verifies the sha256 before moving the file into place,
@@ -287,7 +269,8 @@ python3 -I scripts/knob_profile.py --model <m> --hardware <hw> --workload <wl>
 ```
 
 Prints, per knob: whether it **applies** here, the values **legal here**, and **why** — read
-from the catalog row, the model's `graph.yaml`, blis-vllm's rules pack, and the hardware entry.
+from the catalog row, the model's `graph.yaml`, and the hardware entry. blis-vllm's architecture
+rules are not read here: no simulator command publishes them yet.
 
 **The catalog row alone is not enough.** It carries no speculator, no sliding window, no
 KV-dtype table and no capability gating. For example, `deepseek-v4.1-flash` prices
@@ -466,22 +449,22 @@ inference-sim release --bump-blis-pin.yml-->  DRAFT pin PR  <--fix commits--  pi
   or by hand). For a release newer than `BLIS_REF` it rewrites `pins.env` + `SETUP.md`, checks the
   tag's commit and that the release builds, and opens a **draft** PR with a checklist. It does not
   require this repo's tests to pass: a release that needs code changes still needs its PR. It
-  never guesses `CATALOG_REF` / `REGISTRY_REF`.
+  needs no catalog or registry pin: the release embeds both.
 * **`pin-compat.yml`** runs on every PR, and does its work only when a pin's *value* moves against
   the base branch. Mark its **`gate`** job as the required check: it always reports, and passes when
   no pin moved. Against
   the new binary it runs:
-  * `blis_pin.py drift`: the validator's pinned knob tables against the `blis-vllm` /
-    `blis-schemas` versions the release's go.mod names;
-  * the suite twice, once hermetic and once with those modules as `../` siblings;
+  * `validate_experiment.py experiments/ --blis upstream/blis`: every spec against the new
+    binary's field list, schemas and catalog;
+  * the hermetic suite;
   * `blis_pin.py smoke`: a few rows from each report's own ledger, re-run. It fails on a row that
     ran before and fails now (**LOUD**), and on a knob that moved the numbers before and now
     measures identically to its baseline (**SILENT**).
 
-  It comments what is left to fix. Push the fixes (knob tables, `run_blis.py`, a spec field
+  It comments what is left to fix. Push the fixes (`run_blis.py`, a spec field
   the new stack refuses) onto the same branch until it is green.
 * **`regen-reports.yml`** runs when a push to main changes a pin's *value*, which normally means
-  the merged pin PR, with its fixes already on main. It re-checks `drift` first, so a pin that
+  the merged pin PR, with its fixes already on main. It validates every spec first, so a pin that
   skipped the gate cannot start a campaign. `scripts/blis_pin.py plan` finds each
   `reports/<id>/`'s `experiments/` spec, which `run_experiment.py` re-sweeps.
 

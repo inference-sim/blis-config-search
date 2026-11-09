@@ -4,8 +4,7 @@ name: pin-compat
 # check on main (not the others: they are skipped on ordinary PRs, see the trigger note below).
 #
 # A new inference-sim can need code changes in THIS repo -- v0.14.0 needed 14 files (PR #25):
-# knob tables in validate_experiment.py, run_blis.py's UNSUPPORTED / PD_MUST_MATCH, a newly
-# mandatory field. Those changes belong on the pin PR itself, because merging the pin is what
+# run_blis.py's UNSUPPORTED / PD_MUST_MATCH, a newly mandatory field. Those changes belong on the pin PR itself, because merging the pin is what
 # starts regen-reports.yml, and a regeneration run on code that does not fit the stack spends
 # hours producing broken or silently wrong reports. So the pin PR is the compatibility PR, and
 # this gate keeps it unmergeable until the code fits the stack:
@@ -16,11 +15,9 @@ name: pin-compat
 #     -> green: mark ready, review, merge  -> regen-reports.yml regenerates every report
 #
 # What it checks, all against the NEW binary (none of it is visible to a dry run):
-#   drift  the validator's PINNED knob tables -- what checks.yml validates specs with -- against
-#          the blis-vllm / blis-schemas versions the release's go.mod requires. Any difference is
-#          a table to update on this PR.
-#   suite  the hermetic tests, plus the same tests again with those checkouts as ../ siblings,
-#          so the live-vocabulary paths in validate_experiment.py run too.
+#   specs  every committed spec validated with the new binary's `blis fields`, `blis schema` and
+#          `blis catalog resolve`, so a setting the new release dropped fails here.
+#   suite  the hermetic tests.
 #   smoke  a few rows from each committed report's OWN ledger, re-run through run_blis.run_one:
 #          a row that ran before and fails now (LOUD), or a knob that moved the numbers before
 #          and now measures identically to its baseline (SILENT -- the v0.14.0 failure mode).
@@ -58,11 +55,11 @@ jobs:
     outputs:
       moved: ${{ steps.diff.outputs.moved }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { fetch-depth: 0 }
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with: { python-version: "3.12" }
-      - run: pip install pyyaml
+      - run: pip install --require-hashes -r requirements.txt
       - name: Did this PR move a pin's value?
         id: diff
         env:
@@ -77,7 +74,11 @@ jobs:
           git show "$BASE:pins.env" > /tmp/base-pins.env
           moved="$(python3 -I scripts/blis_pin.py changed /tmp/base-pins.env)"
           echo "pins moved against the base branch: $moved"
-          echo "moved=$([ "$moved" = "{}" ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
+          if [ "$moved" = "{}" ]; then
+            echo "moved=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "moved=true" >> "$GITHUB_OUTPUT"
+          fi
 
   build:
     needs: changed
@@ -90,10 +91,10 @@ jobs:
     outputs:
       reports: ${{ steps.ids.outputs.reports }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with: { python-version: "3.12" }
-      - run: pip install pyyaml jsonschema
+      - run: pip install --require-hashes -r requirements.txt
       - name: Clone the pinned simulator, and the modules its go.mod names
         run: |
           set -euo pipefail
@@ -101,19 +102,13 @@ jobs:
           git clone --branch "$BLIS_REF" --depth 1 https://github.com/inference-sim/inference-sim.git upstream
           test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
             echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
-          # blis-vllm + blis-schemas at the versions THIS release builds against, as ../ siblings:
-          # the layout validate_experiment.py reads live vocabulary from.
-          mkdir -p "$RUNNER_TEMP/stack"
-          python3 -I scripts/blis_pin.py modules upstream/go.mod | while read -r mod ver; do
-            case "$mod" in blis-vllm|blis-schemas)
-              git clone --branch "$ver" --depth 1 "https://github.com/inference-sim/$mod.git" "$RUNNER_TEMP/stack/$mod" ;;
-            esac
-          done
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with: { go-version-file: upstream/go.mod, cache-dependency-path: upstream/go.sum }
       - run: cd upstream && go build -o blis main.go && ./blis --help >/dev/null
-      - name: Knob tables vs the new stack
-        run: python3 -I scripts/blis_pin.py drift --siblings "$RUNNER_TEMP/stack" --go-mod upstream/go.mod
+      - name: Fetch the pinned engine field list
+        run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
+      - name: Every spec against the new binary's field list, schemas and catalog
+        run: python3 -I scripts/validate_experiment.py experiments/ --blis upstream/blis --fields "$RUNNER_TEMP/fields.json"
       - name: Hermetic suite
         run: |
           set -euo pipefail
@@ -121,14 +116,7 @@ jobs:
           python3 -I scripts/test_blis_pin.py
           python3 -I scripts/test_experiment.py
           python3 -I scripts/test_run_blis.py
-      - name: The same suite with the new stack as ../ siblings (live-vocabulary paths)
-        run: |
-          set -euo pipefail
-          for mod in blis-vllm blis-schemas; do cp -r "$RUNNER_TEMP/stack/$mod" "../$mod"; done
-          python3 -I scripts/test_experiment.py
-          python3 -I scripts/validate_experiment.py experiments/
-          rm -rf ../blis-vllm ../blis-schemas
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: pin-compat-blis
           path: upstream/blis
@@ -150,36 +138,40 @@ jobs:
         report: ${{ fromJSON(needs.build.outputs.reports) }}
     name: smoke ${{ matrix.report.id }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with: { python-version: "3.12" }
-      - run: pip install pyyaml
-      - uses: actions/download-artifact@v8
+      - run: pip install --require-hashes -r requirements.txt
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with: { name: pin-compat-blis, path: .build }
-      - name: Clone the pinned catalog + registry
+      - name: Clone the pinned substrate release (the files the scripts read; the simulator uses its embedded data)
         id: stack
         run: |
           set -euo pipefail
           chmod +x .build/blis
           set -a; . ./pins.env; set +a
-          git clone --branch "$CATALOG_REF" --depth 1 https://github.com/inference-sim/blis-catalog.git ../blis-catalog
-          git clone --branch "$REGISTRY_REF" --depth 1 https://github.com/inference-sim/blis-registry.git ../blis-registry
-          echo "catalog_ref=$CATALOG_REF" >> "$GITHUB_OUTPUT"
+          git clone --branch "$SUBSTRATE_REF" --depth 1 https://github.com/inference-sim/blis-substrate.git ../blis-substrate
+          test "$(git -C ../blis-substrate describe --tags --exact-match)" = "$SUBSTRATE_REF" || {
+            echo "blis-substrate is not $SUBSTRATE_REF -- aborting" >&2; exit 1; }
+          echo "substrate_ref=$SUBSTRATE_REF" >> "$GITHUB_OUTPUT"
       - name: Restore the replay corpus
         if: matrix.report.replay
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: .corpus/traces.jsonl
-          key: replay-corpus-${{ steps.stack.outputs.catalog_ref }}
+          key: replay-corpus-${{ steps.stack.outputs.substrate_ref }}
+      - name: Fetch the pinned engine field list
+        run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
       - name: Re-run ${{ matrix.report.id }}'s own rows on the new binary
         run: |
           set -euo pipefail
           python3 -I scripts/blis_pin.py smoke "${{ matrix.report.id }}" \
-            --blis .build/blis --catalog ../blis-catalog --registry ../blis-registry \
+            --blis .build/blis --catalog ../blis-substrate/catalog --registry ../blis-substrate/registry \
+            --fields "$RUNNER_TEMP/fields.json" \
             --corpus .corpus/traces.jsonl --corpus-cache "$RUNNER_TEMP/agx-cache" \
             --max-parallel 2 --timeout "${{ vars.REGEN_RUN_TIMEOUT || '1800' }}" \
             --json "$RUNNER_TEMP/smoke-${{ matrix.report.id }}.json" | tee -a "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()
         with:
           name: smoke-${{ matrix.report.id }}
@@ -198,10 +190,10 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with: { python-version: "3.12" }
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: smoke-*
           path: ${{ runner.temp }}/smoke
@@ -217,7 +209,11 @@ jobs:
           marker="<!-- pin-compat -->"
           {
             echo "$marker"
-            echo "### pin-compat: $([ "$RESULT" = success ] && echo '✅ the code fits the new stack' || echo '❌ changes needed on this branch')"
+            if [ "$RESULT" = success ]; then
+              echo "### pin-compat: the code fits the new stack"
+            else
+              echo "### pin-compat: changes needed on this branch"
+            fi
             echo
             if [ -e "${files[0]}" ]; then python3 -I scripts/blis_pin.py smoke-summary "${files[@]}"; fi
             echo

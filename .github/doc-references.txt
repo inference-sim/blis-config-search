@@ -1,0 +1,6 @@
+# Documentation references that predate X26's check, one "path: finding" per line without its
+# line number. The list only shrinks: prcheck docrefs fails on a finding not listed here and on
+# an entry that no longer occurs. Each names a directory the site build creates.
+CLAUDE.md: web/public/data/ does not exist in this tree (X26)
+README.md: web/public/data/ does not exist in this tree (X26)
+README.md: web/dist/ does not exist in this tree (X26)

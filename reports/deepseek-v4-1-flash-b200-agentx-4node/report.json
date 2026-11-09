@@ -10,11 +10,11 @@
     },
     {
       "h": "What was found",
-      "html": "<strong>8x TP4 + EP (batch tokens 32,768)</strong>, from the <em>batch-tokens</em> sweep, reached 63.57 tok/s/accelerator (2034.3 tok/s across the fleet) at concurrency 128 while holding the scenario's SLOs."
+      "html": "<strong>8x TP4 + EP (batch tokens 32,768)</strong>, from the <em>batch-tokens</em> sweep, reached 63.28 tok/s/accelerator (2024.9 tok/s across the fleet) at concurrency 128 while holding the scenario's SLOs."
     },
     {
       "h": "What to run",
-      "html": "8x TP4 + EP (batch tokens 32,768) at concurrency 128. 106 of 183 runs held the SLOs.",
+      "html": "8x TP4 + EP (batch tokens 32,768) at concurrency 128. 108 of 183 runs held the SLOs.",
       "run": true
     }
   ],
@@ -34,7 +34,7 @@
       "num": 2,
       "prose": [
         "Mid-width tp4 instances should win at the SLO, and EP should matter little at dp 1 but cost throughput once dp spreads experts wider.",
-        "Measured: best was <strong>8x TP4 + EP</strong> at 60.25 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>8x TP4 + EP</strong> at 60.18 tok/s/accelerator (concurrency 128)."
       ],
       "title": "Sweep: topology-ep"
     },
@@ -43,7 +43,7 @@
       "num": 3,
       "prose": [
         "The per-step token cap should bind harder on four wide instances than on eight narrow ones, since long agentic prompts concentrate per instance.",
-        "Measured: best was <strong>8x TP4 + EP (batch tokens 32,768)</strong> at 63.57 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>8x TP4 + EP (batch tokens 32,768)</strong> at 63.28 tok/s/accelerator (concurrency 128)."
       ],
       "title": "Sweep: batch-tokens"
     },
@@ -52,7 +52,7 @@
       "num": 4,
       "prose": [
         "Capping prefill chunks should cost throughput at both widths, more where fewer decodes share each instance's token budget.",
-        "Measured: best was <strong>4x TP8 + EP</strong> at 31.06 tok/s/accelerator (concurrency 64)."
+        "Measured: best was <strong>8x TP4 + EP</strong> at 31 tok/s/accelerator (concurrency 64)."
       ],
       "title": "Sweep: prefill-chunking"
     },
@@ -61,7 +61,7 @@
       "num": 5,
       "prose": [
         "nvfp4 KV and a higher memory fraction both buy cache, so on a prefix-heavy replay they should substitute rather than add.",
-        "Measured: best was <strong>4x TP8 + EP</strong> at 30.97 tok/s/accelerator (concurrency 64)."
+        "Measured: best was <strong>4x TP8 + EP (KV dtype nvfp4_ds_mla)</strong> at 30.87 tok/s/accelerator (concurrency 64)."
       ],
       "title": "Sweep: kv-capacity"
     },
@@ -70,7 +70,7 @@
       "num": 6,
       "prose": [
         "A DeepEP backend should beat the allgather default at EP 16, and the gap should shrink or flip at EP 4.",
-        "Measured: best was <strong>8x TP4 + EP</strong> at 60.25 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>8x TP4 + EP</strong> at 60.18 tok/s/accelerator (concurrency 128)."
       ],
       "title": "Sweep: moe-collective"
     },
@@ -79,7 +79,7 @@
       "num": 7,
       "prose": [
         "dspark should raise throughput more on narrow instances, while K=5 may push wide shapes past the 20ms ITL floor.",
-        "Measured: best was <strong>8x TP4 + EP (5 draft tokens)</strong> at 31.87 tok/s/accelerator (concurrency 64)."
+        "Measured: best was <strong>8x TP4 + EP (5 draft tokens)</strong> at 31.8 tok/s/accelerator (concurrency 64)."
       ],
       "title": "Sweep: drafting"
     },
@@ -88,7 +88,7 @@
       "num": 8,
       "prose": [
         "Prefix-affinity with caching on should lead and random with caching off trail, and the gap should widen from four instances to eight.",
-        "Measured: best was <strong>8x TP4 + EP (prefix-affinity routing)</strong> at 59.25 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>8x TP4 + EP (prefix-affinity routing)</strong> at 59.41 tok/s/accelerator (concurrency 128)."
       ],
       "title": "Sweep: routing-prefix-cache"
     },
@@ -97,7 +97,7 @@
       "num": 9,
       "prose": [
         "Full capture should edge out the PIECEWISE default by a few percent.",
-        "Measured: best was <strong>8x TP4 + EP</strong> at 61.45 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>8x TP4 + EP (graph capture full decode only)</strong> at 61.31 tok/s/accelerator (concurrency 128)."
       ],
       "title": "Sweep: cudagraph"
     }

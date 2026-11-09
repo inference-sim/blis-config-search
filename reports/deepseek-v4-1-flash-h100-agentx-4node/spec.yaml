@@ -2,6 +2,8 @@ name: deepseek-v4-1-flash-h100-agentx-4node
 scenario:
   model: deepseek-v4.1-flash
   hardware: h100
+  cluster:
+    gpus_per_node: 8
   workload: agentx-mvp
   gpus: 32
   slo:
@@ -17,7 +19,7 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-h100
-    grace_period: inf
+    grace_period: 87600h
 sweeps:
 - name: topology
   narrative: Wide TP8 instances should win at the SLO, since narrow tp pays more per-step

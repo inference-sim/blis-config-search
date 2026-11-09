@@ -14,7 +14,7 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-muse-gb200-pd
-    grace_period: inf
+    grace_period: 87600h
 sweeps:
 - name: colocated
   narrative: Nine TP8 instances should lead the colocated shapes, since wider dp groups

@@ -10,11 +10,11 @@
     },
     {
       "h": "What was found",
-      "html": "<strong>1x TP4xPP2 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)</strong>, from the <em>kv-capacity</em> sweep, reached 11.91 tok/s/accelerator (95.3 tok/s across the fleet) at concurrency 16 while holding the scenario's SLOs."
+      "html": "<strong>1x TP8 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)</strong>, from the <em>kv-capacity</em> sweep, reached 11.8 tok/s/accelerator (94.4 tok/s across the fleet) at concurrency 16 while holding the scenario's SLOs."
     },
     {
       "h": "What to run",
-      "html": "1x TP4xPP2 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8) at concurrency 16. 240 of 260 runs held the SLOs.",
+      "html": "1x TP8 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8) at concurrency 16. 240 of 260 runs held the SLOs.",
       "run": true
     }
   ],
@@ -34,7 +34,7 @@
       "num": 2,
       "prose": [
         "TP8 should peak highest, since each pipeline stage adds a boundary hop to every decode step.",
-        "Measured: best was <strong>1x TP4xPP2 + EP</strong> at 10.49 tok/s/accelerator (concurrency 16)."
+        "Measured: best was <strong>1x TP4xPP2 + EP</strong> at 10.34 tok/s/accelerator (concurrency 16)."
       ],
       "title": "Sweep: pipeline-topology"
     },
@@ -43,7 +43,7 @@
       "num": 3,
       "prose": [
         "A seq cap of 8 should bind on TP8 at 16+ lanes, while a small token budget trades throughput for tail ITL on both shapes.",
-        "Measured: best was <strong>1x TP4xPP2 + EP (batch tokens 4,096)</strong> at 10.84 tok/s/accelerator (concurrency 16)."
+        "Measured: best was <strong>1x TP4xPP2 + EP</strong> at 10.44 tok/s/accelerator (concurrency 16)."
       ],
       "title": "Sweep: batch-caps"
     },
@@ -52,7 +52,7 @@
       "num": 4,
       "prose": [
         "fp8 KV should matter most on TP8, where 0.95 leaves almost no KV room, and substitute for memory on the pp shapes.",
-        "Measured: best was <strong>1x TP4xPP2 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)</strong> at 11.91 tok/s/accelerator (concurrency 16)."
+        "Measured: best was <strong>1x TP8 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)</strong> at 11.8 tok/s/accelerator (concurrency 16)."
       ],
       "title": "Sweep: kv-capacity"
     },
@@ -61,7 +61,7 @@
       "num": 5,
       "prose": [
         "DeepEP low-latency should win at small decode batches on both shapes, and matter more at EP width 8 than 4.",
-        "Measured: best was <strong>1x TP4xPP2 + EP</strong> at 10.49 tok/s/accelerator (concurrency 16)."
+        "Measured: best was <strong>1x TP4xPP2 + EP</strong> at 10.34 tok/s/accelerator (concurrency 16)."
       ],
       "title": "Sweep: moe-collective"
     },
@@ -79,7 +79,7 @@
       "num": 7,
       "prose": [
         "Capping long prefills should trade a little peak throughput for a much lower ITL p99 at saturation.",
-        "Measured: best was <strong>1x TP4xPP2 + EP (prefill chunk 8,192)</strong> at 10.49 tok/s/accelerator (concurrency 16)."
+        "Measured: best was <strong>1x TP4xPP2 + EP (prefill chunk 8,192)</strong> at 10.34 tok/s/accelerator (concurrency 16)."
       ],
       "title": "Sweep: prefill-chunking"
     },
@@ -88,7 +88,7 @@
       "num": 8,
       "prose": [
         "FULL-family capture should beat the PIECEWISE default by a few percent, and NONE should collapse.",
-        "Measured: best was <strong>1x TP8 + EP (graph capture full)</strong> at 9.29 tok/s/accelerator (concurrency 8)."
+        "Measured: best was <strong>1x TP8 + EP (graph capture full)</strong> at 9.28 tok/s/accelerator (concurrency 8)."
       ],
       "title": "Sweep: cudagraph"
     }

@@ -40,27 +40,25 @@
   "model": "muse-spark-open-816b-a42b-nvfp4",
   "objective": "max output tok/s per accelerator subject to the scenario's SLOs",
   "pinned_stack": {
-    "blis": "v0.15.0",
-    "catalog": "0.5.0",
+    "blis": "v0.16.0",
+    "data": "override",
     "engine_version": "0.32.0",
-    "kernel": "v0.5.0",
-    "registry": "v0.3.0",
+    "kernel": "unpinned",
     "resolved": {
       "blis": {
-        "commit": "762f1605ff27cd825d6b2cb2d9e991cd4b864c91",
-        "describe": "v0.15.0",
-        "sha256": "46bf00c739eafba4cdb347d4bfdd30bd63e815acaff1525c291b5b8ea947b197"
+        "sha256": "61cafc0644c299e247035f76b64baf238200b1b35053d9fc269ac086ee297281"
       },
       "catalog": {
-        "commit": "b5550f750cb51571498577fbdc1c68f78cda67db",
-        "describe": "0.5.0"
+        "commit": "fe6eab10b9795933de38122ba55e5299dcb20b5e",
+        "describe": "v0.13.0"
       },
       "registry": {
-        "commit": "96bead697172ab7f2cf8346e04e65b837014d867",
-        "describe": "v0.3.0"
+        "commit": "fe6eab10b9795933de38122ba55e5299dcb20b5e",
+        "describe": "v0.13.0"
       }
     },
-    "router": "v1.0.0-blis.2"
+    "router": "v1.0.0-blis.3",
+    "substrate": "v0.13.0"
   },
   "run_id": "muse-spark-open-816b-a42b-h200-agentx-8node-pd",
   "seed": 42,
@@ -70,7 +68,7 @@
       "_overrides": {
         "grace_period": {
           "catalog": "30s",
-          "spec": "inf"
+          "spec": "87600h"
         }
       },
       "benchmark_duration": "900s",
@@ -78,7 +76,7 @@
       "corpus": ".corpus/traces.jsonl",
       "corpus_cache": "/tmp/agx-cache-muse-h200-8node-pd",
       "corpus_sha256": "e39cd2ff3eba21d4a3664be51da743ac3d2149a1933898cafc7bfeac8147eeef",
-      "grace_period": "inf",
+      "grace_period": "87600h",
       "max_context_length": "max_model_len",
       "scenario": "inferencex-agentx-mvp",
       "thinking": "on"

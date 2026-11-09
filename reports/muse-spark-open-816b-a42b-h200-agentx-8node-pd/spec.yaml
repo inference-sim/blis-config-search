@@ -2,6 +2,8 @@ name: muse-spark-open-816b-a42b-h200-agentx-8node-pd
 scenario:
   model: muse-spark-open-816b-a42b-nvfp4
   hardware: h200
+  cluster:
+    gpus_per_node: 8
   workload: agentx-mvp
   gpus: 64
   engine:
@@ -14,7 +16,7 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-muse-h200-8node-pd
-    grace_period: inf
+    grace_period: 87600h
 sweeps:
 - name: colocated
   narrative: Eight single-node TP8 instances should lead, since wider dp groups pay

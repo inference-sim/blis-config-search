@@ -46,6 +46,9 @@ on:
         description: "regenerate even though no stack pin changed"
         type: boolean
         default: true
+      base:
+        description: "branch the batch PRs are cut from and opened against (blank = the default branch). Set it to a pull request's branch to regenerate the reports that branch needs, before it merges"
+        required: false
 
 permissions:
   contents: read
@@ -209,12 +212,14 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
       HAS_BOT_TOKEN: ${{ secrets.PIN_BOT_TOKEN != '' }}
+      BASE_BRANCH: ${{ github.event.inputs.base || github.event.repository.default_branch }}
     steps:
-      # Branch from current main: a campaign outlives workflow edits, and a branch carrying
-      # stale workflow files is refused to GITHUB_TOKEN (no `workflows` scope).
+      # Branch from the base branch (current main unless a dispatch names another): a campaign
+      # outlives workflow edits, and a branch carrying stale workflow files is refused to
+      # GITHUB_TOKEN (no `workflows` scope).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ github.event.inputs.base || github.event.repository.default_branch }}
           fetch-depth: 0       # see what main changed since the swept commit
           token: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
@@ -343,11 +348,11 @@ jobs:
           gh label create report-regen --force --color 0e8a16 \
             --description "Reports regenerated against a new pinned stack"
           gh pr create --title "Regenerate $BATCH reports on inference-sim $BLIS_REF" \
-            --body-file /tmp/body.md --base main --head "$branch" \
+            --body-file /tmp/body.md --base "${BASE_BRANCH}" --head "$branch" \
             --label auto-update --label report-regen
           # A PR opened with GITHUB_TOKEN starts no workflows, but a dispatch does: start its CI here.
           if [ "$HAS_BOT_TOKEN" != true ]; then
             pr="$(gh pr view "$branch" --json number --jq .number)"
             gh workflow run checks.yml --ref "$branch"
-            gh workflow run pin-compat.yml --ref "$branch" -f base=main -f pr="$pr"
+            gh workflow run pin-compat.yml --ref "$branch" -f base="$BASE_BRANCH" -f pr="$pr"
           fi

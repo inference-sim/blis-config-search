@@ -1492,6 +1492,7 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     # otherwise be committed as a report priced with data it was not (CFG-1).
     if seen is not None:
         rec["data"] = seen
+        rec["released_build"] = released_build(_result_doc(stdout))
         if not data_override and seen != "embedded" and not error:
             error = ("priced with other data than the simulator release's embedded data "
                      "(the Result's data block does not name catalog and registry source embedded)")

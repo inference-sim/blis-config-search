@@ -36,6 +36,7 @@ import hashlib
 import itertools
 import json
 import os
+import shutil
 import sys
 import time
 
@@ -738,6 +739,21 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                    "servable": sum(1 for r in all_rows if r.get("servable"))},
     }
     if not dry_run:
+        # The refusal above covers a requested override. This one covers what the Results say: a
+        # report priced with other data, or by an untagged build, is never written to reports/.
+        if report["experimental"] and _is_committed_reports(out_root):
+            # The sweep wrote its scratch (generated scenarios and routing) under out_dir before the
+            # Results could say what they were priced with; leave the committed tree as it was.
+            for scratch in (scenarios_dir, generated_routing):
+                shutil.rmtree(scratch, ignore_errors=True)
+            try:
+                os.rmdir(out_dir)           # only if nothing else is there
+            except OSError:
+                pass
+            raise SystemExit(f"{name}: the Results say this sweep was priced with data or a build other than "
+                             f"a tagged release's embedded data ({_other_data_reason(runs)}), so its report is "
+                             f"experimental and never committed: --out {out_root} is the repository's "
+                             f"reports/ directory. Choose another --out, or run the pinned release.")
         _write_run_dir(out_dir, spec, report, runs)
     return report
 
@@ -971,9 +987,18 @@ def _is_committed_reports(out_root):
 
 def _priced_with_other_data(runs, data_override):
     """True when the sweep asked for other data, or any run's Result says it was priced with data
-    other than the release's embedded data (CFG-1): the report is then experimental, whatever the
-    command line said."""
-    return bool(data_override) or any(r.get("data") not in (None, "embedded") for r in runs)
+    other than a tagged release's own embedded data (CFG-1): the report is then experimental,
+    whatever the command line said. A Result names its data sources and whether the build is a
+    tagged release (`released_data`); an untagged or off-pin build is experimental too."""
+    return bool(data_override) or any(
+        r.get("data") not in (None, "embedded") or r.get("released_build") is False for r in runs)
+
+
+def _other_data_reason(runs):
+    """One line naming why a sweep's Results are not a tagged release's embedded data."""
+    if any(r.get("data") not in (None, "embedded") for r in runs):
+        return "a Result names a data source other than embedded"
+    return "a Result names a build that is not a tagged release"
 
 
 def _pinned_stack(blis, catalog, registry, engine_version, data_override=False):

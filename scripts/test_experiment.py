@@ -1922,6 +1922,46 @@ class DataOverride(unittest.TestCase):
             E.run_experiment(spec, "blis", "/cat", "/reg", os.path.join(E.ROOT, "reports"), data_override=True)
         self.assertIn("never committed", str(cm.exception))
 
+    def sweep(self, out, **row):
+        """run_experiment with run_one faked to return a row carrying `row`, and no data flag."""
+        def fake_run_one(*a, **kw):
+            return {"metrics": {"tokens_per_sec": 1.0, "itl_p99_ms": 1.0}, "cmd": None,
+                    "config": dict(kw.get("config") or a[11]), **row}
+        real = E.run_blis.run_one
+        E.run_blis.run_one = fake_run_one
+        try:
+            return E.run_experiment(spec(), BLIS, "/c", "/r", out, verbose=False)
+        finally:
+            E.run_blis.run_one = real
+
+    def test_a_development_build_makes_the_report_experimental(self):
+        with tempfile.TemporaryDirectory() as out:
+            rep = self.sweep(out, data="embedded", released_build=False)
+        self.assertTrue(rep["experimental"])
+
+    def test_a_tagged_build_on_embedded_data_is_not_experimental(self):
+        with tempfile.TemporaryDirectory() as out:
+            rep = self.sweep(out, data="embedded", released_build=True)
+        self.assertFalse(rep["experimental"])
+
+    def test_a_runtime_override_is_refused_the_committed_directory(self):
+        """No data flag was given, but the Results say path sources: nothing is written to reports/."""
+        import shutil
+        reports = os.path.join(E.ROOT, "reports")
+        before = set(os.listdir(reports))
+        with self.assertRaises(SystemExit) as cm:
+            self.sweep(reports, data="override", released_build=True)
+        self.assertIn("never committed", str(cm.exception))
+        self.assertEqual(before, set(os.listdir(reports)), "nothing was written")
+        self.assertFalse(os.path.exists(os.path.join(reports, "t")), "the sweep's scratch was removed too")
+
+    def test_a_development_build_is_refused_the_committed_directory(self):
+        reports = os.path.join(E.ROOT, "reports")
+        before = set(os.listdir(reports))
+        with self.assertRaises(SystemExit):
+            self.sweep(reports, data="embedded", released_build=False)
+        self.assertEqual(before, set(os.listdir(reports)))
+
     def test_the_committed_reports_directory_is_recognised_through_a_symlink(self):
         import tempfile
         d = tempfile.mkdtemp()

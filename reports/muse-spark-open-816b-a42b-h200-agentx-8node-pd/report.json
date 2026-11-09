@@ -10,11 +10,11 @@
     },
     {
       "h": "What was found",
-      "html": "<strong>8x TP8 + EP</strong>, from the <em>colocated</em> sweep, reached 15.4 tok/s/accelerator (985.4 tok/s across the fleet) at concurrency 128 while holding the scenario's SLOs."
+      "html": "<strong>8x TP8 + EP (batch tokens 32,768)</strong>, from the <em>colocated-tuned</em> sweep, reached 15.19 tok/s/accelerator (972 tok/s across the fleet) at concurrency 128 while holding the scenario's SLOs."
     },
     {
       "h": "What to run",
-      "html": "8x TP8 + EP at concurrency 128. 204 of 204 runs held the SLOs.",
+      "html": "8x TP8 + EP (batch tokens 32,768) at concurrency 128. 204 of 204 runs held the SLOs.",
       "run": true
     }
   ],
@@ -34,7 +34,7 @@
       "num": 2,
       "prose": [
         "Eight single-node TP8 instances should lead, since wider dp groups pay cross-node IB all-to-all for little extra batch.",
-        "Measured: best was <strong>8x TP8 + EP</strong> at 15.4 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>8x TP8 + EP</strong> at 14.93 tok/s/accelerator (concurrency 128)."
       ],
       "title": "Sweep: colocated"
     },
@@ -43,7 +43,7 @@
       "num": 3,
       "prose": [
         "A bigger token budget with a long-prefill cap should hold ITL to higher load, narrowing what P/D can win.",
-        "Measured: best was <strong>8x TP8 + EP</strong> at 15.4 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>8x TP8 + EP (batch tokens 32,768)</strong> at 15.19 tok/s/accelerator (concurrency 128)."
       ],
       "title": "Sweep: colocated-tuned"
     },
@@ -52,7 +52,7 @@
       "num": 4,
       "prose": [
         "Decode-heavy ratios should win on AgentX, since cached prefixes leave only a short uncached tail to prefill per turn.",
-        "Measured: best was <strong>4P/4D TP8 + EP</strong> at 11.47 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>4P/4D TP8 + EP</strong> at 11.55 tok/s/accelerator (concurrency 128)."
       ],
       "title": "Sweep: pd-ratio"
     },
@@ -61,7 +61,7 @@
       "num": 5,
       "prose": [
         "Splitting every request should trail the threshold arms, because a turn with a cached prefix pays an IB handoff for little prefill.",
-        "Measured: best was <strong>4P/4D TP8 + EP</strong> at 11.13 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>4P/4D TP8 + EP</strong> at 8.83 tok/s/accelerator (concurrency 128)."
       ],
       "title": "Sweep: pd-always"
     },
@@ -70,7 +70,7 @@
       "num": 6,
       "prose": [
         "TP16 decode instances should hold ITL at higher load than TP8 ones, trading batch slots for faster steps.",
-        "Measured: best was <strong>4P TP8 + EP / 2D TP16 + EP</strong> at 12.89 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>4P TP8 + EP / 2D TP16 + EP</strong> at 12.64 tok/s/accelerator (concurrency 128)."
       ],
       "title": "Sweep: pd-wide-decode"
     },
@@ -79,7 +79,7 @@
       "num": 7,
       "prose": [
         "A 32k prefill budget should matter on the prefill-light layout and a decode-pool prefill cap on the decode-heavy one.",
-        "Measured: best was <strong>4P/4D TP8 + EP</strong> at 11.76 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>4P/4D TP8 + EP</strong> at 11.84 tok/s/accelerator (concurrency 128)."
       ],
       "title": "Sweep: pd-pool-engine"
     },
@@ -88,7 +88,7 @@
       "num": 8,
       "prose": [
         "Full graph capture on the decode pool should lower ITL by a few percent, with FULL_DECODE_ONLY matching FULL there.",
-        "Measured: best was <strong>3P/5D TP8 + EP</strong> at 8.72 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>3P/5D TP8 + EP</strong> at 8.26 tok/s/accelerator (concurrency 64)."
       ],
       "title": "Sweep: pd-decode-cudagraph"
     }

@@ -2,6 +2,8 @@ name: muse-spark-open-816b-a42b-h200-agentx-8gpu
 scenario:
   model: muse-spark-open-816b-a42b-nvfp4
   hardware: h200
+  cluster:
+    gpus_per_node: 8
   workload: agentx-mvp
   gpus: 8
   engine:
@@ -15,7 +17,7 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-muse-h200
-    grace_period: inf
+    grace_period: 87600h
 sweeps:
 - name: topology-pp
   narrative: TP8 should peak highest, since every pipeline stage adds a boundary hop

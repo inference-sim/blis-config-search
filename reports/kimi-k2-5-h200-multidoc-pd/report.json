@@ -10,11 +10,11 @@
     },
     {
       "h": "What was found",
-      "html": "<strong>8x TP4xDP2 + EP (batch tokens 32,768)</strong>, from the <em>colocated</em> sweep, reached 56.34 tok/s/accelerator (3605.7 tok/s across the fleet) at concurrency 64 while holding the scenario's SLOs."
+      "html": "<strong>8x TP4xDP2 + EP (batch tokens 32,768)</strong>, from the <em>colocated</em> sweep, reached 56.02 tok/s/accelerator (3585.1 tok/s across the fleet) at concurrency 64 while holding the scenario's SLOs."
     },
     {
       "h": "What to run",
-      "html": "8x TP4xDP2 + EP (batch tokens 32,768) at concurrency 64. 368 of 950 runs held the SLOs.",
+      "html": "8x TP4xDP2 + EP (batch tokens 32,768) at concurrency 64. 354 of 950 runs held the SLOs.",
       "run": true
     }
   ],
@@ -34,7 +34,7 @@
       "num": 2,
       "prose": [
         "The colocated control should hold ITL only with a chunked-prefill cap, and the wide-dp shapes should give the most tokens per GPU.",
-        "Measured: best was <strong>8x TP4xDP2 + EP (batch tokens 32,768)</strong> at 56.34 tok/s/accelerator (concurrency 64)."
+        "Measured: best was <strong>8x TP4xDP2 + EP (batch tokens 32,768)</strong> at 56.02 tok/s/accelerator (concurrency 64)."
       ],
       "title": "Sweep: colocated"
     },
@@ -43,7 +43,7 @@
       "num": 3,
       "prose": [
         "Prefill-heavy ratios should win on 10k prompts, and a threshold near the median prompt should beat splitting every request.",
-        "Measured: best was <strong>3P/5D TP8 + EP</strong> at 55.81 tok/s/accelerator (concurrency 64)."
+        "Measured: best was <strong>2P/6D TP8 + EP</strong> at 39.53 tok/s/accelerator (concurrency 32)."
       ],
       "title": "Sweep: pd-dp1"
     },
@@ -52,7 +52,7 @@
       "num": 4,
       "prose": [
         "Splitting every request should cost ITL headroom against the threshold arms, because each handoff stalls a decode slot.",
-        "Measured: best was <strong>4P/4D TP8 + EP</strong> at 35.9 tok/s/accelerator (concurrency 32)."
+        "Measured: best was <strong>4P/4D TP8 + EP</strong> at 38.63 tok/s/accelerator (concurrency 32)."
       ],
       "title": "Sweep: pd-always"
     }

@@ -520,17 +520,86 @@ class FabricSelection(unittest.TestCase):
 
 class BuildCmd(unittest.TestCase):
     def test_kernel_flags_and_cli_knobs(self):
-        cmd = run_blis.build_cmd("blis", "cat", "reg", "scn", "s.yaml", "chatbot", 100, 0, None, None,
+        cmd = run_blis.build_cmd("blis", None, None, "scn", "s.yaml", "chatbot", 100, 0, None, None,
                                  {"num_instances": 2, "concurrency": 64, "scheduler": "fcfs"})
         # v0.10.0 selects the kernel backend from the scenario's `coefficients:` list, NOT a
         # `--latency-model` CLI flag (the flag was removed and is rejected as unknown).
         self.assertNotIn("--latency-model", cmd)
         self.assertNotIn("blis-latency-kernel", cmd)
-        for a, b in (("--scenario", "s.yaml"), ("--scenarios", "scn"), ("--registry", "reg"),
+        for a, b in (("--scenario", "s.yaml"), ("--scenarios", "scn"),
                      ("--num-instances", "2"), ("--concurrency", "64"), ("--scheduler", "fcfs")):
             self.assertEqual(cmd[cmd.index(a) + 1], b)
         for refused in ("--tp", "--model", "--hardware", "--enable-expert-parallel", "--dp"):
             self.assertNotIn(refused, cmd)
+
+
+class EmbeddedData(unittest.TestCase):
+    """A committed report is priced with the pinned release's embedded catalog and registry (CFG-1):
+    the simulator is given neither unless the run is an explicit, experimental override."""
+
+    def cmds(self, catalog, registry):
+        run = run_blis.build_cmd("blis", catalog, registry, "scn", "s.yaml", "chatbot", 100, 0, None, None, {})
+        replay = run_blis.build_replay_cmd("blis", catalog, registry, "scn", "s.yaml", 0, None, {},
+                                           {"scenario": "x", "corpus": "c", "corpus_sha256": "d"})
+        return run, replay
+
+    def test_no_data_flag_without_an_override(self):
+        for cmd in self.cmds(None, None):
+            self.assertNotIn("--catalog", cmd)
+            self.assertNotIn("--registry", cmd)
+
+    def test_an_override_names_both_directories(self):
+        for cmd in self.cmds("/cat", "/reg"):
+            self.assertEqual("/cat", cmd[cmd.index("--catalog") + 1])
+            self.assertEqual("/reg", cmd[cmd.index("--registry") + 1])
+
+    def _record(self, **kw):
+        seen = []
+        real = run_blis.subprocess.run
+
+        class Done:
+            returncode, stdout, stderr = 0, "", ""
+
+        def fake(cmd, **k):
+            if cmd[1:2] in (["run"], ["replay"]):
+                seen.append(cmd)
+                return Done()
+            return real(cmd, **k)
+        run_blis.subprocess.run = fake
+        try:
+            d = tempfile.mkdtemp()
+            cat = os.path.join(d, "catalog")
+            os.makedirs(os.path.join(cat, "workloads"))
+            with open(os.path.join(cat, "workloads", "chatbot.yaml"), "w") as f:
+                f.write("prompt:\n  tokens: 100\n  tokens_stdev: 10\n  tokens_min: 1\n  tokens_max: 200\n"
+                        "output:\n  tokens: 50\n  tokens_stdev: 5\n  tokens_min: 1\n  tokens_max: 100\n")
+            rec = run_blis.run_one(FIXTURE_BLIS, cat, "/reg", d, "m", "h100", "0.32.0", "chatbot", 10, 0,
+                                   None, {"tp": 8, "concurrency": 4}, gpus_per_node=8, **kw)
+        finally:
+            run_blis.subprocess.run = real
+        return rec, seen
+
+    def test_a_default_run_hands_the_simulator_no_data_and_says_embedded(self):
+        rec, seen = self._record()
+        self.assertEqual("embedded", rec["data"])
+        self.assertTrue(seen, "the run command was not built")
+        self.assertNotIn("--catalog", seen[0])
+        self.assertNotIn("--registry", seen[0])
+        self.assertNotIn("catalog", rec["pinned_stack"])
+
+    def test_an_override_run_passes_the_directories_and_is_marked(self):
+        rec, seen = self._record(data_override=True)
+        self.assertEqual("override", rec["data"])
+        self.assertTrue(seen[0][seen[0].index("--catalog") + 1].endswith("catalog"))
+        self.assertEqual("/reg", seen[0][seen[0].index("--registry") + 1])
+
+    def test_the_cli_has_the_override_flag_off_by_default(self):
+        import argparse
+        p = argparse.ArgumentParser()
+        run_blis.add_common_args(p)
+        base = ["--scenarios", "s", "--model", "m", "--hardware", "h100"]
+        self.assertFalse(p.parse_args(base).data_override)
+        self.assertTrue(p.parse_args(base + ["--data-override"]).data_override)
 
 
 class NodeSize(unittest.TestCase):

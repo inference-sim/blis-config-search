@@ -226,7 +226,7 @@ measured leverage and each knob's precondition — worth reading before choosing
 
 ## Replay workloads: the catalog already describes them
 
-`blis-catalog/workloads/<name>.yaml` **is** the workload. For `agentx-mvp` it states the harness
+The catalog's `workloads/<name>.yaml` **is** the workload. For `agentx-mvp` it states the harness
 scenario id, the corpus loader with its pinned HF revision, the `sha256`, `random_seed`,
 `benchmark_duration_s`, `grace_period_s`, `max_context_length`, the cache-bust and trajectory
 settings, and the `category`/`thinking` pair that selects the acceptance profile. The sweeper
@@ -254,7 +254,7 @@ report can say the run departed from the catalog.
 revision and the digest:
 
 ```
-python3 -I scripts/fetch_corpus.py experiments/<name>.yaml --catalog ../blis-catalog
+python3 -I scripts/fetch_corpus.py experiments/<name>.yaml --catalog "$BLIS_CATALOG"
 ```
 
 It downloads to the path the spec states, verifies the sha256 before moving the file into place,
@@ -449,7 +449,7 @@ inference-sim release --bump-blis-pin.yml-->  DRAFT pin PR  <--fix commits--  pi
   or by hand). For a release newer than `BLIS_REF` it rewrites `pins.env` + `SETUP.md`, checks the
   tag's commit and that the release builds, and opens a **draft** PR with a checklist. It does not
   require this repo's tests to pass: a release that needs code changes still needs its PR. It
-  never guesses `CATALOG_REF` / `REGISTRY_REF`.
+  needs no catalog or registry pin: the release embeds both.
 * **`pin-compat.yml`** runs on every PR, and does its work only when a pin's *value* moves against
   the base branch. Mark its **`gate`** job as the required check: it always reports, and passes when
   no pin moved. Against

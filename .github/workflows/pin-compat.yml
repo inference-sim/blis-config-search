@@ -144,28 +144,29 @@ jobs:
       - run: pip install --require-hashes -r requirements.txt
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with: { name: pin-compat-blis, path: .build }
-      - name: Clone the pinned catalog + registry
+      - name: Clone the pinned substrate release (the files the scripts read; the simulator uses its embedded data)
         id: stack
         run: |
           set -euo pipefail
           chmod +x .build/blis
           set -a; . ./pins.env; set +a
-          git clone --branch "$CATALOG_REF" --depth 1 https://github.com/inference-sim/blis-catalog.git ../blis-catalog
-          git clone --branch "$REGISTRY_REF" --depth 1 https://github.com/inference-sim/blis-registry.git ../blis-registry
-          echo "catalog_ref=$CATALOG_REF" >> "$GITHUB_OUTPUT"
+          git clone --branch "$SUBSTRATE_REF" --depth 1 https://github.com/inference-sim/blis-substrate.git ../blis-substrate
+          test "$(git -C ../blis-substrate describe --tags --exact-match)" = "$SUBSTRATE_REF" || {
+            echo "blis-substrate is not $SUBSTRATE_REF -- aborting" >&2; exit 1; }
+          echo "substrate_ref=$SUBSTRATE_REF" >> "$GITHUB_OUTPUT"
       - name: Restore the replay corpus
         if: matrix.report.replay
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: .corpus/traces.jsonl
-          key: replay-corpus-${{ steps.stack.outputs.catalog_ref }}
+          key: replay-corpus-${{ steps.stack.outputs.substrate_ref }}
       - name: Fetch the pinned engine field list
         run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
       - name: Re-run ${{ matrix.report.id }}'s own rows on the new binary
         run: |
           set -euo pipefail
           python3 -I scripts/blis_pin.py smoke "${{ matrix.report.id }}" \
-            --blis .build/blis --catalog ../blis-catalog --registry ../blis-registry \
+            --blis .build/blis --catalog ../blis-substrate/catalog --registry ../blis-substrate/registry \
             --fields "$RUNNER_TEMP/fields.json" \
             --corpus .corpus/traces.jsonl --corpus-cache "$RUNNER_TEMP/agx-cache" \
             --max-parallel 2 --timeout "${{ vars.REGEN_RUN_TIMEOUT || '1800' }}" \

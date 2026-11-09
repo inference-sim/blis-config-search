@@ -183,7 +183,8 @@ def defaults(run_dir, keys):
 
 GH = "https://github.com/inference-sim"
 _PINS = build_catalog.read_pins()
-CATALOG_DIR = os.path.join(ROOT, os.pardir, "blis-catalog")
+# The catalog/ of a blis-substrate checkout at the pinned release (workload descriptors are read from it).
+CATALOG_DIR = os.environ.get("BLIS_CATALOG") or os.path.join(ROOT, os.pardir, "blis-substrate", "catalog")
 
 
 def _clone(repo, ref, commit, dest, *then):
@@ -233,8 +234,14 @@ def setup(exp, run_dir=None):
     sh += _clone("inference-sim", ps["blis"], commit("blis"), "inference-sim",
                  "(cd inference-sim && go build -o blis main.go)", 'export PATH="$PWD/inference-sim:$PATH"')
     sh.append("")
+    if ps.get("substrate"):
+        # the simulator prices with the data embedded in this release (CFG-1); the checkout is only
+        # where the scripts read catalog and registry files from
+        sh += _clone("blis-substrate", ps["substrate"], None, "blis-substrate",
+                     'export BLIS_CATALOG="$PWD/blis-substrate/catalog"',
+                     'export BLIS_REGISTRY="$PWD/blis-substrate/registry"') + [""]
     for key, repo, env in (("catalog", "blis-catalog", "BLIS_CATALOG"), ("registry", "blis-registry", "BLIS_REGISTRY")):
-        if ps.get(key):
+        if ps.get(key) and ps.get("data") != "embedded":     # a report from before the data was embedded
             sh += _clone(repo, ps[key], commit(key), repo, f'export {env}="$PWD/{repo}"') + [""]
     sh += ["# the commands run from this repo: router configs live here, scenarios/ is where you save each scenario",
            f"git clone --depth 1 {GH}/blis-config-search.git && cd blis-config-search && mkdir -p scenarios"]
@@ -258,8 +265,9 @@ def setup(exp, run_dir=None):
              "  --out repro/"]
     stack = [{"name": "BLIS", "repo": "inference-sim", "ref": ps["blis"], "commit": commit("blis")},
              *[{"name": n, "repo": r, "ref": ps[k], "commit": commit(k)}
-               for k, n, r in (("catalog", "catalog", "blis-catalog"), ("registry", "registry", "blis-registry"))
-               if ps.get(k)]]
+               for k, n, r in (("substrate", "substrate (embedded data)", "blis-substrate"),
+                               ("catalog", "catalog", "blis-catalog"), ("registry", "registry", "blis-registry"))
+               if ps.get(k) and not (ps.get("data") == "embedded" and k in ("catalog", "registry"))]]
     # compiled into BLIS; a ledger from before the router was recorded takes the pin of the same BLIS release
     router = ps.get("router") or (_PINS.get("ROUTER_REF") if _PINS.get("BLIS_REF") == ps["blis"] else None)
     for name, repo, ref in (("latency kernel", "blis-latency-kernel", ps.get("kernel")),
@@ -267,8 +275,8 @@ def setup(exp, run_dir=None):
         if ref and ref != "unpinned":
             stack.append({"name": name, "repo": repo, "ref": ref, "commit": None})
     # a fresh checkout sweeps at today's pins.env, whose simulator fixes the engine release
-    then = (ps["blis"], ps.get("catalog"), ps.get("registry"))
-    now = (_PINS.get("BLIS_REF"), _PINS.get("CATALOG_REF"), _PINS.get("REGISTRY_REF"))
+    then = (ps["blis"], ps.get("substrate"))
+    now = (_PINS.get("BLIS_REF"), _PINS.get("SUBSTRATE_REF"))
     return {"stack": stack, "script": "\n".join(sh) + "\n", "sweep": "\n".join(sweep) + "\n",
             "pins_moved": then != now,
             "runs": (exp.get("totals") or {}).get("runs"), "hours": _wall_hours(run_dir) if run_dir else None}

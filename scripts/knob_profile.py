@@ -279,7 +279,7 @@ def main(argv=None):
     ap.add_argument("--model", required=True)
     ap.add_argument("--hardware", required=True)
     ap.add_argument("--workload", required=True)
-    ap.add_argument("--catalog", default=os.path.join(SIBLINGS, "blis-catalog"))
+    ap.add_argument("--catalog", default=os.path.join(SIBLINGS, "blis-substrate", "catalog"))
     ap.add_argument("--json", action="store_true", dest="as_json")
     args = ap.parse_args(argv)
 

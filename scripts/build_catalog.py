@@ -313,28 +313,15 @@ def _stack(pins, versions):
     SUBSTRATE_REF is carried through even though `versions` never had it: the substrate holds
     the cost model that prices every run, so omitting it would understate what pins a number.
 
-    Every row is sourced from pins.env, NOT from _git_describe of a sibling checkout, and that
-    is a bug fix rather than a preference. `versions` reads the catalog and registry off
-    ../blis-catalog and ../blis-registry, which do not exist under actions/checkout -- so on the
-    deployed site both pills have always read the literal string "absent", exactly the failure
-    already documented above for inference-sim ("the pill read absent even though every run was
-    priced by the pin"). That one row was moved to pins.env; these two were left behind. pins.env
-    is committed, so it is the only source that survives a fresh clone.
+    Every row is sourced from pins.env, NOT from _git_describe of an ambient checkout: pins.env is
+    committed, so it is the only source that survives a fresh clone. The catalog and registry are
+    not rows of their own: the simulator prices with the data embedded in the blis-substrate
+    release (CFG-1), so that row stands for them.
 
-    The describe is kept as a FALLBACK, for the case pins.env omits a ref: then an ambient
-    checkout is still a better answer than "absent". Where both exist the pin wins, because the
-    footer's job is provenance for the committed reports and the pin is the authority on that --
-    a developer's sibling checkout sitting ahead of the pin (0.5.0 vs a pinned 0.4.0) must not be
-    published as having priced reports it never saw.
-
-    The rows come from two kinds of pin, which is why some are conditional:
-
-      * DERIVED (substrate, vllm, router) -- Go dependencies compiled into the binary, written to
-        pins.env from inference-sim's go.mod by scripts/sync_pins.py. A derived key can be legally
-        ABSENT: blis-vllm is not a dependency before BLIS v0.14.0, so at an older pin there is no
-        row for it rather than a row reading "absent". Omitting beats inventing.
-      * HAND-PINNED (catalog, registry) -- data directories passed to the binary, not Go modules,
-        so BLIS_REF can never determine them. Always shown.
+    The rows are DERIVED (substrate, vllm, router): Go dependencies compiled into the binary,
+    written to pins.env from inference-sim's go.mod by scripts/sync_pins.py. A derived key can be
+    legally ABSENT: blis-vllm is not a dependency before BLIS v0.14.0, so at an older pin there is
+    no row for it rather than a row reading "absent". Omitting beats inventing.
     """
     def dep(name, version, note):
         return {"name": name, "version": version or "absent", "note": note}
@@ -351,12 +338,6 @@ def _stack(pins, versions):
     if pins.get("ROUTER_REF"):
         deps.append(dep("llm-d-router", pins["ROUTER_REF"],
                         "embedded router that places every request, derived from go.mod"))
-    deps += [
-        dep("blis-catalog", pins.get("CATALOG_REF") or versions.get("blis-catalog"),
-            "models, hardware, workloads the binary is run against"),
-        dep("blis-registry", pins.get("REGISTRY_REF") or versions.get("blis-registry"),
-            "cost-model coefficients and speculative-decoding profiles"),
-    ]
     return {
         "root": dep("inference-sim", versions.get("inference-sim"),
                     "the BLIS simulator whose binary prices every run"),
@@ -364,9 +345,11 @@ def _stack(pins, versions):
     }
 
 
-def build(siblings):
-    catalog = os.path.join(siblings, "blis-catalog")
-    registry = os.path.join(siblings, "blis-registry")
+def build(substrate):
+    """The catalog data of the blis-substrate checkout `substrate` (the pinned release): its
+    catalog/ and registry/ are what the simulator embeds (CFG-1)."""
+    catalog = os.path.join(substrate, "catalog")
+    registry = os.path.join(substrate, "registry")
 
     models, hardware, workloads, fabrics, storage, reg_sets = [], [], [], [], [], []
 
@@ -425,8 +408,7 @@ def build(siblings):
     # scenario.json records the `pinned_stack.blis` that actually priced it.
     pins = read_pins()
     versions = {
-        "blis-catalog": _git_describe(catalog),
-        "blis-registry": _git_describe(registry),
+        "blis-substrate": _git_describe(substrate),
         "inference-sim": _priced_by(pins),
     }
     return {"models": models, "hardware": hardware, "workloads": workloads,

@@ -273,7 +273,7 @@ and note in a `#` comment that the grid was bounded. Do not silently drop a cont
 
 ### Replay workloads: state the corpus path, nothing else
 
-`blis-catalog/workloads/<name>.yaml` **is** the workload. For `agentx-mvp` it states the harness
+The catalog's `workloads/<name>.yaml` **is** the workload. For `agentx-mvp` it states the harness
 scenario id (`inferencex-agentx-mvp`), the corpus loader with its pinned HF revision, the
 `sha256`, `random_seed`, `benchmark_duration_s`, `grace_period_s`, `max_context_length`, the
 cache-bust and trajectory settings, and the `category`/`thinking` pair that selects the

@@ -23,9 +23,8 @@ import blis_cli  # noqa: E402
 import settings  # noqa: E402
 from settings import ENGINE_KIND  # noqa: E402
 
-# cost-model-fabric is the cross-node/cross-rack interconnect term, and it is the set REGISTRY_REF
-# v0.3.0 adds (v0.2.0 has no such file, which is why the registry pin had to move with the BLIS
-# one). Every one of upstream's 40 Muse scenarios names it, so a scenario this script generates
+# cost-model-fabric is the cross-node/cross-rack interconnect term, and it is a coefficient set of
+# the pinned simulator release's embedded registry. Every one of upstream's 40 Muse scenarios names it, so a scenario this script generates
 # names it too.
 #
 # It is NOT a hard requirement -- a scenario omitting it runs rc=0 -- which is exactly why it is
@@ -1184,6 +1183,18 @@ def _cli_flag(key):
 INF_NEEDS_YAML = ("inf", ".inf")
 
 
+def _data_args(catalog, registry):
+    """The simulator's data-override flags. A committed report uses the pinned release's embedded
+    catalog and registry (CFG-1), so the callers hand this None for both and no flag is passed;
+    only an exploratory run (--data-override) names directories."""
+    out = []
+    if catalog:
+        out += ["--catalog", catalog]
+    if registry:
+        out += ["--registry", registry]
+    return out
+
+
 def build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed, defaults, cli,
                      replay):
     """The `blis replay --agentic-scenario` command for a trace-REPLAY workload.
@@ -1198,15 +1209,14 @@ def build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed
     drives a whole agentic trajectory whose sub-requests fan out from it.
     """
     cmd = [blis, "replay",
-           "--scenario", scenario_name, "--scenarios", scenarios_dir, "--registry", registry,
+           "--scenario", scenario_name, "--scenarios", scenarios_dir,
            "--agentic-scenario", replay["scenario"],
            "--corpus", replay["corpus"],
            # Required: the harness reads the dataset's default branch rather than a pinned
            # revision, so only the file's digest ties a run to its bytes. BLIS refuses a replay
            # that states no sha256, and refuses a corpus whose digest does not match.
            "--corpus-sha256", replay["corpus_sha256"]]
-    if catalog:
-        cmd += ["--catalog", catalog]
+    cmd += _data_args(catalog, registry)
     if resolve_defaults(blis, defaults):
         cmd += ["--defaults-filepath", resolve_defaults(blis, defaults)]
     # max_model_len: the deployment's own resolved window. Every trace whose peak prompt + output
@@ -1235,9 +1245,8 @@ def build_cmd(blis, catalog, registry, scenarios_dir, scenario_name, workload, n
     # into the generated scenario), not a CLI flag: the old `--latency-model blis-latency-kernel`
     # flag was removed in v0.10.0 and is rejected ("unknown flag"), so it must not be passed.
     cmd = [blis, "run",
-           "--scenario", scenario_name, "--scenarios", scenarios_dir, "--registry", registry]
-    if catalog:
-        cmd += ["--catalog", catalog]
+           "--scenario", scenario_name, "--scenarios", scenarios_dir]
+    cmd += _data_args(catalog, registry)
     if resolve_defaults(blis, defaults):
         cmd += ["--defaults-filepath", resolve_defaults(blis, defaults)]
     if workload:
@@ -1318,7 +1327,8 @@ def _failure_line(stderr):
 
 def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_version,
             workload, num_requests, seed, horizon, config, phase="probe", timeout=120, defaults=None,
-            replay=None, fabric=DEFAULT_FABRIC, gpus_per_node=None, fields=None):
+            replay=None, fabric=DEFAULT_FABRIC, gpus_per_node=None, fields=None,
+            data_override=False):
     """Run one kernel-priced BLIS config and return a record dict. No runs.jsonl I/O (caller writes).
 
     `replay` selects the trace-REPLAY path (`blis replay --agentic-scenario`) instead of
@@ -1332,14 +1342,21 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     `gpus_per_node` is what the specification states for a chip whose catalog entry fixes no node
     size; a chip that does fix one (GB200 NVL72) takes the catalog's and the scenario states none.
 
+    `catalog` and `registry` are the directories the runner reads files from (a blis-substrate
+    checkout at the pinned release). The simulator is told about them only when `data_override` is
+    true: otherwise it prices with its embedded data (CFG-1) and the record says so.
+
     `fields` is the file holding the engine's field list (--fields), or None to ask the binary.
     """
     rec = _record_shell(config, phase)
+    rec["data"] = "override" if data_override else "embedded"
+    sim_catalog = catalog if data_override else None
+    sim_registry = registry if data_override else None
     # Which cost model priced THIS row (see row_stack): makes provenance_split's stack branch able
     # to fire on real data instead of guarding an unreachable path.
-    rec["pinned_stack"] = row_stack(blis, catalog, registry)
+    rec["pinned_stack"] = row_stack(blis, sim_catalog, sim_registry)
     try:
-        node_size, states_node_size = cluster_node_size(blis, catalog, hardware, gpus_per_node)
+        node_size, states_node_size = cluster_node_size(blis, sim_catalog, hardware, gpus_per_node)
         parallel, engine, cli, router = classify_config(config, settings.vocabulary(blis, fields), node_size)
         # Resolve the preset's token shape so a closed-loop run actually prices the traffic it
         # names (see WORKLOAD_IGNORED). A replay carries its lengths in the corpus, so no shape.
@@ -1409,10 +1426,10 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                     "stdout_tail": "", "stderr_tail": ""})
         return rec
     if replay:
-        cmd = build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed,
+        cmd = build_replay_cmd(blis, sim_catalog, sim_registry, scenarios_dir, scenario_name, seed,
                                defaults, cli, replay)
     else:
-        cmd = build_cmd(blis, catalog, registry, scenarios_dir, scenario_name, workload,
+        cmd = build_cmd(blis, sim_catalog, sim_registry, scenarios_dir, scenario_name, workload,
                         num_requests, seed, horizon, defaults, cli, shape)
     t0 = time.time()
     try:
@@ -1466,8 +1483,13 @@ def add_common_args(p):
     p.add_argument("--fields",
                    help="the engine's field list: the pinned blis-vllm release's fields.json, until the "
                         "binary has `blis fields` (default: ask the binary)")
-    p.add_argument("--catalog", default=os.environ.get("BLIS_CATALOG"))
-    p.add_argument("--registry", default=os.environ.get("BLIS_REGISTRY"), help="blis-registry v0.1.1 clone root")
+    p.add_argument("--catalog", default=os.environ.get("BLIS_CATALOG"),
+                   help="the catalog/ of a blis-substrate checkout at the pinned release: the runner reads files from it")
+    p.add_argument("--registry", default=os.environ.get("BLIS_REGISTRY"),
+                   help="the registry/ of the same checkout")
+    p.add_argument("--data-override", action="store_true", dest="data_override",
+                   help="EXPERIMENTAL: price with --catalog/--registry instead of the simulator's embedded data; "
+                        "the record is marked and the run is never a committed report")
     p.add_argument("--scenarios", required=True, help="dir to write/read generated scenario YAMLs")
     p.add_argument("--model", required=True, help="catalog short-name, e.g. glm-5.3-flash")
     p.add_argument("--hardware", required=True, help="scenario hardware key, e.g. h100")
@@ -1534,7 +1556,7 @@ def require_env(args):
     if not args.catalog:
         missing.append("--catalog or BLIS_CATALOG (NS-6)")
     if not args.registry:
-        missing.append("--registry or BLIS_REGISTRY (blis-latency-kernel needs it)")
+        missing.append("--registry or BLIS_REGISTRY (the runner reads acceptance profiles from it)")
     if missing:
         raise ValueError("missing required: " + "; ".join(missing))
 
@@ -1554,7 +1576,7 @@ def main():
                   blis_cli.engine_release(args.blis, ENGINE_KIND, args.fields), args.workload, args.num_requests,
                   args.seed, args.horizon,
                   json.loads(args.config), args.phase, args.timeout, args.defaults, replay,
-                  fabric=args.fabric, fields=args.fields)
+                  fabric=args.fabric, fields=args.fields, data_override=args.data_override)
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         with open(args.out, "a") as f:

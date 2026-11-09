@@ -17,7 +17,7 @@ the pin is what starts hours of regeneration against it.
   python3 -I scripts/blis_pin.py changed OLD_PINS.env         # which pins a push moved
   python3 -I scripts/blis_pin.py same-stack DIR DIR           # exit 0 if two reports share a stack
   python3 -I scripts/blis_pin.py plan [--only ID,...]         # what to regenerate, in batches
-  python3 -I scripts/blis_pin.py regen ID --blis B --catalog C --registry R --out DIR
+  python3 -I scripts/blis_pin.py regen ID --blis B --catalog C --registry R --out DIR   # C, R: the pinned blis-substrate checkout's catalog/ and registry/
   python3 -I scripts/blis_pin.py summary --old DIR --new DIR ID [ID ...]
   python3 -I scripts/blis_pin.py smoke [ID ...] --blis B --catalog C --registry R [--corpus F]
 
@@ -53,8 +53,7 @@ UPSTREAM = "inference-sim/inference-sim"
 TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 # The keys whose VALUE says which stack priced a report. A comment-only edit to pins.env moves
 # none of them and must not queue hours of sweeps.
-STACK_KEYS = ("BLIS_REF", "BLIS_SHA", "SUBSTRATE_REF", "VLLM_REF", "ROUTER_REF",
-              "CATALOG_REF", "REGISTRY_REF")
+STACK_KEYS = ("BLIS_REF", "BLIS_SHA", "SUBSTRATE_REF", "VLLM_REF", "ROUTER_REF")
 # A batch is one PR. Small enough to review the numbers, large enough not to open a PR per report.
 MAX_BATCH = 4
 
@@ -168,8 +167,7 @@ def bump(tag, sha=None, go_mod=None, release_name=None, pins_path=PINS, setup_pa
     """Move the pin to `tag`, in pins.env and SETUP.md. Returns {key: (old, new)} for what moved.
 
     The derived pins (sync_pins.DERIVED) move with it because inference-sim's go.mod pins them.
-    CATALOG_REF and REGISTRY_REF are NOT inferred: they are separate repos and no file upstream says which ones a
-    release needs, so the PR asks a reviewer instead of guessing."""
+    The catalog and registry need no pin of their own: the release embeds them (CFG-1)."""
     pins = read_pins(pins_path)
     old_ref = pins.get("BLIS_REF")
     if not newer(tag, old_ref):

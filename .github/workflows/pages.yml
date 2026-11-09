@@ -54,12 +54,15 @@ jobs:
       - run: pip install --require-hashes -r requirements.txt
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: "22" }
-      - name: Clone the pinned catalog + registry
-        # build_catalog.py reads them from ../; without them the Submit pickers and spec-sheets are empty.
+      - name: Clone the pinned substrate release
+        # build_catalog.py reads its catalog/ and registry/ (the data the simulator embeds) from
+        # ../blis-substrate; without it the Submit pickers and spec-sheets are empty.
         run: |
+          set -euo pipefail
           set -a; . ./pins.env; set +a
-          git clone --branch "$CATALOG_REF" --depth 1 https://github.com/inference-sim/blis-catalog.git ../blis-catalog
-          git clone --branch "$REGISTRY_REF" --depth 1 https://github.com/inference-sim/blis-registry.git ../blis-registry
+          git clone --branch "$SUBSTRATE_REF" --depth 1 https://github.com/inference-sim/blis-substrate.git ../blis-substrate
+          test "$(git -C ../blis-substrate describe --tags --exact-match)" = "$SUBSTRATE_REF" || {
+            echo "blis-substrate is not $SUBSTRATE_REF -- aborting" >&2; exit 1; }
       - name: Build + stage data, then build the SPA
         working-directory: web
         run: |

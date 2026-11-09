@@ -88,11 +88,11 @@ def test_smoke_skips_dropped_sweeps():
 
 def test_rewrite_pins_keeps_comments():
     print("test_rewrite_pins_keeps_comments")
-    text = "# BLIS_REF=v0.0.1 is a comment\nBLIS_REF=v0.14.0\nBLIS_SHA=aaa\n\nCATALOG_REF=0.4.0\n"
+    text = "# BLIS_REF=v0.0.1 is a comment\nBLIS_REF=v0.14.0\nBLIS_SHA=aaa\n\nSUBSTRATE_REF=v0.13.0\n"
     out = B.rewrite_pins(text, {"BLIS_REF": "v0.15.0", "BLIS_SHA": "bbb"})
     check("BLIS_REF=v0.15.0\n" in out and "BLIS_SHA=bbb\n" in out, "assignments move")
     check("# BLIS_REF=v0.0.1 is a comment" in out, "a comment naming the key is left alone")
-    check("CATALOG_REF=0.4.0" in out, "keys not named in the update are untouched")
+    check("SUBSTRATE_REF=v0.13.0" in out, "keys not named in the update are untouched")
     try:
         B.rewrite_pins(text, {"NEW_PIN": "x"})
         check(False, "inventing a pin that pins.env does not assign must be refused")
@@ -149,9 +149,8 @@ def test_bump_end_to_end_on_copies():
         check(after["SUBSTRATE_REF"] == "v0.11.0", "SUBSTRATE_REF follows the release's go.mod")
         check(after["VLLM_REF"] == "v0.32.0-blis.2" and after["ROUTER_REF"] == "v1.0.0-blis.2",
               "every derived pin follows the release's go.mod")
-        check(after["CATALOG_REF"] == cur["CATALOG_REF"]
-              and after["REGISTRY_REF"] == cur["REGISTRY_REF"],
-              "catalog/registry are NOT guessed -- the PR asks a reviewer")
+        check("CATALOG_REF" not in after and "REGISTRY_REF" not in after,
+              "the catalog and registry are embedded in the release: no pin of their own")
         check(set(moved) >= {"BLIS_REF", "BLIS_SHA"}, f"bump reports what moved: {moved}")
         with open(setup) as f:
             check('"v99.0.0: big"' in f.read(), "the release title is recorded beside the sha")
@@ -166,10 +165,12 @@ def test_bump_end_to_end_on_copies():
 
 def test_changed_ignores_comments():
     print("test_changed_ignores_comments")
-    a = {"BLIS_REF": "v1.0.0", "BLIS_SHA": "a", "CATALOG_REF": "0.4.0"}
+    a = {"BLIS_REF": "v1.0.0", "BLIS_SHA": "a", "SUBSTRATE_REF": "v0.12.0"}
     check(B.changed(a, dict(a)) == {}, "identical values -> nothing to regenerate")
-    check(B.changed(a, dict(a, CATALOG_REF="0.5.0")) == {"CATALOG_REF": ("0.4.0", "0.5.0")},
-          "a catalog-only move still regenerates: the catalog prices runs too")
+    check(B.changed(a, dict(a, SUBSTRATE_REF="v0.13.0")) == {"SUBSTRATE_REF": ("v0.12.0", "v0.13.0")},
+          "a substrate move regenerates: its embedded data prices the runs")
+    check(B.changed(a, dict(a, CATALOG_REF="0.5.0")) == {},
+          "a catalog ref is not a stack pin: the data is the release's embedded data")
     check(B.changed(a, dict(a, SOMETHING_ELSE="x")) == {},
           "a key outside the stack pins does not queue a campaign")
 

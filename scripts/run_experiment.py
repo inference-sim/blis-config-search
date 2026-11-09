@@ -533,8 +533,17 @@ def best_of(rows):
 
 
 def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dry_run=False,
-                   run_timeout=600, max_parallel=1, verbose=True, fields=None):
-    """Expand, filter, run and rank one spec. Returns the assembled report dict."""
+                   run_timeout=600, max_parallel=1, verbose=True, fields=None, data_override=False):
+    """Expand, filter, run and rank one spec. Returns the assembled report dict.
+
+    `catalog` and `registry` are where the scripts read files from (a blis-substrate checkout at
+    the pinned release). The simulator prices with its embedded data unless `data_override` names
+    them to it, which makes the report experimental and refuses a committed reports/ directory
+    (CFG-1)."""
+    if data_override and not dry_run and _is_committed_reports(out_root):
+        raise SystemExit(f"--data-override prices with data other than the pinned release's embedded "
+                         f"data, so its report is experimental and never committed: --out {out_root} is the "
+                         f"repository's reports/ directory. Choose another --out.")
     routing_dir = routing_dir or os.path.join(ROOT, "routing")
     sc = spec["scenario"]
     name = spec["name"]
@@ -652,7 +661,8 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                                    None, cfg, phase=sname, timeout=run_timeout,
                                    replay={k: v for k, v in replay.items()
                                            if k != "_overrides"} if replay else None,
-                                   fabric=fabric, gpus_per_node=gpus_per_node, fields=fields)
+                                   fabric=fabric, gpus_per_node=gpus_per_node, fields=fields,
+                                   data_override=data_override)
             rec["sweep"] = sname
             _relativize_cmd(rec, out_dir)
             ok, why = servable(rec, slo_ms, gpus)
@@ -718,7 +728,8 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
         "objective": "max output tok/s per accelerator subject to the scenario's SLOs",
         "sweeps": sweep_results,
         "best_overall": best_of(all_rows),
-        "pinned_stack": _pinned_stack(blis, catalog, registry, engine_version),
+        "pinned_stack": _pinned_stack(blis, catalog, registry, engine_version, data_override),
+        "experimental": bool(data_override),
         "model_arch": (entry or {}).get("arch"),
         "totals": {"configs": sum(s["configs"] for s in sweep_results),
                    "runs": len(runs) if not dry_run else
@@ -953,21 +964,27 @@ def _blis_source_commit(blis):
     return (desc, commit) if commit else (None, None)
 
 
-def _pinned_stack(blis, catalog, registry, engine_version):
+def _is_committed_reports(out_root):
+    return os.path.realpath(out_root) == os.path.realpath(os.path.join(ROOT, "reports"))
+
+
+def _pinned_stack(blis, catalog, registry, engine_version, data_override=False):
     """What priced these runs: the pins.env refs, the engine release the simulator ran, and the
-    commits and binary digest that ran."""
+    commits and binary digest that ran. The catalog and registry are the simulator's embedded data
+    (the substrate release in pins.env) unless the run overrode them."""
     pins = build_catalog.read_pins()
     out = {"blis": pins.get("BLIS_REF", "unpinned"),
            "kernel": pins.get("KERNEL_REF", "unpinned"),
            "router": pins.get("ROUTER_REF", "unpinned"),
+           "substrate": pins.get("SUBSTRATE_REF", "unpinned"),
            "engine_version": engine_version,
-           "catalog": pins.get("CATALOG_REF", "unpinned"),
-           "registry": pins.get("REGISTRY_REF", "unpinned")}
+           "data": "override" if data_override else "embedded"}
     resolved = {}
-    for name, path in (("catalog", catalog), ("registry", registry)):
-        desc, commit = _git_identity(path)
-        if desc or commit:
-            resolved[name] = {"describe": desc, "commit": commit}
+    if data_override:
+        for name, path in (("catalog", catalog), ("registry", registry)):
+            desc, commit = _git_identity(path)
+            if desc or commit:
+                resolved[name] = {"describe": desc, "commit": commit}
     digest = _file_digest(blis)
     if digest:
         resolved["blis"] = {"sha256": digest}
@@ -1194,6 +1211,9 @@ def main(argv=None):
     ap.add_argument("spec", help="experiments/<name>.yaml")
     ap.add_argument("--out", default=os.path.join(ROOT, "reports"))
     ap.add_argument("--blis"); ap.add_argument("--catalog"); ap.add_argument("--registry")
+    ap.add_argument("--data-override", action="store_true", dest="data_override",
+                    help="EXPERIMENTAL: price with --catalog/--registry instead of the simulator's embedded "
+                         "data. The report is marked experimental and may not be written to reports/")
     ap.add_argument("--fields", help="the engine's field list: the pinned blis-vllm release's fields.json, "
                                      "until the binary has `blis fields` (default: ask the binary)")
     ap.add_argument("--routing", default=os.path.join(ROOT, "routing"))
@@ -1228,7 +1248,8 @@ def main(argv=None):
     t0 = time.time()
     report = run_experiment(spec, args.blis, args.catalog, args.registry, args.out,
                             routing_dir=args.routing, dry_run=args.dry_run,
-                            run_timeout=args.timeout, max_parallel=args.max_parallel, fields=args.fields)
+                            run_timeout=args.timeout, max_parallel=args.max_parallel, fields=args.fields,
+                            data_override=args.data_override)
     if args.as_json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:

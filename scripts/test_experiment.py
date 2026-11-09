@@ -1902,6 +1902,35 @@ class DryRunPlan(unittest.TestCase):
         self.assertEqual("2x TP8 (max seqs 64)", out["winner"]["chosen"])
 
 
+class DataOverride(unittest.TestCase):
+    """An override-priced report is experimental and is never written to the committed reports/ (CFG-1)."""
+
+    def test_the_stack_names_the_embedded_data_by_default(self):
+        st = E._pinned_stack(None, "/cat", "/reg", "0.32.0")
+        self.assertEqual("embedded", st["data"])
+        self.assertNotIn("catalog", st)
+        self.assertNotIn("registry", st)
+        self.assertNotIn("catalog", st.get("resolved", {}))
+
+    def test_an_override_is_recorded(self):
+        self.assertEqual("override", E._pinned_stack(None, "/cat", "/reg", "0.32.0", True)["data"])
+
+    def test_an_override_refuses_the_committed_reports_directory(self):
+        spec = {"name": "x", "scenario": {"gpus": 1, "model": "m", "hardware": "h100", "workload": "chatbot",
+                                           "concurrency": [1]}}
+        with self.assertRaises(SystemExit) as cm:
+            E.run_experiment(spec, "blis", "/cat", "/reg", os.path.join(E.ROOT, "reports"), data_override=True)
+        self.assertIn("never committed", str(cm.exception))
+
+    def test_the_committed_reports_directory_is_recognised_through_a_symlink(self):
+        import tempfile
+        d = tempfile.mkdtemp()
+        link = os.path.join(d, "r")
+        os.symlink(os.path.join(E.ROOT, "reports"), link)
+        self.assertTrue(E._is_committed_reports(link))
+        self.assertFalse(E._is_committed_reports(d))
+
+
 class PinCheck(unittest.TestCase):
     """An off-pin simulator is reported by SOURCE commit, never by binary digest (#23)."""
     PINS = {"BLIS_SHA": "f2ba6bb1c189ed5a56933cfa3d0927eae3836ee9"}

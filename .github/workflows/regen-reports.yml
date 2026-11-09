@@ -162,32 +162,32 @@ jobs:
       - run: pip install --require-hashes -r requirements.txt
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with: { name: blis, path: .build }
-      - name: Clone the pinned catalog + registry
+      - name: Clone the pinned substrate release (the files the scripts read; the simulator uses its embedded data)
         id: stack
         run: |
           set -euo pipefail
           chmod +x .build/blis
           set -a; . ./pins.env; set +a
-          # Inside the checkout, as run-experiment.yml does: a ledger's cmd records ./blis-catalog,
-          # and a path outside the repo would stay absolute (a runner path in a committed report).
-          git clone --branch "$CATALOG_REF" --depth 1 https://github.com/inference-sim/blis-catalog.git blis-catalog
-          git clone --branch "$REGISTRY_REF" --depth 1 https://github.com/inference-sim/blis-registry.git blis-registry
-          echo "catalog_ref=$CATALOG_REF" >> "$GITHUB_OUTPUT"
-      # The 568 MB replay corpus is pinned by the catalog, so one download per catalog pin serves
+          # Inside the checkout, as run-experiment.yml does, so no runner path reaches a committed report.
+          git clone --branch "$SUBSTRATE_REF" --depth 1 https://github.com/inference-sim/blis-substrate.git blis-substrate
+          test "$(git -C blis-substrate describe --tags --exact-match)" = "$SUBSTRATE_REF" || {
+            echo "blis-substrate is not $SUBSTRATE_REF -- aborting" >&2; exit 1; }
+          echo "substrate_ref=$SUBSTRATE_REF" >> "$GITHUB_OUTPUT"
+      # The 568 MB replay corpus is pinned by the release's catalog, so one download per substrate pin serves
       # every replay report in the campaign. blis_pin.py digest-checks it either way.
       - name: Restore the replay corpus
         if: matrix.report.replay
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: .corpus/traces.jsonl
-          key: replay-corpus-${{ steps.stack.outputs.catalog_ref }}
+          key: replay-corpus-${{ steps.stack.outputs.substrate_ref }}
       - name: Fetch the pinned engine field list
         run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
       - name: Regenerate ${{ matrix.report.id }}
         run: |
           set -euo pipefail
           python3 -I scripts/blis_pin.py regen "${{ matrix.report.id }}" \
-            --blis .build/blis --catalog blis-catalog --registry blis-registry \
+            --blis .build/blis --catalog blis-substrate/catalog --registry blis-substrate/registry \
             --fields "$RUNNER_TEMP/fields.json" \
             --out "$RUNNER_TEMP/regen" --timeout "${{ vars.REGEN_RUN_TIMEOUT || '1800' }}" \
             --max-parallel "${{ vars.SWEEP_MAX_PARALLEL || '1' }}"

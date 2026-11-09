@@ -58,8 +58,8 @@ Routing policies live in `routing/*.yaml`.
 
 ### Pinned stack and siblings
 
-`pins.env` is the single source of truth for which BLIS produced the reports. `BLIS_REF`/`BLIS_SHA`,
-`CATALOG_REF`, `REGISTRY_REF` are hand-pinned; the block at the end is generated from
+`pins.env` is the single source of truth for which BLIS produced the reports. `BLIS_REF`/`BLIS_SHA`
+are hand-pinned; the block at the end is generated from
 inference-sim's `go.mod` by `scripts/sync_pins.py` — don't edit it by hand. `test_build.py` checks
 the pins against `SETUP.md`, the workflows, and `go.mod`.
 

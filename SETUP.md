@@ -36,30 +36,28 @@ such policy"): the nearest configurations are a `queue-scorer` or `load-aware-sc
 `max-score-picker`, or `random-picker`. So reports that compared routing policies before v0.12.0
 cannot be reproduced arm-for-arm.
 
-## 2. Catalog + registry (both required by the kernel)
+## 2. Catalog + registry (embedded; a checkout only for the scripts' file reads)
+
+The simulator prices with the catalog and registry **embedded** in the blis-substrate release it
+pins, so a run passes neither `--catalog` nor `--registry` to it and every Result records data
+source `embedded`. A model runs only if that embedded catalog carries it (NS-6).
+
+Some scripts read catalog and registry *files* (a workload's descriptor, a model's graph, the
+speculative-decoding acceptance profiles). They read them from a checkout of the same release,
+`SUBSTRATE_REF` in `pins.env`:
 
 ```bash
-git clone --branch 0.5.0 --depth 1 https://github.com/inference-sim/blis-catalog.git
-export BLIS_CATALOG=$PWD/blis-catalog
-git clone --branch v0.3.0 --depth 1 https://github.com/inference-sim/blis-registry.git
-export BLIS_REGISTRY=$PWD/blis-registry      # MUST be v0.3.0: it adds cost-model-fabric, the
-                                             # cross-node interconnect set every generated
-                                             # scenario now names (and every upstream Muse one
-                                             # does), on top of v0.2.0's cost-model-memory and
-                                             # acceptance/, the measured speculative-decoding
-                                             # acceptance lengths (v0.1.1 has no acceptance/)
+set -a; . ./pins.env; set +a
+git clone --branch "$SUBSTRATE_REF" --depth 1 https://github.com/inference-sim/blis-substrate.git
+export BLIS_CATALOG=$PWD/blis-substrate/catalog
+export BLIS_REGISTRY=$PWD/blis-substrate/registry
 ```
 
-A model runs only if it is in the catalog (NS-6). `glm-5.3-flash`, `glm-5.3`, and `qwen3-14b` all
-ship in catalog `0.4.0`, which also adds `deepseek-v4.1-flash` and the `agentx-mvp` replay
-workload. Catalog `0.5.0` adds the three Muse-Spark entries -- `muse-spark-open-816b-a42b`, its
-`-nvfp4` twin and the `muse-spark-open-dspark` drafter -- which do not exist in `0.4.0` at all,
-so Muse needs this pin and not merely a newer binary. The runner generates kernel scenario files
-into a `--scenarios` dir you choose (e.g. `/tmp/cs-scenarios`).
-
-The catalog pin and the binary pin move **together**: catalog `0.4.0`'s model graphs use schema
-fields that v0.10.0 cannot decode (it fails with hundreds of `field ... not found in type
-model.Node` errors), and the pinned v0.15.0 needs `0.5.0` for the entries above.
+These two variables (or `--catalog` / `--registry`) name where the scripts read those files; they
+are not handed to the simulator. `--data-override` hands them to it, for an **experimental** run
+priced with other data: its report is marked experimental and the sweeper refuses to write it into
+`reports/`. The runner generates kernel scenario files into a `--scenarios` dir you choose (e.g.
+`/tmp/cs-scenarios`).
 
 ## 2b. The AgentX replay corpus (only for a replay workload)
 

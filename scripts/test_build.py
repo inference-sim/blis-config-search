@@ -238,7 +238,7 @@ def test_catalog_workload_kinds():
     """
     tmp = tempfile.mkdtemp()
     try:
-        wdir = os.path.join(tmp, "blis-catalog", "workloads")
+        wdir = os.path.join(tmp, "catalog", "workloads")
         os.makedirs(wdir)
         with open(os.path.join(wdir, "sharegpt.yaml"), "w", encoding="utf-8") as f:
             f.write("prefix_tokens: 0\n"
@@ -328,7 +328,7 @@ def test_derived_pins_match_gomod():
     block, _, _ = rest.partition(sync_pins.END)
     assigned = {ln.partition("=")[0].strip() for ln in block.splitlines()
                 if ln.strip() and not ln.strip().startswith("#") and "=" in ln}
-    for key in ("CATALOG_REF", "REGISTRY_REF", "BLIS_REF", "BLIS_SHA"):
+    for key in ("BLIS_REF", "BLIS_SHA"):
         check(key not in assigned,
               f"{key} is hand-pinned and must live outside the generated block")
     # Conversely every assignment inside the block must be a derived key, or sync_pins would
@@ -355,8 +355,8 @@ def test_displayed_stack_survives_a_fresh_clone():
     stack = cat["stack"]
 
     # the flat `versions` map is left as it was -- it still degrades to "absent", by design
-    check(cat["versions"]["blis-catalog"] == "absent",
-          "precondition: without siblings the legacy describe yields 'absent'")
+    check(cat["versions"]["blis-substrate"] == "absent",
+          "precondition: without a checkout the describe yields 'absent'")
 
     want = {
         # The ROOT is deliberately NOT BLIS_REF. It is what PRICED the committed reports, which is
@@ -368,8 +368,6 @@ def test_displayed_stack_survives_a_fresh_clone():
         "blis-substrate": pins.get("SUBSTRATE_REF"),
         "blis-vllm": pins.get("VLLM_REF"),
         "llm-d-router": pins.get("ROUTER_REF"),
-        "blis-catalog": pins.get("CATALOG_REF"),
-        "blis-registry": pins.get("REGISTRY_REF"),
     }
     rows = [stack["root"]] + list(stack["deps"])
     # Not a fixed count: a derived dep legally absent from go.mod at the pinned ref (blis-vllm
@@ -473,7 +471,7 @@ def test_pins_are_the_single_source_of_the_sim_version():
     with open(os.path.join(ROOT, ".github", "workflows", "run-experiment.yml")) as f:
         exp_wf = f.read()
     check(". ./pins.env" in exp_wf, "run-experiment.yml should source pins.env")
-    for key in ("BLIS_REF", "CATALOG_REF", "REGISTRY_REF"):
+    for key in ("BLIS_REF", "SUBSTRATE_REF"):
         check(f'"${key}"' in exp_wf, f"run-experiment.yml should take {key} from pins.env")
     check(f"--branch {ref} " not in exp_wf,
           "run-experiment.yml hard-codes the sim ref; source it from pins.env instead")
@@ -537,7 +535,7 @@ def test_pins_are_the_single_source_of_the_sim_version():
     # Historical statements are legitimate and stay: a dated measurement, a "removed in vX" note,
     # a recorded pinned_stack. So this reads only the *instructional* surfaces and asks that any
     # version they name is one pins.env actually pins.
-    pinned_refs = {pins.get(k) for k in ("BLIS_REF", "CATALOG_REF", "REGISTRY_REF", "KERNEL_REF")}
+    pinned_refs = {pins.get(k) for k in ("BLIS_REF", "SUBSTRATE_REF", "KERNEL_REF")}
     superseded = {"v0.10.0", "0.2.1", "v0.1.1"} - pinned_refs
     for rel in ("README.md", os.path.join("experiments", "README.md"),
                 os.path.join(".claude", "skills", "blis-experiment", "SKILL.md")):
@@ -549,6 +547,24 @@ def test_pins_are_the_single_source_of_the_sim_version():
         for stale in sorted(superseded):
             check(stale not in text,
                   f"{rel} names superseded ref {stale}; cite pins.env instead of a version")
+
+
+def test_pins_name_no_independent_catalog_or_registry():
+    """CFG-1: a committed report is priced with the pinned release's embedded data, so pins.env has
+    no catalog or registry pin of its own, and no workflow clones either repository."""
+    print("test_pins_name_no_independent_catalog_or_registry")
+    pins = bc.read_pins()
+    check("CATALOG_REF" not in pins and "REGISTRY_REF" not in pins,
+          "pins.env pins a catalog or registry apart from the release that embeds them")
+    check(bool(pins.get("SUBSTRATE_REF")), "pins.env has no SUBSTRATE_REF to read catalog files from")
+    wf = os.path.join(ROOT, ".github", "workflows")
+    for fn in sorted(os.listdir(wf)):
+        with open(os.path.join(wf, fn)) as f:
+            text = f.read()
+        check("blis-catalog.git" not in text and "blis-registry.git" not in text,
+              f"{fn} clones the legacy catalog or registry repository")
+        if "run_experiment.py" in text or "blis_pin.py regen" in text or "blis_pin.py smoke" in text:
+            check("--data-override" not in text, f"{fn} would price a committed report with overridden data")
 
 
 def test_lexicon_mirror_is_in_sync():
@@ -577,8 +593,8 @@ def test_lexicon_mirror_is_in_sync():
 
 def test_catalog():
     print("test_catalog")
-    cat = bc.build(os.path.join(ROOT, os.pardir))
-    # against the real sibling repos if present; else graceful empty
+    cat = bc.build(os.path.join(ROOT, os.pardir, "blis-substrate"))
+    # against a blis-substrate checkout beside this repo if present; else graceful empty
     if cat["models"]:
         names = {m["name"] for m in cat["models"]}
         check("qwen3-14b" in names, "qwen3-14b in catalog")
@@ -625,7 +641,7 @@ def test_catalog():
 
     # graceful degradation: nonexistent siblings
     empty = bc.build("/nonexistent-siblings-xyz")
-    check(empty["models"] == [] and empty["versions"]["blis-catalog"] == "absent",
+    check(empty["models"] == [] and empty["versions"]["blis-substrate"] == "absent",
           "absent siblings -> empty catalog + 'absent' version")
 
 
@@ -842,7 +858,7 @@ def test_explore_data():
               "reproducing the sweep runs the report's own spec into repro/, not over reports/")
         check(explore_data.setup({}) is None, "a ledger with no pinned_stack ships no setup")
         pins = explore_data._PINS
-        now = {"blis": pins["BLIS_REF"], "catalog": pins["CATALOG_REF"], "registry": pins["REGISTRY_REF"]}
+        now = {"blis": pins["BLIS_REF"], "substrate": pins["SUBSTRATE_REF"]}
         check(not explore_data.setup({"pinned_stack": now})["pins_moved"]
               and explore_data.setup({"pinned_stack": dict(now, blis="v0.0.1")})["pins_moved"],
               "the sweep tab says when today's pins would sweep a different stack than the report's")
@@ -873,6 +889,7 @@ if __name__ == "__main__":
     test_pins_are_the_single_source_of_the_sim_version()
     test_derived_pins_match_gomod()
     test_displayed_stack_survives_a_fresh_clone()
+    test_pins_name_no_independent_catalog_or_registry()
     test_lexicon_mirror_is_in_sync()
     test_catalog()
     test_workflows_sane()

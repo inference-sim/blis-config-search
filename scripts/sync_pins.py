@@ -21,14 +21,13 @@ The indirect case is why this parses the whole require set rather than the direc
 that only took direct requires would silently drop the kernel at v0.15.0 and publish a footer with
 no cost-model version at all.
 
-blis-catalog and blis-registry are NOT derivable at any BLIS version, and never will be: they are
-not Go modules (no go.mod -- verified, zero hits in go.mod and go.sum alike), they are data
-directories handed to the binary as arguments. One BLIS build runs against any catalog version, so
-their refs are a genuinely independent axis and stay hand-pinned as CATALOG_REF / REGISTRY_REF.
+The catalog and the registry are not pinned here: the simulator prices with the data embedded in
+the blis-substrate release (SUBSTRATE_REF), so a committed report has no data axis of its own
+(CFG-1).
 
 WHY THE VALUES ARE COMMITTED RATHER THAN READ AT BUILD TIME. The site build (pages.yml) runs
 actions/checkout on this repo alone and never clones inference-sim, so go.mod is unreadable when
-the footer is generated -- the same absence that made the catalog/registry pills read "absent" in
+the footer is generated -- the same absence that once made the footer pills read "absent" in
 production. So the derivation happens here, at pin-bump time, and the result is committed.
 test_build.py re-derives and fails on mismatch when ../inference-sim is present, and skips when it
 is not, so a contributor without the sibling is not blocked while CI still catches drift.

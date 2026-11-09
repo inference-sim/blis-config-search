@@ -70,7 +70,29 @@ SCENARIO_ROUTER = ("router_config",)
 PARALLEL_DEFAULTS = {"tp": 1, "pp": 1, "dp": 1, "enable_expert_parallel": False}
 
 
-GPUS_PER_NODE = 8   # single-node H100; a per-instance footprint beyond this spans nodes (needs a fabric)
+# The GPUs in a node are the catalog entry's where it fixes them (GB200 NVL72: 4 per tray), else the
+# specification's (`scenario.cluster.gpus_per_node`). No constant: a node of 8 is a fact about an HGX
+# server, not about every chip (blis-config-search #96).
+
+
+def cluster_node_size(blis, catalog, hardware, stated=None):
+    """(gpus_per_node, write_it): the node size of `hardware`, and whether the scenario states it.
+
+    A chip whose catalog entry fixes the size gets that size, and the scenario states nothing, so
+    the substrate's one resolver fills it (with the rack size) and a restated different value is
+    refused there. Any other chip needs the specification to state it.
+    """
+    fixed = blis_cli.chip_packaging(blis, hardware, catalog)["gpus_per_node"]
+    if fixed:
+        if stated is not None and stated != fixed:
+            raise ConfigError(f"scenario.cluster.gpus_per_node is {stated}, but the catalog fixes {hardware} "
+                              f"at {fixed}: omit it")
+        return int(fixed), False
+    if not stated:
+        raise ConfigError(f"the catalog fixes no node size for {hardware}: state scenario.cluster.gpus_per_node")
+    return int(stated), True
+
+
 # Cross-node cost resolves from the fabric (a catalog networks/ entry), required once nodes > 1.
 DEFAULT_FABRIC = "ib-400g"   # InfiniBand NDR 400 Gb/s; the standard H100 multi-node interconnect
 # NON-PRECISION engine defaults only. quantization/cache_dtype are intentionally NOT defaulted: an
@@ -186,7 +208,7 @@ class ConfigError(ValueError):
     pass
 
 
-def classify_config(config, vocab):
+def classify_config(config, vocab, node_size=None):
     """Split a candidate into (parallel, engine, cli, router); raise ConfigError on unknown keys.
 
     `vocab` is the settings.Vocabulary of the simulator that will run the candidate: its pool-
@@ -273,12 +295,12 @@ def classify_config(config, vocab):
     # 332.3 GiB per rank at tp=8 on a 141 GiB device and only fits from tp=32 (4 nodes) up.
     # What is still refused is a footprint that STRADDLES a node boundary: pools are allocated in
     # whole nodes, so the remainder would sit idle and the cross-node term would be mispriced.
-    if fp > GPUS_PER_NODE and fp % GPUS_PER_NODE:
+    if node_size and fp > node_size and fp % node_size:
         raise ConfigError(
-            f"per-instance footprint tp*pp*dp={fp} spans {fp / GPUS_PER_NODE:.2g} nodes: a "
-            f"multi-node instance must fill whole {GPUS_PER_NODE}-GPU nodes (use a footprint that "
-            f"is a multiple of {GPUS_PER_NODE}, or scale out with num_instances instead)")
-    pd = resolve_pd(cli, pd_parallel, pd_engine, parallel, engine)
+            f"per-instance footprint tp*pp*dp={fp} spans {fp / node_size:.2g} nodes: a "
+            f"multi-node instance must fill whole {node_size}-GPU nodes (use a footprint that "
+            f"is a multiple of {node_size}, or scale out with num_instances instead)")
+    pd = resolve_pd(cli, pd_parallel, pd_engine, parallel, engine, node_size)
     if pd:
         parallel = {**parallel, "pd": pd}
     return parallel, engine, cli, router
@@ -297,7 +319,7 @@ def _pd_requested(cli, pd_parallel, pd_engine):
                 or any(pd_parallel.values()) or any(pd_engine.values()))
 
 
-def resolve_pd(cli, pd_parallel, pd_engine, base_parallel, base_engine):
+def resolve_pd(cli, pd_parallel, pd_engine, base_parallel, base_engine, node_size=None):
     """Resolve a disaggregated candidate into {role: {parallel, engine, instances}}, or {}.
 
     Each role's layout is the shared `parallel`/`engine` overridden by that role's own
@@ -346,10 +368,10 @@ def resolve_pd(cli, pd_parallel, pd_engine, base_parallel, base_engine):
         # pp>1 is priced from kernel v0.5.0 on each side of a disaggregated run too; see the
         # colocated site in classify_config for what moved and what still refuses.
         fp = footprint_gpus(par)
-        if fp > GPUS_PER_NODE and fp % GPUS_PER_NODE:
+        if node_size and fp > node_size and fp % node_size:
             raise ConfigError(
                 f"{role} pool footprint tp*pp*dp={fp} straddles a node boundary: a multi-node "
-                f"pool must fill whole {GPUS_PER_NODE}-GPU nodes")
+                f"pool must fill whole {node_size}-GPU nodes")
         out[role] = {"parallel": par, "engine": eng, "instances": instances,
                      "footprint_gpus_per_instance": fp}
     # The pools must agree on everything a handoff depends on. Each of these is a hard refusal
@@ -875,18 +897,27 @@ _ITL_FROM_STEP_INTERVAL = {"itl_mean_ms": "step_interval_mean_ms", "itl_p90_ms":
                            "itl_p95_ms": "step_interval_p95_ms", "itl_p99_ms": "step_interval_p99_ms"}
 
 # Counters that moved out of the metrics dict into the document's own `requests` block, under
-# shorter names. _completion_issue reads all five, so without this remapping an incomplete or
+# the Result's names (generated, queued_at_horizon, in_flight_at_horizon). _completion_issue reads all five, so without this remapping an incomplete or
 # overloaded run is ranked as a clean capacity point.
-_REQUEST_COUNTS = {"injected_requests": "injected", "completed_requests": "completed",
-                   "still_queued": "still_queued", "still_running": "still_running",
-                   "dropped_unservable": "dropped_unservable", "timed_out_requests": "timed_out",
-                   "length_capped_requests": "length_capped"}
+_REQUEST_COUNTS = {"injected_requests": "generated", "completed_requests": "completed",
+                   "still_queued": "queued_at_horizon", "still_running": "in_flight_at_horizon",
+                   "timed_out_requests": "timed_out", "length_capped_requests": "length_capped"}
 
 # Counters that stayed on the cluster aggregate but outside whole_run.
 _CLUSTER_KEYS = {**{k: k for k in ("total_input_tokens", "total_output_tokens",
                                     "scheduling_delay_p99_ms", "kv_allocation_failures")},
                  "preemption_count": "preemptions",
                  "vllm_estimated_duration_s": "simulated_duration_s"}
+
+
+def _engine_report(doc):
+    """The engine's own report in a Result: `reports.engine` (cluster aggregate, instances).
+
+    The top-level `engine` of a schema 2 Result names the engine ({kind, version}) and nothing
+    else; the aggregate and the per-instance rows moved under `reports`, which carries each
+    component's report as that component made it.
+    """
+    return ((doc.get("reports") or {}).get("engine")) or {}
 
 
 def _flatten_result(doc):
@@ -898,7 +929,7 @@ def _flatten_result(doc):
     run resolves normally off the per-instance rows. That asymmetry is why it reads as a finding
     rather than a crash: a sweep reports 0 servable, or judges only its multi-instance arms.
     """
-    cluster = ((doc.get("engine") or {}).get("cluster")) or {}
+    cluster = _engine_report(doc).get("cluster") or {}
     whole = cluster.get("whole_run") or {}
     if not whole:
         return {}   # no whole-run aggregate: fail as "no cluster metrics parsed", not later
@@ -910,6 +941,9 @@ def _flatten_result(doc):
         for legacy, new in mapping.items():
             if new in src:
                 out[legacy] = src[new]
+    # `dropped` is a map by reason; the overload check wants the number dropped as unservable.
+    dropped = (doc.get("requests") or {}).get("dropped") or {}
+    out["dropped_unservable"] = sum(v for v in dropped.values() if isinstance(v, (int, float)))
     return out
 
 
@@ -944,7 +978,7 @@ def parse_metrics(stdout):
 def parse_all_instances(stdout):
     doc = _result_doc(stdout)
     if doc is not None:
-        inst = (doc.get("engine") or {}).get("instances") or {}
+        inst = _engine_report(doc).get("instances") or {}
         # Each value is a verbatim MetricsOutput, already carrying its own instance_id.
         return [v for _, v in sorted(inst.items()) if isinstance(v, dict)]
     return [o for o in _all_metrics(stdout) if o.get("instance_id") not in (None, "cluster")]
@@ -962,7 +996,7 @@ def _completion_issue(m):
     return None
 
 
-def pool_nodes(parallel, num_instances=1):
+def pool_nodes(parallel, num_instances=1, node_size=8):
     """Nodes the colocated pool must hold for `num_instances` copies of this instance shape.
 
     BLIS v0.10.0 validates `--num-instances` against the pool's rank capacity: a pool of
@@ -971,10 +1005,11 @@ def pool_nodes(parallel, num_instances=1):
     the pool from ONE instance's footprint therefore capped every search at a single node's
     worth of instances; size it for the whole fleet instead."""
     total = footprint_gpus(parallel) * max(1, num_instances)
-    return max(1, -(-total // GPUS_PER_NODE))           # ceil(total / 8)
+    return max(1, -(-total // node_size))           # ceil(total / the node size)
 
 
-def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router):
+def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router,
+                      node_size, states_node_size):
     """Render a DISAGGREGATED Scenario+Deployment: one pool per role plus `pd_transfer`.
 
     Pools never share a node (blis-vllm places each role on its own nodes and asserts they do
@@ -984,7 +1019,7 @@ def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, 
     pools, total_nodes = [], 0
     for role in PD_ROLES:
         spec = pd[role]
-        nodes = pool_nodes(spec["parallel"], spec["instances"])
+        nodes = pool_nodes(spec["parallel"], spec["instances"], node_size)
         total_nodes += nodes
         pools.append(
             f"  - role: {role}\n"
@@ -995,6 +1030,7 @@ def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, 
     router_block = ""
     if rc:
         router_block = f"\nrouter:\n  endpoint_picker_config: {json.dumps(os.path.abspath(rc))}"
+    node_size_line = f"\n  gpus_per_node: {node_size}" if states_node_size else ""
     return f"""kind: Scenario
 name: {name}
 engine:
@@ -1005,8 +1041,7 @@ coefficients: [{", ".join(COEFFICIENTS)}]
 cluster:
   hardware: {hardware}
   fabric: {fabric}
-  nodes: {total_nodes}
-  gpus_per_node: {GPUS_PER_NODE}
+  nodes: {total_nodes}{node_size_line}
 ---
 kind: Deployment
 name: {name}
@@ -1018,7 +1053,7 @@ pd_transfer:
 
 
 def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances=1,
-                  fabric=DEFAULT_FABRIC, router=None):
+                  fabric=DEFAULT_FABRIC, router=None, node_size=8, states_node_size=True):
     """Render a two-doc Scenario+Deployment YAML (no external yaml dep). Omitted engine keys (e.g.
     quantization when unset) let the checkpoint/engine govern.
 
@@ -1044,8 +1079,10 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
         return "\n".join(out)
     pd = (parallel or {}).get("pd")
     if pd:
-        return _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router)
-    nodes = pool_nodes(parallel, num_instances)
+        return _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router,
+                                 node_size, states_node_size)
+    nodes = pool_nodes(parallel, num_instances, node_size)
+    node_size_line = f"\n  gpus_per_node: {node_size}" if states_node_size else ""
     # A multi-node cluster MUST name a fabric: BLIS resolves cross-node cost from the fabric,
     # not the chip, and refuses the scenario otherwise ("scenario.cluster.fabric: required for
     # a N-node cluster"). Single-node clusters omit it (no cross-node traffic to price).
@@ -1066,8 +1103,7 @@ model: {model}
 coefficients: [{", ".join(COEFFICIENTS)}]
 cluster:
   hardware: {hardware}{fabric_line}
-  nodes: {nodes}
-  gpus_per_node: 8
+  nodes: {nodes}{node_size_line}
 ---
 kind: Deployment
 name: {name}
@@ -1082,16 +1118,21 @@ pools:
 
 
 def scenario_name(model, hardware, engine_version, parallel, engine, num_instances=1,
-                  fabric=DEFAULT_FABRIC, router=None):
+                  fabric=DEFAULT_FABRIC, router=None, node_size=8, states_node_size=True):
     """The hashed file name (no .yaml) of a deployment's scenario; the router is part of the key
     because two routing arms differ ONLY in their `router:` block."""
-    key = json.dumps([model, hardware, engine_version, parallel, engine, num_instances, fabric,
-                      router or {}], sort_keys=True)
+    parts = [model, hardware, engine_version, parallel, engine, num_instances, fabric, router or {}]
+    # Part of the key only when it differs from what every earlier scenario used (8 GPUs a node,
+    # stated), so a committed report on an HGX server keeps the file name it was recorded under.
+    if (node_size, states_node_size) != (8, True):
+        parts += [node_size, states_node_size]
+    key = json.dumps(parts, sort_keys=True)
     return f"{model}-{hardware}-{hashlib.sha1(key.encode()).hexdigest()[:10]}"
 
 
 def write_scenario(blis, scenarios_dir, model, hardware, engine_version, parallel, engine,
-                   num_instances=1, fabric=DEFAULT_FABRIC, router=None):
+                   num_instances=1, fabric=DEFAULT_FABRIC, router=None, node_size=8,
+                   states_node_size=True):
     """Write a scenario ATOMICALLY (temp + os.replace) so concurrent pool workers never read a
     half-written file for the same hashed deployment; return its file name.
 
@@ -1101,12 +1142,13 @@ def write_scenario(blis, scenarios_dir, model, hardware, engine_version, paralle
     `num_instances` participates in the hash because it sets the pool's node count — two runs
     that differ only in instance count need DIFFERENT scenario files, or the second reuses a
     pool too small for it and BLIS refuses the run."""
-    name = scenario_name(model, hardware, engine_version, parallel, engine, num_instances, fabric, router)
+    name = scenario_name(model, hardware, engine_version, parallel, engine, num_instances, fabric, router,
+                         node_size, states_node_size)
     os.makedirs(scenarios_dir, exist_ok=True)
     path = os.path.join(scenarios_dir, name + ".yaml")
     if not os.path.exists(path):
         body = scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances,
-                             fabric, router)
+                             fabric, router, node_size, states_node_size)
         fd, tmp = tempfile.mkstemp(dir=scenarios_dir, prefix=".tmp-", suffix=".yaml")
         try:
             with os.fdopen(fd, "w") as f:
@@ -1276,7 +1318,7 @@ def _failure_line(stderr):
 
 def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_version,
             workload, num_requests, seed, horizon, config, phase="probe", timeout=120, defaults=None,
-            replay=None, fabric=DEFAULT_FABRIC):
+            replay=None, fabric=DEFAULT_FABRIC, gpus_per_node=None):
     """Run one kernel-priced BLIS config and return a record dict. No runs.jsonl I/O (caller writes).
 
     `replay` selects the trace-REPLAY path (`blis replay --agentic-scenario`) instead of
@@ -1286,13 +1328,17 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     `fabric` is the cluster's inter-node interconnect (a catalog networks/ class); it prices
     cross-node traffic for a multi-node run and is ignored on a single node. A trailing default
     (ib-400g) so every existing caller is byte-identical.
+
+    `gpus_per_node` is what the specification states for a chip whose catalog entry fixes no node
+    size; a chip that does fix one (GB200 NVL72) takes the catalog's and the scenario states none.
     """
     rec = _record_shell(config, phase)
     # Which cost model priced THIS row (see row_stack): makes provenance_split's stack branch able
     # to fire on real data instead of guarding an unreachable path.
     rec["pinned_stack"] = row_stack(blis, catalog, registry)
     try:
-        parallel, engine, cli, router = classify_config(config, settings.vocabulary(blis))
+        node_size, states_node_size = cluster_node_size(blis, catalog, hardware, gpus_per_node)
+        parallel, engine, cli, router = classify_config(config, settings.vocabulary(blis), node_size)
         # Resolve the preset's token shape so a closed-loop run actually prices the traffic it
         # names (see WORKLOAD_IGNORED). A replay carries its lengths in the corpus, so no shape.
         shape = {} if replay else load_workload_shape(catalog, workload)
@@ -1348,11 +1394,12 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                               al_src and hardware and f"({hardware})" not in al_src)}
     # Fabric only reaches a multi-node YAML, so normalize it to the default on a single node:
     # the scenario hash then matches what the explorer reconstructs from the recorded fabric.
-    multinode = bool(pd) or pool_nodes(parallel, num_instances) > 1
+    multinode = bool(pd) or pool_nodes(parallel, num_instances, node_size) > 1
     fabric = fabric if multinode else DEFAULT_FABRIC
     try:
         scenario_name = write_scenario(blis, scenarios_dir, model, hardware, engine_version,
-                                       parallel, engine, num_instances, fabric, router)
+                                       parallel, engine, num_instances, fabric, router,
+                                       node_size, states_node_size)
     except blis_cli.DocumentInvalid as e:
         rec.update({"deployment": None, "cmd": None, "returncode": None, "wall_s": 0.0,
                     "metrics": {}, "metrics_all_instances": [],
@@ -1395,6 +1442,10 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                        # real interconnect instead of assuming IB. None on a single node, which
                        # prices no cross-node traffic (fabric was normalized to the default above).
                        "fabric": fabric if multinode else None,
+                       # The node size the scenario was priced with, and whether the scenario states
+                       # it (a chip whose catalog entry fixes it states none), so the explorer
+                       # rebuilds the same scenario text and file name (#96).
+                       "gpus_per_node": node_size, "states_gpus_per_node": states_node_size,
                        "scenario": scenario_name, "router": router or None,
                        # The acceptance the drafting run was priced with, so the report can
                        # derive a correct per-token rate instead of a per-STEP one.

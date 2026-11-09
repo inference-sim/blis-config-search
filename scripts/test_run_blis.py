@@ -20,8 +20,8 @@ FIXTURE_BLIS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdat
 VOCAB = settings.vocabulary(FIXTURE_BLIS)
 
 
-def classify(config):
-    return run_blis.classify_config(config, VOCAB)
+def classify(config, node_size=8):
+    return run_blis.classify_config(config, VOCAB, node_size)
 
 
 class ParseMetrics(unittest.TestCase):
@@ -47,17 +47,18 @@ class ParseMetrics(unittest.TestCase):
         self.assertEqual([o["instance_id"] for o in run_blis.parse_all_instances(s)], ["i0", "i1"])
 
 
-# The v0.15.0 Result document, trimmed to the sections parse_metrics reads. Values are a real
+# The schema 2 Result document (the engine report is under `reports.engine`), trimmed to the sections parse_metrics reads. Values are a real
 # single-instance Muse run's, so the numbers below are the pinned simulator's own.
 RESULT_DOC = json.dumps({
     "kind": "Result", "schema_version": "1",
     "window": {"start": "first_arrival_after_warmup", "duration_s": 4.792675, "requests": 8},
-    "requests": {"generated": 8, "injected": 8, "completed": 8, "still_queued": 0,
-                 "still_running": 0, "dropped_unservable": 0, "timed_out": 0, "length_capped": 0},
+    "requests": {"generated": 8, "completed": 8, "queued_at_horizon": 0,
+                 "in_flight_at_horizon": 0, "timed_out": 0, "length_capped": 0},
     # The MEASURED WINDOW: per-request TPOT, deliberately NOT the source of itl_*.
     "metrics": {"itl_p99_ms": 33.87192666666667, "itl_mean_ms": 27.831343253968253,
                 "output_tok_s": 106.82969322977252, "request_throughput": 1.6692139567151956},
-    "engine": {"cluster": {
+    "engine": {"kind": "vllm", "version": "0.32.0"},
+    "reports": {"engine": {"cluster": {
         "preemptions": 2, "kv_allocation_failures": 0, "scheduling_delay_p99_ms": 1.5,
         "total_input_tokens": 32768, "total_output_tokens": 512, "simulated_duration_s": 5.29,
         "step_interval_p99_ms": 294.031,
@@ -65,7 +66,7 @@ RESULT_DOC = json.dumps({
                       "ttft_p99_ms": 349.06543, "ttft_mean_ms": 342.987,
                       "e2e_p99_ms": 2479.9476, "e2e_mean_ms": 2097.138625,
                       "step_interval_mean_ms": 27.831343253968253, "step_interval_p90_ms": 16.729,
-                      "step_interval_p95_ms": 16.729, "step_interval_p99_ms": 294.031}}}})
+                      "step_interval_p95_ms": 16.729, "step_interval_p99_ms": 294.031}}}}})
 
 
 class ResultDocument(unittest.TestCase):
@@ -114,9 +115,9 @@ class ResultDocument(unittest.TestCase):
         self.assertEqual(m["total_output_tokens"], 512)
         self.assertEqual(m["vllm_estimated_duration_s"], 5.29)
 
-    def test_instances_are_read_from_the_engine_block(self):
+    def test_instances_are_read_from_the_engine_report(self):
         doc = json.loads(RESULT_DOC)
-        doc["engine"]["instances"] = {
+        doc["reports"]["engine"]["instances"] = {
             "instance_1": {"instance_id": "instance_1", "tokens_per_sec": 2.0, "itl_p99_ms": 40.0},
             "instance_0": {"instance_id": "instance_0", "tokens_per_sec": 1.0, "itl_p99_ms": 30.0}}
         s = json.dumps(doc)
@@ -372,6 +373,10 @@ class Footprint(unittest.TestCase):
         # cross-node cost would be mispriced. Refuse it rather than silently round the pool up.
         with self.assertRaises(run_blis.ConfigError):
             classify({"tp": 2, "dp": 6})                # 12 GPUs: 1.5 nodes
+        # The node size is the chip's, not a constant: 12 GPUs fill three 4-GPU nodes.
+        classify({"tp": 2, "dp": 6}, node_size=4)
+        with self.assertRaises(run_blis.ConfigError):
+            classify({"tp": 2, "dp": 6}, node_size=8)
 
     def test_multinode_scenario_names_a_fabric(self):
         # Cross-node cost resolves from the fabric, not the chip; BLIS refuses a multi-node
@@ -472,6 +477,38 @@ class BuildCmd(unittest.TestCase):
             self.assertEqual(cmd[cmd.index(a) + 1], b)
         for refused in ("--tp", "--model", "--hardware", "--enable-expert-parallel", "--dp"):
             self.assertNotIn(refused, cmd)
+
+
+class NodeSize(unittest.TestCase):
+    """The node size comes from the catalog entry where it fixes one, else the specification (#96)."""
+
+    def test_a_chip_the_catalog_fixes_takes_the_catalogs_size_and_writes_none(self):
+        size, writes = run_blis.cluster_node_size(FIXTURE_BLIS, None, "gb200-nvl72")
+        self.assertEqual((size, writes), (4, False))
+        y = run_blis.scenario_yaml("m", "gb200-nvl72", "0.32.0", dict(run_blis.PARALLEL_DEFAULTS),
+                                   {}, "n", num_instances=2, node_size=size, states_node_size=writes)
+        self.assertNotIn("gpus_per_node", y)
+        self.assertNotIn("gpus_per_rack", y)
+
+    def test_a_chip_with_no_fixed_size_needs_the_specification_to_state_it(self):
+        self.assertEqual(run_blis.cluster_node_size(FIXTURE_BLIS, None, "h100", 8), (8, True))
+        self.assertEqual(run_blis.cluster_node_size(FIXTURE_BLIS, None, "h200", 4), (4, True))
+        with self.assertRaises(run_blis.ConfigError):
+            run_blis.cluster_node_size(FIXTURE_BLIS, None, "h100")
+
+    def test_a_stated_size_that_contradicts_the_catalog_is_refused(self):
+        with self.assertRaises(run_blis.ConfigError) as cm:
+            run_blis.cluster_node_size(FIXTURE_BLIS, None, "gb200-nvl72", 8)
+        self.assertIn("omit it", str(cm.exception))
+
+    def test_the_pool_is_sized_in_the_chips_nodes(self):
+        par = {"tp": 8, "pp": 1, "dp": 1}
+        self.assertEqual(run_blis.pool_nodes(par, 8, node_size=8), 8)
+        self.assertEqual(run_blis.pool_nodes(par, 8, node_size=4), 16)
+        y = run_blis.scenario_yaml("m", "h200", "0.32.0", dict(run_blis.PARALLEL_DEFAULTS, **par), {}, "n",
+                                   num_instances=8, node_size=4, states_node_size=True)
+        self.assertIn("gpus_per_node: 4", y)
+        self.assertIn("nodes: 16", y)
 
 
 class RunOneRejects(unittest.TestCase):

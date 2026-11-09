@@ -365,11 +365,14 @@ def _scenario(run_dir, exp, dep, unset=None):
     # The fabric the run was priced over (issue #71): part of the scenario hash, so regenerating
     # with the wrong one would never match the recorded name. A record predating the field used IB.
     fabric = dep.get("fabric") or run_blis.DEFAULT_FABRIC
+    # The node size the run was priced with (#96); a record that predates it used 8, stated.
+    node_size = dep.get("gpus_per_node") or 8
+    states_node_size = dep.get("states_gpus_per_node", True)
     # the engine release the ledger recorded; a ledger that records none cannot be reconstructed
     recorded = (exp.get("pinned_stack") or {}).get("engine_version")
     for ev in dict.fromkeys([v for v in (recorded, sc.get("engine_version")) if v]):
         if run_blis.scenario_name(model, hw, ev, dep["parallel"], dep["engine"], dep["num_instances"],
-                                  fabric, router) + ".yaml" != name:
+                                  fabric, router, node_size, states_node_size) + ".yaml" != name:
             continue
         shown = {}
         if router.get("router_config"):
@@ -380,7 +383,7 @@ def _scenario(run_dir, exp, dep, unset=None):
             shown = {"router_config": "__ROUTER__"}
         text = run_blis.scenario_yaml(model, hw, ev, json.loads(json.dumps(dep["parallel"])),
                                       dict(dep["engine"]), name[:-5], dep["num_instances"],
-                                      fabric, shown or None)
+                                      fabric, shown or None, node_size, states_node_size)
         if shown:
             text = text.replace(json.dumps(os.path.abspath("__ROUTER__")), json.dumps("../" + rel))
         return name, _note_unset(text, unset or {})

@@ -79,7 +79,6 @@ CATALOG_OWNED_REPLAY_FIELDS = frozenset({
     "split_flattened_agents",
 })
 DURATION_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(us|ms|s)$")
-GPUS_PER_NODE = 8          # a per-instance footprint past this spans nodes (run_blis.GPUS_PER_NODE)
 
 # ---------------------------------------------------------------------------------------------
 # Knob names. None is kept here. Engine setting names are the engine's own, read from the
@@ -317,7 +316,7 @@ def f_valid(fields):
     return " (valid: " + ", ".join(fields) + ")"
 
 
-def _check_gpu_math_colocated(sweep, gpus, where, errs):
+def _check_gpu_math_colocated(sweep, gpus, where, errs, node_size=None):
     """At least one combo must total EXACTLY `gpus`, and report what the survivors are.
 
     `gpus` is the experiment's like-for-like guarantee, so a grid that cannot reach it is not
@@ -330,11 +329,11 @@ def _check_gpu_math_colocated(sweep, gpus, where, errs):
     ok = [(fp, ni) for fp in fps for ni in insts
           if isinstance(ni, int) and fp * ni == gpus]
     if ok:
-        straddling = [fp for fp, _ in ok if fp > GPUS_PER_NODE and fp % GPUS_PER_NODE]
+        straddling = [fp for fp, _ in ok if node_size and fp > node_size and fp % node_size]
         if len(straddling) == len(ok):
             errs.append(f"{where}: every surviving combo has a per-instance footprint that "
                         f"straddles a node boundary ({sorted(set(straddling))} GPUs on "
-                        f"{GPUS_PER_NODE}-GPU nodes); a multi-node instance must fill whole nodes")
+                        f"{node_size}-GPU nodes); a multi-node instance must fill whole nodes")
         return
     combos = sorted({f"{fp}x{ni}={fp * ni}" for fp in fps for ni in insts
                      if isinstance(ni, int)})
@@ -417,6 +416,17 @@ def _check_router(router, where, errs, routing_dir=ROUTING_DIR):
                                 f"{', '.join(sorted(known))})")
 
 
+def _node_size(sc, blis, catalog=None):
+    """The node size a spec's scenario runs on, or None when it cannot be told (reported elsewhere)."""
+    try:
+        fixed = blis_cli.chip_packaging(blis, sc.get("hardware"), catalog)["gpus_per_node"]
+    except blis_cli.BlisCommandError:
+        return None
+    cluster = sc.get("cluster")
+    gpn = cluster.get("gpus_per_node") if isinstance(cluster, dict) else None
+    return fixed or (gpn if isinstance(gpn, int) and not isinstance(gpn, bool) else None)
+
+
 def scenario_identity_errors(sc, blis, catalog=None):
     """`model` and `hardware` that the catalog has no entry for, by `blis catalog resolve`.
 
@@ -437,28 +447,46 @@ def scenario_identity_errors(sc, blis, catalog=None):
     return errs
 
 
-def cluster_errors(sc):
-    """`scenario.cluster` structure: a mapping whose only key is `fabric`, a non-empty string.
+def cluster_errors(sc, blis=None, catalog=None):
+    """`scenario.cluster` structure: a mapping of `fabric` (a non-empty string) and
+    `gpus_per_node` (a positive integer).
 
     The fabric's name is not checked here: no simulator command resolves a network name yet, and
     this repository reads no catalog file (design §5). BLIS refuses an unknown fabric on every
     run. Omitted means the runner's ib-400g default.
     """
     cluster = sc.get("cluster")
-    if cluster is None:
-        return []
     errs = []
-    if not isinstance(cluster, dict) or not cluster:
-        errs.append("scenario.cluster: must be a non-empty mapping, e.g. {fabric: roce-200g}")
-        return errs
-    for key in cluster:
-        if key != "fabric":
-            errs.append(f"scenario.cluster.{key}: unknown key (the only cluster knob is `fabric`)")
-    fabric = cluster.get("fabric")
-    if "fabric" in cluster and (not isinstance(fabric, str) or not fabric):
-        errs.append("scenario.cluster.fabric: must be a non-empty string naming a networks/ class "
-                    "(ib-400g, roce-200g, ethernet-100gbe)")
-        return errs
+    if cluster is not None:
+        if not isinstance(cluster, dict) or not cluster:
+            errs.append("scenario.cluster: must be a non-empty mapping, e.g. {fabric: roce-200g}")
+            return errs
+        for key in cluster:
+            if key not in ("fabric", "gpus_per_node"):
+                errs.append(f"scenario.cluster.{key}: unknown key (the cluster knobs are `fabric` "
+                            f"and `gpus_per_node`)")
+        gpn = cluster.get("gpus_per_node")
+        if "gpus_per_node" in cluster and (isinstance(gpn, bool) or not isinstance(gpn, int) or gpn < 1):
+            errs.append("scenario.cluster.gpus_per_node: must be a positive integer")
+        fabric = cluster.get("fabric")
+        if "fabric" in cluster and (not isinstance(fabric, str) or not fabric):
+            errs.append("scenario.cluster.fabric: must be a non-empty string naming a networks/ class "
+                        "(ib-400g, roce-200g, ethernet-100gbe)")
+    # The node size: the catalog's where it fixes one, else the specification's (#96).
+    gpn = (cluster or {}).get("gpus_per_node") if isinstance(cluster, dict) else None
+    if blis is not None and sc.get("hardware") and not errs:
+        try:
+            fixed = blis_cli.chip_packaging(blis, sc["hardware"], catalog)["gpus_per_node"]
+        except blis_cli.BlisCommandError:
+            fixed = None          # an unknown chip is reported by scenario_identity_errors
+        else:
+            if fixed and gpn is not None and gpn != fixed:
+                errs.append(f"scenario.cluster.gpus_per_node: {gpn} contradicts the catalog, which fixes "
+                            f"{sc['hardware']} at {fixed}; omit it")
+            elif not fixed and gpn is None:
+                errs.append(f"scenario.cluster.gpus_per_node: required, because the catalog fixes no node "
+                            f"size for {sc['hardware']} (an 8-GPU HGX server: 8)")
+    return errs
     return errs
 
 
@@ -571,7 +599,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None):
                 errs.append(f"scenario.{key}: required")
         # Present AND real: a name the catalog does not define cannot run anywhere.
         errs.extend(scenario_identity_errors(sc, blis, catalog))
-        errs.extend(cluster_errors(sc))
+        errs.extend(cluster_errors(sc, blis, catalog))
         gpus = sc.get("gpus")
         if not isinstance(gpus, int) or isinstance(gpus, bool) or gpus < 1:
             errs.append("scenario.gpus: required positive integer -- the budget EVERY run uses")
@@ -726,7 +754,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None):
             if disagg:
                 _check_gpu_math_pd(sw, sc["gpus"], where, errs)
             elif colocated:
-                _check_gpu_math_colocated(sw, sc["gpus"], where, errs)
+                _check_gpu_math_colocated(sw, sc["gpus"], where, errs, _node_size(sc, blis, catalog))
         # Cross-knob and model-aware constraints LAST: they read the sweep as a whole, so they
         # run once the individual knobs are known to be well-formed.
         if isinstance(sc, dict):

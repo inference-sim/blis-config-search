@@ -151,6 +151,27 @@ def resolve(blis, model=None, chip=None, catalog=None):
     return _cached(_key(blis, *args), load)
 
 
+def chip_packaging(blis, chip, catalog=None):
+    """{gpus_per_node, gpus_per_rack} the catalog entry of `chip` fixes, each None where the
+    scenario states it (design §2.2): `blis catalog resolve --chip`.
+
+    A chip the catalog does not know is an error, not an empty packaging.
+    """
+    args = ["catalog", "resolve", "--chip", chip]
+    if catalog:
+        args += ["--catalog", catalog]
+
+    def load():
+        doc = _json(blis, args)
+        if not isinstance(doc, dict) or doc.get("identity") is None:
+            raise BlisCommandError(f"`blis {' '.join(args)}`: {doc.get('reason') if isinstance(doc, dict) else 'no answer'}")
+        pk = doc.get("packaging")
+        if not isinstance(pk, dict) or not {"gpus_per_node", "gpus_per_rack"} <= set(pk):
+            raise BlisCommandError(f"`blis {' '.join(args)}` printed no packaging")
+        return {k: pk[k] for k in ("gpus_per_node", "gpus_per_rack")}
+    return _cached(_key(blis, "packaging", *args), load)
+
+
 def validate_document(blis, document, path):
     """Validate the file at `path` as a BLIS `document` with the Go validators.
 

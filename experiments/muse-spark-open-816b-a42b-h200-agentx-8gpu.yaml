@@ -11,6 +11,7 @@ name: muse-spark-open-816b-a42b-h200-agentx-8gpu
 scenario:
   model: muse-spark-open-816b-a42b-nvfp4
   hardware: h200
+  cluster: {gpus_per_node: 8}   # an 8-GPU HGX server; the catalog fixes no node size for this chip
   workload: agentx-mvp
   gpus: 8
   engine: {max_model_len: 262144}   # at the 32k default the replay drops every trace

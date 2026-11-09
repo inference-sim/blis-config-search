@@ -51,7 +51,14 @@ def main(argv):
         reason = ("a catalog entry has this name" if hit else
                   "no catalog entry has this name" if kind == "--model" else
                   "the catalog has no hardware entry of this name")
-        print(json.dumps({"query": query, "identity": hit, "reason": reason}))
+        out = {"query": query, "identity": hit, "reason": reason}
+        if kind == "--chip" and hit:
+            # What the real command prints for a resolved chip (blis-substrate v0.13.0's catalog):
+            # a product that fixes its packaging states it, every other chip leaves it to the scenario.
+            fixed = {"gb200-nvl72": (4, 72), "gb300": (4, 72)}.get(hit)
+            out["packaging"] = {"gpus_per_node": fixed[0] if fixed else None,
+                                "gpus_per_rack": fixed[1] if fixed else None}
+        print(json.dumps(out))
         return
     fail(f"fixture blis: unsupported arguments {argv}", 2)
 

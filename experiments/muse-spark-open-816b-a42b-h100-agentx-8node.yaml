@@ -16,7 +16,7 @@ scenario:
   hardware: h100
   workload: agentx-mvp
   gpus: 64
-  cluster: {fabric: roce-200g}            # H100 fleets run on RoCE; cross-node EP/all2all is priced at 25 GB/s, not IB's 50
+  cluster: {fabric: roce-200g, gpus_per_node: 8}            # H100 fleets run on RoCE; cross-node EP/all2all is priced at 25 GB/s, not IB's 50
   engine:
     max_model_len: 262144                 # at the 32k default the replay drops every trace
     gpu_memory_utilization: 0.95          # H100 TP8 refuses at 0.9 for one 262k sequence (single-node spec)

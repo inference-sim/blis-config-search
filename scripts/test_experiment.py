@@ -42,6 +42,7 @@ def spec(**over):
     base = {
         "name": "t",
         "scenario": {"model": "qwen3-14b", "hardware": "h100", "workload": "chatbot",
+                     "cluster": {"gpus_per_node": 8},
                      "gpus": 16, "slo": {"itl_p99": "20ms"}, "concurrency": [1, 2]},
         "sweeps": [{"name": "s", "num-instances": [2], "parallel": {"tp": [8]}}],
     }
@@ -399,13 +400,28 @@ class ValidatorRejects(unittest.TestCase):
     def test_valid_spec_has_no_errors(self):
         self.assertEqual([], self.errs(spec()))
 
-    def test_cluster_must_be_a_mapping_with_only_fabric(self):
+    def test_cluster_must_be_a_mapping_of_fabric_and_gpus_per_node(self):
         bad = spec()
         bad["scenario"]["cluster"] = "roce-200g"
         self.assertTrue(any("scenario.cluster:" in e for e in self.errs(bad)))
         bad2 = spec()
         bad2["scenario"]["cluster"] = {"fabric": "ib-400g", "bogus": 1}
         self.assertTrue(any("scenario.cluster.bogus" in e for e in self.errs(bad2)))
+
+    def test_the_node_size_is_the_catalogs_or_the_specifications(self):
+        # A chip the catalog fixes (GB200 NVL72: 4 per tray) takes the catalog's value; a
+        # contradicting one is refused, and so is an omitted one for a chip the catalog does not fix.
+        gb = spec()
+        gb["scenario"]["hardware"] = "gb200-nvl72"
+        gb["scenario"]["cluster"] = {"fabric": "ib-400g"}
+        self.assertEqual([e for e in self.errs(gb) if "gpus_per_node" in e], [])
+        gb["scenario"]["cluster"] = {"gpus_per_node": 8}
+        self.assertTrue(any("contradicts the catalog" in e for e in self.errs(gb)))
+        h = spec()
+        del h["scenario"]["cluster"]
+        self.assertTrue(any("gpus_per_node: required" in e for e in self.errs(h)))
+        h["scenario"]["cluster"] = {"gpus_per_node": 0}
+        self.assertTrue(any("positive integer" in e for e in self.errs(h)))
 
     def test_fabric_omitted_or_empty_cluster_is_structural_error(self):
         # Present but empty is a mistake, not the IB default (which comes from OMITTING cluster).
@@ -1549,7 +1565,8 @@ class PdRunner(unittest.TestCase):
         with self.assertRaises(run_blis.ConfigError) as e:
             run_blis.classify_config(self.cfg(prefill_tp=4, prefill_dp=3,
                                               decode_tp=4, decode_dp=3,
-                                              prefill_instances=1, decode_instances=1), V.knob_vocabulary(BLIS))
+                                              prefill_instances=1, decode_instances=1), V.knob_vocabulary(BLIS),
+                                      node_size=8)
         self.assertIn("whole", str(e.exception))
 
     def test_scenario_yaml_renders_two_pools_and_pd_transfer(self):
@@ -1628,7 +1645,7 @@ class DryRunPlan(unittest.TestCase):
     def test_scenario_json_carries_the_experiment_narrative(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
             f.write("name: kv\nscenario: {model: qwen3-14b, hardware: h100, workload: chatbot,"
-                    " gpus: 16, slo: {itl_p99: 20ms}, concurrency: [8]}\nsweeps:\n"
+                    " cluster: {gpus_per_node: 8}, gpus: 16, slo: {itl_p99: 20ms}, concurrency: [8]}\nsweeps:\n"
                     "  - {name: a, narrative: bf16 KV., num-instances: [16],"
                     " engine: {cache_dtype: [auto]}}\n"
                     "  - {name: b, narrative: fp8 KV., num-instances: [16],"

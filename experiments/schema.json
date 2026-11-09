@@ -58,6 +58,12 @@
           "additionalProperties": false,
           "minProperties": 1,
           "properties": {
+            "gpus_per_node": {
+              "description": "The GPUs in one node, for a chip whose catalog entry fixes none (an HGX H100 or H200 server has 8, a 4-GPU H200 server has 4). Omit it for a chip the catalog fixes (GB200 NVL72: 4 per tray in a 72-GPU rack): the catalog's value is used, and a different one is refused. Omitted for any other chip, the validator refuses the specification.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 72
+            },
             "fabric": {
               "description": "A blis-catalog networks/ class (ib-400g, roce-200g, ethernet-100gbe). A property of the cluster, not the GPU die -- an H100 fleet on RoCE must say so, or it is priced on InfiniBand. The validator checks the name against the sibling blis-catalog checkout.",
               "type": "string",

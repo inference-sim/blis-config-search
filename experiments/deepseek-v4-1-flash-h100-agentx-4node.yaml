@@ -10,6 +10,7 @@ name: deepseek-v4-1-flash-h100-agentx-4node
 scenario:
   model: deepseek-v4.1-flash
   hardware: h100
+  cluster: {gpus_per_node: 8}   # an 8-GPU HGX server; the catalog fixes no node size for this chip
   workload: agentx-mvp
   gpus: 32
   slo: {itl_p99: 20ms}

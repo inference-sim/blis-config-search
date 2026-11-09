@@ -9,6 +9,7 @@ name: kimi-k2-5-h200-multidoc-pd
 scenario:
   model: kimi-k2.5
   hardware: h200
+  cluster: {gpus_per_node: 8}   # an 8-GPU HGX server; the catalog fixes no node size for this chip
   workload: multidoc
   gpus: 64
   slo: {itl_p99: 20ms, ttft_p99: 5s}

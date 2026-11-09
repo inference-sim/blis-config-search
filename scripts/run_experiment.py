@@ -753,14 +753,13 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                              f"a tagged release's embedded data ({_other_data_reason(runs)}), so its report is "
                              f"experimental and never committed: --out {out_root} is the repository's "
                              f"reports/ directory. Choose another --out, or run the pinned release.")
+        _write_run_dir(out_dir, spec, report, runs)
         if stage:
-            # The gate passed: publish the staged sweep into the report directory.
-            os.makedirs(final_dir, exist_ok=True)
-            for sub in ("scenarios", "routing"):
-                if os.path.isdir(os.path.join(out_dir, sub)):
-                    shutil.copytree(os.path.join(out_dir, sub), os.path.join(final_dir, sub), dirs_exist_ok=True)
+            # The gate passed and the whole report is assembled: replace the report directory as a
+            # whole, so a file the new sweep no longer writes does not survive from an older one
+            # and the tree depends only on this sweep (the sweeper is deterministic).
+            _replace_dir(out_dir, final_dir)
             shutil.rmtree(stage, ignore_errors=True)
-        _write_run_dir(final_dir, spec, report, runs)
     return report
 
 
@@ -998,6 +997,25 @@ def _priced_with_other_data(runs, data_override):
     tagged release (`released_data`); an untagged or off-pin build is experimental too."""
     return bool(data_override) or any(
         r.get("data") not in (None, "embedded") or r.get("released_build") is False for r in runs)
+
+
+def _replace_dir(src, dst):
+    """Make `dst` hold exactly what `src` holds. The old `dst`, if any, is moved aside first and
+    removed only after the new one is in place, so a failure part way leaves the old report."""
+    os.makedirs(os.path.dirname(os.path.abspath(dst)), exist_ok=True)
+    old = None
+    if os.path.lexists(dst):
+        old = dst + ".old-" + os.path.basename(src)
+        os.rename(dst, old)
+    try:
+        shutil.copytree(src, dst)
+    except BaseException:
+        shutil.rmtree(dst, ignore_errors=True)
+        if old:
+            os.rename(old, dst)
+        raise
+    if old:
+        shutil.rmtree(old, ignore_errors=True)
 
 
 def _other_data_reason(runs):

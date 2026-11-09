@@ -2005,6 +2005,40 @@ class DataOverride(unittest.TestCase):
             snap = self.snapshot(root)
             self.assertIn(os.path.join("t", "runs.jsonl"), snap)
             self.assertNotEqual(b"old ./experiment.json", snap[os.path.join("t", "experiment.json")])
+            # A file the new sweep no longer writes does not survive from the older one.
+            self.assertNotIn(os.path.join("t", "scenarios", "preexisting.txt"), snap)
+            self.assertNotIn(os.path.join("t", "routing", "preexisting.txt"), snap)
+
+    def test_a_rerun_over_a_report_equals_a_fresh_run(self):
+        """The published tree depends only on the sweep, not on what was in the directory before."""
+        real = E._is_committed_reports
+        try:
+            with tempfile.TemporaryDirectory() as fresh, tempfile.TemporaryDirectory() as over:
+                self.existing_report(over)
+                for root in (fresh, over):
+                    E._is_committed_reports = lambda out_root, r=root: os.path.realpath(out_root) == os.path.realpath(r)
+                    self.sweep(root, data="embedded", released_build=True)
+                self.assertEqual(self.snapshot(fresh), self.snapshot(over))
+        finally:
+            E._is_committed_reports = real
+
+    def test_replacing_a_directory_keeps_the_old_one_if_the_copy_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            src, dst = os.path.join(d, "src"), os.path.join(d, "dst")
+            os.makedirs(src)
+            os.makedirs(dst)
+            with open(os.path.join(dst, "keep.txt"), "w") as f:
+                f.write("old")
+            real = E.shutil.copytree
+            E.shutil.copytree = lambda *a, **k: (_ for _ in ()).throw(OSError("disk full"))
+            try:
+                with self.assertRaises(OSError):
+                    E._replace_dir(src, dst)
+            finally:
+                E.shutil.copytree = real
+            with open(os.path.join(dst, "keep.txt")) as f:
+                self.assertEqual("old", f.read())
+            self.assertEqual(["dst", "src"], sorted(os.listdir(d)), "no .old directory left behind")
 
     def test_the_committed_reports_directory_is_recognised_through_a_symlink(self):
         import tempfile

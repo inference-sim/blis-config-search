@@ -533,6 +533,48 @@ class BuildCmd(unittest.TestCase):
             self.assertNotIn(refused, cmd)
 
 
+class DataEnvironment(unittest.TestCase):
+    """The simulator reads BLIS_CATALOG and BLIS_REGISTRY as whole-data replacement paths. The scripts
+    name the checkout they read files from SUBSTRATE_CATALOG and SUBSTRATE_REGISTRY, so those never
+    collide with the simulator's; and a default run removes the simulator's own two from its child
+    environment even when the caller exported them (CFG-1). These run a real child process."""
+
+    def child_env(self, data_override):
+        import subprocess
+        import sys
+        old = {k: os.environ.get(k) for k in run_blis.SIM_DATA_ENV}
+        for k in run_blis.SIM_DATA_ENV:
+            os.environ[k] = "/some/checkout"
+        try:
+            env = run_blis.sim_env(data_override)
+            out = subprocess.run([sys.executable, "-c",
+                                  "import os;print([k for k in ('BLIS_CATALOG','BLIS_REGISTRY') if k in os.environ])"],
+                                 capture_output=True, text=True, env=env).stdout
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        return out.strip()
+
+    def test_a_default_run_does_not_inherit_the_data_paths(self):
+        self.assertEqual("[]", self.child_env(False))
+
+    def test_an_override_keeps_them(self):
+        self.assertEqual("['BLIS_CATALOG', 'BLIS_REGISTRY']", self.child_env(True))
+
+    def test_the_data_a_result_names_decides_the_label(self):
+        emb = {"source": "embedded"}
+        self.assertEqual("embedded", run_blis.data_of({"data": {"catalog": emb, "registry": emb, "released_data": True}}))
+        # A development binary prices with embedded data too; released_data is a separate fact.
+        self.assertEqual("embedded", run_blis.data_of({"data": {"catalog": emb, "registry": emb, "released_data": False}}))
+        self.assertIs(False, run_blis.released_build({"data": {"released_data": False}}))
+        self.assertEqual("override", run_blis.data_of({"data": {"catalog": {"source": "path"}, "registry": emb,
+                                                                  "released_data": True}}))
+        self.assertIsNone(run_blis.data_of({}))
+
+
 class EmbeddedData(unittest.TestCase):
     """A committed report is priced with the pinned release's embedded catalog and registry (CFG-1):
     the simulator is given neither unless the run is an explicit, experimental override."""

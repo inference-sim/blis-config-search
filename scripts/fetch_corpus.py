@@ -86,8 +86,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("spec", help="experiments/<name>.yaml")
-    ap.add_argument("--catalog", default=os.environ.get("BLIS_CATALOG"),
-                    help="blis-catalog checkout (default: $BLIS_CATALOG)")
+    ap.add_argument("--catalog", default=os.environ.get("SUBSTRATE_CATALOG"),
+                    help="blis-catalog checkout (default: $SUBSTRATE_CATALOG)")
     ap.add_argument("--dest", help="override the destination path (default: the spec's corpus path)")
     args = ap.parse_args()
 
@@ -97,7 +97,7 @@ def main():
     workload = sc.get("workload")
 
     if not args.catalog:
-        raise SystemExit("--catalog (or $BLIS_CATALOG) is required to read the workload descriptor")
+        raise SystemExit("--catalog (or $SUBSTRATE_CATALOG) is required to read the workload descriptor")
 
     desc = _descriptor(workload, args.catalog)
     if not desc:

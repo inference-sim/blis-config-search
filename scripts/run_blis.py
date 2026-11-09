@@ -946,6 +946,45 @@ def _flatten_result(doc):
     return out
 
 
+# The simulator reads these two variables as whole-data replacement paths (a flag wins over them).
+# The scripts name the blis-substrate checkout they read FILES from SUBSTRATE_CATALOG and
+# SUBSTRATE_REGISTRY, so they never collide; and a default run still removes these two from the
+# simulator's environment, so a caller's export cannot make it price with a path and not with its
+# embedded data (CFG-1).
+SIM_DATA_ENV = ("BLIS_CATALOG", "BLIS_REGISTRY")
+
+
+def sim_env(data_override):
+    """The environment the simulator runs in: the caller's, without SIM_DATA_ENV unless the run
+    overrides the data on purpose."""
+    env = dict(os.environ)
+    if not data_override:
+        for k in SIM_DATA_ENV:
+            env.pop(k, None)
+    return env
+
+
+def data_of(doc):
+    """What data a Result says it was priced with: "embedded" when the catalog and the registry
+    both come from the simulator build's embedded data, else "override". None when the document
+    records no data block. Whether the build is a tagged release (`released_data`) is a separate
+    fact, read by `released_build`: a development binary prices with embedded data too."""
+    d = (doc or {}).get("data")
+    if not isinstance(d, dict):
+        return None
+    cat, reg = d.get("catalog") or {}, d.get("registry") or {}
+    if cat.get("source") == "embedded" and reg.get("source") == "embedded":
+        return "embedded"
+    return "override"
+
+
+def released_build(doc):
+    """True when the Result says the build is a tagged release run on its own embedded data
+    (`data.released_data`); None when it records no data block."""
+    d = (doc or {}).get("data")
+    return d.get("released_data") if isinstance(d, dict) else None
+
+
 def result_invalid(blis, stdout):
     """Why `blis schema validate result` refuses the Result on stdout, or None (SUB-19).
 
@@ -1433,12 +1472,13 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                         num_requests, seed, horizon, defaults, cli, shape)
     t0 = time.time()
     try:
-        pr = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        pr = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=sim_env(data_override))
         stdout, stderr, rc = pr.stdout, pr.stderr, pr.returncode
     except subprocess.TimeoutExpired:
         stdout, stderr, rc = "", "timeout", -1
     invalid = result_invalid(blis, stdout) if rc == 0 else None
     metrics = parse_metrics(stdout) if rc == 0 and not invalid else {}
+    seen = data_of(_result_doc(stdout)) if rc == 0 and not invalid else None
     if rc != 0:
         error = _failure_line(stderr) or f"rc={rc}"
     elif invalid:
@@ -1447,6 +1487,14 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
         error = "rc=0 but no cluster metrics parsed from stdout (output format changed?)"
     else:
         error = _completion_issue(metrics)
+    # The record states the data the Result says priced the run, not the flag that asked for it.
+    # A default run whose Result is not the release's embedded data is an error row: it would
+    # otherwise be committed as a report priced with data it was not (CFG-1).
+    if seen is not None:
+        rec["data"] = seen
+        if not data_override and seen != "embedded" and not error:
+            error = ("priced with other data than the simulator release's embedded data "
+                     "(the Result's data block does not name catalog and registry source embedded)")
     rec.update({
         # `router` and `workload` are recorded so a ledger row states the WHOLE deployment and the
         # traffic it was priced on. Without the workload field a replay row and a generated-shape
@@ -1483,9 +1531,9 @@ def add_common_args(p):
     p.add_argument("--fields",
                    help="the engine's field list: the pinned blis-vllm release's fields.json, until the "
                         "binary has `blis fields` (default: ask the binary)")
-    p.add_argument("--catalog", default=os.environ.get("BLIS_CATALOG"),
+    p.add_argument("--catalog", default=os.environ.get("SUBSTRATE_CATALOG"),
                    help="the catalog/ of a blis-substrate checkout at the pinned release: the runner reads files from it")
-    p.add_argument("--registry", default=os.environ.get("BLIS_REGISTRY"),
+    p.add_argument("--registry", default=os.environ.get("SUBSTRATE_REGISTRY"),
                    help="the registry/ of the same checkout")
     p.add_argument("--data-override", action="store_true", dest="data_override",
                    help="EXPERIMENTAL: price with --catalog/--registry instead of the simulator's embedded data; "
@@ -1554,9 +1602,9 @@ def require_env(args):
     main() catch it and exit."""
     missing = []
     if not args.catalog:
-        missing.append("--catalog or BLIS_CATALOG (NS-6)")
+        missing.append("--catalog or SUBSTRATE_CATALOG (NS-6)")
     if not args.registry:
-        missing.append("--registry or BLIS_REGISTRY (the runner reads acceptance profiles from it)")
+        missing.append("--registry or SUBSTRATE_REGISTRY (the runner reads acceptance profiles from it)")
     if missing:
         raise ValueError("missing required: " + "; ".join(missing))
 

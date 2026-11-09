@@ -254,7 +254,7 @@ report can say the run departed from the catalog.
 revision and the digest:
 
 ```
-python3 -I scripts/fetch_corpus.py experiments/<name>.yaml --catalog "$BLIS_CATALOG"
+python3 -I scripts/fetch_corpus.py experiments/<name>.yaml --catalog "$SUBSTRATE_CATALOG"
 ```
 
 It downloads to the path the spec states, verifies the sha256 before moving the file into place,

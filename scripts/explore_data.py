@@ -184,7 +184,7 @@ def defaults(run_dir, keys):
 GH = "https://github.com/inference-sim"
 _PINS = build_catalog.read_pins()
 # The catalog/ of a blis-substrate checkout at the pinned release (workload descriptors are read from it).
-CATALOG_DIR = os.environ.get("BLIS_CATALOG") or os.path.join(ROOT, os.pardir, "blis-substrate", "catalog")
+CATALOG_DIR = os.environ.get("SUBSTRATE_CATALOG") or os.path.join(ROOT, os.pardir, "blis-substrate", "catalog")
 
 
 def _clone(repo, ref, commit, dest, *then):
@@ -238,9 +238,9 @@ def setup(exp, run_dir=None):
         # the simulator prices with the data embedded in this release (CFG-1); the checkout is only
         # where the scripts read catalog and registry files from
         sh += _clone("blis-substrate", ps["substrate"], None, "blis-substrate",
-                     'export BLIS_CATALOG="$PWD/blis-substrate/catalog"',
-                     'export BLIS_REGISTRY="$PWD/blis-substrate/registry"') + [""]
-    for key, repo, env in (("catalog", "blis-catalog", "BLIS_CATALOG"), ("registry", "blis-registry", "BLIS_REGISTRY")):
+                     'export SUBSTRATE_CATALOG="$PWD/blis-substrate/catalog"',
+                     'export SUBSTRATE_REGISTRY="$PWD/blis-substrate/registry"') + [""]
+    for key, repo, env in (("catalog", "blis-catalog", "SUBSTRATE_CATALOG"), ("registry", "blis-registry", "SUBSTRATE_REGISTRY")):
         if ps.get(key) and ps.get("data") != "embedded":     # a report from before the data was embedded
             sh += _clone(repo, ps[key], commit(key), repo, f'export {env}="$PWD/{repo}"') + [""]
     sh += ["# the commands run from this repo: router configs live here, scenarios/ is where you save each scenario",
@@ -259,9 +259,9 @@ def setup(exp, run_dir=None):
     # writes to repro/, never reports/: reproducing locally does not touch the published report
     sweep = ["# in the blis-config-search checkout, after the install script",
              "python3 -m venv .venv && . .venv/bin/activate && pip install pyyaml",
-             f'python3 -I scripts/run_experiment.py {spec} --dry-run --catalog "$BLIS_CATALOG"',
+             f'python3 -I scripts/run_experiment.py {spec} --dry-run --catalog "$SUBSTRATE_CATALOG"',
              f"python3 -I scripts/run_experiment.py {spec} \\",
-             '  --blis "$(command -v blis)" --catalog "$BLIS_CATALOG" --registry "$BLIS_REGISTRY" \\',
+             '  --blis "$(command -v blis)" --catalog "$SUBSTRATE_CATALOG" --registry "$SUBSTRATE_REGISTRY" \\',
              "  --out repro/"]
     stack = [{"name": "BLIS", "repo": "inference-sim", "ref": ps["blis"], "commit": commit("blis")},
              *[{"name": n, "repo": r, "ref": ps[k], "commit": commit(k)}
@@ -460,9 +460,9 @@ def _recipe(cmd, workload, dep=None):
         if flag in INERT_FLAGS:
             continue
         if flag == "--registry":
-            val = '"$BLIS_REGISTRY"'
+            val = '"$SUBSTRATE_REGISTRY"'
         elif flag == "--catalog":
-            val = '"$BLIS_CATALOG"'
+            val = '"$SUBSTRATE_CATALOG"'
         elif flag == "--scenarios":
             val = "scenarios"
         elif flag == "--max-context-length" and val == "max_model_len" and _max_model_len(dep):

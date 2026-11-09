@@ -49,8 +49,8 @@ speculative-decoding acceptance profiles). They read them from a checkout of the
 ```bash
 set -a; . ./pins.env; set +a
 git clone --branch "$SUBSTRATE_REF" --depth 1 https://github.com/inference-sim/blis-substrate.git
-export BLIS_CATALOG=$PWD/blis-substrate/catalog
-export BLIS_REGISTRY=$PWD/blis-substrate/registry
+export SUBSTRATE_CATALOG=$PWD/blis-substrate/catalog
+export SUBSTRATE_REGISTRY=$PWD/blis-substrate/registry
 ```
 
 These two variables (or `--catalog` / `--registry`) name where the scripts read those files; they
@@ -95,7 +95,7 @@ Then a whole spec, without BLIS first to check its run budget:
 ```bash
 python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run
 python3 -I scripts/run_experiment.py experiments/<name>.yaml \
-  --blis /path/to/blis --catalog "$BLIS_CATALOG" --registry "$BLIS_REGISTRY"
+  --blis /path/to/blis --catalog "$SUBSTRATE_CATALOG" --registry "$SUBSTRATE_REGISTRY"
 ```
 
 ## 4. Unit tests (no BLIS / no network)

@@ -787,7 +787,7 @@ def test_explore_data():
              "--registry", "./blis-registry", "--catalog", "./blis-catalog", "--defaults-filepath",
              "./upstream/defaults.yaml", "--workload", "chatbot", "--prompt-tokens", "256"], "chatbot")
         check("upstream" not in recipe and "--workload " not in recipe and "--scenarios scenarios" in recipe
-              and '--catalog "$BLIS_CATALOG"' in recipe and "--prompt-tokens 256" in recipe,
+              and '--catalog "$SUBSTRATE_CATALOG"' in recipe and "--prompt-tokens 256" in recipe,
               "the shown command drops CI paths and inert flags, keeping what BLIS reads")
         # A multi-node run priced over a non-IB fabric (issue #71): the fabric is part of the
         # scenario hash, so _scenario must regenerate with the RECORDED fabric or the panel shows
@@ -847,7 +847,7 @@ def test_explore_data():
         ps = {"blis": "v9.0.0", "catalog": "1.0.0", "registry": "v2.0.0",
               "resolved": {"blis": {"commit": "a" * 40}, "catalog": {"commit": "b" * 40}}}
         st = explore_data.setup({"pinned_stack": ps, "scenario": {"replay": {"corpus": ".corpus/t.jsonl", "corpus_sha256": "c" * 64}}})
-        check("--branch v9.0.0" in st["script"] and "a" * 40 in st["script"] and "export BLIS_REGISTRY" in st["script"]
+        check("--branch v9.0.0" in st["script"] and "a" * 40 in st["script"] and "export SUBSTRATE_REGISTRY" in st["script"]
               and "shasum -a 256 -c" in st["script"],
               "the setup script installs the report's own recorded stack, checks each tag's commit and the corpus")
         routed = explore_data.setup({"pinned_stack": dict(ps, router="v1.0.0-blis.9")})["stack"]

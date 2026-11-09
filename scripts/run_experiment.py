@@ -728,8 +728,9 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
         "objective": "max output tok/s per accelerator subject to the scenario's SLOs",
         "sweeps": sweep_results,
         "best_overall": best_of(all_rows),
-        "pinned_stack": _pinned_stack(blis, catalog, registry, engine_version, data_override),
-        "experimental": bool(data_override),
+        "pinned_stack": _pinned_stack(blis, catalog, registry, engine_version,
+                                      _priced_with_other_data(runs, data_override)),
+        "experimental": _priced_with_other_data(runs, data_override),
         "model_arch": (entry or {}).get("arch"),
         "totals": {"configs": sum(s["configs"] for s in sweep_results),
                    "runs": len(runs) if not dry_run else
@@ -966,6 +967,13 @@ def _blis_source_commit(blis):
 
 def _is_committed_reports(out_root):
     return os.path.realpath(out_root) == os.path.realpath(os.path.join(ROOT, "reports"))
+
+
+def _priced_with_other_data(runs, data_override):
+    """True when the sweep asked for other data, or any run's Result says it was priced with data
+    other than the release's embedded data (CFG-1): the report is then experimental, whatever the
+    command line said."""
+    return bool(data_override) or any(r.get("data") not in (None, "embedded") for r in runs)
 
 
 def _pinned_stack(blis, catalog, registry, engine_version, data_override=False):

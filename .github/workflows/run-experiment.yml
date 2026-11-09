@@ -129,8 +129,8 @@ jobs:
           git clone --branch "$SUBSTRATE_REF" --depth 1 https://github.com/inference-sim/blis-substrate.git
           test "$(git -C blis-substrate describe --tags --exact-match)" = "$SUBSTRATE_REF" || {
             echo "blis-substrate is not $SUBSTRATE_REF -- aborting" >&2; exit 1; }
-          echo "BLIS_CATALOG=$PWD/blis-substrate/catalog" >> "$GITHUB_ENV"
-          echo "BLIS_REGISTRY=$PWD/blis-substrate/registry" >> "$GITHUB_ENV"
+          echo "SUBSTRATE_CATALOG=$PWD/blis-substrate/catalog" >> "$GITHUB_ENV"
+          echo "SUBSTRATE_REGISTRY=$PWD/blis-substrate/registry" >> "$GITHUB_ENV"
           echo "BLIS_BIN=$PWD/upstream/blis"      >> "$GITHUB_ENV"
 
       - name: Fetch the pinned engine field list
@@ -139,8 +139,8 @@ jobs:
       - name: Validate before running anything
         run: |
           set -euo pipefail
-          python3 -I scripts/validate_experiment.py "$SPEC" --blis "$BLIS_BIN" --catalog "$BLIS_CATALOG" --fields "$RUNNER_TEMP/fields.json"
-          python3 -I scripts/run_experiment.py "$SPEC" --dry-run --blis "$BLIS_BIN" --catalog "$BLIS_CATALOG" --fields "$RUNNER_TEMP/fields.json"
+          python3 -I scripts/validate_experiment.py "$SPEC" --blis "$BLIS_BIN" --catalog "$SUBSTRATE_CATALOG" --fields "$RUNNER_TEMP/fields.json"
+          python3 -I scripts/run_experiment.py "$SPEC" --dry-run --blis "$BLIS_BIN" --catalog "$SUBSTRATE_CATALOG" --fields "$RUNNER_TEMP/fields.json"
 
       - name: Fetch the replay corpus
         run: |
@@ -150,13 +150,13 @@ jobs:
           # against the descriptor's sha256. The script reads the dataset, the PINNED revision and
           # the digest out of the substrate release we just cloned, so there is no second copy of that pin to
           # drift. A generated-shape spec needs nothing and the step is a no-op.
-          python3 -I scripts/fetch_corpus.py "$SPEC" --catalog "$BLIS_CATALOG"
+          python3 -I scripts/fetch_corpus.py "$SPEC" --catalog "$SUBSTRATE_CATALOG"
 
       - name: Run the sweeper
         run: |
           set -euo pipefail
           python3 -I scripts/run_experiment.py "$SPEC" \
-            --blis "$BLIS_BIN" --catalog "$BLIS_CATALOG" --registry "$BLIS_REGISTRY" \
+            --blis "$BLIS_BIN" --catalog "$SUBSTRATE_CATALOG" --registry "$SUBSTRATE_REGISTRY" \
             --fields "$RUNNER_TEMP/fields.json" \
             --out reports/ --timeout "${{ github.event.inputs.timeout || '600' }}" \
             --max-parallel "${{ vars.SWEEP_MAX_PARALLEL || '1' }}"

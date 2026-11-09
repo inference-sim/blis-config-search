@@ -25,8 +25,9 @@ cd scripts && python3 -m unittest test_experiment.GridExpansion   # or .GridExpa
 # the others are plain-function runners; call the function from the __main__ block
 
 # Experiment specs
-python3 -I scripts/validate_experiment.py experiments/<name>.yaml --blis ./blis   # or experiments/
-python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run --blis ./blis
+python3 -I scripts/fetch_fields.py fields.json      # the pinned engine's field list, until `blis fields` exists
+python3 -I scripts/validate_experiment.py experiments/<name>.yaml --blis ./blis --fields fields.json   # or experiments/
+python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run --blis ./blis --fields fields.json
 
 # Site data + web app
 python3 -I scripts/build_gallery.py                                 # reports/ -> site/
@@ -63,7 +64,7 @@ inference-sim's `go.mod` by `scripts/sync_pins.py` — don't edit it by hand. `t
 the pins against `SETUP.md`, the workflows, and `go.mod`.
 
 The validator and runner reach the simulator only through its commands (`scripts/blis_cli.py`):
-`blis fields`, `blis schema`, `blis schema validate` and `blis catalog resolve`. Tests use the
+`blis schema`, `blis schema validate` and `blis catalog resolve`, and the field list in the file `--fields` names (`blis fields` replaces the file when it exists). Tests use the
 TEMPORARY stand-in `scripts/testdata/blis-m1/blis` until a pinned build has the commands. The
 site build (`build_catalog.py`), `knob_profile.py` and `fetch_corpus.py` still read a catalog
 checkout; see the M1 pull request for why. `test_build.py` reads `../inference-sim`'s go.mod.

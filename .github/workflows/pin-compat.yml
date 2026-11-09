@@ -105,8 +105,10 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with: { go-version-file: upstream/go.mod, cache-dependency-path: upstream/go.sum }
       - run: cd upstream && go build -o blis main.go && ./blis --help >/dev/null
+      - name: Fetch the pinned engine field list
+        run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
       - name: Every spec against the new binary's field list, schemas and catalog
-        run: python3 -I scripts/validate_experiment.py experiments/ --blis upstream/blis
+        run: python3 -I scripts/validate_experiment.py experiments/ --blis upstream/blis --fields "$RUNNER_TEMP/fields.json"
       - name: Hermetic suite
         run: |
           set -euo pipefail
@@ -157,11 +159,14 @@ jobs:
         with:
           path: .corpus/traces.jsonl
           key: replay-corpus-${{ steps.stack.outputs.catalog_ref }}
+      - name: Fetch the pinned engine field list
+        run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
       - name: Re-run ${{ matrix.report.id }}'s own rows on the new binary
         run: |
           set -euo pipefail
           python3 -I scripts/blis_pin.py smoke "${{ matrix.report.id }}" \
             --blis .build/blis --catalog ../blis-catalog --registry ../blis-registry \
+            --fields "$RUNNER_TEMP/fields.json" \
             --corpus .corpus/traces.jsonl --corpus-cache "$RUNNER_TEMP/agx-cache" \
             --max-parallel 2 --timeout "${{ vars.REGEN_RUN_TIMEOUT || '1800' }}" \
             --json "$RUNNER_TEMP/smoke-${{ matrix.report.id }}.json" | tee -a "$GITHUB_STEP_SUMMARY"

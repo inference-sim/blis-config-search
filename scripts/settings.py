@@ -123,6 +123,7 @@ def inert_reason(vocab, name):
             f"would report the same number; state it in scenario.engine if a run should record it")
 
 
-def vocabulary(blis):
-    """The Vocabulary the binary `blis` publishes. Raises blis_cli.BlisCommandError."""
-    return vocabulary_from(blis_cli.fields(blis, ENGINE_KIND), blis_cli.schema(blis, "deployment"))
+def vocabulary(blis, fields=None):
+    """The Vocabulary the binary `blis` publishes, with the engine's field list from the file `fields`
+    when it names one. Raises blis_cli.BlisCommandError."""
+    return vocabulary_from(blis_cli.fields(blis, ENGINE_KIND, fields), blis_cli.schema(blis, "deployment"))

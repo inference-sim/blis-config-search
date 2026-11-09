@@ -533,7 +533,7 @@ def best_of(rows):
 
 
 def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dry_run=False,
-                   run_timeout=600, max_parallel=1, verbose=True):
+                   run_timeout=600, max_parallel=1, verbose=True, fields=None):
     """Expand, filter, run and rank one spec. Returns the assembled report dict."""
     routing_dir = routing_dir or os.path.join(ROOT, "routing")
     sc = spec["scenario"]
@@ -545,7 +545,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     concurrency = list(sc["concurrency"])
     slo_ms = slo_limits(sc.get("slo"))
     shared_engine = dict(sc.get("engine") or {})
-    engine_version = blis_cli.engine_release(blis, run_blis.ENGINE_KIND)
+    engine_version = blis_cli.engine_release(blis, run_blis.ENGINE_KIND, fields)
     replay = dict(sc.get("replay") or {}) or None
     # The cluster's inter-node fabric, defaulting to IB so a spec that states none is byte-identical.
     # Only a multi-node run prices cross-node traffic; run_blis ignores it on a single node.
@@ -652,7 +652,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                                    None, cfg, phase=sname, timeout=run_timeout,
                                    replay={k: v for k, v in replay.items()
                                            if k != "_overrides"} if replay else None,
-                                   fabric=fabric, gpus_per_node=gpus_per_node)
+                                   fabric=fabric, gpus_per_node=gpus_per_node, fields=fields)
             rec["sweep"] = sname
             _relativize_cmd(rec, out_dir)
             ok, why = servable(rec, slo_ms, gpus)
@@ -1194,6 +1194,8 @@ def main(argv=None):
     ap.add_argument("spec", help="experiments/<name>.yaml")
     ap.add_argument("--out", default=os.path.join(ROOT, "reports"))
     ap.add_argument("--blis"); ap.add_argument("--catalog"); ap.add_argument("--registry")
+    ap.add_argument("--fields", help="the engine's field list: the pinned blis-vllm release's fields.json, "
+                                     "until the binary has `blis fields` (default: ask the binary)")
     ap.add_argument("--routing", default=os.path.join(ROOT, "routing"))
     ap.add_argument("--dry-run", action="store_true", dest="dry_run",
                     help="expand and filter the grids and print the run plan; run no BLIS")
@@ -1217,7 +1219,7 @@ def main(argv=None):
         raise SystemExit("--registry is required for a real run "
                          "(use --dry-run to expand the grids only)")
     try:
-        errs = validator.validate(spec, args.blis, args.routing, args.catalog)
+        errs = validator.validate(spec, args.blis, args.routing, args.catalog, args.fields)
     except blis_cli.BlisCommandError as e:
         raise SystemExit(f"{args.spec}: {e}")
     if errs:
@@ -1226,7 +1228,7 @@ def main(argv=None):
     t0 = time.time()
     report = run_experiment(spec, args.blis, args.catalog, args.registry, args.out,
                             routing_dir=args.routing, dry_run=args.dry_run,
-                            run_timeout=args.timeout, max_parallel=args.max_parallel)
+                            run_timeout=args.timeout, max_parallel=args.max_parallel, fields=args.fields)
     if args.as_json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:

@@ -130,11 +130,14 @@ jobs:
           echo "BLIS_REGISTRY=$PWD/blis-registry" >> "$GITHUB_ENV"
           echo "BLIS_BIN=$PWD/upstream/blis"      >> "$GITHUB_ENV"
 
+      - name: Fetch the pinned engine field list
+        run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
+
       - name: Validate before running anything
         run: |
           set -euo pipefail
-          python3 -I scripts/validate_experiment.py "$SPEC" --blis "$BLIS_BIN" --catalog "$BLIS_CATALOG"
-          python3 -I scripts/run_experiment.py "$SPEC" --dry-run --blis "$BLIS_BIN" --catalog "$BLIS_CATALOG"
+          python3 -I scripts/validate_experiment.py "$SPEC" --blis "$BLIS_BIN" --catalog "$BLIS_CATALOG" --fields "$RUNNER_TEMP/fields.json"
+          python3 -I scripts/run_experiment.py "$SPEC" --dry-run --blis "$BLIS_BIN" --catalog "$BLIS_CATALOG" --fields "$RUNNER_TEMP/fields.json"
 
       - name: Fetch the replay corpus
         run: |
@@ -151,6 +154,7 @@ jobs:
           set -euo pipefail
           python3 -I scripts/run_experiment.py "$SPEC" \
             --blis "$BLIS_BIN" --catalog "$BLIS_CATALOG" --registry "$BLIS_REGISTRY" \
+            --fields "$RUNNER_TEMP/fields.json" \
             --out reports/ --timeout "${{ github.event.inputs.timeout || '600' }}" \
             --max-parallel "${{ vars.SWEEP_MAX_PARALLEL || '1' }}"
 

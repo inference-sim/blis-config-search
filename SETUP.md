@@ -16,7 +16,8 @@ go build -o blis main.go
 ```
 
 Pass this `./blis` to the validator and the sweeper as `--blis`. Both read the engine's
-settings with `blis fields --engine vllm`, the pool-layout keys with `blis schema deployment`,
+settings from the pinned blis-vllm release's `fields.json`, which `scripts/fetch_fields.py FILE`
+writes and `--fields FILE` names (the simulator prints it itself once it has `blis fields`), the pool-layout keys with `blis schema deployment`,
 and model and chip names with `blis catalog resolve`; the sweeper validates each generated
 scenario and each Result with `blis schema validate`. This repository keeps no copy of any of
 them. The kernel cost-model

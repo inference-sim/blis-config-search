@@ -27,8 +27,9 @@ spec; everything after it is deterministic and runs in CI.
 Write `experiments/<name>.yaml` (the site's Submit tab drafts one), then:
 
 ```bash
-python3 -I scripts/validate_experiment.py experiments/<name>.yaml --blis ./blis
-python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run --blis ./blis   # check the run budget
+python3 -I scripts/fetch_fields.py fields.json   # the pinned engine's field list, until `blis fields` exists
+python3 -I scripts/validate_experiment.py experiments/<name>.yaml --blis ./blis --fields fields.json
+python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run --blis ./blis --fields fields.json   # check the run budget
 ```
 
 and open a PR. CI validates it (no secrets, safe for forks); after merge the sweeper runs and a

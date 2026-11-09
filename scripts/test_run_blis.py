@@ -349,6 +349,60 @@ class ClassifyConfig(unittest.TestCase):
         self.assertNotIn("True", doc)
 
 
+class FieldListPath(unittest.TestCase):
+    """The engine's field list is the file --fields names, until the binary prints it itself
+    (CFG-3): no ambient environment variable and no network read decides it."""
+
+    def doc(self):
+        return blis_cli.fields(FIXTURE_BLIS, "vllm")
+
+    def write(self, doc):
+        import json
+        import tempfile
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d)
+        path = os.path.join(d, "fields.json")
+        with open(path, "w") as f:
+            json.dump(doc, f)
+        return path
+
+    def test_the_named_file_is_the_field_list(self):
+        doc = self.doc()
+        trimmed = dict(doc, fields=[f for f in doc["fields"] if f["name"] != "max_num_seqs"])
+        vocab = settings.vocabulary(FIXTURE_BLIS, self.write(trimmed))
+        with self.assertRaises(run_blis.ConfigError) as e:
+            run_blis.classify_config({"tp": 8, "max_num_seqs": 64}, vocab)
+        self.assertIn("unknown key", str(e.exception))
+        # The binary's own list still has it: the file, not the binary, decided.
+        run_blis.classify_config({"tp": 8, "max_num_seqs": 64}, settings.vocabulary(FIXTURE_BLIS))
+
+    def test_the_engine_release_is_the_files(self):
+        doc = self.doc()
+        other = dict(doc, engine=dict(doc["engine"], version="9.9.9"))
+        self.assertEqual("9.9.9", blis_cli.engine_release(FIXTURE_BLIS, "vllm", self.write(other)))
+
+    def test_an_environment_variable_does_not_name_the_file(self):
+        doc = self.doc()
+        other = dict(doc, engine=dict(doc["engine"], version="9.9.9"))
+        old = os.environ.get("BLIS_FIELDS")
+        os.environ["BLIS_FIELDS"] = self.write(other)
+        blis_cli._CACHE.clear()      # a cached read would hide the loader
+        try:
+            self.assertEqual(doc["engine"]["version"], blis_cli.engine_release(FIXTURE_BLIS, "vllm"))
+        finally:
+            if old is None:
+                del os.environ["BLIS_FIELDS"]
+            else:
+                os.environ["BLIS_FIELDS"] = old
+            blis_cli._CACHE.clear()
+
+    def test_a_file_that_is_not_a_field_list_is_refused(self):
+        with self.assertRaises(blis_cli.BlisCommandError):
+            blis_cli.fields(FIXTURE_BLIS, "vllm", self.write({"kind": "Scenario"}))
+        with self.assertRaises(blis_cli.BlisCommandError):
+            blis_cli.fields(FIXTURE_BLIS, "vllm", "/nonexistent/fields.json")
+
+
 class Footprint(unittest.TestCase):
     def test_tp_pp_dp(self):
         self.assertEqual(run_blis.footprint_gpus({"tp": 8, "pp": 1, "dp": 2}), 16)

@@ -73,9 +73,11 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with: { go-version-file: upstream/go.mod, cache-dependency-path: upstream/go.sum }
       - run: cd upstream && go build -o blis main.go
+      - name: Fetch the pinned engine field list
+        run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
       - name: Validate experiments/
         env: { BLIS: upstream/blis }
-        run: python3 -I scripts/validate_experiment.py experiments/
+        run: python3 -I scripts/validate_experiment.py experiments/ --fields "$RUNNER_TEMP/fields.json"
       - name: Knob profile smoke test (no catalog checkout -> must degrade, not crash)
         run: |
           python3 -I -c "import sys; sys.path.insert(0,'scripts'); import knob_profile; print('ok')"
@@ -83,7 +85,7 @@ jobs:
         run: |
           set -euo pipefail
           for spec in experiments/*.yaml; do
-            python3 -I scripts/run_experiment.py "$spec" --dry-run --blis upstream/blis
+            python3 -I scripts/run_experiment.py "$spec" --dry-run --blis upstream/blis --fields "$RUNNER_TEMP/fields.json"
           done
 
   web:

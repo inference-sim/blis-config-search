@@ -1318,7 +1318,7 @@ def _failure_line(stderr):
 
 def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_version,
             workload, num_requests, seed, horizon, config, phase="probe", timeout=120, defaults=None,
-            replay=None, fabric=DEFAULT_FABRIC, gpus_per_node=None):
+            replay=None, fabric=DEFAULT_FABRIC, gpus_per_node=None, fields=None):
     """Run one kernel-priced BLIS config and return a record dict. No runs.jsonl I/O (caller writes).
 
     `replay` selects the trace-REPLAY path (`blis replay --agentic-scenario`) instead of
@@ -1331,6 +1331,8 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
 
     `gpus_per_node` is what the specification states for a chip whose catalog entry fixes no node
     size; a chip that does fix one (GB200 NVL72) takes the catalog's and the scenario states none.
+
+    `fields` is the file holding the engine's field list (--fields), or None to ask the binary.
     """
     rec = _record_shell(config, phase)
     # Which cost model priced THIS row (see row_stack): makes provenance_split's stack branch able
@@ -1338,7 +1340,7 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     rec["pinned_stack"] = row_stack(blis, catalog, registry)
     try:
         node_size, states_node_size = cluster_node_size(blis, catalog, hardware, gpus_per_node)
-        parallel, engine, cli, router = classify_config(config, settings.vocabulary(blis), node_size)
+        parallel, engine, cli, router = classify_config(config, settings.vocabulary(blis, fields), node_size)
         # Resolve the preset's token shape so a closed-loop run actually prices the traffic it
         # names (see WORKLOAD_IGNORED). A replay carries its lengths in the corpus, so no shape.
         shape = {} if replay else load_workload_shape(catalog, workload)
@@ -1461,6 +1463,9 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
 
 def add_common_args(p):
     p.add_argument("--blis", default="./blis")
+    p.add_argument("--fields",
+                   help="the engine's field list: the pinned blis-vllm release's fields.json, until the "
+                        "binary has `blis fields` (default: ask the binary)")
     p.add_argument("--catalog", default=os.environ.get("BLIS_CATALOG"))
     p.add_argument("--registry", default=os.environ.get("BLIS_REGISTRY"), help="blis-registry v0.1.1 clone root")
     p.add_argument("--scenarios", required=True, help="dir to write/read generated scenario YAMLs")
@@ -1546,10 +1551,10 @@ def main():
     except ValueError as e:
         sys.exit(str(e))
     rec = run_one(args.blis, args.catalog, args.registry, args.scenarios, args.model, args.hardware,
-                  blis_cli.engine_release(args.blis, ENGINE_KIND), args.workload, args.num_requests,
+                  blis_cli.engine_release(args.blis, ENGINE_KIND, args.fields), args.workload, args.num_requests,
                   args.seed, args.horizon,
                   json.loads(args.config), args.phase, args.timeout, args.defaults, replay,
-                  fabric=args.fabric)
+                  fabric=args.fabric, fields=args.fields)
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         with open(args.out, "a") as f:

@@ -102,9 +102,10 @@ ROUTER_PLUGIN_PARAMS = {
     "probabilistic-admitter": {"queueDepthThreshold", "kvCacheUtilThreshold", "power", "k"},
 }
 
-def knob_vocabulary(blis):
-    """The settings.Vocabulary the binary `blis` publishes. Raises blis_cli.BlisCommandError."""
-    return settings.vocabulary(blis)
+def knob_vocabulary(blis, fields=None):
+    """The settings.Vocabulary the binary `blis` publishes, reading the engine's field list from the
+    file `fields` when one is named. Raises blis_cli.BlisCommandError."""
+    return settings.vocabulary(blis, fields)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -555,7 +556,7 @@ def advisories(spec, path=None):
     return notes
 
 
-def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None):
+def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None):
     """Every error in `spec`, as readable `path: message` strings. Empty means valid.
 
     `blis` is the simulator binary whose commands supply the names (`blis fields`, `blis
@@ -568,7 +569,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None):
     errs = []
     if not isinstance(spec, dict):
         return ["spec must be a mapping"]
-    vocab = knob_vocabulary(blis)
+    vocab = knob_vocabulary(blis, fields)
     par_vocab, eng_vocab, source = vocab.parallel, vocab.engine_names(), vocab.source
 
     name = spec.get("name")
@@ -819,6 +820,9 @@ def main(argv=None):
     ap.add_argument("--blis", default=os.environ.get("BLIS"),
                     help="the simulator binary whose commands supply setting names and catalog "
                          "identities (default: $BLIS)")
+    ap.add_argument("--fields",
+                    help="the engine's field list: the pinned blis-vllm release's fields.json, until the "
+                         "binary has `blis fields` (default: ask the binary)")
     ap.add_argument("--catalog",
                     help="a catalog directory for `blis catalog resolve` (default: the catalog "
                          "the binary embeds)")
@@ -829,7 +833,7 @@ def main(argv=None):
         print(f"no spec files under {args.target}", file=sys.stderr)
         return 1
     try:
-        vocab = knob_vocabulary(args.blis)
+        vocab = knob_vocabulary(args.blis, args.fields)
     except blis_cli.BlisCommandError as e:
         print(f"validate_experiment: {e}", file=sys.stderr)
         return 2
@@ -842,7 +846,7 @@ def main(argv=None):
             rel = path
         spec, err = load(path)
         try:
-            errs = [err] if err else validate(spec, args.blis, args.routing, args.catalog)
+            errs = [err] if err else validate(spec, args.blis, args.routing, args.catalog, args.fields)
         except blis_cli.BlisCommandError as e:
             print(f"validate_experiment: {rel}: {e}", file=sys.stderr)
             return 2

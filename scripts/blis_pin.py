@@ -318,7 +318,7 @@ def _run(cmd):
     subprocess.run(cmd, check=True, cwd=ROOT)
 
 
-def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1):
+def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1, fields=None):
     """Regenerate ONE report into <out>/<run_id>/ from its source, at the pins on disk.
 
     Writes into a fresh `out` rather than over reports/: the caller swaps the directory in whole,
@@ -329,12 +329,13 @@ def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1):
     if e["kind"] != "experiment":
         raise SystemExit(f"{run_id} has no experiment spec to regenerate from")
     spec = e["source"]
-    _run([py, "-I", "scripts/validate_experiment.py", spec, "--blis", blis, "--catalog", catalog])
+    fargs = ["--fields", fields] if fields else []
+    _run([py, "-I", "scripts/validate_experiment.py", spec, "--blis", blis, "--catalog", catalog, *fargs])
     if e["replay"]:
         _run([py, "-I", "scripts/fetch_corpus.py", spec, "--catalog", catalog])
     _run([py, "-I", "scripts/run_experiment.py", spec, "--blis", blis, "--catalog", catalog,
           "--registry", registry, "--out", out, "--timeout", str(timeout),
-          "--max-parallel", str(max_parallel)])
+          "--max-parallel", str(max_parallel), *fargs])
     shutil.rmtree(os.path.join(out, run_id, "scenarios"), ignore_errors=True)
     _check_coherent(os.path.join(out, run_id))
     return os.path.join(out, run_id)
@@ -498,7 +499,7 @@ def _local_router(path, root, run_id):
                      f"nor routing/")
 
 
-def _run_context(entry, root, blis, catalog, corpus, corpus_cache):
+def _run_context(entry, root, blis, catalog, corpus, corpus_cache, fields=None):
     """(model, hardware, engine_version, workload, seed, replay, nreq_of, fabric, gpus_per_node) for a report's
     source, built the way its runner builds them, so a smoke run is a run the regeneration would
     make -- including the cluster fabric, or a multi-node RoCE report re-prices on IB."""
@@ -515,7 +516,7 @@ def _run_context(entry, root, blis, catalog, corpus, corpus_cache):
     fabric = (sc.get("cluster") or {}).get("fabric") or run_experiment.run_blis.DEFAULT_FABRIC
     gpus_per_node = (sc.get("cluster") or {}).get("gpus_per_node")
     return (sc["model"], sc["hardware"],
-            run_experiment.blis_cli.engine_release(blis, run_experiment.run_blis.ENGINE_KIND),
+            run_experiment.blis_cli.engine_release(blis, run_experiment.run_blis.ENGINE_KIND, fields),
             sc["workload"], int(sc.get("seed", 42)), replay,
             (lambda c: None) if replay else (lambda c: max(80, c * 4)), fabric, gpus_per_node)
 
@@ -547,7 +548,7 @@ def live_rows(runs, spec):
 
 
 def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=None,
-          max_pairs=SMOKE_PAIRS, timeout=1800, max_parallel=1):
+          max_pairs=SMOKE_PAIRS, timeout=1800, max_parallel=1, fields=None):
     """Re-run a few of reports/<run_id>/'s own rows on `blis`; return {id, checks, failures}."""
     import concurrent.futures
     import tempfile
@@ -568,7 +569,7 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
         ok = sorted((r for r in runs if _ok(r)), key=lambda r: r["config"].get("concurrency") or 0)
         pairs = [{"knob": "", "base": ok[0], "row": None, "moved": False}] if ok else []
     model, hardware, ev, workload, seed, replay, nreq_of, fabric, gpus_per_node = _run_context(
-        entry, root, blis, catalog, corpus, corpus_cache)
+        entry, root, blis, catalog, corpus, corpus_cache, fields)
     scen_dir = tempfile.mkdtemp(prefix="pin-smoke-")
     todo = {}
     for p in pairs:
@@ -584,7 +585,7 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
         return key, run_blis.run_one(blis, catalog, registry, scen_dir, model, hardware, ev,
                                      workload, nreq_of(c), seed, None, cfg, phase="pin-smoke",
                                      timeout=timeout, replay=replay, fabric=fabric,
-                                     gpus_per_node=gpus_per_node)
+                                     gpus_per_node=gpus_per_node, fields=fields)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, max_parallel)) as ex:
         new = dict(ex.map(_one, sorted(todo)))
     shutil.rmtree(scen_dir, ignore_errors=True)
@@ -672,6 +673,7 @@ def main(argv=None):
     r.add_argument("--out", required=True)
     r.add_argument("--timeout", type=int, default=1800)
     r.add_argument("--max-parallel", type=int, default=1)
+    r.add_argument("--fields", help="the engine's field list (the pinned blis-vllm release's fields.json)")
     m = sub.add_parser("modules", help="print the blis-* modules a go.mod requires, one per line")
     m.add_argument("go_mod")
     k = sub.add_parser("smoke", help="re-run a few ledger rows per report on a new binary")
@@ -684,6 +686,7 @@ def main(argv=None):
     k.add_argument("--max-pairs", type=int, default=SMOKE_PAIRS)
     k.add_argument("--timeout", type=int, default=1800)
     k.add_argument("--max-parallel", type=int, default=1)
+    k.add_argument("--fields", help="the engine's field list (the pinned blis-vllm release's fields.json)")
     k.add_argument("--json", dest="json_out", help="also write the full result here")
     ks = sub.add_parser("smoke-summary", help="render smoke --json files as one markdown table")
     ks.add_argument("files", nargs="+")
@@ -711,7 +714,8 @@ def main(argv=None):
         print(json.dumps(plan(only=only or None, max_batch=a.max_batch)))
     elif a.cmd == "regen":
         regen(a.id, os.path.abspath(a.blis), os.path.abspath(a.catalog),
-              os.path.abspath(a.registry), os.path.abspath(a.out), a.timeout, a.max_parallel)
+              os.path.abspath(a.registry), os.path.abspath(a.out), a.timeout, a.max_parallel,
+              os.path.abspath(a.fields) if a.fields else None)
     elif a.cmd == "modules":
         with open(a.go_mod) as f:
             for mod, ver in sorted(go_mod_versions(f.read()).items()):
@@ -719,7 +723,8 @@ def main(argv=None):
     elif a.cmd == "smoke":
         results = [smoke(i, os.path.abspath(a.blis), os.path.abspath(a.catalog),
                          os.path.abspath(a.registry), corpus=a.corpus, corpus_cache=a.corpus_cache,
-                         max_pairs=a.max_pairs, timeout=a.timeout, max_parallel=a.max_parallel)
+                         max_pairs=a.max_pairs, timeout=a.timeout, max_parallel=a.max_parallel,
+                         fields=os.path.abspath(a.fields) if a.fields else None)
                    for i in (a.ids or report_ids())]
         if a.json_out:
             with open(a.json_out, "w") as f:

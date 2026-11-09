@@ -39,7 +39,8 @@ jobs:
           git -C ../inference-sim fetch --depth 1 origin "$BLIS_REF"
           # A tag or branch can move; the pin is only meaningful if it still resolves to the
           # recorded commit, so refuse a moved ref here as the other workflows do on clone.
-          test "$(git -C ../inference-sim rev-parse FETCH_HEAD)" = "$BLIS_SHA" || {
+          # An annotated tag fetches as the tag object; the pin is the commit it points at.
+          test "$(git -C ../inference-sim rev-parse 'FETCH_HEAD^{commit}')" = "$BLIS_SHA" || {
             echo "::error::$BLIS_REF no longer points at $BLIS_SHA" >&2; exit 1; }
           git -C ../inference-sim fetch --depth 1 origin "$BLIS_SHA"
       - name: Build + catalog + pin tests

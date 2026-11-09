@@ -187,7 +187,7 @@ jobs:
           git config user.email "bot@users.noreply.github.com"
           if [ "${{ steps.target.outputs.exists }}" != true ]; then
             git checkout -b "$branch"
-            git add pins.env SETUP.md
+            git add pins.env
             git commit -m "Bump the pinned inference-sim to $tag
 
           Opened by bump-blis-pin.yml as a draft. Code changes the release needs go on this

@@ -100,50 +100,36 @@ def test_rewrite_pins_keeps_comments():
         check(True, "")
 
 
-def test_rewrite_setup_moves_only_instructions():
-    print("test_rewrite_setup_moves_only_instructions")
-    with open(B.SETUP) as f:
+def test_setup_md_sources_the_pins():
+    print("test_setup_md_sources_the_pins")
+    with open(os.path.join(B.ROOT, "SETUP.md")) as f:
         setup = f.read()
     pins = B.read_pins()
-    old, sha = pins["BLIS_REF"], pins["BLIS_SHA"]
-    out = B.rewrite_setup(setup, old, "v9.9.9", "f" * 40, "release v9.9.9")
-    check(f"git clone --branch v9.9.9 --depth 1 https://github.com/inference-sim/inference-sim.git"
-          in out, "the clone line moves")
-    check(f"EXPECT={'f' * 40}" in out and sha not in out, "the EXPECT sha moves")
-    check("v9.9.9 no longer resolves to $EXPECT" in out, "the abort message moves")
-    # Historical mentions of the old version are statements of fact and must survive the bump.
-    hist = setup.count(old) - 4
-    check(out.count(old) == hist,
-          f"only the 4 instructional lines move; {hist} historical mention(s) of {old} remain")
-    try:
-        B.rewrite_setup("no clone block here\n", old, "v9.9.9", "f" * 40, "x")
-        check(False, "a SETUP.md whose clone block changed shape must fail loudly")
-    except ValueError:
-        check(True, "")
+    check(". ./pins.env" in setup and '--branch "$BLIS_REF"' in setup
+          and '"$(git rev-parse HEAD)" = "$BLIS_SHA"' in setup,
+          "the clone recipe sources pins.env and uses $BLIS_REF and $BLIS_SHA")
+    check(pins["BLIS_REF"] not in setup and pins["BLIS_SHA"] not in setup,
+          "SETUP.md copies neither the pinned release nor its commit (X23): a bump has nothing to rewrite there")
+    check(not hasattr(B, "rewrite_setup"), "bump edits pins.env only")
 
 
 def test_bump_end_to_end_on_copies():
     print("test_bump_end_to_end_on_copies")
     tmp = tempfile.mkdtemp()
     try:
-        pins, setup = os.path.join(tmp, "pins.env"), os.path.join(tmp, "SETUP.md")
+        pins = os.path.join(tmp, "pins.env")
         shutil.copy(B.PINS, pins)
-        shutil.copy(B.SETUP, setup)
         cur = B.read_pins(pins)
         if not B.semver(cur["BLIS_REF"]):
             # A draft pins a branch commit; the bot orders only release tags, so start the copy
-            # from one. rewrite_setup moves the same four lines whatever the old ref is.
+            # from one.
             with open(pins) as f:
                 text = B.rewrite_pins(f.read(), {"BLIS_REF": "v0.15.0"})
             with open(pins, "w") as f:
                 f.write(text)
-            with open(setup) as f:
-                text = B.rewrite_setup(f.read(), cur["BLIS_REF"], "v0.15.0", cur["BLIS_SHA"], "x")
-            with open(setup, "w") as f:
-                f.write(text)
             cur = B.read_pins(pins)
-        moved = B.bump("v99.0.0", sha="e" * 40, go_mod=GO_MOD, release_name="v99.0.0: big",
-                       pins_path=pins, setup_path=setup)
+        setup_before = open(os.path.join(B.ROOT, "SETUP.md"), "rb").read()
+        moved = B.bump("v99.0.0", sha="e" * 40, go_mod=GO_MOD, release_name="v99.0.0: big", pins_path=pins)
         after = B.read_pins(pins)
         check(after["BLIS_REF"] == "v99.0.0" and after["BLIS_SHA"] == "e" * 40, "pin moved")
         check(after["SUBSTRATE_REF"] == "v0.11.0", "SUBSTRATE_REF follows the release's go.mod")
@@ -152,16 +138,15 @@ def test_bump_end_to_end_on_copies():
         check("CATALOG_REF" not in after and "REGISTRY_REF" not in after,
               "the catalog and registry are embedded in the release: no pin of their own")
         check(set(moved) >= {"BLIS_REF", "BLIS_SHA"}, f"bump reports what moved: {moved}")
-        with open(setup) as f:
-            check('"v99.0.0: big"' in f.read(), "the release title is recorded beside the sha")
+        check(open(os.path.join(B.ROOT, "SETUP.md"), "rb").read() == setup_before,
+              "a bump leaves SETUP.md alone: it sources pins.env and holds no version")
         try:
-            B.bump(cur["BLIS_REF"], sha="e" * 40, go_mod=GO_MOD, pins_path=pins, setup_path=setup)
+            B.bump(cur["BLIS_REF"], sha="e" * 40, go_mod=GO_MOD, pins_path=pins)
             check(False, "bumping to a tag that is not newer must refuse")
         except SystemExit:
             check(True, "")
     finally:
         shutil.rmtree(tmp)
-
 
 def test_changed_ignores_comments():
     print("test_changed_ignores_comments")
@@ -442,6 +427,9 @@ def test_workflow_wiring():
     check("always()" in regen, "batch PRs open even when some report jobs failed")
     check("scripts/test_blis_pin.py" in open(os.path.join(wf, "checks.yml")).read(),
           "checks.yml must run these tests")
+    ck = open(os.path.join(wf, "checks.yml")).read()
+    check("FETCH_HEAD^{commit}" in ck and 'rev-parse FETCH_HEAD)' not in ck,
+          "an annotated tag fetches as the tag object: checks.yml compares the commit it points at")
     compat = open(os.path.join(wf, "pin-compat.yml")).read()
     check("pull_request:" in compat and "paths:" not in compat.split("\njobs:")[0].replace(
               "without a `paths:` filter", ""),
@@ -496,7 +484,7 @@ if __name__ == "__main__":
     test_sync_pins_reads_replace()
     test_smoke_skips_dropped_sweeps()
     test_rewrite_pins_keeps_comments()
-    test_rewrite_setup_moves_only_instructions()
+    test_setup_md_sources_the_pins()
     test_bump_end_to_end_on_copies()
     test_changed_ignores_comments()
     test_same_stack()

@@ -13,7 +13,7 @@ The pin PR is the compatibility PR on purpose: a release can need code changes h
 the pin is what starts hours of regeneration against it.
 
   python3 -I scripts/blis_pin.py latest                       # newest upstream release tag
-  python3 -I scripts/blis_pin.py bump v0.15.0                 # rewrite pins.env + SETUP.md
+  python3 -I scripts/blis_pin.py bump v0.15.0                 # rewrite pins.env
   python3 -I scripts/blis_pin.py changed OLD_PINS.env         # which pins a push moved
   python3 -I scripts/blis_pin.py same-stack DIR DIR           # exit 0 if two reports share a stack
   python3 -I scripts/blis_pin.py plan [--only ID,...]         # what to regenerate, in batches
@@ -48,7 +48,6 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 PINS = os.path.join(ROOT, "pins.env")
-SETUP = os.path.join(ROOT, "SETUP.md")
 UPSTREAM = "inference-sim/inference-sim"
 TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 # The keys whose VALUE says which stack priced a report. A comment-only edit to pins.env moves
@@ -142,29 +141,9 @@ def rewrite_pins(text, updates):
     return "".join(out)
 
 
-def rewrite_setup(text, old_ref, new_ref, new_sha, note):
-    """SETUP.md's step-1 clone block, moved from old_ref to new_ref.
-
-    Only the four instructional lines change -- the clone, the "tag is NOT immutable" warning, the
-    EXPECT sha and the abort message. Every other mention of old_ref in SETUP.md is a historical
-    statement ("routing moved in v0.12.0") and stays true after the bump."""
-    lines, hits = text.splitlines(keepends=True), 0
-    for i, line in enumerate(lines):
-        if line.startswith("EXPECT="):
-            lines[i] = f"EXPECT={new_sha}   # {note}\n"
-            hits += 1
-        elif (line.startswith("git clone --branch ") and "inference-sim.git" in line) \
-                or "tag is NOT configured immutable" in line \
-                or "no longer resolves to $EXPECT" in line:
-            lines[i] = line.replace(old_ref, new_ref)
-            hits += 1
-    if hits != 4:
-        raise ValueError(f"SETUP.md's clone block changed shape: expected 4 pin lines, found {hits}")
-    return "".join(lines)
-
-
-def bump(tag, sha=None, go_mod=None, release_name=None, pins_path=PINS, setup_path=SETUP):
-    """Move the pin to `tag`, in pins.env and SETUP.md. Returns {key: (old, new)} for what moved.
+def bump(tag, sha=None, go_mod=None, release_name=None, pins_path=PINS):
+    """Move the pin to `tag`, in pins.env. SETUP.md sources pins.env, so it holds no version and
+    needs no edit. Returns {key: (old, new)} for what moved.
 
     The derived pins (sync_pins.DERIVED) move with it because inference-sim's go.mod pins them.
     The catalog and registry need no pin of their own: the release embeds them (CFG-1)."""
@@ -175,22 +154,13 @@ def bump(tag, sha=None, go_mod=None, release_name=None, pins_path=PINS, setup_pa
     sha = sha or resolve_tag_sha(tag)
     if go_mod is None:
         go_mod = _http_text(f"https://raw.githubusercontent.com/{UPSTREAM}/{sha}/go.mod")
-    mods = go_mod_versions(go_mod)
     import sync_pins
     updates = {"BLIS_REF": tag, "BLIS_SHA": sha, **sync_pins.derive_from_text(go_mod)}
     with open(pins_path) as f:
         pins_text = f.read()
-    with open(setup_path) as f:
-        setup_text = f.read()
-    extras = ", ".join(f"{k.removeprefix('blis-')} {v}" for k, v in sorted(mods.items()))
-    note = f"release {tag}" + (f", \"{release_name}\"" if release_name and release_name != tag
-                               else "") + (f" ({extras} in go.mod)" if extras else "")
     new_pins = rewrite_pins(pins_text, updates)
-    new_setup = rewrite_setup(setup_text, old_ref, tag, sha, note)
     with open(pins_path, "w") as f:
         f.write(new_pins)
-    with open(setup_path, "w") as f:
-        f.write(new_setup)
     return {k: (pins.get(k), v) for k, v in updates.items() if pins.get(k) != v}
 
 
@@ -652,7 +622,7 @@ def main(argv=None):
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("latest", help="print the newest upstream release as JSON, plus `newer`")
-    b = sub.add_parser("bump", help="rewrite pins.env + SETUP.md to an upstream release tag")
+    b = sub.add_parser("bump", help="rewrite pins.env to an upstream release tag")
     b.add_argument("tag")
     b.add_argument("--release-name")
     c = sub.add_parser("changed", help="print the stack pins that differ from OLD pins.env")

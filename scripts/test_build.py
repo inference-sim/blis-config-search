@@ -464,8 +464,10 @@ def test_pins_are_the_single_source_of_the_sim_version():
     # SETUP.md documents the same pin a human would clone
     with open(os.path.join(ROOT, "SETUP.md")) as f:
         setup = f.read()
-    check(f"--branch {ref} " in setup, f"SETUP.md should clone {ref}")
-    check(sha in setup, f"SETUP.md should verify the pinned sha {sha[:7]}")
+    check(". ./pins.env" in setup and '--branch "$BLIS_REF"' in setup and '"$BLIS_SHA"' in setup,
+          "SETUP.md should clone and verify what pins.env pins, by sourcing it")
+    check(ref not in setup and sha not in setup,
+          "SETUP.md should not copy the pinned release or commit (X23): pins.env is the one place")
 
     # CI must read pins.env rather than carry its own copy of the refs.
     with open(os.path.join(ROOT, ".github", "workflows", "run-experiment.yml")) as f:

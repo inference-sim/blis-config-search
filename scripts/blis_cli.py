@@ -59,10 +59,43 @@ def _key(blis, *rest):
     return (os.path.realpath(blis) if blis else None, *rest)
 
 
+def _pinned_release():
+    """VLLM_REF from pins.env: the blis-vllm release the pinned simulator is built with."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "pins.env"), encoding="utf-8") as f:
+        for line in f:
+            if line.startswith("VLLM_REF="):
+                return line.split("=", 1)[1].strip()
+    raise BlisCommandError("pins.env has no VLLM_REF")
+
+
+def _field_list_json(blis, engine):
+    """The engine's field list as a parsed document.
+
+    TEMPORARY until the M2 substrate release lets the engine report its own list through
+    `blis fields`: the pinned simulator has no such command, so the list is the pinned
+    blis-vllm release's fields.json, which BLIS_FIELDS names (a path) or, when it is unset,
+    which is read from that release on GitHub. A build that does have the command is asked.
+    """
+    if engine != "vllm":
+        return _json(blis, ["fields", "--engine", engine])
+    path = os.environ.get("BLIS_FIELDS")
+    try:
+        if path:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        import urllib.request
+        url = f"https://raw.githubusercontent.com/inference-sim/blis-vllm/{_pinned_release()}/fields.json"
+        with urllib.request.urlopen(url, timeout=60) as r:  # noqa: S310 (a fixed https URL)
+            return json.load(r)
+    except (OSError, ValueError) as e:
+        raise BlisCommandError(f"the field list of engine {engine!r}: {e}") from e
+
+
 def fields(blis, engine):
     """The engine's field list (fields.json) at the release this build runs: `blis fields`."""
     def load():
-        doc = _json(blis, ["fields", "--engine", engine])
+        doc = _field_list_json(blis, engine)
         if not isinstance(doc, dict) or doc.get("kind") != "FieldList":
             raise BlisCommandError(f"`blis fields --engine {engine}` printed no FieldList")
         got = (doc.get("engine") or {}).get("kind")
@@ -79,7 +112,7 @@ def fields(blis, engine):
                     ("config", "env") and row.get("status")):
                 raise BlisCommandError(f"`blis fields --engine {engine}`: malformed entry {row!r}")
         return doc
-    return _cached(_key(blis, "fields", engine), load)
+    return _cached(_key(blis, "fields", engine, os.environ.get("BLIS_FIELDS")), load)
 
 
 def engine_release(blis, engine):

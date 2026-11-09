@@ -6,12 +6,12 @@ same stack from `pins.env`; the clone lines below are kept in step by `scripts/b
 ## 1. Build the pinned BLIS binary (kernel backend)
 
 ```bash
-git clone --branch m1/substrate --depth 1 https://github.com/inference-sim/inference-sim.git
+git clone --branch m1/inference-sim --depth 1 https://github.com/inference-sim/inference-sim.git
 cd inference-sim
-# The m1/substrate tag is NOT configured immutable upstream, so verify it still resolves
+# The m1/inference-sim tag is NOT configured immutable upstream, so verify it still resolves
 # to the pinned commit before building; fail loudly if the tag has been moved.
-EXPECT=9eaaf748541fce624e88ab7ef87c0019afaca0c3   # inference-sim m1/substrate, the M1 draft's branch (inference-sim#2077); v0.16.0 when tagged
-test "$(git rev-parse HEAD)" = "$EXPECT" || { echo "m1/substrate no longer resolves to $EXPECT -- aborting" >&2; exit 1; }
+EXPECT=e3e5de7a058ab0059aaacaff1d6b009065bde0c8   # inference-sim m1/inference-sim, the M1 draft's branch (inference-sim#2090); the release tag when tagged
+test "$(git rev-parse HEAD)" = "$EXPECT" || { echo "m1/inference-sim no longer resolves to $EXPECT -- aborting" >&2; exit 1; }
 go build -o blis main.go
 ```
 

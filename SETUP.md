@@ -10,7 +10,7 @@ git clone --branch m1/inference-sim --depth 1 https://github.com/inference-sim/i
 cd inference-sim
 # The m1/inference-sim tag is NOT configured immutable upstream, so verify it still resolves
 # to the pinned commit before building; fail loudly if the tag has been moved.
-EXPECT=0129f55134ceaf9021872c1db9380a6457afbf77   # inference-sim m1/inference-sim, the M1 draft's branch (inference-sim#2090); the release tag when tagged
+EXPECT=3b84e0878e4c63f47d202de2ff0471ee7722a4cc   # inference-sim m1/inference-sim, the M1 draft's branch (inference-sim#2090); the release tag when tagged
 test "$(git rev-parse HEAD)" = "$EXPECT" || { echo "m1/inference-sim no longer resolves to $EXPECT -- aborting" >&2; exit 1; }
 go build -o blis main.go
 ```

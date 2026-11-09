@@ -38,6 +38,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 import time
 
 try:
@@ -563,7 +564,12 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     # The node size the specification states, for a chip whose catalog entry fixes none (#96).
     gpus_per_node = (sc.get("cluster") or {}).get("gpus_per_node")
 
-    out_dir = os.path.join(out_root, name)
+    final_dir = os.path.join(out_root, name)
+    # Into the committed reports/, a sweep is staged outside the tree: only the Results can say
+    # whether it was priced by a tagged release on its embedded data (CFG-1), and a refusal must
+    # leave an existing report byte for byte as it was. Nothing is copied in until the gate passes.
+    stage = tempfile.mkdtemp(prefix="sweep-") if (not dry_run and _is_committed_reports(out_root)) else None
+    out_dir = os.path.join(stage, name) if stage else final_dir
     scenarios_dir = os.path.join(out_dir, "scenarios")
     generated_routing = os.path.join(out_dir, "routing")
     if not dry_run:
@@ -741,20 +747,20 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     if not dry_run:
         # The refusal above covers a requested override. This one covers what the Results say: a
         # report priced with other data, or by an untagged build, is never written to reports/.
-        if report["experimental"] and _is_committed_reports(out_root):
-            # The sweep wrote its scratch (generated scenarios and routing) under out_dir before the
-            # Results could say what they were priced with; leave the committed tree as it was.
-            for scratch in (scenarios_dir, generated_routing):
-                shutil.rmtree(scratch, ignore_errors=True)
-            try:
-                os.rmdir(out_dir)           # only if nothing else is there
-            except OSError:
-                pass
+        if stage and report["experimental"]:
+            shutil.rmtree(stage, ignore_errors=True)       # the staged sweep only; reports/ is untouched
             raise SystemExit(f"{name}: the Results say this sweep was priced with data or a build other than "
                              f"a tagged release's embedded data ({_other_data_reason(runs)}), so its report is "
                              f"experimental and never committed: --out {out_root} is the repository's "
                              f"reports/ directory. Choose another --out, or run the pinned release.")
-        _write_run_dir(out_dir, spec, report, runs)
+        if stage:
+            # The gate passed: publish the staged sweep into the report directory.
+            os.makedirs(final_dir, exist_ok=True)
+            for sub in ("scenarios", "routing"):
+                if os.path.isdir(os.path.join(out_dir, sub)):
+                    shutil.copytree(os.path.join(out_dir, sub), os.path.join(final_dir, sub), dirs_exist_ok=True)
+            shutil.rmtree(stage, ignore_errors=True)
+        _write_run_dir(final_dir, spec, report, runs)
     return report
 
 

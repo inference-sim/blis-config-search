@@ -1962,6 +1962,50 @@ class DataOverride(unittest.TestCase):
             self.sweep(reports, data="embedded", released_build=False)
         self.assertEqual(before, set(os.listdir(reports)))
 
+    def snapshot(self, root):
+        out = {}
+        for d, _dirs, files in os.walk(root):
+            for f in files:
+                path = os.path.join(d, f)
+                with open(path, "rb") as fh:
+                    out[os.path.relpath(path, root)] = fh.read()
+        return out
+
+    def existing_report(self, root):
+        for sub, name in (("scenarios", "preexisting.txt"), ("routing", "preexisting.txt"), (".", "experiment.json")):
+            os.makedirs(os.path.join(root, "t", sub), exist_ok=True)
+            with open(os.path.join(root, "t", sub, name), "w") as f:
+                f.write(f"old {sub}/{name}")
+
+    def test_a_refused_rerun_leaves_an_existing_report_byte_for_byte(self):
+        """Regeneration is the normal case: reports/<name>/ already exists, with scenarios/ and
+        routing/ in it. A refusal must not delete or change any of it."""
+        with tempfile.TemporaryDirectory() as root:
+            self.existing_report(root)
+            before = self.snapshot(root)
+            real = E._is_committed_reports
+            E._is_committed_reports = lambda out_root: os.path.realpath(out_root) == os.path.realpath(root)
+            try:
+                with self.assertRaises(SystemExit) as cm:
+                    self.sweep(root, data="embedded", released_build=False)
+            finally:
+                E._is_committed_reports = real
+            self.assertIn("never committed", str(cm.exception))
+            self.assertEqual(before, self.snapshot(root), "no file added, removed or changed")
+
+    def test_a_passing_rerun_publishes_into_an_existing_report(self):
+        with tempfile.TemporaryDirectory() as root:
+            self.existing_report(root)
+            real = E._is_committed_reports
+            E._is_committed_reports = lambda out_root: os.path.realpath(out_root) == os.path.realpath(root)
+            try:
+                self.sweep(root, data="embedded", released_build=True)
+            finally:
+                E._is_committed_reports = real
+            snap = self.snapshot(root)
+            self.assertIn(os.path.join("t", "runs.jsonl"), snap)
+            self.assertNotEqual(b"old ./experiment.json", snap[os.path.join("t", "experiment.json")])
+
     def test_the_committed_reports_directory_is_recognised_through_a_symlink(self):
         import tempfile
         d = tempfile.mkdtemp()

@@ -10,14 +10,15 @@ name: muse-spark-open-816b-a42b-gb200-agentx-pd
 scenario:
   model: muse-spark-open-816b-a42b-nvfp4
   hardware: gb200-nvl72
-  workload: agentx-mvp
+  workload_spec: workloads/agentx-run-recipe.yaml   # the full AgentX run recipe
   gpus: 72
   engine: {max_model_len: 262144}   # at the 32k default the replay drops every trace
   concurrency: [64, 128, 256, 512]  # session lanes; 8x TP8 saturated by 512 on the 64-GPU rack
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-muse-gb200-pd
-    grace_period: 87600h   # = never ends within a run (ten years). TEMPORARY: `inf` is refused by the strict Result loader until blis-substrate#28 ships (M2); restore `inf` then (blis-config-search#102)
+    # grace_period: the recipe's 30 s. An infinite grace makes the measured window run to the drain
+    # (output_tok_s falls 100-fold); restoring it waits on the simulator's window semantics (blis-config-search#102).
 
 sweeps:
   - name: colocated

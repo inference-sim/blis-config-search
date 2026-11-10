@@ -917,9 +917,12 @@ class WorkloadByFile(unittest.TestCase):
     """A spec names its workload by catalog name or by a file, never both (CFG-1, CFG-2)."""
 
     GOOD = {"scenario": "inferencex-agentx-mvp",
-            "corpus": {"source": {"huggingface": "org/ds", "revision": "a" * 40, "file": "t.jsonl"},
+            "corpus": {"loader": "semianalysis_cc_traces_weka_062126",
+                       "source": {"huggingface": "org/ds", "revision": "a" * 40, "file": "t.jsonl"},
                        "sha256": "b" * 64},
             "benchmark_duration_s": 900, "grace_period_s": 30, "max_context_length": "max_model_len",
+            "trace_idle_gap_cap_s": 300, "warmup": {"mode": "cache_pressure", "requests_per_lane": 10},
+            "trajectory_start": {"min_ratio": 0.25, "max_ratio": 0.75},
             "category": "coding", "thinking": "on"}
 
     def write(self, doc, name="wl.yaml"):
@@ -1034,6 +1037,93 @@ class WorkloadByFile(unittest.TestCase):
         self.assertIsNone(rep["scenario"]["workload_spec"])
 
 
+class AgentxRunRecipe(unittest.TestCase):
+    """Every AgentX sweep descriptor states the whole run recipe: the 300 s
+    per-trajectory idle-gap cap, 10 warm-up requests per lane, the trajectory window 0.25 to 0.75, the
+    3600 s window and the uncapped corpus. A descriptor missing a field is refused; one that states a
+    different value is labelled in the report."""
+
+    FILE = "workloads/agentx-run-recipe.yaml"
+
+    @classmethod
+    def recipe_doc(cls):
+        with open(os.path.join(E.ROOT, cls.FILE), encoding="utf-8") as f:
+            return yaml.safe_load(f)
+
+    def doc(self):
+        with open(os.path.join(E.ROOT, self.FILE), encoding="utf-8") as f:
+            return yaml.safe_load(f)
+
+    def write(self, doc):
+        d = tempfile.mkdtemp(dir=E.ROOT)
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        with open(os.path.join(d, "wl.yaml"), "w") as f:
+            yaml.safe_dump(doc, f)
+        return os.path.relpath(os.path.join(d, "wl.yaml"), E.ROOT)
+
+    def sweep(self, path):
+        d = spec()
+        del d["scenario"]["workload"]
+        d["scenario"]["workload_spec"] = path
+        return d
+
+    def test_the_recipe_file_states_the_runs_values_and_validates(self):
+        d = self.doc()
+        self.assertEqual({k: V._dig(d, k) for k in V.AGENTX_RECIPE}, V.AGENTX_RECIPE)
+        self.assertEqual(V.AGENTX_UNCAPPED_LOADER, d["corpus"]["loader"])
+        self.assertEqual({}, V.recipe_differences(d))
+        self.assertEqual([], V.validate(self.sweep(self.FILE), BLIS, ROUTING))
+
+    def test_a_descriptor_missing_any_recipe_field_is_refused_naming_it(self):
+        for field in V.AGENTX_RECIPE:
+            d = copy.deepcopy(self.doc())
+            node = d
+            *parents, leaf = field.split(".")
+            for k in parents:
+                node = node[k]
+            del node[leaf]
+            errs = V.validate(self.sweep(self.write(d)), BLIS, ROUTING)
+            self.assertTrue(any("must state the whole run recipe" in e and field in e for e in errs), (field, errs))
+
+    def test_the_catalogs_agentx_descriptor_is_refused_because_it_states_no_cap_or_warmup(self):
+        d = spec()
+        d["scenario"]["workload"] = "agentx-mvp"
+        errs = V.validate(d, BLIS, ROUTING)
+        self.assertTrue(any("states no per-trajectory idle-gap cap" in e for e in errs), errs)
+
+    def test_a_different_value_or_the_capped_corpus_is_labelled_not_refused(self):
+        d = self.doc()
+        d["benchmark_duration_s"] = 900
+        d["corpus"]["loader"] = "semianalysis_cc_traces_weka_062126_256k"
+        self.assertEqual([], V.validate(self.sweep(self.write(d)), BLIS, ROUTING))
+        rec = E.recipe_record(d)
+        self.assertEqual({"benchmark_duration_s": [900, 3600],
+                          "corpus.loader": ["semianalysis_cc_traces_weka_062126_256k", V.AGENTX_UNCAPPED_LOADER]},
+                         rec["differs_from_run"])
+        self.assertIn("differs from the run's in", rec["label"])
+
+    def test_the_sweep_output_names_the_recipe(self):
+        doc = spec()
+        del doc["scenario"]["workload"]
+        doc["scenario"]["workload_spec"] = self.FILE
+        doc["scenario"]["replay"] = {"corpus": ".corpus/t.jsonl"}
+        rep = E.run_experiment(doc, BLIS, None, None, "/nonexistent", dry_run=True, verbose=False)
+        rec = rep["scenario"]["workload_spec"]["recipe"]
+        self.assertEqual(300, rec["fields"]["trace_idle_gap_cap_s"])
+        self.assertEqual(10, rec["fields"]["warmup.requests_per_lane"])
+        self.assertEqual({}, rec["differs_from_run"])
+        self.assertIn("300 s idle-gap cap, 10 warm-up requests per lane", rec["label"])
+        meta = E._report_json(rep)
+        self.assertIn("300 s idle-gap cap, 10 warm-up requests per lane", meta["hero"][0]["html"] + meta["standfirst"])
+
+    def test_every_committed_agentic_sweep_states_the_recipe(self):
+        names = sorted(n for n in os.listdir(os.path.join(E.ROOT, "experiments")) if "agentx" in n and n.endswith(".yaml"))
+        self.assertEqual(9, len(names))
+        for n in names:
+            with open(os.path.join(E.ROOT, "experiments", n), encoding="utf-8") as f:
+                self.assertEqual(self.FILE, yaml.safe_load(f)["scenario"].get("workload_spec"), n)
+
+
 class ReplayComesFromTheCatalog(unittest.TestCase):
     """A replay workload is fully described by blis-catalog/workloads/<name>.yaml.
 
@@ -1109,6 +1199,16 @@ class ReplayComesFromTheCatalog(unittest.TestCase):
             doc, err = V.load(path)
             self.assertIsNone(err, f"{path}: {err}")
             sc = doc.get("scenario") or {}
+            if sc.get("workload_spec"):
+                checked += 1
+                try:
+                    out = E.resolve_workload_spec(sc["workload_spec"], E.load_workload_spec(sc["workload_spec"]),
+                                                  sc.get("replay"))
+                except SystemExit as exc:
+                    self.fail(f"{os.path.basename(path)} is a replay spec that cannot run: {exc}")
+                self.assertTrue(out.get("corpus"), f"{os.path.basename(path)}: no corpus path")
+                self.assertFalse(os.path.isabs(out["corpus"]))
+                continue
             if E.replay_descriptor(sc.get("workload"), self.CATALOG) is None:
                 continue
             checked += 1
@@ -2304,6 +2404,64 @@ class ProvenanceSplit(unittest.TestCase):
         self.assertEqual("", report.provenance_split([ok, err, ok]))
         self.assertIn("mix bases", report.provenance_split([ok, dict(old, metrics={"tokens_per_sec": 1.0})]))
         self.assertIn("unrecorded", report.provenance_split([old, new]))
+
+
+class BoundedGrace(unittest.TestCase):
+    """An agentic replay's grace is the recipe's finite 30 s. An infinite grace makes the measured window
+    run to the drain (a 3600 s recipe measured over 358,132 s, 552 tok/s read as 5.6), so no spec states
+    it until the simulator separates the window from the drain; none states a ten-year stand-in either."""
+
+    def specs(self):
+        import glob
+        for path in sorted(glob.glob(os.path.join(E.ROOT, "experiments", "*.yaml"))):
+            with open(path, encoding="utf-8") as f:
+                yield os.path.basename(path), yaml.safe_load(f)
+
+    def test_no_replay_spec_overrides_the_recipes_grace_with_inf_or_a_stand_in(self):
+        replays = [(n, d["scenario"]["replay"]) for n, d in self.specs() if d["scenario"].get("replay")]
+        self.assertEqual(9, len(replays))
+        for name, rep in replays:
+            self.assertNotIn("grace_period", rep, name)
+
+    def test_the_recipe_the_specs_name_has_a_30_second_grace(self):
+        with open(os.path.join(E.ROOT, "workloads", "agentx-run-recipe.yaml"), encoding="utf-8") as f:
+            self.assertEqual(30, yaml.safe_load(f)["grace_period_s"])
+
+    def test_no_spec_carries_a_ten_year_comment_or_a_temporary_note(self):
+        import glob
+        for path in sorted(glob.glob(os.path.join(E.ROOT, "experiments", "*.yaml"))):
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            self.assertNotIn("87600h", text, path)
+            self.assertNotIn("TEMPORARY", text, path)
+
+    def test_an_override_of_a_recipe_field_is_named_in_the_record_and_the_headline(self):
+        doc = AgentxRunRecipe.recipe_doc()
+        self.assertEqual({}, E.recipe_record(doc, {"benchmark_duration": "3600s", "grace_period": "30s"})["overrides"])
+        rec = E.recipe_record(doc, {"benchmark_duration": "900s", "grace_period": "inf"})
+        self.assertEqual({"benchmark_duration_s": [3600, 900], "grace_period_s": [30, "inf"]}, rec["overrides"])
+        self.assertEqual({"benchmark_duration_s": [900, 3600], "grace_period_s": ["inf", 30]}, rec["differs_from_run"])
+        self.assertEqual("inf", rec["fields"]["grace_period_s"])
+        self.assertIn("the spec overrides benchmark_duration_s (3600 to 900), grace_period_s (30 to inf)", rec["label"])
+
+    def test_the_sweep_output_names_a_grace_override_of_the_spec(self):
+        doc = spec()
+        del doc["scenario"]["workload"]
+        doc["scenario"]["workload_spec"] = AgentxRunRecipe.FILE
+        doc["scenario"]["replay"] = {"corpus": ".corpus/t.jsonl", "grace_period": "inf"}
+        rep = E.run_experiment(doc, BLIS, None, None, "/nonexistent", dry_run=True, verbose=False)
+        rec = rep["scenario"]["workload_spec"]["recipe"]
+        self.assertEqual("inf", rec["fields"]["grace_period_s"])
+        self.assertEqual({"grace_period_s": ["inf", 30]}, rec["differs_from_run"])
+        meta = E._report_json(rep)
+        self.assertIn("grace_period_s (30 to inf)", meta["hero"][0]["html"] + meta["standfirst"])
+
+    def test_the_runner_asks_for_yaml_when_the_grace_is_infinite(self):
+        # The Result echoes the grace, and the stdout JSON of the pinned release has no infinity.
+        cmd = run_blis.build_replay_cmd("/b", None, None, "/sc", "s.yaml", 42, None, {},
+                                        {"scenario": "x", "corpus": "/c", "corpus_sha256": "a",
+                                         "grace_period": "inf"})
+        self.assertEqual("yaml", cmd[cmd.index("--format") + 1])
 
 
 class BasisAndScope(unittest.TestCase):

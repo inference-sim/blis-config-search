@@ -1,0 +1,38 @@
+# The full AgentX run recipe, as InferenceX's agentic runs recorded it (the aiperf export's
+# input_config, the same in all 22 exports read): the uncapped corpus, a 3600 s sending window, the
+# trajectory start window 0.25 to 0.75, the 10 s whole-system idle cap the scenario locks, the 300 s
+# per-trajectory idle-gap cap, and 10 cache-pressure warm-up requests per lane. A sweep that mirrors a
+# measured run replays this; scripts/validate_experiment.py refuses a workload file that states an
+# AgentX replay without every one of these, and the report names the recipe it replayed and where it
+# differs from this one.
+#
+# Two entries are the sweep's own and not the run's: `max_context_length: max_model_len` (the run's
+# export has no filter, but a sweep chooses its deployment's max_model_len, and a trace longer than it
+# is dropped) and `category`/`thinking` (the speculative-acceptance selectors a drafting sweep needs;
+# the run records neither, so they are an assumption the report states).
+scenario: inferencex-agentx-mvp
+harness_version: "0.12.0"
+corpus:
+  loader: semianalysis_cc_traces_weka_062126
+  format: weka-trace-v7
+  encoding: jsonl
+  source:
+    huggingface: semianalysisai/cc-traces-weka-062126
+    revision: 23f152f6f0f9399a85901b89a6458def0ef16729
+    file: traces.jsonl
+    split: train
+  sha256: 29b6a19e751ff5230771519aab755f80a0f43a4ba9cf96b72d3a6a437ec99276
+random_seed: 42
+benchmark_duration_s: 3600
+grace_period_s: 30
+system_idle_gap_cap_s: 10
+trace_idle_gap_cap_s: 300
+warmup:
+  mode: cache_pressure
+  requests_per_lane: 10
+trajectory_start:
+  min_ratio: 0.25
+  max_ratio: 0.75
+max_context_length: max_model_len
+category: coding
+thinking: "on"

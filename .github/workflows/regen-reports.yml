@@ -169,9 +169,7 @@ jobs:
           chmod +x .build/blis
           set -a; . ./pins.env; set +a
           # Inside the checkout, as run-experiment.yml does, so no runner path reaches a committed report.
-          git clone --branch "$SUBSTRATE_REF" --depth 1 https://github.com/inference-sim/blis-substrate.git blis-substrate
-          test "$(git -C blis-substrate describe --tags --exact-match)" = "$SUBSTRATE_REF" || {
-            echo "blis-substrate is not $SUBSTRATE_REF -- aborting" >&2; exit 1; }
+          sh scripts/clone_pinned.sh "$SUBSTRATE_REF" https://github.com/inference-sim/blis-substrate.git blis-substrate
           echo "substrate_ref=$SUBSTRATE_REF" >> "$GITHUB_OUTPUT"
       # The 568 MB replay corpus is pinned by the release's catalog, so one download per substrate pin serves
       # every replay report in the campaign. blis_pin.py digest-checks it either way.

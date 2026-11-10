@@ -60,9 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           set -a; . ./pins.env; set +a
-          git clone --branch "$SUBSTRATE_REF" --depth 1 https://github.com/inference-sim/blis-substrate.git ../blis-substrate
-          test "$(git -C ../blis-substrate describe --tags --exact-match)" = "$SUBSTRATE_REF" || {
-            echo "blis-substrate is not $SUBSTRATE_REF -- aborting" >&2; exit 1; }
+          sh scripts/clone_pinned.sh "$SUBSTRATE_REF" https://github.com/inference-sim/blis-substrate.git ../blis-substrate
       - name: Build + stage data, then build the SPA
         working-directory: web
         run: |

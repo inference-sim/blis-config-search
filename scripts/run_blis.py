@@ -1197,6 +1197,59 @@ pd_transfer:
 """
 
 
+# The engine block takes vLLM's own names from the pin at inference-sim PR 5 on (the M2 field list): the
+# settings that moved are written under the argument or config object vLLM gives them, and the earlier
+# names are refused ("engine key \"cudagraph_mode\" is now \"compilation_config.cudagraph_mode\"").
+# The run record keeps the sweep's own names; the move happens once, where the scenario is rendered.
+# TEMPORARY copy of the accuracy dashboard's table (settings.VLLM_BLOCK_MOVES) until blis-vllm#93.
+VLLM_BLOCK_MOVES = (
+    ("cudagraph_mode", "compilation_config.cudagraph_mode"),
+    ("decoder_replay_cudagraph_capture_sizes", "compilation_config.decoder_replay_cudagraph_capture_sizes"),
+    ("custom_ops", "compilation_config.custom_ops"),
+    ("use_trtllm_attention", "attention_config.use_trtllm_attention"),
+    ("mla_prefill_backend", "attention_config.mla_prefill_backend"),
+    ("indexer_kv_dtype", "attention_config.indexer_kv_dtype"),
+    ("cache_dtype", "kv_cache_dtype"),
+    ("dbo.enable_dbo", "enable_dbo"),
+    ("dbo.dbo_decode_token_threshold", "dbo_decode_token_threshold"),
+    ("dbo.dbo_prefill_token_threshold", "dbo_prefill_token_threshold"),
+    ("eplb.enable_eplb", "enable_eplb"),
+    ("eplb.num_redundant_experts", "eplb_config.num_redundant_experts"),
+    ("eplb.window_size", "eplb_config.window_size"),
+    ("eplb.step_interval", "eplb_config.step_interval"),
+    ("kv_events.enable_kv_cache_events", "kv_events_config.enable_kv_cache_events"),
+    ("kv_events.publisher", "kv_events_config.publisher"),
+    ("kv_events.topic", "kv_events_config.topic"),
+    ("speculative.method", "speculative_config.method"),
+    ("speculative.num_spec_tokens", "speculative_config.num_speculative_tokens"),
+    ("speculative.draft_model", "speculative_config.model"),
+    ("speculative.kv_cache_dtype", "speculative_config.kv_cache_dtype"),
+    ("speculative.draft_sample_method", "speculative_config.draft_sample_method"),
+    ("speculative.rejection_sample_method", "speculative_config.rejection_sample_method"),
+    ("speculative.enable_adaptive_verification", "speculative_config.enable_adaptive_verification"),
+)
+
+
+def to_vllm_block(eng):
+    """The engine block with its keys in vLLM's names (VLLM_BLOCK_MOVES); a copy."""
+    out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in (eng or {}).items()}
+    for internal, external in VLLM_BLOCK_MOVES:
+        grp, _, leaf = internal.partition(".")
+        src = out.get(grp) if leaf else out
+        key = leaf or grp
+        if not isinstance(src, dict) or key not in src:
+            continue
+        value = src.pop(key)
+        if leaf and not src:
+            out.pop(grp, None)
+        dgrp, _, dleaf = external.partition(".")
+        if dleaf:
+            out.setdefault(dgrp, {})[dleaf] = value
+        else:
+            out[dgrp] = value
+    return out
+
+
 def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances=1,
                   fabric=DEFAULT_FABRIC, router=None, node_size=8, states_node_size=True):
     """Render a two-doc Scenario+Deployment YAML (no external yaml dep). Omitted engine keys (e.g.
@@ -1224,8 +1277,10 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
         return "\n".join(out)
     pd = (parallel or {}).get("pd")
     if pd:
+        pd = {**pd, **{r: {**pd[r], "engine": to_vllm_block(pd[r].get("engine"))} for r in PD_ROLES if r in pd}}
         return _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router,
                                  node_size, states_node_size)
+    engine = to_vllm_block(engine)
     nodes = pool_nodes(parallel, num_instances, node_size)
     node_size_line = f"\n  gpus_per_node: {node_size}" if states_node_size else ""
     # A multi-node cluster MUST name a fabric: BLIS resolves cross-node cost from the fabric,

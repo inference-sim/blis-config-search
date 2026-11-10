@@ -279,6 +279,50 @@ def test_catalog_workload_kinds():
         shutil.rmtree(tmp)
 
 
+def test_fetch_fields_resolves_a_pseudo_version_to_its_commit():
+    """go.mod names an unreleased blis-vllm commit by a pseudo-version, which is no git ref; the fields
+    file is fetched at the commit its last twelve hex digits name. A tag is fetched as itself."""
+    print("test_fetch_fields_resolves_a_pseudo_version_to_its_commit")
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import fetch_fields
+    check(fetch_fields.fields_ref("v0.32.1-0.20261111132033-96ea750e3a62") == "96ea750e3a62", "pseudo-version")
+    check(fetch_fields.fields_ref("v0.32.0-blis.2") == "v0.32.0-blis.2", "a tag is itself")
+    check(fetch_fields.fields_ref("v0.13.0") == "v0.13.0", "a release is itself")
+
+
+def test_clone_pinned_clones_a_tag_or_the_commit_a_pseudo_version_names():
+    """The workflows clone blis-substrate at SUBSTRATE_REF, which is a tag or, while a stack is open, a
+    Go pseudo-version (no git ref). scripts/clone_pinned.sh handles both and refuses a ref that is not at
+    the pin."""
+    print("test_clone_pinned_clones_a_tag_or_the_commit_a_pseudo_version_names")
+    import subprocess
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        src = os.path.join(tmp, "src")
+        def git(*a, cwd=src):
+            return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+                                   "-c", "tag.gpgsign=false", *a], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
+        os.makedirs(src)
+        git("init", "-q", "-b", "main")
+        for i in range(2):
+            open(os.path.join(src, "f"), "w").write(str(i))
+            git("add", "f"); git("commit", "-qm", f"c{i}")
+            if i == 0:
+                git("tag", "v1.2.3")
+        first = git("rev-parse", "HEAD~1")
+        def clone(ref, dest):
+            return subprocess.run(["sh", os.path.join(ROOT, "scripts", "clone_pinned.sh"), ref, "file://" + src,
+                                   os.path.join(tmp, dest)], capture_output=True, text=True)
+        r = clone("v1.2.3", "tag")
+        check(r.returncode == 0 and git("rev-parse", "HEAD", cwd=os.path.join(tmp, "tag")) == first, "a tag is cloned by name")
+        pseudo = f"v1.2.4-0.20261111044143-{first[:12]}"
+        r = clone(pseudo, "pseudo")
+        check(r.returncode == 0 and git("rev-parse", "HEAD", cwd=os.path.join(tmp, "pseudo")) == first,
+              f"a pseudo-version is cloned at its commit: {r.stderr}")
+        check(clone("v9.9.9", "missing").returncode != 0, "a tag the repository lacks is refused")
+        check(clone("v1.2.4-0.20261111044143-" + "0" * 12, "nocommit").returncode != 0, "a commit it lacks is refused")
+
+
 def test_derived_pins_match_gomod():
     """The derived block in pins.env must equal what inference-sim's go.mod says at BLIS_REF.
 
@@ -889,6 +933,8 @@ if __name__ == "__main__":
     test_explore_data()
     test_catalog_workload_kinds()
     test_pins_are_the_single_source_of_the_sim_version()
+    test_fetch_fields_resolves_a_pseudo_version_to_its_commit()
+    test_clone_pinned_clones_a_tag_or_the_commit_a_pseudo_version_names()
     test_derived_pins_match_gomod()
     test_displayed_stack_survives_a_fresh_clone()
     test_pins_name_no_independent_catalog_or_registry()

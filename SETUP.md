@@ -45,11 +45,11 @@ source `embedded`. A model runs only if that embedded catalog carries it (NS-6).
 
 Some scripts read catalog and registry *files* (a workload's descriptor, a model's graph, the
 speculative-decoding acceptance profiles). They read them from a checkout of the same release,
-`SUBSTRATE_REF` in `pins.env`:
+`SUBSTRATE_REF` in `pins.env` (a release tag, or while a stack is open a Go pseudo-version, which `scripts/clone_pinned.sh` checks out at its commit):
 
 ```bash
 set -a; . ./pins.env; set +a
-git clone --branch "$SUBSTRATE_REF" --depth 1 https://github.com/inference-sim/blis-substrate.git
+sh scripts/clone_pinned.sh "$SUBSTRATE_REF" https://github.com/inference-sim/blis-substrate.git blis-substrate
 export SUBSTRATE_CATALOG=$PWD/blis-substrate/catalog
 export SUBSTRATE_REGISTRY=$PWD/blis-substrate/registry
 ```

@@ -36,6 +36,7 @@ import hashlib
 import itertools
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -741,7 +742,8 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                      "workload_spec": ({"path": workload_spec,
                                         "sha256": replay["workload_spec_sha256"],
                                         "catalog": False, "label": WORKLOAD_SPEC_LABEL,
-                                        "document": replay["workload_document"]}
+                                        "document": replay["workload_document"],
+                                        "recipe": recipe_record(replay["workload_document"], replay)}
                                        if workload_spec else None),
                      "concurrency": concurrency, "slo": sc.get("slo") or {}, "seed": seed,
                      "engine": shared_engine or None, "engine_version": engine_version,
@@ -968,6 +970,59 @@ WORKLOAD_SPEC_LABEL = "custom (not in the catalog)"
 def workload_spec_label(path):
     """How a report names a workload that came from a file."""
     return f"{WORKLOAD_SPEC_LABEL}: {os.path.basename(str(path))}"
+
+
+def _seconds(v):
+    """A duration the runner passes as text ("3600s", "30s", "inf") in seconds; inf stays "inf"."""
+    if v is None:
+        return None
+    t = str(v).strip().lower()
+    if t in ("inf", ".inf"):
+        return "inf"
+    m = re.fullmatch(r"([0-9.]+)(ms|s|m|h)?", t)
+    if not m:
+        return t
+    x = float(m.group(1)) * {"ms": 1e-3, "s": 1, "m": 60, "h": 3600, None: 1}[m.group(2)]
+    return int(x) if x == int(x) else x
+
+
+# The recipe fields a spec's replay block can override, and the replay key that does: what BLIS is
+# actually run with is the EFFECTIVE replay, not only the workload file.
+EFFECTIVE_FIELDS = {"benchmark_duration_s": "benchmark_duration", "grace_period_s": "grace_period"}
+
+
+def recipe_record(doc, effective=None):
+    """The AgentX run recipe a replay is run with, for the report: each recipe field as run, the fields
+    that differ from the run's (the file's own values and any override of them by the spec), and one line
+    a reader sees. `effective` is the resolved replay (resolve_workload_spec): a spec's replay block may
+    override the window or the grace, so the record is derived from it as well as from the document, and
+    an override is named. None for a workload that is not an AgentX replay."""
+    import validate_experiment as ve
+    if not ve.is_agentx(doc):
+        return None
+    fields = {k: ve._dig(doc, k) for k in ve.AGENTX_RECIPE}
+    fields["corpus.loader"] = ve._dig(doc, "corpus.loader")
+    overrides = {}
+    for field, key in EFFECTIVE_FIELDS.items():
+        if effective and effective.get(key) is not None:
+            have = _seconds(effective[key])
+            if have != fields.get(field):
+                overrides[field] = [fields.get(field), have]
+                fields[field] = have
+    diff = {k: [fields[k], v] for k, v in ve.AGENTX_RECIPE.items() if fields.get(k) is not None and fields[k] != v}
+    loader = fields["corpus.loader"]
+    if loader is not None and loader != ve.AGENTX_UNCAPPED_LOADER:
+        diff["corpus.loader"] = [loader, ve.AGENTX_UNCAPPED_LOADER]
+    line = (f"AgentX run recipe: {fields['trace_idle_gap_cap_s']} s idle-gap cap, "
+            f"{fields['warmup.requests_per_lane']} warm-up requests per lane, trajectory start "
+            f"{fields['trajectory_start.min_ratio']} to {fields['trajectory_start.max_ratio']}, "
+            f"{fields['benchmark_duration_s']} s window, {fields['grace_period_s']} s grace, "
+            f"corpus {fields['corpus.loader']}")
+    if overrides:
+        line += "; the spec overrides " + ", ".join(f"{k} ({v[0]} to {v[1]})" for k, v in sorted(overrides.items()))
+    if diff:
+        line += "; differs from the run's in " + ", ".join(f"{k} ({v[0]} not {v[1]})" for k, v in sorted(diff.items()))
+    return {"fields": fields, "overrides": overrides, "differs_from_run": diff, "label": line}
 
 
 def _spec_path(path):
@@ -1234,6 +1289,8 @@ def _report_json(report):
     workload = (sc.get("replay") or {}).get("scenario") or sc["workload"]
     if sc.get("workload_spec"):
         workload = sc["workload_spec"]["label"]
+        if (sc["workload_spec"].get("recipe") or {}).get("label"):
+            workload += f" ({sc['workload_spec']['recipe']['label']})"
     tested = (f"{report['totals']['configs']} configurations over "
               f"{len(report['sweeps'])} sweep{'s' if len(report['sweeps']) != 1 else ''} "
               f"({', '.join(s['name'] for s in report['sweeps'])}), each at "

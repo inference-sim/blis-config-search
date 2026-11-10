@@ -7,7 +7,7 @@ import { RouterPanel } from './RouterView'
 import { Backdrop, H, LegendBtn, M, W, YAxis } from './chart'
 import { HoverLine } from './Overview'
 import { ConfigName } from '../components/ConfigName'
-import { ENGINE_HELP, METRIC, TOPO_FIELDS, TOPO_INFO, bareKey, fmt, fmtMetric, layerOf, matches, niceMax, poolOf, rankConfigs, type Pool } from './model'
+import { ENGINE_HELP, METRIC, loadLabel, TOPO_FIELDS, TOPO_INFO, bareKey, fmt, fmtMetric, layerOf, matches, niceMax, poolOf, rankConfigs, type Pool } from './model'
 
 /* ---------------- topology ---------------- */
 
@@ -71,7 +71,7 @@ function GpuLayout({ r, x }: { r: Run; x: Explorer }) {
     <aside className="xf-gpu" aria-label="Accelerator layout">
       <p className="eyebrow">{x.picked ? 'Selected config' : 'Best in the filter'}</p>
       <ConfigName label={r.topo} variant={x.caption(r)} />
-      <p className="xf-sub">{fmtMetric(x.target, r[x.target])} {METRIC[x.target].label} at {r.conc} sessions</p>
+      <p className="xf-sub">{fmtMetric(x.target, r[x.target])} {METRIC[x.target].label} at {loadLabel(r.conc)}</p>
       <div className="xf-gpu-row">
         {pools.map((p, i) => (
           <div key={p ?? 'shared'} className="xf-gpu-pool">
@@ -141,14 +141,14 @@ function ModeChart({ x }: { x: Explorer }) {
         <YAxis ym={ym} py={py} label={`best ${METRIC[m].label}`} />
         <Backdrop onClick={x.resetCharts} />
         {loads.map((c) => <text key={c} x={px(c)} y={H - M.b + 13} textAnchor="middle" className="tick">{c}</text>)}
-        <text x={(M.l + W - M.r) / 2} y={H - 3} textAnchor="middle" className="axlabel">sessions</text>
+        <text x={(M.l + W - M.r) / 2} y={H - 3} textAnchor="middle" className="axlabel">concurrency</text>
         {series.map((s) => (
           <g key={s.mode} className={`xf-ser${s.mode === 'P/D' ? ' pd' : ''}${off(s.mode) ? ' faded' : ''}`}>
             {s.pts.length > 1 && <polyline points={s.pts.map((r) => `${px(r.conc)},${py(r[m] as number)}`).join(' ')} />}
             {s.pts.map((r) => (
               <circle key={r.id} cx={px(r.conc)} cy={py(r[m] as number)} r={r.cfg === focus ? 5.6 : 4} className={r.cfg === focus ? 'hot' : undefined}
                 onPointerEnter={() => x.setHover(r.cfg)} onClick={() => x.pick(r.cfg)}>
-                <title>{`${s.mode} · ${r.topo} · ${r.conc} sessions · ${fmtMetric(m, r[m])} ${METRIC[m].label}`}</title>
+                <title>{`${s.mode} · ${r.topo} · ${loadLabel(r.conc)} · ${fmtMetric(m, r[m])} ${METRIC[m].label}`}</title>
               </circle>
             ))}
           </g>
@@ -218,7 +218,7 @@ function RatioHeatmap({ x }: { x: Explorer }) {
               <button type="button" key={`${p}-${d}`} className={`xf-heat-c${on ? ' on' : ''}`} aria-pressed={on} onClick={() => click(p, d)}
                 aria-label={`${p} prefill / ${d} decode: ${measure === 'pass' ? `${fmt(v * 100, 0)}% of runs meet every SLO` : v ? `best ${fmtMetric(m, v)} ${METRIC[m].label}` : 'no run meets every SLO'}`}
                 style={{ ['--t' as string]: String(0.08 + t * 0.82) }}
-                title={`${p} prefill / ${d} decode: ${rs.length} runs, ${rs.filter((r) => r.ok).length} meet every SLO${b ? `; best ${b.topo}, ${fmtMetric(m, b[m])} ${METRIC[m].label} at ${b.conc} sessions` : ''}`}>
+                title={`${p} prefill / ${d} decode: ${rs.length} runs, ${rs.filter((r) => r.ok).length} meet every SLO${b ? `; best ${b.topo}, ${fmtMetric(m, b[m])} ${METRIC[m].label} at ${loadLabel(b.conc)}` : ''}`}>
                 <span className={t > 0.55 ? 'light' : ''}>{measure === 'pass' ? `${fmt(v * 100, 0)}%` : v ? fmtMetric(m, v) : 'none'}</span>
               </button>
             )

@@ -1,0 +1,20 @@
+# A spec that names its workload by file, kept out of experiments/ so CI does not run it.
+# It shows the form; copy it to experiments/ with a Replay file of your own.
+name: custom-workload-example
+
+scenario:
+  model: muse-spark-open-816b-a42b-nvfp4
+  hardware: h200
+  cluster: {gpus_per_node: 8}
+  workload_spec: workloads/agentx-uncapped-30s-grace.yaml
+  gpus: 8
+  engine: {max_model_len: 262144}
+  concurrency: [4, 8]
+  replay:
+    corpus: .corpus/traces.jsonl
+
+sweeps:
+  - name: topology
+    narrative: TP8 on one instance should lead, since a second instance does not fit eight GPUs.
+    num-instances: [1]
+    parallel: {tp: [8], enable_expert_parallel: [true]}

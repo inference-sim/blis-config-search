@@ -552,7 +552,8 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     gpus = int(sc["gpus"])
     seed = int(sc.get("seed", 42))
     model, hardware = sc["model"], sc["hardware"]
-    workload = sc["workload"]
+    workload_spec = sc.get("workload_spec")
+    workload = sc.get("workload") or workload_spec_label(workload_spec)
     concurrency = list(sc["concurrency"])
     slo_ms = slo_limits(sc.get("slo"))
     shared_engine = dict(sc.get("engine") or {})
@@ -591,7 +592,11 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     # corpus digest, the sending window, the grace period and the context filter are all stated
     # in blis-catalog/workloads/<name>.yaml. So a spec states NONE of them: naming the workload
     # is naming all of it. See resolve_replay.
-    replay = resolve_replay(workload, catalog, replay, dry_run=dry_run)
+    if workload_spec:
+        workload_doc = load_workload_spec(workload_spec)
+        replay = resolve_workload_spec(workload_spec, workload_doc, replay, dry_run=dry_run)
+    else:
+        replay = resolve_replay(workload, catalog, replay, dry_run=dry_run)
 
     # DRAFTING ON A REPLAY needs the acceptance selectors, and they are the WORKLOAD's, not a
     # knob: BLIS resolves acceptance from the registry by (model, method, K, thinking, category)
@@ -601,7 +606,12 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     # the report showed an EMPTY drafting sweep rather than an error. The values are read from
     # the catalog's workload entry (agentx-mvp: category coding, thinking on), never invented.
     accept_sel = {}
-    if catalog:
+    if workload_spec:
+        # The file is the workload; it states the selectors itself (category, thinking).
+        for key, sel in (("category", "speculative_category"), ("thinking", "speculative_thinking")):
+            if workload_doc.get(key) is not None:
+                accept_sel[sel] = str(workload_doc[key])
+    elif catalog:
         wl = _workload_entry(workload, catalog)
         if wl:
             if wl.get("category"):
@@ -661,13 +671,14 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
             all runs.jsonl I/O."""
             idx, cfg, label, variant, c = item
             nreq = None if replay else max(80, c * 4)
-            # `_overrides` is provenance for the report (which catalog settings the spec
-            # replaced), not a replay field -- keep it out of the command.
+            # `_overrides` and `workload_document` are provenance for the report (which catalog
+            # settings the spec replaced; the workload file as read), not replay fields -- keep
+            # them out of the command and out of every run record.
             rec = run_blis.run_one(blis, catalog, registry, scenarios_dir, model, hardware,
                                    engine_version, workload, nreq, seed,
                                    None, cfg, phase=sname, timeout=run_timeout,
                                    replay={k: v for k, v in replay.items()
-                                           if k != "_overrides"} if replay else None,
+                                           if k not in RECORD_ONLY_REPLAY} if replay else None,
                                    fabric=fabric, gpus_per_node=gpus_per_node, fields=fields,
                                    data_override=data_override)
             rec["sweep"] = sname
@@ -725,12 +736,27 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
         "name": name,
         "description": (spec.get("description") or "").strip(),
         "scenario": {"model": model, "hardware": hardware, "workload": workload, "gpus": gpus,
+                     # A workload named by a file: the file, its own sha256 and the document as read
+                     # (null for a catalog workload), so the report can state it is not in the catalog.
+                     "workload_spec": ({"path": workload_spec,
+                                        "sha256": replay["workload_spec_sha256"],
+                                        "catalog": False, "label": WORKLOAD_SPEC_LABEL,
+                                        "document": replay["workload_document"]}
+                                       if workload_spec else None),
                      "concurrency": concurrency, "slo": sc.get("slo") or {}, "seed": seed,
                      "engine": shared_engine or None, "engine_version": engine_version,
                      # The cluster fabric the sweep assumed, so a report states its interconnect
                      # without reopening the spec. Omitted (null) means the ib-400g default.
-                     "cluster": (sc.get("cluster") or None), "replay": replay},
+                     "cluster": (sc.get("cluster") or None),
+                     "replay": ({k: v for k, v in replay.items() if k != "workload_document"}
+                                if replay else None)},
         "slo_ms": slo_ms,
+        # What every ranked figure is (CFG-4, DEV-8): the metric basis and the scope it ranges over.
+        # The cluster figures are the Result's measured window. The worst-instance TTFT, end-to-end
+        # and TPOT gates are rebuilt from its profiling-phase rows; the ITL gate is the cluster's,
+        # because the decode-step interval is not per request (inference-sim #2087 gives the rest).
+        "basis": run_blis.BASIS,
+        "scope": "cluster; worst instance for TTFT and end-to-end gates",
         "interactivity_floor": {"tok_per_s_per_user": floor_rate_from(slo_ms)},
         "objective": "max output tok/s per accelerator subject to the scenario's SLOs",
         "sweeps": sweep_results,
@@ -933,6 +959,90 @@ def resolve_replay(workload, catalog, stated, dry_run=False):
     return out
 
 
+# Replay keys the report records once and no run passes to the simulator.
+RECORD_ONLY_REPLAY = ("_overrides", "workload_document")
+
+WORKLOAD_SPEC_LABEL = "custom (not in the catalog)"
+
+
+def workload_spec_label(path):
+    """How a report names a workload that came from a file."""
+    return f"{WORKLOAD_SPEC_LABEL}: {os.path.basename(str(path))}"
+
+
+def _spec_path(path):
+    """A workload_spec path is relative to the repository, so a spec means the same file anywhere.
+    It must stay inside the repository once symlinks and `..` are resolved."""
+    full = os.path.realpath(os.path.join(ROOT, path))
+    if os.path.isabs(path) or not full.startswith(os.path.realpath(ROOT) + os.sep):
+        raise SystemExit(f"scenario.workload_spec: {path!r} is outside the repository")
+    return full
+
+
+def load_workload_spec(path):
+    """The replay document in the workload file, as a mapping.
+
+    The file is a blis-schemas Replay document: the replay block itself, as the catalog's
+    `replay:` carries it. The simulator reads and checks it (`blis replay --workload-spec`).
+    """
+    full = _spec_path(path)
+    try:
+        with open(full, encoding="utf-8") as f:
+            doc = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError) as e:
+        raise SystemExit(f"scenario.workload_spec: {path}: {e}")
+    if not isinstance(doc, dict):
+        raise SystemExit(f"scenario.workload_spec: {path} is not a mapping")
+    return doc
+
+
+def workload_spec_sha256(path):
+    h = hashlib.sha256()
+    with open(_spec_path(path), "rb") as f:
+        h.update(f.read())
+    return h.hexdigest()
+
+
+def resolve_workload_spec(path, doc, stated, dry_run=False):
+    """The replay descriptor for a workload named by file.
+
+    The corpus digest, the window, the grace period and the context filter come from the file, as
+    they come from the catalog entry for a named workload. The report records the whole document
+    and the file's own sha256, and `_overrides` is empty: the file is the workload.
+    """
+    stated = dict(stated or {})
+    corpus = doc.get("corpus") if isinstance(doc.get("corpus"), dict) else {}
+    if not doc.get("scenario"):
+        raise SystemExit(f"workload_spec {path!r} states no `scenario` (the harness scenario id)")
+    out = {"scenario": doc["scenario"],
+           "workload_spec": _spec_path(path),
+           "workload_spec_relative": path,
+           "workload_spec_sha256": workload_spec_sha256(path),
+           "workload_document": doc}
+    if corpus.get("sha256"):
+        out["corpus_sha256"] = corpus["sha256"]
+    if doc.get("benchmark_duration_s"):
+        out["benchmark_duration"] = f"{doc['benchmark_duration_s']}s"
+    if doc.get("max_context_length"):
+        out["max_context_length"] = str(doc["max_context_length"])
+    if doc.get("grace_period_s") is not None:
+        g = doc["grace_period_s"]
+        out["grace_period"] = g if isinstance(g, str) else f"{g}s"
+    for key in ("category", "thinking"):
+        if doc.get(key) is not None:
+            out[key] = doc[key]
+    for key in ("corpus", "corpus_cache"):
+        if stated.get(key):
+            out[key] = stated[key]
+    if "grace_period" in stated:
+        out["grace_period"] = stated["grace_period"]
+    if not dry_run and not out.get("corpus"):
+        raise SystemExit(
+            f"workload_spec {path!r} is a trace REPLAY, so it needs a local corpus file:\n"
+            f"  scenario:\n    replay:\n      corpus: .corpus/traces.jsonl")
+    return out
+
+
 def _workload_entry(workload, catalog):
     """The catalog's workload row, which carries the acceptance selectors a drafting replay needs."""
     try:
@@ -1122,6 +1232,8 @@ def _report_json(report):
     sc = report["scenario"]
     winner = report.get("best_overall")
     workload = (sc.get("replay") or {}).get("scenario") or sc["workload"]
+    if sc.get("workload_spec"):
+        workload = sc["workload_spec"]["label"]
     tested = (f"{report['totals']['configs']} configurations over "
               f"{len(report['sweeps'])} sweep{'s' if len(report['sweeps']) != 1 else ''} "
               f"({', '.join(s['name'] for s in report['sweeps'])}), each at "
@@ -1165,7 +1277,9 @@ def _report_json(report):
                           f"comparing {len(report['sweeps'])} designs on one GPU budget."),
         "meta": ["BLIS discrete-event simulation", "Experiment Spec (RFC #21)",
                  "deterministic sweep — no LLM in the measurement path",
-                 f"seed {sc['seed']}"],
+                 f"seed {sc['seed']}",
+                 f"basis: {report['basis'].replace('_', ' ')}",
+                 f"scope: {report['scope']}"],
         "hero": [{"h": "What was tested", "html": tested},
                  {"h": "What was found", "html": found},
                  {"h": "What to run", "html": run_html, "run": True}],
@@ -1202,9 +1316,11 @@ def _scenario_json(spec, report):
     return {
         "run_id": report["name"],
         "model": sc["model"], "hardware": sc["hardware"], "gpu_budget": sc["gpus"],
-        "workload": ({"replay": sc["replay"]} if sc.get("replay")
-                     else {"preset": sc["workload"]}),
+        "workload": ({"replay": sc["replay"],
+                      **({"workload_spec": sc["workload_spec"]} if sc.get("workload_spec") else {})}
+                     if sc.get("replay") else {"preset": sc["workload"]}),
         "objective": report["objective"],
+        "basis": report["basis"], "scope": report["scope"],
         "interactivity_floor": ({"tok_per_s_per_user": floor["tok_per_s_per_user"]}
                                 if floor.get("tok_per_s_per_user") else {}),
         "slos": sc.get("slo") or {},

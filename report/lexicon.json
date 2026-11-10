@@ -17,10 +17,10 @@
   },
   "metrics": {
     "conc": {
-      "label": "sessions",
-      "unit": "sessions",
+      "label": "concurrency",
+      "unit": "c",
       "digits": 0,
-      "help": "Concurrent sessions (simultaneous users or requests) at this operating point."
+      "help": "The offered load, written c<N>. For a replay it is session-tree lanes drawn from a finite corpus, so a load above the corpus size resamples traces; it is not a count of users."
     },
     "pu": {
       "label": "tok/s per user",
@@ -176,7 +176,7 @@
     "cl_log": "aggregate output tok/s delivered by the cluster (log)",
     "pu": "tok/s per user",
     "tpg": "tok/s per accelerator",
-    "conc": "sessions",
+    "conc": "concurrency",
     "p95_log": "slowest 95% of session latencies (log)",
     "max_conc": "highest concurrency served inside every limit"
   },
@@ -269,8 +269,8 @@
       "title": "The operating curve, and where it stops",
       "xl": "@axes.cl_log",
       "yl": "@axes.pu",
-      "caption": "Each configuration trades tok/s per user for tok/s fleet, until it falls off a cliff. One line per configuration, walking the load up; the number beside each marker is the session count. Filled markers hold the interactivity floor, hollow ones break a limit. The dashed line is the floor itself.",
-      "read": "One line per configuration, walking the load up. Flat is good: it means adding sessions has not yet slowed anyone down. Where a line turns down is its knee: the first load that breaks the floor."
+      "caption": "Each configuration trades tok/s per user for tok/s fleet, until it falls off a cliff. One line per configuration, walking the load up; the number beside each marker is the concurrency, written c<N>. Filled markers hold the interactivity floor, hollow ones break a limit. The dashed line is the floor itself.",
+      "read": "One line per configuration, walking the load up. Flat is good: it means raising the concurrency has not yet slowed anyone down. Where a line turns down is its knee: the first load that breaks the floor."
     },
     "per_user_vs_load": {
       "surfaces": [
@@ -280,7 +280,7 @@
       "xl": "@axes.conc",
       "yl": "@axes.pu",
       "caption": "Each configuration trades tok/s per user for tok/s fleet, until it falls off a cliff. One line per configuration, walking the load up. Filled markers hold the interactivity floor, hollow ones break a limit.",
-      "read": "One line per configuration, walking the load up. Flat is good: it means adding sessions has not yet slowed anyone down. The violet line marks that configuration's knee, the first load that breaks the floor."
+      "read": "One line per configuration, walking the load up. Flat is good: it means raising the concurrency has not yet slowed anyone down. The violet line marks that configuration's knee, the first load that breaks the floor."
     },
     "efficiency_interactivity": {
       "surfaces": [
@@ -290,7 +290,7 @@
       "xl": "@axes.pu",
       "yl": "@axes.tpg",
       "caption": "tok/s per accelerator against tok/s per user, one point per run: the two halves of the search objective, plotted against each other.",
-      "read": "Each point is one run: x is what one caller feels, y is how much each accelerator delivers (so configurations compare regardless of how many accelerators they use). Up and to the right is better for everyone; filled points hold the interactivity floor, hollow ones break it. A faint line connects a configuration's runs in load order, so you can trace where adding sessions takes it."
+      "read": "Each point is one run: x is what one caller feels, y is how much each accelerator delivers (so configurations compare regardless of how many accelerators they use). Up and to the right is better for everyone; filled points hold the interactivity floor, hollow ones break it. A faint line connects a configuration's runs in load order, so you can trace where raising the concurrency takes it."
     },
     "latency_vs_load": {
       "surfaces": [
@@ -320,7 +320,7 @@
       "xl": "@axes.max_conc",
       "yl": "",
       "caption": "Highest concurrency each configuration serves inside every limit. The cross marks the first load that breaks one. Identical hardware, identical workload.",
-      "read": "One bar per configuration: how many sessions it carries before any limit binds."
+      "read": "One bar per configuration: what concurrency it carries before any limit binds."
     }
   }
 }

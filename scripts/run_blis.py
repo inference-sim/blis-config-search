@@ -871,78 +871,134 @@ def _result_doc(stdout):
     return None
 
 
-# The legacy MetricsOutput key -> where the same number lives in a v0.15.0 Result document.
-#
-# `engine.cluster.whole_run` is the WHOLE RUN, which is what every earlier pin's stdout reported
-# and what the committed ledgers therefore hold; top-level `metrics` is the MEASURED WINDOW, a
-# different population (result_build.go standardMetrics). Mixing the two would make this bump a
-# silent re-baselining of every latency in the repo, so the whole-run block is the source and the
-# measured window is left to the Result document's own readers.
-_WHOLE_RUN_KEYS = {k: k for k in ("tokens_per_sec", "responses_per_sec",
-                                   "ttft_mean_ms", "ttft_p90_ms", "ttft_p95_ms", "ttft_p99_ms",
-                                   "e2e_mean_ms", "e2e_p90_ms", "e2e_p95_ms", "e2e_p99_ms")}
+# What the report ranks and gates on is the MEASURED WINDOW (CFG-4, DEV-8): the Result's top-level
+# `metrics`, each figure {value, samples}. The whole run includes warm-up and the drain, and the two
+# bases are never mixed. `engine.cluster.whole_run` and the per-instance engine blocks are whole-run;
+# nothing here reads them (test_run_blis.MeasuredWindow pins that).
+BASIS = "measured_window"
 
-# itl_* was RENAMED to step_interval_*, not dropped: result_inputs.go fills whole_run's
-# step_interval_* from whole.ITL*Ms, the very fields MetricsOutput's itl_* keys held ("the
-# step-interval series the legacy itl_* keys held"). So this is a rename to follow, NOT the
-# top-level metrics.itl_* -- those are FormulaTPOTExclFirst, per-request TPOT over the measured
-# window, a genuinely different measurement. Measured on one Muse run: whole-run
-# step_interval_p99 294.03 ms against measured-window itl_p99 33.87 ms, ~9x apart because a step
-# serves the whole batch. Reading the per-request figure into itl_p99_ms would silently rebase
-# every SLO verdict and every per-user rate in the repo against 12 committed reports. The same
-# holds for the step_interval_* on `cluster` itself: result_inputs.go fills that copy from `sum`
-# (the measured window), so it is not a fallback for whole_run's either.
-_ITL_FROM_STEP_INTERVAL = {"itl_mean_ms": "step_interval_mean_ms", "itl_p90_ms": "step_interval_p90_ms",
-                           "itl_p95_ms": "step_interval_p95_ms", "itl_p99_ms": "step_interval_p99_ms"}
+# The legacy flat key the rest of the module reads -> the Result's measured-window metric.
+_MEASURED_KEYS = {"tokens_per_sec": "output_tok_s", "responses_per_sec": "request_throughput",
+                  "ttft_mean_ms": "ttft_mean_ms", "ttft_p90_ms": "ttft_p90_ms",
+                  "ttft_p95_ms": "ttft_p95_ms", "ttft_p99_ms": "ttft_p99_ms",
+                  "e2e_mean_ms": "e2e_mean_ms", "e2e_p90_ms": "e2e_p90_ms",
+                  "e2e_p95_ms": "e2e_p95_ms", "e2e_p99_ms": "e2e_p99_ms",
+                  # The ITL gate is the decode-step interval (acceptance-aware in per_user_rate),
+                  # so it reads the measured window's step_interval_*, the same quantity the
+                  # whole-run basis used. The per-request TPOT is a different metric (DEV-8).
+                  "itl_mean_ms": "step_interval_mean_ms", "itl_p90_ms": "step_interval_p90_ms",
+                  "itl_p95_ms": "step_interval_p95_ms", "itl_p99_ms": "step_interval_p99_ms",
+                  "preemption_count": "preemptions"}
 
-# Counters that moved out of the metrics dict into the document's own `requests` block, under
-# the Result's names (generated, queued_at_horizon, in_flight_at_horizon). _completion_issue reads all five, so without this remapping an incomplete or
-# overloaded run is ranked as a clean capacity point.
+# Counters that live in the document's own `requests` block, under the Result's names.
 _REQUEST_COUNTS = {"injected_requests": "generated", "completed_requests": "completed",
                    "still_queued": "queued_at_horizon", "still_running": "in_flight_at_horizon",
                    "timed_out_requests": "timed_out", "length_capped_requests": "length_capped"}
 
-# Counters that stayed on the cluster aggregate but outside whole_run.
-_CLUSTER_KEYS = {**{k: k for k in ("total_input_tokens", "total_output_tokens",
-                                    "scheduling_delay_p99_ms", "kv_allocation_failures")},
-                 "preemption_count": "preemptions",
-                 "vllm_estimated_duration_s": "simulated_duration_s"}
+# Run totals on the cluster aggregate that are counts, not rates: no window changes what they mean.
+_CLUSTER_KEYS = {"kv_allocation_failures": "kv_allocation_failures"}
 
 
 def _engine_report(doc):
-    """The engine's own report in a Result: `reports.engine` (cluster aggregate, instances).
-
-    The top-level `engine` of a schema 2 Result names the engine ({kind, version}) and nothing
-    else; the aggregate and the per-instance rows moved under `reports`, which carries each
-    component's report as that component made it.
-    """
+    """The engine's own report in a Result: `reports.engine` (cluster aggregate, instances)."""
     return ((doc.get("reports") or {}).get("engine")) or {}
 
 
-def _flatten_result(doc):
-    """A v0.15.0 Result document as the flat MetricsOutput dict the rest of this module reads.
+def _figure(entry):
+    """The number in a Result metric, {value, samples}; None when the metric has no value."""
+    v = entry.get("value") if isinstance(entry, dict) else entry
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
-    The aggregate was restructured by the bump while `engine.instances` kept emitting a verbatim
-    MetricsOutput per instance, so WITHOUT this a single-instance run (no instances block) has no
-    itl_* anywhere and every ITL SLO fails as "declared but not measured", while a multi-instance
-    run resolves normally off the per-instance rows. That asymmetry is why it reads as a finding
-    rather than a crash: a sweep reports 0 servable, or judges only its multi-instance arms.
+
+def _flatten_result(doc):
+    """A Result document as the flat dict the rest of this module reads, on the measured window.
+
+    Returns {} when the document has no measured-window `metrics`, so the run fails as "no cluster
+    metrics parsed" and is never ranked on another basis.
     """
-    cluster = _engine_report(doc).get("cluster") or {}
-    whole = cluster.get("whole_run") or {}
-    if not whole:
-        return {}   # no whole-run aggregate: fail as "no cluster metrics parsed", not later
+    measured = doc.get("metrics")
+    if not isinstance(measured, dict) or not measured:
+        return {}
     out = {"instance_id": "cluster"}
-    # itl_* ONLY from whole_run, never the cluster's own step_interval_* (see
-    # _ITL_FROM_STEP_INTERVAL); hence the guard above rather than a fallback.
-    for src, mapping in ((whole, _WHOLE_RUN_KEYS), (whole, _ITL_FROM_STEP_INTERVAL),
-                         (cluster, _CLUSTER_KEYS), (doc.get("requests") or {}, _REQUEST_COUNTS)):
-        for legacy, new in mapping.items():
-            if new in src:
-                out[legacy] = src[new]
-    # `dropped` is a map by reason; the overload check wants the number dropped as unservable.
+    for legacy, name in _MEASURED_KEYS.items():
+        v = _figure(measured.get(name))
+        if v is not None:
+            out[legacy] = v
+    cluster = _engine_report(doc).get("cluster") or {}
+    for legacy, name in _CLUSTER_KEYS.items():
+        if name in cluster:
+            out[legacy] = cluster[name]
+    for legacy, name in _REQUEST_COUNTS.items():
+        if name in (doc.get("requests") or {}):
+            out[legacy] = doc["requests"][name]
     dropped = (doc.get("requests") or {}).get("dropped") or {}
     out["dropped_unservable"] = sum(v for v in dropped.values() if isinstance(v, (int, float)))
+    return out
+
+
+def _percentile(xs, p):
+    """The p-th percentile by linear interpolation between order statistics (numpy's default),
+    which is the method the Result's own percentiles use: on a real run the cluster p99 rebuilt
+    from request_rows equals Result.metrics to the printed digits."""
+    xs = sorted(xs)
+    k = (len(xs) - 1) * p / 100.0
+    lo, hi = int(k), min(int(k) + 1, len(xs) - 1)
+    return xs[lo] + (xs[hi] - xs[lo]) * (k - lo)
+
+
+_ROW_LATENCY = (("ttft", "ttft_us"), ("e2e", "e2e_us"), ("tpot", "tpot_us"))
+
+
+def measured_instances(doc):
+    """Each instance's measured-window latency figures, rebuilt from the Result's per-request rows.
+
+    The pinned simulator reports a per-instance block only for the whole run, so the worst-instance
+    gate takes the completed non-warm-up requests that finish inside the window, grouped by the instance that served them.
+    Only latencies a row carries can be rebuilt (TTFT, end-to-end, TPOT): the decode-step interval
+    is not per request, so the ITL gate stays on the cluster. Remove this when the simulator emits
+    the per-instance measured window (inference-sim #2087). [] when the Result has no rows.
+    """
+    by = {}
+    end = (doc.get("window") or {}).get("end_us")
+    for r in doc.get("request_rows") or []:
+        # The cluster figure counts every non-warm-up request that completed inside the window,
+        # profile and grace alike; the rebuild takes the same population.
+        done = (r.get("arrival_us") or 0) + (r.get("e2e_us") or 0)
+        if (r.get("phase") != "warmup" and r.get("fate") == "completed" and r.get("instance")
+                and (end is None or done <= end)):
+            by.setdefault(r["instance"], []).append(r)
+    out = []
+    for inst in sorted(by):
+        o = {"instance_id": inst, "requests": len(by[inst])}
+        for stem, col in _ROW_LATENCY:
+            xs = [r[col] / 1000.0 for r in by[inst] if isinstance(r.get(col), (int, float))]
+            if not xs:
+                continue
+            o[f"{stem}_mean_ms"] = sum(xs) / len(xs)
+            for p in (50, 90, 95, 99):
+                o[f"{stem}_p{p}_ms"] = _percentile(xs, p)
+        out.append(o)
+    return out
+
+
+def measured_record(doc):
+    """What a run record keeps of the Result's measured window, copied verbatim with BLIS's names.
+
+    `metrics` is the Result's top-level metrics ({name: {value, samples}}), `metric_defs` its
+    definitions when the document carries them (the pinned release carries none), `window` the
+    measured window, and `instances` the per-instance figures measured_instances rebuilds. None
+    when the document has no `metrics` block: the field is then absent, never empty.
+    """
+    if not isinstance(doc.get("metrics"), dict) or not doc["metrics"]:
+        return None
+    out = {"metrics": doc["metrics"]}
+    if isinstance(doc.get("metric_defs"), dict) and doc["metric_defs"]:
+        out["metric_defs"] = doc["metric_defs"]
+    if isinstance(doc.get("window"), dict):
+        out["window"] = doc["window"]
+    inst = measured_instances(doc)
+    if inst:
+        out["instances"] = inst
     return out
 
 
@@ -1014,11 +1070,11 @@ def parse_metrics(stdout):
 
 
 def parse_all_instances(stdout):
+    """Per-instance figures on the measured window (see measured_instances). A pre-Result flat
+    output has no measured window, so its per-instance rows are returned as they were written."""
     doc = _result_doc(stdout)
     if doc is not None:
-        inst = _engine_report(doc).get("instances") or {}
-        # Each value is a verbatim MetricsOutput, already carrying its own instance_id.
-        return [v for _, v in sorted(inst.items()) if isinstance(v, dict)]
+        return measured_instances(doc)
     return [o for o in _all_metrics(stdout) if o.get("instance_id") not in (None, "cluster")]
 
 
@@ -1258,6 +1314,10 @@ def build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed
     cmd += _data_args(catalog, registry)
     if resolve_defaults(blis, defaults):
         cmd += ["--defaults-filepath", resolve_defaults(blis, defaults)]
+    # A workload named by file: the replay document is the file's, so the catalog's
+    # descriptor is left out. BLIS still checks the corpus against the sha256 passed above.
+    if replay.get("workload_spec"):
+        cmd += ["--workload-spec", replay["workload_spec"]]
     # max_model_len: the deployment's own resolved window. Every trace whose peak prompt + output
     # exceeds it is DROPPED, and the AgentX corpus caps requests at 256k -- so a 32768-token
     # deployment drops the entire corpus ("no trace fits max_context_length 32768").
@@ -1347,9 +1407,16 @@ def row_stack(blis, catalog, registry):
     return out
 
 
+def _config_hash(config):
+    return hashlib.sha1(json.dumps(config, sort_keys=True).encode()).hexdigest()[:12]
+
+
 def _record_shell(config, phase):
+    """`config_hash` names one run (the config at its load); `config_key` names the configuration,
+    so the records of one configuration across loads share it."""
+    unloaded = {k: v for k, v in config.items() if k != "concurrency"}
     return {"config": config, "concurrency": config.get("concurrency"),
-            "config_hash": hashlib.sha1(json.dumps(config, sort_keys=True).encode()).hexdigest()[:12],
+            "config_hash": _config_hash(config), "config_key": _config_hash(unloaded),
             "phase": phase}
 
 
@@ -1477,8 +1544,9 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     except subprocess.TimeoutExpired:
         stdout, stderr, rc = "", "timeout", -1
     invalid = result_invalid(blis, stdout) if rc == 0 else None
+    doc = _result_doc(stdout) if rc == 0 and not invalid else None
     metrics = parse_metrics(stdout) if rc == 0 and not invalid else {}
-    seen = data_of(_result_doc(stdout)) if rc == 0 and not invalid else None
+    seen = data_of(doc) if doc is not None else None
     if rc != 0:
         error = _failure_line(stderr) or f"rc={rc}"
     elif invalid:
@@ -1492,7 +1560,7 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     # otherwise be committed as a report priced with data it was not (CFG-1).
     if seen is not None:
         rec["data"] = seen
-        rec["released_build"] = released_build(_result_doc(stdout))
+        rec["released_build"] = released_build(doc)
         if not data_override and seen != "embedded" and not error:
             error = ("priced with other data than the simulator release's embedded data "
                      "(the Result's data block does not name catalog and registry source embedded)")
@@ -1524,6 +1592,16 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
         "metrics": metrics, "metrics_all_instances": parse_all_instances(stdout) if rc == 0 else [],
         "error": error, "stdout_tail": stdout[-2000:], "stderr_tail": stderr[-2000:],
     })
+    if doc is not None and metrics:
+        # The window every figure above is on, the Result's measured-window metrics verbatim, and
+        # the whole-run aggregate kept as raw data only: nothing ranks or displays it.
+        rec["basis"] = BASIS
+        measured = measured_record(doc)
+        if measured:
+            rec["measured"] = measured
+        whole = (_engine_report(doc).get("cluster") or {}).get("whole_run")
+        if whole:
+            rec["whole_run"] = whole
     return rec
 
 

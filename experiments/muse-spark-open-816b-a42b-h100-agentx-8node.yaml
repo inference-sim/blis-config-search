@@ -14,7 +14,7 @@ name: muse-spark-open-816b-a42b-h100-agentx-8node
 scenario:
   model: muse-spark-open-816b-a42b-nvfp4
   hardware: h100
-  workload: agentx-mvp
+  workload_spec: workloads/agentx-run-recipe.yaml   # the full AgentX run recipe
   gpus: 64
   cluster: {fabric: roce-200g, gpus_per_node: 8}            # H100 fleets run on RoCE; cross-node EP/all2all is priced at 25 GB/s, not IB's 50
   engine:
@@ -24,7 +24,7 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-muse-h100-8node
-    grace_period: 87600h   # = never ends within a run (ten years). TEMPORARY: `inf` is refused by the strict Result loader until blis-substrate#28 ships (M2); restore `inf` then (blis-config-search#102)
+    grace_period: inf   # a request in flight at the end of the window is never cancelled
 
 sweeps:
   - name: topology

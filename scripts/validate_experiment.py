@@ -453,6 +453,59 @@ def scenario_identity_errors(sc, blis, catalog=None):
 SPEC_SOURCES = ("huggingface", "url")
 
 
+# The AgentX run recipe (workloads/agentx-run-recipe.yaml): the fields an AgentX replay descriptor must
+# state, each a (path in the document, what the run recorded) pair. A descriptor missing one is
+# refused: BLIS then replays the scenario's default for it (no per-trajectory idle cap, no warm-up), a
+# different request pattern from the run's, with nothing in the report to say so.
+AGENTX_RECIPE = {
+    "benchmark_duration_s": 3600,
+    "trace_idle_gap_cap_s": 300,
+    "warmup.requests_per_lane": 10,
+    "trajectory_start.min_ratio": 0.25,
+    "trajectory_start.max_ratio": 0.75,
+}
+AGENTX_UNCAPPED_LOADER = "semianalysis_cc_traces_weka_062126"
+
+
+def _dig(doc, dotted):
+    for k in dotted.split("."):
+        if not isinstance(doc, dict) or k not in doc:
+            return None
+        doc = doc[k]
+    return doc
+
+
+def is_agentx(doc):
+    return str((doc or {}).get("scenario") or "").startswith("inferencex-agentx")
+
+
+def recipe_missing(doc):
+    """The AgentX recipe fields a replay descriptor does not state, [] when complete or not AgentX."""
+    if not is_agentx(doc):
+        return []
+    missing = [k for k in AGENTX_RECIPE if _dig(doc, k) is None]
+    if _dig(doc, "warmup.mode") not in (None, "cache_pressure"):
+        missing.append("warmup.mode: cache_pressure")
+    loader = _dig(doc, "corpus.loader")
+    if loader is None:
+        missing.append("corpus.loader")
+    return missing
+
+
+def recipe_differences(doc):
+    """{field: [stated, the run's]} for each stated recipe field whose value is not the run's, and the
+    corpus when it is not the uncapped one. A sweep may differ (it is a different experiment); the report
+    says so."""
+    if not is_agentx(doc):
+        return {}
+    out = {k: [_dig(doc, k), v] for k, v in AGENTX_RECIPE.items()
+           if _dig(doc, k) is not None and _dig(doc, k) != v}
+    loader = _dig(doc, "corpus.loader")
+    if loader is not None and loader != AGENTX_UNCAPPED_LOADER:
+        out["corpus.loader"] = [loader, AGENTX_UNCAPPED_LOADER]
+    return out
+
+
 def workload_spec_errors(path, root=ROOT):
     """Why the workload file at `path` cannot be a workload, else []. The file is read as the replay
     block of a catalog workload entry: `corpus.sha256` and `corpus.source` (a Hugging Face dataset
@@ -483,6 +536,10 @@ def workload_spec_errors(path, root=ROOT):
     if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha):
         errs.append(f"scenario.workload_spec: {path!r}: corpus.sha256 is required, 64 lowercase hex "
                     f"digits -- a report must name the bytes it replayed")
+    gaps = recipe_missing(doc)
+    if gaps:
+        errs.append(f"scenario.workload_spec: {path!r}: an AgentX replay must state the whole run recipe "
+                    f"(workloads/agentx-run-recipe.yaml); missing {', '.join(gaps)}")
     src = corpus.get("source")
     if not isinstance(src, dict) or not any(src.get(k) for k in SPEC_SOURCES):
         errs.append(f"scenario.workload_spec: {path!r}: corpus.source is required, a Hugging Face "
@@ -506,6 +563,10 @@ def workload_errors(sc, blis=None, root=ROOT):
         if not isinstance(filed, str):
             return ["scenario.workload_spec: must be a path string"]
         return workload_spec_errors(filed, root)
+    if str(named).startswith("agentx"):
+        return [f"scenario.workload: {named!r} is the catalog's AgentX descriptor, which states no per-trajectory "
+                f"idle-gap cap and no warm-up: name `workload_spec: workloads/agentx-run-recipe.yaml` (the full "
+                f"run recipe) instead"]
     return []
 
 

@@ -279,6 +279,17 @@ def test_catalog_workload_kinds():
         shutil.rmtree(tmp)
 
 
+def test_fetch_fields_resolves_a_pseudo_version_to_its_commit():
+    """go.mod names an unreleased blis-vllm commit by a pseudo-version, which is no git ref; the fields
+    file is fetched at the commit its last twelve hex digits name. A tag is fetched as itself."""
+    print("test_fetch_fields_resolves_a_pseudo_version_to_its_commit")
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import fetch_fields
+    check(fetch_fields.fields_ref("v0.32.1-0.20261111132033-96ea750e3a62") == "96ea750e3a62", "pseudo-version")
+    check(fetch_fields.fields_ref("v0.32.0-blis.2") == "v0.32.0-blis.2", "a tag is itself")
+    check(fetch_fields.fields_ref("v0.13.0") == "v0.13.0", "a release is itself")
+
+
 def test_derived_pins_match_gomod():
     """The derived block in pins.env must equal what inference-sim's go.mod says at BLIS_REF.
 
@@ -889,6 +900,7 @@ if __name__ == "__main__":
     test_explore_data()
     test_catalog_workload_kinds()
     test_pins_are_the_single_source_of_the_sim_version()
+    test_fetch_fields_resolves_a_pseudo_version_to_its_commit()
     test_derived_pins_match_gomod()
     test_displayed_stack_survives_a_fresh_clone()
     test_pins_name_no_independent_catalog_or_registry()

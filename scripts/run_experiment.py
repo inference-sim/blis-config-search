@@ -741,7 +741,8 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                      "workload_spec": ({"path": workload_spec,
                                         "sha256": replay["workload_spec_sha256"],
                                         "catalog": False, "label": WORKLOAD_SPEC_LABEL,
-                                        "document": replay["workload_document"]}
+                                        "document": replay["workload_document"],
+                                        "recipe": recipe_record(replay["workload_document"])}
                                        if workload_spec else None),
                      "concurrency": concurrency, "slo": sc.get("slo") or {}, "seed": seed,
                      "engine": shared_engine or None, "engine_version": engine_version,
@@ -968,6 +969,25 @@ WORKLOAD_SPEC_LABEL = "custom (not in the catalog)"
 def workload_spec_label(path):
     """How a report names a workload that came from a file."""
     return f"{WORKLOAD_SPEC_LABEL}: {os.path.basename(str(path))}"
+
+
+def recipe_record(doc):
+    """The AgentX run recipe a workload file states, for the report: each recipe field as stated, the
+    fields that differ from the run's, and one line a reader sees. None for a workload that is not an
+    AgentX replay."""
+    import validate_experiment as ve
+    if not ve.is_agentx(doc):
+        return None
+    fields = {k: ve._dig(doc, k) for k in ve.AGENTX_RECIPE}
+    fields["corpus.loader"] = ve._dig(doc, "corpus.loader")
+    diff = ve.recipe_differences(doc)
+    line = (f"AgentX run recipe: {fields['trace_idle_gap_cap_s']} s idle-gap cap, "
+            f"{fields['warmup.requests_per_lane']} warm-up requests per lane, trajectory start "
+            f"{fields['trajectory_start.min_ratio']} to {fields['trajectory_start.max_ratio']}, "
+            f"{fields['benchmark_duration_s']} s window, corpus {fields['corpus.loader']}")
+    if diff:
+        line += "; differs from the run's in " + ", ".join(f"{k} ({v[0]} not {v[1]})" for k, v in sorted(diff.items()))
+    return {"fields": fields, "differs_from_run": diff, "label": line}
 
 
 def _spec_path(path):
@@ -1234,6 +1254,8 @@ def _report_json(report):
     workload = (sc.get("replay") or {}).get("scenario") or sc["workload"]
     if sc.get("workload_spec"):
         workload = sc["workload_spec"]["label"]
+        if (sc["workload_spec"].get("recipe") or {}).get("label"):
+            workload += f" ({sc['workload_spec']['recipe']['label']})"
     tested = (f"{report['totals']['configs']} configurations over "
               f"{len(report['sweeps'])} sweep{'s' if len(report['sweeps']) != 1 else ''} "
               f"({', '.join(s['name'] for s in report['sweeps'])}), each at "

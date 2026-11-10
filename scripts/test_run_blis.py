@@ -1048,10 +1048,25 @@ class SpeculativeDecoding(unittest.TestCase):
                                    {"block_size": 128,
                                     "speculative": {"method": "dspark", "num_spec_tokens": 5}},
                                    "n")
-        self.assertIn("      speculative:\n", y)
+        self.assertIn("      speculative_config:\n", y)
         self.assertIn('        method: "dspark"', y)
-        self.assertIn("        num_spec_tokens: 5", y)
+        self.assertIn("        num_speculative_tokens: 5", y)
         self.assertNotIn('{"method"', y)
+
+    def test_the_engine_block_takes_vllms_names_and_the_sweeps_record_keeps_its_own(self):
+        """The pin at inference-sim PR 5 refuses the earlier names ("engine key cudagraph_mode is now
+        compilation_config.cudagraph_mode"); the move happens where the scenario is rendered."""
+        eng = {"cache_dtype": "fp8", "cudagraph_mode": "FULL", "indexer_kv_dtype": "fp8", "block_size": 64,
+               "eplb": {"enable_eplb": True, "window_size": 5}, "speculative": {"method": "mtp", "num_spec_tokens": 2}}
+        y = run_blis.scenario_yaml("m", "b200", "0.32.0", dict(run_blis.PARALLEL_DEFAULTS), eng, "n")
+        for want in ('      kv_cache_dtype: "fp8"', "      compilation_config:\n", '        cudagraph_mode: "FULL"',
+                     "      attention_config:\n", "      enable_eplb: true", "      eplb_config:\n",
+                     "      speculative_config:\n", "        num_speculative_tokens: 2", "      block_size: 64"):
+            self.assertIn(want, y)
+        for old in ("cache_dtype:", "  cudagraph_mode:\n", "num_spec_tokens", "\n      speculative:"):
+            self.assertNotIn(old if old != "cache_dtype:" else "\n      cache_dtype:", y)
+        self.assertEqual(eng["cache_dtype"], "fp8")             # the caller's block is not changed
+        self.assertEqual(run_blis.to_vllm_block({"block_size": 8}), {"block_size": 8})
 
     def test_drafter_is_read_from_the_models_own_graph(self):
         """The right drafter is a property of the MODEL (dspark here, mtp on v4-pro), so it is

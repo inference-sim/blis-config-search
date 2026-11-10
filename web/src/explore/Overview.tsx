@@ -3,7 +3,7 @@
 import { useMemo } from 'react'
 import type { Explorer } from './useExplorer'
 import type { MetricKey, Run } from './types'
-import { METRIC, NA, SLO_OF, TOPO_FIELDS, TOPO_INFO, bareKey, fmt, fmtMetric, niceMax, poolOf, quantile, sloMs, sortValues, tagsOf } from './model'
+import { METRIC, NA, SLO_OF, TOPO_FIELDS, TOPO_INFO, bareKey, fmt, fmtMetric, loadLabel, niceMax, poolOf, quantile, sloMs, sortValues, tagsOf } from './model'
 import { Backdrop, H, LegendBtn, M, W, YAxis } from './chart'
 
 const PAL = ['var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c7)', 'var(--c5)']
@@ -41,7 +41,7 @@ const yScale = (m: MetricKey, ym: number) => (v: number) => {
 
 export function runTip(x: Explorer, r: Run) {
   const tags = tagsOf(r, x.fields, x.usual, x.data.routers).map((t) => t.text).join(' · ')
-  return `${r.topo} (${r.mode})${tags ? `\n${tags}` : ''}\n${r.conc} sessions · sweep ${r.sweep}\n`
+  return `${r.topo} (${r.mode})${tags ? `\n${tags}` : ''}\n${loadLabel(r.conc)} · sweep ${r.sweep}\n`
     + `${fmt(r.tpg, 1)} tok/s/acc · ${fmt(r.pu, 1)} tok/s/user\nTPOT p99 ${fmt(r.itl, 1)} ms · TTFT p99 ${fmt(r.ttft, 0)} ms\n${r.ok ? 'meets every SLO' : 'misses an SLO'}`
 }
 
@@ -110,12 +110,12 @@ export function LoadRamp({ x }: { x: Explorer }) {
   const follow = followed(x)
   const focus = x.hover ?? x.picked
   return (
-    <svg className={`chart xf-chart${focus ? ' focused' : ''}`} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${METRIC[m].label} by sessions`}
+    <svg className={`chart xf-chart${focus ? ' focused' : ''}`} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${METRIC[m].label} by concurrency`}
       onPointerLeave={() => x.setHover(null)}>
       <YAxis ym={ym} py={py} label={`${METRIC[m].label}${hi ? '' : ' ms (lower is up)'}`} />
       <Backdrop onClick={x.resetCharts} />
       {loads.map((c) => <text key={c} x={px(c)} y={H - M.b + 13} textAnchor="middle" className="tick">{c}</text>)}
-      <text x={(M.l + W - M.r) / 2} y={H - 3} textAnchor="middle" className="axlabel">sessions (the spec’s loads)</text>
+      <text x={(M.l + W - M.r) / 2} y={H - 3} textAnchor="middle" className="axlabel">concurrency (the spec’s loads)</text>
       {slo !== null && <g className="xf-slo"><line x1={M.l} x2={W - M.r} y1={py(slo)} y2={py(slo)} /><text x={W - M.r} y={py(slo) - 4} textAnchor="end">SLO {x.data.slo[SLO_OF[m] as string]}</text></g>}
       {rs.map((r) => (
         <circle key={r.id} cx={px(r.conc) + jit(r.id)} cy={py(r[m] as number)} r={r.cfg === focus ? 3.2 : 1.8}
@@ -217,7 +217,7 @@ export function HoverLine({ x, idle }: { x: Explorer; idle: string }) {
   return (
     <p className={`xf-hoverline${best ? '' : ' idle'}`} aria-live="polite">
       {best
-        ? <><b className="mono">{best.topo}</b> {tagsOf(best, x.fields, x.usual, x.data.routers).map((t) => t.text).join(' · ')} · best {fmtMetric(y, best[y])} {METRIC[y].label} at {best.conc} sessions · click to filter</>
+        ? <><b className="mono">{best.topo}</b> {tagsOf(best, x.fields, x.usual, x.data.routers).map((t) => t.text).join(' · ')} · best {fmtMetric(y, best[y])} {METRIC[y].label} at {loadLabel(best.conc)} · click to filter</>
         : idle}
     </p>
   )

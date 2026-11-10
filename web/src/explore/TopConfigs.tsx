@@ -1,10 +1,11 @@
 // The top configs at the head of the page, ranked on the target. Tied configs fold into one card.
 import { useState } from 'react'
 import type { Explorer } from './useExplorer'
-import type { MetricKey } from './types'
-import { METRIC, METRIC_KEYS, fmtMetric, knobDiff } from './model'
+import type { MetricKey, Run } from './types'
+import { METRIC, METRIC_KEYS, fmtMetric, knobDiff, loadLabel, resolvedConfig, sweepLine } from './model'
 import type { BarMeasure } from './useExplorer'
 import { ConfigName } from '../components/ConfigName'
+import { REPO } from '../lib'
 
 export function Controls({ x }: { x: Explorer }) {
   const bars: [BarMeasure, string][] = [['best', 'best of the target'], ['pass', '% meeting SLO'], ['count', 'run count']]
@@ -18,6 +19,28 @@ export function Controls({ x }: { x: Explorer }) {
         <span className="xf-seg-l">bars show</span>
         {bars.map(([b, l]) => <button type="button" key={b} aria-pressed={x.bar === b} onClick={() => x.setBar(b)}>{l}</button>)}
       </div>
+    </div>
+  )
+}
+
+/** Under a card: the sweep that produced the config and its hypothesis, a link to that sweep in the spec, and the full configuration on request. */
+function Arm({ x, r }: { x: Explorer; r: Run }) {
+  const sweep = x.data.sweeps.find((s) => s.name === r.sweep)
+  const line = sweepLine(x.data.spec_yaml ?? '', r.sweep)
+  const spec = `${REPO}/blob/main/experiments/${encodeURIComponent(x.data.run_id)}.yaml${line ? `#L${line}` : ''}`
+  const cfg = resolvedConfig(r, x.data.fixed_engine, x.data.keys)
+  return (
+    <div className="xf-arm">
+      <p className="xf-arm-h"><span className="xf-sub">from sweep</span> <b className="mono">{r.sweep}</b></p>
+      {sweep?.narrative && <p className="xf-arm-hyp">{sweep.narrative}</p>}
+      <p className="xf-arm-links">
+        <a className="xf-armlink" href={spec} target="_blank" rel="noreferrer">this sweep in the spec ↗</a>
+        <button type="button" className="linkbtn" onClick={() => x.toggleValue('sweep', r.sweep)}>show only this sweep</button>
+      </p>
+      <details className="xf-arm-cfg">
+        <summary>full configuration</summary>
+        <dl>{cfg.map(([k, v]) => <div key={k}><dt className="mono">{k}</dt><dd className="mono">{v}</dd></div>)}</dl>
+      </details>
     </div>
   )
 }
@@ -45,8 +68,9 @@ export function TopConfigs({ x }: { x: Explorer }) {
               return keys.length > 2 ? `${keys.slice(0, 2).join(', ')} and ${keys.length - 2} more` : keys.join(' and ')
             }
             return (
-              <button type="button" key={r.cfg} className="xf-cfg" aria-pressed={x.picked === r.cfg} onClick={() => x.pick(r.cfg)}>
-                <span className="xf-cfg-rank"><b>{i + 1}</b><span className={`xf-mode${r.mode === 'P/D' ? ' pd' : ''}`}>{r.mode}</span><span className="xf-sub">{r.conc} sessions</span></span>
+              <div key={r.cfg} className="xf-cfgwrap">
+              <button type="button" className="xf-cfg" aria-pressed={x.picked === r.cfg} onClick={() => x.pick(r.cfg)}>
+                <span className="xf-cfg-rank"><b>{i + 1}</b><span className={`xf-mode${r.mode === 'P/D' ? ' pd' : ''}`}>{r.mode}</span><span className="xf-sub">{loadLabel(r.conc)}</span></span>
                 <ConfigName label={r.topo} variant={x.caption(r)} reserve />
                 <span className="xf-metrics">
                   <span className="xf-hero">
@@ -64,6 +88,8 @@ export function TopConfigs({ x }: { x: Explorer }) {
                 )}
                 <span className="xf-cfg-act" aria-hidden="true">{x.picked === r.cfg ? 'Showing this config · click to clear' : 'Filter the page to this config →'}</span>
               </button>
+              <Arm x={x} r={r} />
+              </div>
             )
           })}
         </div>

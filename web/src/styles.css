@@ -307,6 +307,19 @@ ol.sb-how b{color:var(--ink);font-weight:600}
 .xf-top-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
 .xf-top-f{display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;margin-top:8px}
 .xf-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.xf-cfgwrap{display:flex;flex-direction:column;gap:8px;min-width:0}
+.xf-cfgwrap>.xf-cfg{flex:1}
+.xf-arm{font-size:12.5px;color:var(--muted);display:flex;flex-direction:column;gap:5px;padding:0 2px}
+.xf-arm p{margin:0}
+.xf-arm-h b{color:var(--ink)}
+.xf-arm-hyp{color:var(--ink)}
+.xf-arm-links{display:flex;gap:14px;flex-wrap:wrap}
+.xf-armlink{color:var(--accent-ink)}
+.xf-arm-cfg summary{cursor:pointer;color:var(--accent-ink);font-weight:600}
+.xf-arm-cfg dl{margin:6px 0 0;display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:11.5px}
+.xf-arm-cfg dl div{display:contents}
+.xf-arm-cfg dt{color:var(--muted)}
+.xf-arm-cfg dd{margin:0;color:var(--ink);overflow-wrap:anywhere}
 @media (max-width:900px){.xf-cards{grid-template-columns:minmax(0,1fr)}}
 .xf-cfg{all:unset;box-sizing:border-box;cursor:pointer;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line-strong);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:9px;min-width:0;box-shadow:0 1px 2px rgba(23,28,26,.05)}
 .xf-cfg .xf-cfg-act{margin-top:auto}

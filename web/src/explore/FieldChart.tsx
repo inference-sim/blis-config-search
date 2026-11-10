@@ -1,6 +1,6 @@
 // One crossfilter field as bars: one bar per value, sized by the page's bar measure. Click to filter.
 import type { Explorer } from './useExplorer'
-import { METRIC, better, fmt, fmtMetric, poolOf, rankConfigs, sortValues, NA, bareValue, isNumeric } from './model'
+import { METRIC, better, fmt, loadLabel, fmtMetric, poolOf, rankConfigs, sortValues, NA, bareValue, isNumeric } from './model'
 
 interface Bar { v: string; n: number; ok: number; best: number | null; bestTopo: string; bestConc: number | null }
 
@@ -42,7 +42,7 @@ export function FieldChart({ x, k, title, help }: { x: Explorer; k: string; titl
   // every column gets the tag line when one has it, so the values stay on one row
   const tagged = bars.some((b) => bareValue(b.v) !== b.v)
   const tip = (b: Bar) => `${title} ${b.v}: ${b.n} runs in filter, ${b.ok} meet every SLO`
-    + (b.best !== null ? `; best ${fmtMetric(m, b.best)} ${METRIC[m].label} (${b.bestTopo}, ${b.bestConc} sessions)` : '')
+    + (b.best !== null ? `; best ${fmtMetric(m, b.best)} ${METRIC[m].label} (${b.bestTopo}, ${b.bestConc === null ? 'n/a' : loadLabel(b.bestConc)})` : '')
   const cls = (b: Bar, base: string) => [base, sel.includes(b.v) && 'on', sel.length && !sel.includes(b.v) && 'dim', b === win && 'win', !b.n && 'zero'].filter(Boolean).join(' ')
   const pool = poolOf(k)
 

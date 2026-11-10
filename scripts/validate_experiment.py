@@ -448,6 +448,67 @@ def scenario_identity_errors(sc, blis, catalog=None):
     return errs
 
 
+# What a workload file must state so a report stays reproducible (CFG-1, CFG-2): where the
+# corpus comes from, and its digest. The simulator checks the digest of the bytes it replays.
+SPEC_SOURCES = ("huggingface", "url")
+
+
+def workload_spec_errors(path, root=ROOT):
+    """Why the workload file at `path` cannot be a workload, else []. The file is read as the replay
+    block of a catalog workload entry: `corpus.sha256` and `corpus.source` (a Hugging Face dataset
+    and revision, or a URL) are required, so every report names the bytes it replayed."""
+    import yaml
+    full = os.path.realpath(os.path.join(root, path))
+    if not os.path.isabs(path) and not full.startswith(os.path.realpath(root) + os.sep):
+        return [f"scenario.workload_spec: {path!r} is outside this repository"]
+    if os.path.isabs(path):
+        return [f"scenario.workload_spec: {path!r} is an absolute path, which pins the spec to one "
+                f"machine -- use a path inside this repository, such as workloads/muse-cb-1m.yaml"]
+    if not os.path.isfile(full):
+        return [f"scenario.workload_spec: {path!r}: no such file in this repository"]
+    try:
+        with open(full, encoding="utf-8") as f:
+            doc = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError) as e:
+        return [f"scenario.workload_spec: {path!r}: {e}"]
+    if not isinstance(doc, dict):
+        return [f"scenario.workload_spec: {path!r} is not a mapping"]
+    errs = []
+    if not doc.get("scenario"):
+        errs.append(f"scenario.workload_spec: {path!r}: `scenario` (the harness scenario id) is required")
+    corpus = doc.get("corpus")
+    if not isinstance(corpus, dict):
+        return [f"scenario.workload_spec: {path!r} has no `corpus` mapping (source and sha256)"]
+    sha = corpus.get("sha256")
+    if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha):
+        errs.append(f"scenario.workload_spec: {path!r}: corpus.sha256 is required, 64 lowercase hex "
+                    f"digits -- a report must name the bytes it replayed")
+    src = corpus.get("source")
+    if not isinstance(src, dict) or not any(src.get(k) for k in SPEC_SOURCES):
+        errs.append(f"scenario.workload_spec: {path!r}: corpus.source is required, a Hugging Face "
+                    f"dataset and revision (huggingface, revision) or a url")
+    elif src.get("huggingface") and not src.get("revision"):
+        errs.append(f"scenario.workload_spec: {path!r}: corpus.source.revision is required with "
+                    f"huggingface -- a dataset's default branch moves")
+    return errs
+
+
+def workload_errors(sc, blis=None, root=ROOT):
+    """`workload` (a catalog name) or `workload_spec` (a file), one of them and never both."""
+    named, filed = sc.get("workload"), sc.get("workload_spec")
+    if named and filed:
+        return ["scenario: state `workload` or `workload_spec`, never both -- a workload comes from "
+                "the catalog or from a file"]
+    if not named and not filed:
+        return ["scenario.workload: required (a catalog name), or `workload_spec` (a file in this "
+                "repository)"]
+    if filed:
+        if not isinstance(filed, str):
+            return ["scenario.workload_spec: must be a path string"]
+        return workload_spec_errors(filed, root)
+    return []
+
+
 def cluster_errors(sc, blis=None, catalog=None):
     """`scenario.cluster` structure: a mapping of `fabric` (a non-empty string) and
     `gpus_per_node` (a positive integer).
@@ -535,9 +596,10 @@ def advisories(spec, path=None):
     # grace period and context filter from blis-catalog/workloads/<name>.yaml, and still refuses
     # a corpus whose bytes do not match -- so none of those belong in a spec.
     rep = ((spec.get("scenario") or {}).get("replay") or {})
+    # (A workload named by a file states these in the file, and the spec still must not.)
     for key in sorted(set(rep) & CATALOG_OWNED_REPLAY_FIELDS):
         notes.append(
-            f"scenario.replay.{key}: already stated by the catalog's workload descriptor, which "
+            f"scenario.replay.{key}: already stated by the workload's descriptor, which "
             f"the sweeper reads -- remove it rather than keeping a copy that can drift")
     corpus = rep.get("corpus")
     if isinstance(corpus, str) and os.path.isabs(corpus):
@@ -586,18 +648,19 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None):
 
     sc = spec.get("scenario")
     if not isinstance(sc, dict):
-        errs.append("scenario: required mapping (model, hardware, workload, gpus, concurrency)")
+        errs.append("scenario: required mapping (model, hardware, workload or workload_spec, gpus, concurrency)")
         sc = {}
     else:
-        known_sc = {"model", "hardware", "workload", "gpus", "slo", "concurrency", "seed",
-                    "engine", "replay", "cluster"}
+        known_sc = {"model", "hardware", "workload", "workload_spec", "gpus", "slo", "concurrency",
+                    "seed", "engine", "replay", "cluster"}
         for key in sc:
             if key not in known_sc:
                 errs.append(f"scenario.{key}: unknown key "
                             f"(allowed: {', '.join(sorted(known_sc))})")
-        for key in ("model", "hardware", "workload"):
+        for key in ("model", "hardware"):
             if not sc.get(key):
                 errs.append(f"scenario.{key}: required")
+        errs.extend(workload_errors(sc, blis))
         # Present AND real: a name the catalog does not define cannot run anywhere.
         errs.extend(scenario_identity_errors(sc, blis, catalog))
         errs.extend(cluster_errors(sc, blis, catalog))

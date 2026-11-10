@@ -9,7 +9,7 @@ import { OverviewSection } from './Overview'
 import { EngineSection, RoutingSection, TopologySection } from './Sections'
 import { RunsTable } from './RunsTable'
 import { OpenSetup, SetupButton, useSetupDialog } from './SetupDialog'
-import { METRIC, SLO_OF, TOPO_FIELDS, bareKey, layerOf, poolOf, sortValues } from './model'
+import { CONCURRENCY_NOTE, METRIC, SLO_OF, TOPO_FIELDS, bareKey, layerOf, loadLabel, poolOf, sortValues } from './model'
 import { catalogDoc } from '../lib'
 import { CatRef } from '../components/Coverage'
 import { CaveatBadge } from '../components/Reports'
@@ -92,7 +92,7 @@ function Body({ data }: { data: ExploreData }) {
 function fieldName(k: string): string {
   if (k === 'mode') return 'mode'
   if (k === 'sweep') return 'sweep'
-  if (k === 'conc') return 'sessions'
+  if (k === 'conc') return 'concurrency'
   if (k === 'router_config') return 'router'
   const t = TOPO_FIELDS.find((f) => f.key === k)
   const base = t ? t.part : bareKey(k)
@@ -103,7 +103,6 @@ function Rail({ x }: { x: X }) {
   const count = (layer: string) => x.fields.filter((k) => layerOf(k) === layer).length
   const active = Object.entries(x.sel).flatMap(([k, vs]) => vs.map((v) => [k, v] as const))
   const loads = sortValues([...new Set(x.runs.map((r) => String(r.conc)))])
-  const pool = x.shown('conc')
   const nav: [string, string, string | null, number | null][] = [
     ['sec-overview', 'Overview', null, null], ['sec-topology', 'Topology', 'topology', count('topology')],
     ['sec-routing', 'Routing', 'routing', count('routing')], ['sec-engine', 'vLLM engine', 'engine', count('engine')], ['sec-runs', 'Runs', null, null],
@@ -121,15 +120,15 @@ function Rail({ x }: { x: X }) {
       <div className="xf-active">
         {x.picked && <button type="button" className="xf-achip pick" onClick={() => x.pick(x.picked as string)}>showing a top config · clear ✕</button>}
         {active.length ? active.map(([k, v]) => (
-          <button type="button" key={`${k}=${v}`} className="xf-achip" onClick={() => x.toggleValue(k, v)}>{fieldName(k)} <b>{v}</b> ✕</button>
+          <button type="button" key={`${k}=${v}`} className="xf-achip" onClick={() => x.toggleValue(k, v)}>{fieldName(k)} <b>{k === 'conc' ? loadLabel(v) : v}</b> ✕</button>
         )) : <span className="xf-sub">No filters yet. Click bars in any section, or a top config.</span>}
       </div>
       <span className="xf-sub">{x.shown().length.toLocaleString('en-US')} of {x.runs.length.toLocaleString('en-US')} runs shown</span>
       <label className="xf-toggle"><input type="checkbox" checked={x.okOnly} onChange={(e) => x.setOkOnly(e.target.checked)} /> only runs that meet every SLO</label>
       <div className="xf-facet">
-        <span className="xf-facet-l">sessions</span>
+        <span className="xf-facet-l" title={CONCURRENCY_NOTE}>concurrency</span>
         <div className="xf-opts">{loads.map((v) => (
-          <button type="button" key={v} className="xf-chip" aria-pressed={(x.sel.conc ?? []).includes(v)} onClick={() => x.toggleValue('conc', v)}>{v}<small>{pool.filter((r) => String(r.conc) === v).length}</small></button>
+          <button type="button" key={v} className="xf-chip" aria-pressed={(x.sel.conc ?? []).includes(v)} onClick={() => x.toggleValue('conc', v)}>{loadLabel(v)}</button>
         ))}</div>
       </div>
       <p className="xf-sub xf-rail-note">Ranked on {METRIC[x.target].label}. Topology, routing and engine filters live in their sections.</p>

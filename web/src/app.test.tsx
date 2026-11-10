@@ -226,6 +226,44 @@ describe('report explorer page', () => {
     expect(cards()[0].querySelectorAll('.xf-kpi-l')).toHaveLength(4)
   })
 
+  it('writes the load as c<N> and labels the axis concurrency, with no bare "sessions" left', async () => {
+    page()
+    await waitFor(() => expect(cards().length).toBeGreaterThan(0))
+    expect(cards()[0].querySelector('.xf-cfg-rank .xf-sub')?.textContent).toBe('c64')
+    const text = document.body.textContent ?? ''
+    expect(text).not.toMatch(/\bsessions\b/)
+    // title and aria-label attributes are not text content, so read them too
+    const attrs = [...document.querySelectorAll('[title],[aria-label]')].map((e) => `${e.getAttribute('title') ?? ''} ${e.getAttribute('aria-label') ?? ''}`).join(' ')
+    expect(attrs.replace(/does not add new sessions/, '')).not.toMatch(/\bsessions\b/)
+    expect(attrs).toMatch(/\bc64\b/)
+    expect(document.querySelector('.xf-facet-l')?.textContent).toBe('concurrency')
+    expect(document.querySelector('.xf-facet-l')?.getAttribute('title')).toMatch(/session-tree lanes.*finite corpus/)
+    const chips = [...document.querySelectorAll('.xf-facet .xf-chip')]
+    expect(chips.map((c) => c.textContent)).toEqual(['c8', 'c64'])      // no run count beside a chip
+    expect([...document.querySelectorAll('.axlabel')].map((e) => e.textContent).join('|')).toMatch(/concurrency/)
+    fireEvent.click(chips[1])
+    expect([...document.querySelectorAll('.xf-achip')].map((b) => b.textContent)).toContain('concurrency c64 ✕')
+  })
+
+  it('names the sweep and hypothesis behind each card, links to it in the spec, and shows the full config on request', async () => {
+    render(<ScenarioPage runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16)]}
+      load={() => Promise.resolve({ ...FIXTURE, run_id: 'a', fixed_engine: { max_model_len: 262144 },
+        sweeps: FIXTURE.sweeps.map((s) => ({ ...s, narrative: `hypothesis of ${s.name}` })),
+        spec_yaml: 'name: a\nsweeps:\n  - name: colo\n    narrative: x\n  - name: pd\n    narrative: y\n' })} />)
+    await waitFor(() => expect(cards().length).toBeGreaterThan(0))
+    const arm = document.querySelector('.xf-arm') as Element
+    expect(arm.querySelector('.xf-arm-h b')?.textContent).toBe('colo')
+    expect(arm.querySelector('.xf-arm-hyp')?.textContent).toBe('hypothesis of colo')
+    expect(arm.querySelector('a.xf-armlink')?.getAttribute('href')).toMatch(/experiments\/a\.yaml#L3$/)
+    const details = arm.querySelector('details') as HTMLDetailsElement
+    expect(details.open).toBe(false)                                  // on request, not by default
+    const keys = [...details.querySelectorAll('dt')].map((e) => e.textContent)
+    expect(keys).toContain('max_model_len')
+    expect(keys).toContain('tp')
+    fireEvent.click(arm.querySelector('.linkbtn') as Element)
+    expect([...document.querySelectorAll('.xf-achip')].map((b) => b.textContent)).toContain('sweep colo ✕')
+  })
+
   it('re-ranks every view when the target changes', async () => {
     page()
     await waitFor(() => expect(cards().length).toBeGreaterThan(0))

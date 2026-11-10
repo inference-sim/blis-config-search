@@ -7,6 +7,7 @@ Hermetic: no BLIS, no network. Everything here is a pure function of a spec, whi
 the property that lets CI run the sweeper unattended -- so these tests are the guard on it.
 """
 import copy
+import yaml
 import glob
 import json
 import os
@@ -912,6 +913,127 @@ class NarrativeLength(unittest.TestCase):
                     f"move the rationale into a # comment")
 
 
+class WorkloadByFile(unittest.TestCase):
+    """A spec names its workload by catalog name or by a file, never both (CFG-1, CFG-2)."""
+
+    GOOD = {"scenario": "inferencex-agentx-mvp",
+            "corpus": {"source": {"huggingface": "org/ds", "revision": "a" * 40, "file": "t.jsonl"},
+                       "sha256": "b" * 64},
+            "benchmark_duration_s": 900, "grace_period_s": 30, "max_context_length": "max_model_len",
+            "category": "coding", "thinking": "on"}
+
+    def write(self, doc, name="wl.yaml"):
+        d = tempfile.mkdtemp(dir=E.ROOT)
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        with open(os.path.join(d, name), "w") as f:
+            yaml.safe_dump(doc, f)
+        return os.path.relpath(os.path.join(d, name), E.ROOT)
+
+    def with_file(self, path, **sc):
+        doc = spec()
+        del doc["scenario"]["workload"]
+        doc["scenario"]["workload_spec"] = path
+        doc["scenario"].update(sc)
+        return doc
+
+    def test_a_workload_file_validates(self):
+        self.assertEqual([], V.validate(self.with_file(self.write(self.GOOD)), BLIS, ROUTING))
+
+    def test_both_a_name_and_a_file_is_refused(self):
+        doc = self.with_file(self.write(self.GOOD), workload="chatbot")
+        errs = V.validate(doc, BLIS, ROUTING)
+        self.assertTrue(any("never both" in e for e in errs), errs)
+
+    def test_neither_is_refused(self):
+        doc = spec()
+        del doc["scenario"]["workload"]
+        errs = V.validate(doc, BLIS, ROUTING)
+        self.assertTrue(any("scenario.workload: required" in e for e in errs), errs)
+
+    def test_a_file_with_no_sha256_is_refused(self):
+        bad = copy.deepcopy(self.GOOD)
+        del bad["corpus"]["sha256"]
+        errs = V.validate(self.with_file(self.write(bad)), BLIS, ROUTING)
+        self.assertTrue(any("corpus.sha256 is required" in e for e in errs), errs)
+        bad["corpus"]["sha256"] = "B" * 64            # not lowercase hex
+        errs = V.validate(self.with_file(self.write(bad)), BLIS, ROUTING)
+        self.assertTrue(any("corpus.sha256 is required" in e for e in errs), errs)
+
+    def test_a_file_with_no_source_or_an_unpinned_dataset_is_refused(self):
+        bad = copy.deepcopy(self.GOOD)
+        del bad["corpus"]["source"]
+        self.assertTrue(any("corpus.source is required" in e
+                            for e in V.validate(self.with_file(self.write(bad)), BLIS, ROUTING)))
+        bad = copy.deepcopy(self.GOOD)
+        del bad["corpus"]["source"]["revision"]
+        self.assertTrue(any("source.revision is required" in e
+                            for e in V.validate(self.with_file(self.write(bad)), BLIS, ROUTING)))
+        bad["corpus"]["source"] = {"url": "https://example.org/t.jsonl"}
+        self.assertEqual([], V.validate(self.with_file(self.write(bad)), BLIS, ROUTING))
+
+    def test_a_missing_or_absolute_path_is_refused(self):
+        errs = V.validate(self.with_file("workloads/none.yaml"), BLIS, ROUTING)
+        self.assertTrue(any("no such file" in e for e in errs), errs)
+        errs = V.validate(self.with_file("/etc/hosts"), BLIS, ROUTING)
+        self.assertTrue(any("absolute path" in e for e in errs), errs)
+
+    def test_the_schema_requires_exactly_one(self):
+        import jsonschema
+        with open(os.path.join(E.ROOT, "experiments", "schema.json"), encoding="utf-8") as f:
+            schema = json.load(f)
+        v = jsonschema.Draft202012Validator(schema)
+        ok = self.with_file("workloads/x.yaml")
+        self.assertTrue(v.is_valid(ok))
+        both = self.with_file("workloads/x.yaml", workload="chatbot")
+        self.assertFalse(v.is_valid(both))
+        none = spec()
+        del none["scenario"]["workload"]
+        self.assertFalse(v.is_valid(none))
+
+    def test_the_replay_comes_from_the_file_and_records_its_sha256_and_document(self):
+        path = self.write(self.GOOD)
+        r = E.resolve_workload_spec(path, E.load_workload_spec(path),
+                                    {"corpus": "/c/t.jsonl", "grace_period": "inf"}, dry_run=True)
+        self.assertEqual("b" * 64, r["corpus_sha256"])
+        self.assertEqual("900s", r["benchmark_duration"])
+        self.assertEqual("inf", r["grace_period"])            # the spec's one deliberate override
+        self.assertEqual("max_model_len", r["max_context_length"])
+        self.assertEqual(self.GOOD, r["workload_document"])
+        self.assertEqual(E.workload_spec_sha256(path), r["workload_spec_sha256"])
+        self.assertEqual(64, len(r["workload_spec_sha256"]))
+
+    def test_the_command_passes_the_file_and_the_catalog_is_not_read(self):
+        path = self.write(self.GOOD)
+        r = E.resolve_workload_spec(path, E.load_workload_spec(path), {"corpus": "/c/t.jsonl"})
+        replay = {k: v for k, v in r.items() if k not in E.RECORD_ONLY_REPLAY}
+        cmd = run_blis.build_replay_cmd("/b", None, None, "/sc", "s.yaml", 42, None, {}, replay)
+        self.assertEqual(r["workload_spec"], cmd[cmd.index("--workload-spec") + 1])
+        self.assertEqual("b" * 64, cmd[cmd.index("--corpus-sha256") + 1])
+        self.assertNotIn("workload_document", " ".join(cmd))
+        plain = run_blis.build_replay_cmd("/b", None, None, "/sc", "s.yaml", 42, None, {},
+                                          {"scenario": "x", "corpus": "/c", "corpus_sha256": "a"})
+        self.assertNotIn("--workload-spec", plain)
+
+    def test_the_report_labels_the_workload_not_in_the_catalog(self):
+        path = self.write(self.GOOD)
+        doc = self.with_file(path, replay={"corpus": ".corpus/t.jsonl"})
+        rep = E.run_experiment(doc, BLIS, None, None, "/nonexistent", dry_run=True, verbose=False)
+        wl = rep["scenario"]["workload_spec"]
+        self.assertEqual((wl["catalog"], wl["label"]), (False, "custom (not in the catalog)"))
+        self.assertEqual(E.workload_spec_sha256(path), wl["sha256"])
+        self.assertEqual(self.GOOD, wl["document"])
+        self.assertTrue(rep["scenario"]["workload"].startswith("custom (not in the catalog)"))
+        self.assertNotIn("workload_document", rep["scenario"]["replay"])
+        sc = E._scenario_json(doc, rep)
+        self.assertEqual(wl, sc["workload"]["workload_spec"])
+        meta = E._report_json(rep)
+        self.assertIn("custom (not in the catalog)", meta["hero"][0]["html"] + meta["standfirst"])
+
+    def test_a_catalog_workload_has_no_workload_spec_block(self):
+        rep = E.run_experiment(spec(), BLIS, None, None, "/nonexistent", dry_run=True, verbose=False)
+        self.assertIsNone(rep["scenario"]["workload_spec"])
+
+
 class ReplayComesFromTheCatalog(unittest.TestCase):
     """A replay workload is fully described by blis-catalog/workloads/<name>.yaml.
 
@@ -1073,6 +1195,33 @@ class CorpusProvisioning(unittest.TestCase):
         self.assertIn(source["revision"], url, "the pinned revision must appear in the URL")
         self.assertNotIn("/main/", url, "a branch name would not be reproducible")
         self.assertEqual(64, len(desc["corpus"]["sha256"]))
+
+    def test_a_spec_that_names_a_workload_file_is_fetched_from_that_files_corpus(self):
+        """The CI fetch step runs on every replay spec, including one with no catalog workload."""
+        import contextlib
+        import io
+        root = tempfile.mkdtemp(dir=E.ROOT)
+        self.addCleanup(__import__("shutil").rmtree, root, True)
+        rel = os.path.relpath(root, E.ROOT)
+        with open(os.path.join(root, "wl.yaml"), "w") as f:
+            yaml.safe_dump(WorkloadByFile.GOOD, f)
+        with open(os.path.join(root, "s.yaml"), "w") as f:
+            yaml.safe_dump({"scenario": {"workload_spec": os.path.join(rel, "wl.yaml"),
+                                         "replay": {"corpus": os.path.join(root, "c.jsonl")}}}, f)
+        seen = []
+        orig, argv = FC.fetch, sys.argv
+        FC.fetch = lambda dest, url, sha, token=None: seen.append((dest, url, sha))
+        sys.argv = ["fetch_corpus.py", os.path.join(root, "s.yaml")]
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(0, FC.main())
+        finally:
+            FC.fetch, sys.argv = orig, argv
+        g = WorkloadByFile.GOOD["corpus"]
+        self.assertEqual(1, len(seen))
+        self.assertEqual("b" * 64, seen[0][2])
+        self.assertIn(g["source"]["revision"], seen[0][1])      # the pinned revision, not a branch
+        self.assertIn(g["source"]["huggingface"], seen[0][1])
 
     def test_a_digest_mismatch_is_refused_and_leaves_nothing_behind(self):
         """A truncated transfer must never be renamed into place as the corpus."""
@@ -1834,7 +1983,7 @@ class DryRunPlan(unittest.TestCase):
         """The narrative seam must carry the spec's PRE-RUN hypothesis beside the outcome; this
         path has no LLM, so it must quote rather than invent."""
         report = {
-            "name": "x", "description": "",
+            "name": "x", "description": "", "basis": "measured_window", "scope": "cluster",
             "scenario": {"model": "m", "hardware": "h100", "workload": "chatbot", "gpus": 8,
                          "concurrency": [4], "seed": 42, "replay": None},
             "totals": {"configs": 1, "runs": 1, "servable": 1},
@@ -1857,6 +2006,7 @@ class DryRunPlan(unittest.TestCase):
     def test_report_json_states_when_nothing_was_servable(self):
         report = {
             "name": "x", "description": "", "totals": {"configs": 1, "runs": 1, "servable": 0},
+            "basis": "measured_window", "scope": "cluster",
             "scenario": {"model": "m", "hardware": "h100", "workload": "chatbot", "gpus": 8,
                          "concurrency": [4], "seed": 42, "replay": None},
             "sweeps": [{"name": "s", "narrative": "", "configs": 1, "runs": 1, "dropped": [],
@@ -2122,14 +2272,46 @@ class ProvenanceSplit(unittest.TestCase):
         self.assertIn("distinct resolved stacks", report.provenance_split(stacks))
 
 
-class PerUserRateUnderDrafting(unittest.TestCase):
-    """Under speculative decoding BLIS logs ITL per VERIFICATION STEP, and a step emits AL tokens,
-    so the naive 1000/ITL is a step rate. report._per_user_rate must return the AL-scaled per-token
-    rate, withhold it when AL is unknown, and give the direct rate without drafting -- the one
-    definition _feasible also judges on. (Ported from the retired test_report.py, issue #69, and
-    rewritten to call the kept helper directly rather than the removed build_records.)"""
+    def test_a_ledger_that_mixes_bases_is_flagged_and_a_uniform_one_is_not(self):
+        import report
+        m = {"tokens_per_sec": 1.0}
+        old = {"cmd": ["blis", "run", "--seed", "42"], "metrics": m}          # written before the basis was recorded
+        new = {"cmd": ["blis", "run", "--seed", "42"], "basis": "measured_window", "metrics": m}
+        self.assertEqual("", report.provenance_split([old, old]))
+        self.assertEqual("", report.provenance_split([new, new]))
+        self.assertIn("mix bases", report.provenance_split([old, new]))
+        # An error row never produced metrics, so it has no basis to disagree about.
+        err = {"cmd": None, "error": "unsupported config: x", "metrics": {}}
+        ok = dict(new, metrics={"tokens_per_sec": 1.0})
+        self.assertEqual("", report.provenance_split([ok, err, ok]))
+        self.assertIn("mix bases", report.provenance_split([ok, dict(old, metrics={"tokens_per_sec": 1.0})]))
+        self.assertIn("unrecorded", report.provenance_split([old, new]))
 
-    ITL = 32.995
+
+class BasisAndScope(unittest.TestCase):
+    """A report states the basis and scope of every ranked figure (CFG-4, DEV-8)."""
+
+    def test_the_narrative_and_the_scenario_state_both(self):
+        report = {"name": "x", "description": "", "totals": {"configs": 1, "runs": 1, "servable": 0},
+                  "scenario": {"model": "m", "hardware": "h", "workload": "w", "gpus": 8, "seed": 42,
+                               "concurrency": [4], "replay": None},
+                  "sweeps": [], "best_overall": None, "basis": "measured_window",
+                  "scope": "cluster; worst instance for TTFT and end-to-end gates",
+                  "interactivity_floor": {}, "objective": "o", "pinned_stack": {}}
+        meta = E._report_json(report)["meta"]
+        self.assertIn("basis: measured window", meta)
+        self.assertTrue(any(m.startswith("scope: cluster") for m in meta))
+        sc = E._scenario_json({}, report)
+        self.assertEqual((sc["basis"], sc["scope"]), (report["basis"], report["scope"]))
+
+
+class PerUserRateUnderDrafting(unittest.TestCase):
+    """The per-user rate is 1000 over the worst p99 time per output token, drafting or not. TPOT is
+    per request and per TOKEN, so it already holds what speculation gains: the AL factor the engine's
+    per-STEP interval needed is gone, and an unknown acceptance withholds nothing. (Rewritten for the
+    registry's per-request TPOT gate; the acceptance-scaled rate belonged to the step interval.)"""
+
+    TPOT = 10.0
 
     def _run(self, *, k=0, al=None):
         dep = {"parallel": {"tp": 4}, "num_instances": 1, "gpus": 4,
@@ -2139,35 +2321,27 @@ class PerUserRateUnderDrafting(unittest.TestCase):
             if al:
                 dep["acceptance"] = {"acceptance_length": al, "source": "test (b200)"}
         return {"concurrency": 8, "config": {"tp": 4}, "deployment": dep, "returncode": 0,
-                "metrics": {"tokens_per_sec": 1041.5, "itl_p99_ms": self.ITL,
+                "metrics": {"tokens_per_sec": 1041.5, "itl_p99_ms": self.TPOT, "tpot_p99_ms": self.TPOT,
                             "injected_requests": 40, "completed_requests": 40}}
 
     def test_no_drafting_uses_the_direct_rate(self):
         import report
         pu, basis = report._per_user_rate(self._run())
-        self.assertAlmostEqual(pu, 1000 / self.ITL, places=1)
+        self.assertAlmostEqual(pu, 1000 / self.TPOT, places=1)
         self.assertEqual(basis, "")
 
-    def test_drafting_with_acceptance_scales_by_al(self):
+    def test_drafting_is_not_scaled_by_the_acceptance_length(self):
         import report
-        pu, basis = report._per_user_rate(self._run(k=5, al=3.51))
-        self.assertAlmostEqual(pu, 3.51 * 1000 / self.ITL, places=1)
-        self.assertEqual(basis, "derived-from-acceptance")
+        for al in (3.51, None):
+            pu, basis = report._per_user_rate(self._run(k=5, al=al))
+            self.assertAlmostEqual(pu, 1000 / self.TPOT, places=1)
+            self.assertEqual(basis, "")
 
-    def test_the_derived_rate_is_above_the_naive_one(self):
-        """The whole point: the naive axis would reject this config against a 50 tok/s/user floor
-        while the correct one clears it comfortably."""
-        import report
-        pu, _ = report._per_user_rate(self._run(k=5, al=3.51))
-        self.assertLess(1000 / self.ITL, 50)      # naive: looks like a violation
-        self.assertGreater(pu, 50)                # derived: clears the floor
-
-    def test_drafting_without_acceptance_withholds_the_rate(self):
-        """An unknown acceptance factor means an unknown multiple -- publish nothing."""
+    def test_an_unknown_acceptance_withholds_nothing(self):
         import report
         pu, basis = report._per_user_rate(self._run(k=5, al=None))
-        self.assertIsNone(pu)
-        self.assertEqual(basis, "step-estimate-withheld")
+        self.assertIsNotNone(pu)
+        self.assertEqual(basis, "")
 
 
 class ReportSchemaDoc(unittest.TestCase):

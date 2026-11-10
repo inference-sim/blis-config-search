@@ -286,8 +286,14 @@ def provenance_split(runs):
     each row recorded. A split in either means the rows are not comparable, and the report must say
     so rather than presenting a matched-load table across the boundary.
     """
-    seeds, stacks = set(), set()
+    seeds, stacks, bases = set(), set(), set()
     for r in runs:
+        # A record written before the basis was recorded was ranked on the whole run; a new one on
+        # the measured window. Figures on the two are different populations (DEV-8).
+        # Only a run that produced metrics has a basis; an error row (refused config, failed or
+        # invalid Result) has none to disagree about.
+        if r.get("metrics"):
+            bases.add(r.get("basis") or "unrecorded")
         cmd = r.get("cmd") or []
         if "--seed" in cmd:
             try:
@@ -304,4 +310,7 @@ def provenance_split(runs):
     if len(stacks) > 1:
         issues.append(f"runs span {len(stacks)} distinct resolved stacks: they were not priced by "
                       f"one cost model")
+    if len(bases) > 1:
+        issues.append(f"runs mix bases ({sorted(bases)}): a whole-run figure and a measured-window "
+                      f"figure are different populations and are never compared (DEV-8)")
     return "; ".join(issues)

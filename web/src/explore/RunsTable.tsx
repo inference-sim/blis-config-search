@@ -27,7 +27,7 @@ export function loadCommands(runId: string): Promise<Commands> {
 
 const PAGE = 50
 const COLS: { k: keyof Run; label: string; digits: number }[] = [
-  { k: 'conc', label: 'sessions', digits: 0 },
+  { k: 'conc', label: 'concurrency', digits: 0 },
   { k: 'tpg', label: METRIC.tpg.short, digits: 1 },
   { k: 'cl', label: METRIC.cl.short, digits: 0 },
   { k: 'pu', label: METRIC.pu.short, digits: 1 },

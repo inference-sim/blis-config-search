@@ -262,6 +262,29 @@ and is a no-op once the corpus is there — so `run-experiment.yml` runs it on e
 whose workload is a generated shape needs nothing and the script says so. `.corpus/` is
 gitignored; the corpus is 568 MB and deliberately not vendored.
 
+### A workload the catalog does not have: `workload_spec`
+
+A spec names its workload by catalog name (`workload:`) or by a file in this repository
+(`workload_spec:`), **never both**. The file is the `replay:` block of a catalog workload entry, and
+the sweeper passes it to `blis replay --workload-spec`:
+
+A complete example is `examples/custom-workload-example.yaml` (kept outside `experiments/`, which CI runs).
+
+```yaml
+scenario:
+  workload_spec: workloads/agentx-uncapped-30s-grace.yaml
+  replay:
+    corpus: .corpus/traces.jsonl
+```
+
+The validator requires `corpus.sha256` (64 lowercase hex digits) and `corpus.source`, either a
+Hugging Face `huggingface` dataset with a pinned `revision`, or a `url`, so every report names the
+bytes it replayed; the simulator refuses a corpus whose digest differs. The path is relative to the
+repository root. The report labels the workload "custom (not in the catalog)" and records the
+file's own sha256 and the document as read, in `scenario.json` and `experiment.json`. A custom
+workload runs wherever its corpus can be fetched by its declared source and checked against the
+sha256.
+
 ## Which knobs apply to your model × hardware × workload
 
 ```
@@ -420,7 +443,7 @@ red-underline a spec CI accepts.
 
 | File | Contents |
 |---|---|
-| `runs.jsonl` | one row per BLIS run: config, deployment, metrics, per-instance metrics, errors |
+| `runs.jsonl` | one row per BLIS run: config, deployment, metrics (the measured window), the Result's measured-window metrics verbatim, a load-independent `config_key`, errors; see `report/schema.md` |
 | `experiment.json` | per-sweep results, narratives, the best config per sweep and overall |
 | `scenario.json` | the resolved scenario + pinned stack, as `report.py` / `build_gallery.py` read it |
 | `pareto.json` | finalists (one per sweep), the winner and the reason, and dropped combos |

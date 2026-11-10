@@ -478,14 +478,19 @@ def _run_context(entry, root, blis, catalog, corpus, corpus_cache, fields=None):
         local["corpus_cache"] = os.path.abspath(corpus_cache)
     replay = None
     if entry["replay"]:
-        replay = run_experiment.resolve_replay(sc["workload"], catalog,
-                                               dict(sc.get("replay") or {}, **local))
-        replay = {k: v for k, v in replay.items() if k != "_overrides"}
+        stated = dict(sc.get("replay") or {}, **local)
+        if sc.get("workload_spec"):
+            replay = run_experiment.resolve_workload_spec(
+                sc["workload_spec"], run_experiment.load_workload_spec(sc["workload_spec"]), stated)
+        else:
+            replay = run_experiment.resolve_replay(sc["workload"], catalog, stated)
+        replay = {k: v for k, v in replay.items() if k not in run_experiment.RECORD_ONLY_REPLAY}
     fabric = (sc.get("cluster") or {}).get("fabric") or run_experiment.run_blis.DEFAULT_FABRIC
     gpus_per_node = (sc.get("cluster") or {}).get("gpus_per_node")
     return (sc["model"], sc["hardware"],
             run_experiment.blis_cli.engine_release(blis, run_experiment.run_blis.ENGINE_KIND, fields),
-            sc["workload"], int(sc.get("seed", 42)), replay,
+            sc.get("workload") or run_experiment.workload_spec_label(sc["workload_spec"]),
+            int(sc.get("seed", 42)), replay,
             (lambda c: None) if replay else (lambda c: max(80, c * 4)), fabric, gpus_per_node)
 
 

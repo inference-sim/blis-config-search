@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import type { Explorer } from './useExplorer'
 import type { Plugin, RouterChain } from './types'
-import { METRIC, fmtMetric, overrideParts, rankConfigs, routerLabel } from './model'
+import { METRIC, fmtMetric, loadLabel, overrideParts, rankConfigs, routerLabel } from './model'
 
 const GLOSS: Record<string, string> = {
   'random-picker': 'picks any remaining instance at random',
@@ -154,7 +154,7 @@ function RouterDetail({ x, id, view, index, onClose }: { x: Explorer; id: string
       <p className="xf-router-sum">{r ? r.summary : 'No EndpointPickerConfig was recorded for these runs.'}</p>
       {r?.override && <p className="xf-sub">Generated from <span className="mono">{r.family}</span> with <mark className="xf-hot">{r.override}</mark>; the highlighted parameter is all that differs from its siblings.</p>}
       <div className="xf-router-stats">
-        {best ? <span>best <b>{fmtMetric(m, best[m])}</b> {METRIC[m].label} · {best.topo} · {best.conc} sessions</span> : <span>no run in this filter meets every SLO</span>}
+        {best ? <span>best <b>{fmtMetric(m, best[m])}</b> {METRIC[m].label} · {best.topo} · {loadLabel(best.conc)}</span> : <span>no run in this filter meets every SLO</span>}
         {delta !== null && <span>vs the default router, same serving mode: <b className={good ? 'good' : 'bad'}>{delta >= 0 ? '+' : '−'}{Math.abs(delta * 100).toFixed(0)}%</b></span>}
       </div>
       {r?.chain ? (view === 'yaml' ? <pre className="xf-yaml">{r.yaml}</pre> : view === 'steps' ? <Steps c={r.chain} hot={hot} /> : <Diagram c={r.chain} hot={hot} />)

@@ -32,6 +32,13 @@ HF_URL = "https://huggingface.co/datasets/{dataset}/resolve/{revision}/{path}"
 CHUNK = 1 << 20
 
 
+def _spec_descriptor(path):
+    """The replay block of a workload file named by `workload_spec` (relative to the repository)."""
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    with open(os.path.join(root, path)) as f:
+        return yaml.safe_load(f) or {}
+
+
 def _descriptor(workload, catalog):
     """The workload's replay descriptor, or None when the workload is a generated shape."""
     path = os.path.join(catalog, "workloads", workload + ".yaml")
@@ -94,12 +101,14 @@ def main():
     with open(args.spec) as f:
         spec = yaml.safe_load(f) or {}
     sc = spec.get("scenario") or {}
-    workload = sc.get("workload")
+    workload = sc.get("workload") or sc.get("workload_spec")
 
-    if not args.catalog:
-        raise SystemExit("--catalog (or $SUBSTRATE_CATALOG) is required to read the workload descriptor")
-
-    desc = _descriptor(workload, args.catalog)
+    if sc.get("workload_spec"):
+        desc = _spec_descriptor(sc["workload_spec"])
+    else:
+        if not args.catalog:
+            raise SystemExit("--catalog (or $SUBSTRATE_CATALOG) is required to read the workload descriptor")
+        desc = _descriptor(workload, args.catalog)
     if not desc:
         print(f"workload {workload!r} is a generated shape -- no corpus to fetch")
         return 0
@@ -114,6 +123,9 @@ def main():
     source = corpus.get("source") or {}
     dataset, revision = source.get("huggingface"), source.get("revision")
     want_sha = corpus.get("sha256")
+    if source.get("url") and want_sha and not dataset:
+        fetch(dest, source["url"], want_sha, token=os.environ.get("HF_TOKEN"))
+        return 0
     if not (dataset and revision and want_sha):
         raise SystemExit(
             f"the descriptor for {workload!r} does not name a dataset, a pinned revision and a "

@@ -18,6 +18,35 @@ export const METRIC_KEYS = Object.keys(METRIC) as MetricKey[]
 /** The SLO key in the spec that bounds a metric, when there is one. */
 export const SLO_OF: Partial<Record<MetricKey, string>> = { itl: 'itl_p99', ttft: 'ttft_p99' }
 
+/** The 1-based line of a sweep's `- name:` entry in the spec as written, or null when it is not there. */
+export function sweepLine(specYaml: string, sweep: string): number | null {
+  const lines = specYaml.split('\n')
+  let inSweeps = false
+  for (let i = 0; i < lines.length; i++) {
+    if (/^sweeps:\s*$/.test(lines[i])) inSweeps = true
+    else if (inSweeps && new RegExp(`^\\s*-\\s+name:\\s*["']?${sweep.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']?\\s*(#.*)?$`).test(lines[i])) return i + 1
+  }
+  return null
+}
+
+/** The whole resolved configuration of a run, one line per setting: what every run carries, then what this one set.
+ *  An unset knob shows the value it ran at when the report knows it. */
+export function resolvedConfig(r: Run, fixed: Record<string, unknown>, keys: string[]): [string, string][] {
+  const out: [string, string][] = Object.entries(fixed).map(([k, v]) => [k, typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v)])
+  for (const k of keys) {
+    const v = r.knobs[k]
+    if ((v === null || v === undefined || v === '') && r.defaults[k] === undefined) continue
+    out.push([k, disp(v, r.defaults[k])])
+  }
+  return out
+}
+
+/** How a load is written everywhere: c<N>, the concurrency notation. A bare count read as "N users". */
+export function loadLabel(n: number | string): string { return `c${n}` }
+
+/** What concurrency means for a replay: lanes, not users, so a load above the corpus resamples traces. */
+export const CONCURRENCY_NOTE = 'For a replay, concurrency is the number of session-tree lanes held busy, drawn from a finite corpus. A load above the number of traces in the corpus resamples traces; it does not add new sessions.'
+
 export function sloMs(v: string | undefined): number | null {
   const m = /^([\d.]+)\s*(us|ms|s)$/.exec(String(v ?? ''))
   return m ? Number(m[1]) * { us: 0.001, ms: 1, s: 1000 }[m[2] as 'us' | 'ms' | 's'] : null

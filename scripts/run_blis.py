@@ -542,12 +542,11 @@ def load_workload_shape(catalog, workload):
     return out
 
 
-# The acceptance length a drafting run resolved. BLIS applies it internally but does NOT echo it
-# in the metrics, and it is the number the per-user axis needs: under speculative decoding BLIS
-# logs ITL per VERIFICATION STEP, and one step emits AL tokens, so the per-token rate is
-# AL x 1000 / ITL_p99 and the naive 1000/ITL understates it by the full acceptance factor. On
-# deepseek-v4.1-flash at K=5 that is the difference between 27.7 tok/s/user (looks like a floor
-# violation) and 97.4 (the real rate) -- i.e. the naive axis would reject every drafting config.
+# The acceptance length a drafting run resolved. BLIS applies it internally but does NOT echo it in the
+# metrics. It used to be the number the per-user axis needed (the engine's step interval is per verification
+# step and one step emits AL tokens); the axis is now the per-request TPOT, which is per token, so the
+# record keeps it as information about the run (the report shows which acceptance priced a drafting arm),
+# not as a factor.
 #
 # The profile key is exactly what the run already states: (model, method, K, thinking, category),
 # so the same lookup BLIS does can be reproduced here and RECORDED on the row.
@@ -656,7 +655,9 @@ def worst_metric(run, key):
 
 
 def worst_itl_p99(run):
-    """The worst-instance p99 ITL -- `worst_metric` at the key the per-user rate is built on."""
+    """The worst-instance p99 time per output token -- `worst_metric` at the key the per-user rate is
+    built on. The slot is still called itl_p99_ms in the records, on the cluster figure and on each
+    instance's; the value is TPOT (see _MEASURED_KEYS and measured_instances)."""
     return worst_metric(run, "itl_p99_ms")
 
 
@@ -664,30 +665,20 @@ def per_user_rate(run):
     """THE per-user token rate for a recorded run -- the one definition the search, the report's
     feasibility test and the displayed number all use (namasl review #2).
 
-    Two things make this more than 1000/ITL:
+    The rate is 1000 / the worst p99 time per output token. TPOT is per request and per TOKEN, so what
+    speculation gains is already in it: there is no acceptance factor to apply (the engine's decode-step
+    interval, which was per step and needed one, is no longer the gate). The basis is the WORST
+    INSTANCE, not the aggregate, because that is what the floor promises every user. Scoring the
+    displayed rate on the aggregate while testing feasibility on the worst instance is how a row came
+    to be shown at 101.9 tok/s/user and simultaneously marked infeasible at 31.8 ms.
 
-    * Under speculative decoding BLIS reports the ITL of a VERIFICATION STEP, and one step emits
-      the ACCEPTANCE LENGTH of tokens. The per-TOKEN rate is therefore AL x 1000/ITL; the naive
-      form understates a drafting arm by the whole acceptance factor.
-    * The basis is the WORST INSTANCE, not the aggregate, because that is what the floor promises
-      every user. Scoring the displayed rate on the aggregate while testing feasibility on the
-      worst instance is how a row came to be shown at 101.9 tok/s/user and simultaneously marked
-      infeasible at 31.8 ms ITL.
-
-    Returns (rate_or_None, basis, itl_used) where basis is "" for a direct rate,
-    "derived-from-acceptance" for an AL-scaled one, and "step-estimate-withheld" when drafting is
-    on and the acceptance is unknown -- an unknown multiple is never published as a number.
+    Returns (rate_or_None, basis, tpot_used); basis is always "" (a direct rate), kept so callers need
+    no change.
     """
-    itl, missing = worst_itl_p99(run)
-    if missing or not itl:
+    tpot, missing = worst_itl_p99(run)
+    if missing or not tpot:
         return None, "", None
-    mtp = draft_depth(run)
-    if mtp:
-        al = run_acceptance(run)
-        if al is None:
-            return None, "step-estimate-withheld", itl
-        return al * 1000.0 / itl, "derived-from-acceptance", itl
-    return 1000.0 / itl, "", itl
+    return 1000.0 / tpot, "", tpot
 
 
 _SPEC_CACHE = {}
@@ -871,78 +862,194 @@ def _result_doc(stdout):
     return None
 
 
-# The legacy MetricsOutput key -> where the same number lives in a v0.15.0 Result document.
-#
-# `engine.cluster.whole_run` is the WHOLE RUN, which is what every earlier pin's stdout reported
-# and what the committed ledgers therefore hold; top-level `metrics` is the MEASURED WINDOW, a
-# different population (result_build.go standardMetrics). Mixing the two would make this bump a
-# silent re-baselining of every latency in the repo, so the whole-run block is the source and the
-# measured window is left to the Result document's own readers.
-_WHOLE_RUN_KEYS = {k: k for k in ("tokens_per_sec", "responses_per_sec",
-                                   "ttft_mean_ms", "ttft_p90_ms", "ttft_p95_ms", "ttft_p99_ms",
-                                   "e2e_mean_ms", "e2e_p90_ms", "e2e_p95_ms", "e2e_p99_ms")}
+# What the report ranks and gates on is the MEASURED WINDOW (CFG-4, DEV-8): the Result's top-level
+# `metrics`, each figure {value, samples}. The whole run includes warm-up and the drain, and the two
+# bases are never mixed. `engine.cluster.whole_run` and the per-instance engine blocks are whole-run;
+# nothing here reads them (test_run_blis.MeasuredWindow pins that).
+BASIS = "measured_window"
 
-# itl_* was RENAMED to step_interval_*, not dropped: result_inputs.go fills whole_run's
-# step_interval_* from whole.ITL*Ms, the very fields MetricsOutput's itl_* keys held ("the
-# step-interval series the legacy itl_* keys held"). So this is a rename to follow, NOT the
-# top-level metrics.itl_* -- those are FormulaTPOTExclFirst, per-request TPOT over the measured
-# window, a genuinely different measurement. Measured on one Muse run: whole-run
-# step_interval_p99 294.03 ms against measured-window itl_p99 33.87 ms, ~9x apart because a step
-# serves the whole batch. Reading the per-request figure into itl_p99_ms would silently rebase
-# every SLO verdict and every per-user rate in the repo against 12 committed reports. The same
-# holds for the step_interval_* on `cluster` itself: result_inputs.go fills that copy from `sum`
-# (the measured window), so it is not a fallback for whole_run's either.
-_ITL_FROM_STEP_INTERVAL = {"itl_mean_ms": "step_interval_mean_ms", "itl_p90_ms": "step_interval_p90_ms",
-                           "itl_p95_ms": "step_interval_p95_ms", "itl_p99_ms": "step_interval_p99_ms"}
+# Result schema versions. Up to version 2 a figure is {value, samples} and the cluster is implied.
+# Version 3 (blis-substrate layer 10, result.Figure) makes `scope` required and adds `member`,
+# `aggregate` and `over`: a figure at a pool or an instance, or an aggregate of narrower figures, is a
+# different figure. This module ranks on the cluster figure only, so from version 3 it refuses a figure
+# that is not cluster scope with no member, aggregate or over. The check is keyed on the version the
+# document states, so it lights up with the pin bump to a simulator that writes version 3 and does
+# nothing before it (test_run_blis.FigureForms). A version this module has not read is refused.
+FIGURE_SCOPE_FROM_SCHEMA = 3
+READ_RESULT_SCHEMAS = (1, 2, 3)      # 1: the fixtures' string "1"; 2: the pinned release; 3: layer 10
+FIGURE_FORM_FIELDS = ("member", "aggregate", "over")
 
-# Counters that moved out of the metrics dict into the document's own `requests` block, under
-# the Result's names (generated, queued_at_horizon, in_flight_at_horizon). _completion_issue reads all five, so without this remapping an incomplete or
-# overloaded run is ranked as a clean capacity point.
+
+def result_schema_version(doc):
+    """The Result's schema_version as an int, or None when it states none or not a number."""
+    v = doc.get("schema_version")
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def figure_form_problems(doc):
+    """Why the Result's figures cannot be ranked on, or []: a schema version this module has not read,
+    or (from version 3) a figure it reads that is not cluster scope with no member, aggregate or over.
+    A Result of version 2 or earlier carries no scope and is read as the cluster figure, as before."""
+    version = result_schema_version(doc)
+    if version is None:
+        return []
+    if version not in READ_RESULT_SCHEMAS:
+        return [f"Result schema_version {version} is not one this runner reads {READ_RESULT_SCHEMAS}"]
+    if version < FIGURE_SCOPE_FROM_SCHEMA:
+        return []
+    bad = []
+    measured = doc.get("metrics") if isinstance(doc.get("metrics"), dict) else {}
+    for name in sorted(set(_MEASURED_KEYS.values())):
+        entry = measured.get(name)
+        if not isinstance(entry, dict):
+            continue
+        extra = [k for k in FIGURE_FORM_FIELDS if entry.get(k) not in (None, "", [])]
+        if entry.get("scope") != "cluster" or extra:
+            what = f"scope {entry.get('scope')!r}" + "".join(f", {k} {entry[k]!r}" for k in extra)
+            bad.append(f"{name} is not a cluster figure ({what})")
+    return bad
+
+
+# The aggregate behind the feasibility test of a latency SLO: the max, over the cluster figure and every
+# instance's, of each p99 (worst_metric). Stated on the report so the figure that gates a row is named
+# in the registry's terms: aggregate max, over instances.
+FEASIBILITY_AGGREGATE = {"aggregate": "max", "over": "instance", "metrics": ["ttft_p99_ms", "e2e_p99_ms", "itl_p99_ms"]}
+
+# The legacy flat key the rest of the module reads -> the Result's measured-window metric.
+_MEASURED_KEYS = {"tokens_per_sec": "output_tok_s", "responses_per_sec": "request_throughput",
+                  "ttft_mean_ms": "ttft_mean_ms", "ttft_p90_ms": "ttft_p90_ms",
+                  "ttft_p95_ms": "ttft_p95_ms", "ttft_p99_ms": "ttft_p99_ms",
+                  "e2e_mean_ms": "e2e_mean_ms", "e2e_p90_ms": "e2e_p90_ms",
+                  "e2e_p95_ms": "e2e_p95_ms", "e2e_p99_ms": "e2e_p99_ms",
+                  # The interactivity gate is the registry's per-request time per output token, tpot_*
+                  # ((E2E - TTFT) / (tokens - 1) of each request, a per-TOKEN figure that already holds
+                  # what speculation gains), not the engine's decode-step interval, which is per STEP
+                  # (DEV-8, #92). The legacy `itl_*` slots keep their names for the ledgers and the pages
+                  # and now hold the same TPOT values; the registry's pooled `itl_*` is a different
+                  # population (all inter-token gaps) the pinned simulator does not compute.
+                  "tpot_mean_ms": "tpot_mean_ms", "tpot_p50_ms": "tpot_p50_ms", "tpot_p90_ms": "tpot_p90_ms",
+                  "tpot_p95_ms": "tpot_p95_ms", "tpot_p99_ms": "tpot_p99_ms",
+                  "itl_mean_ms": "tpot_mean_ms", "itl_p90_ms": "tpot_p90_ms",
+                  "itl_p95_ms": "tpot_p95_ms", "itl_p99_ms": "tpot_p99_ms",
+                  "preemption_count": "preemptions"}
+
+# Counters that live in the document's own `requests` block, under the Result's names.
 _REQUEST_COUNTS = {"injected_requests": "generated", "completed_requests": "completed",
                    "still_queued": "queued_at_horizon", "still_running": "in_flight_at_horizon",
                    "timed_out_requests": "timed_out", "length_capped_requests": "length_capped"}
 
-# Counters that stayed on the cluster aggregate but outside whole_run.
-_CLUSTER_KEYS = {**{k: k for k in ("total_input_tokens", "total_output_tokens",
-                                    "scheduling_delay_p99_ms", "kv_allocation_failures")},
-                 "preemption_count": "preemptions",
-                 "vllm_estimated_duration_s": "simulated_duration_s"}
+# Run totals on the cluster aggregate that are counts, not rates: no window changes what they mean.
+_CLUSTER_KEYS = {"kv_allocation_failures": "kv_allocation_failures"}
 
 
 def _engine_report(doc):
-    """The engine's own report in a Result: `reports.engine` (cluster aggregate, instances).
-
-    The top-level `engine` of a schema 2 Result names the engine ({kind, version}) and nothing
-    else; the aggregate and the per-instance rows moved under `reports`, which carries each
-    component's report as that component made it.
-    """
+    """The engine's own report in a Result: `reports.engine` (cluster aggregate, instances)."""
     return ((doc.get("reports") or {}).get("engine")) or {}
 
 
-def _flatten_result(doc):
-    """A v0.15.0 Result document as the flat MetricsOutput dict the rest of this module reads.
+def _figure(entry):
+    """The number in a Result metric, {value, samples}; None when the metric has no value."""
+    v = entry.get("value") if isinstance(entry, dict) else entry
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
-    The aggregate was restructured by the bump while `engine.instances` kept emitting a verbatim
-    MetricsOutput per instance, so WITHOUT this a single-instance run (no instances block) has no
-    itl_* anywhere and every ITL SLO fails as "declared but not measured", while a multi-instance
-    run resolves normally off the per-instance rows. That asymmetry is why it reads as a finding
-    rather than a crash: a sweep reports 0 servable, or judges only its multi-instance arms.
+
+def _flatten_result(doc):
+    """A Result document as the flat dict the rest of this module reads, on the measured window.
+
+    Returns {} when the document has no measured-window `metrics`, so the run fails as "no cluster
+    metrics parsed" and is never ranked on another basis.
     """
-    cluster = _engine_report(doc).get("cluster") or {}
-    whole = cluster.get("whole_run") or {}
-    if not whole:
-        return {}   # no whole-run aggregate: fail as "no cluster metrics parsed", not later
+    measured = doc.get("metrics")
+    if not isinstance(measured, dict) or not measured:
+        return {}
     out = {"instance_id": "cluster"}
-    # itl_* ONLY from whole_run, never the cluster's own step_interval_* (see
-    # _ITL_FROM_STEP_INTERVAL); hence the guard above rather than a fallback.
-    for src, mapping in ((whole, _WHOLE_RUN_KEYS), (whole, _ITL_FROM_STEP_INTERVAL),
-                         (cluster, _CLUSTER_KEYS), (doc.get("requests") or {}, _REQUEST_COUNTS)):
-        for legacy, new in mapping.items():
-            if new in src:
-                out[legacy] = src[new]
-    # `dropped` is a map by reason; the overload check wants the number dropped as unservable.
+    for legacy, name in _MEASURED_KEYS.items():
+        v = _figure(measured.get(name))
+        if v is not None:
+            out[legacy] = v
+    cluster = _engine_report(doc).get("cluster") or {}
+    for legacy, name in _CLUSTER_KEYS.items():
+        if name in cluster:
+            out[legacy] = cluster[name]
+    for legacy, name in _REQUEST_COUNTS.items():
+        if name in (doc.get("requests") or {}):
+            out[legacy] = doc["requests"][name]
     dropped = (doc.get("requests") or {}).get("dropped") or {}
     out["dropped_unservable"] = sum(v for v in dropped.values() if isinstance(v, (int, float)))
+    return out
+
+
+def _percentile(xs, p):
+    """The p-th percentile by linear interpolation between order statistics (numpy's default),
+    which is the method the Result's own percentiles use: on a real run the cluster p99 rebuilt
+    from request_rows equals Result.metrics to the printed digits."""
+    xs = sorted(xs)
+    k = (len(xs) - 1) * p / 100.0
+    lo, hi = int(k), min(int(k) + 1, len(xs) - 1)
+    return xs[lo] + (xs[hi] - xs[lo]) * (k - lo)
+
+
+_ROW_LATENCY = (("ttft", "ttft_us"), ("e2e", "e2e_us"), ("tpot", "tpot_us"))
+
+
+def measured_instances(doc):
+    """Each instance's measured-window latency figures, rebuilt from the Result's per-request rows.
+
+    The pinned simulator reports a per-instance block only for the whole run, so the worst-instance
+    gate takes the completed non-warm-up requests that finish inside the window, grouped by the instance that served them.
+    Only latencies a row carries can be rebuilt (TTFT, end-to-end, TPOT): the decode-step interval
+    is not per request, so the ITL gate stays on the cluster. Remove this when the simulator emits
+    the per-instance measured window (inference-sim #2087). [] when the Result has no rows.
+    """
+    by = {}
+    end = (doc.get("window") or {}).get("end_us")
+    for r in doc.get("request_rows") or []:
+        # The cluster figure counts every non-warm-up request that completed inside the window,
+        # profile and grace alike; the rebuild takes the same population.
+        done = (r.get("arrival_us") or 0) + (r.get("e2e_us") or 0)
+        if (r.get("phase") != "warmup" and r.get("fate") == "completed" and r.get("instance")
+                and (end is None or done <= end)):
+            by.setdefault(r["instance"], []).append(r)
+    out = []
+    for inst in sorted(by):
+        o = {"instance_id": inst, "requests": len(by[inst])}
+        for stem, col in _ROW_LATENCY:
+            xs = [r[col] / 1000.0 for r in by[inst] if isinstance(r.get(col), (int, float))]
+            if not xs:
+                continue
+            o[f"{stem}_mean_ms"] = sum(xs) / len(xs)
+            for p in (50, 90, 95, 99):
+                o[f"{stem}_p{p}_ms"] = _percentile(xs, p)
+            if stem == "tpot":
+                # The interactivity gate's slot holds the per-request TPOT on each instance, as on the
+                # cluster figure (_MEASURED_KEYS), so the worst-instance gate judges the same quantity.
+                for k in ("mean", "p50", "p90", "p95", "p99"):
+                    o[f"itl_{k}_ms"] = o[f"tpot_{k}_ms"]
+        out.append(o)
+    return out
+
+
+def measured_record(doc):
+    """What a run record keeps of the Result's measured window, copied verbatim with BLIS's names.
+
+    `metrics` is the Result's top-level metrics ({name: {value, samples}}), `metric_defs` its
+    definitions when the document carries them (the pinned release carries none), `window` the
+    measured window, and `instances` the per-instance figures measured_instances rebuilds. None
+    when the document has no `metrics` block: the field is then absent, never empty.
+    """
+    if not isinstance(doc.get("metrics"), dict) or not doc["metrics"]:
+        return None
+    out = {"metrics": doc["metrics"]}
+    if isinstance(doc.get("metric_defs"), dict) and doc["metric_defs"]:
+        out["metric_defs"] = doc["metric_defs"]
+    if isinstance(doc.get("window"), dict):
+        out["window"] = doc["window"]
+    inst = measured_instances(doc)
+    if inst:
+        out["instances"] = inst
     return out
 
 
@@ -1014,11 +1121,11 @@ def parse_metrics(stdout):
 
 
 def parse_all_instances(stdout):
+    """Per-instance figures on the measured window (see measured_instances). A pre-Result flat
+    output has no measured window, so its per-instance rows are returned as they were written."""
     doc = _result_doc(stdout)
     if doc is not None:
-        inst = _engine_report(doc).get("instances") or {}
-        # Each value is a verbatim MetricsOutput, already carrying its own instance_id.
-        return [v for _, v in sorted(inst.items()) if isinstance(v, dict)]
+        return measured_instances(doc)
     return [o for o in _all_metrics(stdout) if o.get("instance_id") not in (None, "cluster")]
 
 
@@ -1258,6 +1365,10 @@ def build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed
     cmd += _data_args(catalog, registry)
     if resolve_defaults(blis, defaults):
         cmd += ["--defaults-filepath", resolve_defaults(blis, defaults)]
+    # A workload named by file: the replay document is the file's, so the catalog's
+    # descriptor is left out. BLIS still checks the corpus against the sha256 passed above.
+    if replay.get("workload_spec"):
+        cmd += ["--workload-spec", replay["workload_spec"]]
     # max_model_len: the deployment's own resolved window. Every trace whose peak prompt + output
     # exceeds it is DROPPED, and the AgentX corpus caps requests at 256k -- so a 32768-token
     # deployment drops the entire corpus ("no trace fits max_context_length 32768").
@@ -1347,9 +1458,16 @@ def row_stack(blis, catalog, registry):
     return out
 
 
+def _config_hash(config):
+    return hashlib.sha1(json.dumps(config, sort_keys=True).encode()).hexdigest()[:12]
+
+
 def _record_shell(config, phase):
+    """`config_hash` names one run (the config at its load); `config_key` names the configuration,
+    so the records of one configuration across loads share it."""
+    unloaded = {k: v for k, v in config.items() if k != "concurrency"}
     return {"config": config, "concurrency": config.get("concurrency"),
-            "config_hash": hashlib.sha1(json.dumps(config, sort_keys=True).encode()).hexdigest()[:12],
+            "config_hash": _config_hash(config), "config_key": _config_hash(unloaded),
             "phase": phase}
 
 
@@ -1477,12 +1595,16 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     except subprocess.TimeoutExpired:
         stdout, stderr, rc = "", "timeout", -1
     invalid = result_invalid(blis, stdout) if rc == 0 else None
+    doc = _result_doc(stdout) if rc == 0 and not invalid else None
     metrics = parse_metrics(stdout) if rc == 0 and not invalid else {}
-    seen = data_of(_result_doc(stdout)) if rc == 0 and not invalid else None
+    seen = data_of(doc) if doc is not None else None
     if rc != 0:
         error = _failure_line(stderr) or f"rc={rc}"
     elif invalid:
         error = f"Result refused: {invalid}"
+    elif doc is not None and figure_form_problems(doc):
+        error = "Result figures cannot be ranked on: " + "; ".join(figure_form_problems(doc))
+        metrics = {}
     elif not metrics:
         error = "rc=0 but no cluster metrics parsed from stdout (output format changed?)"
     else:
@@ -1492,7 +1614,7 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     # otherwise be committed as a report priced with data it was not (CFG-1).
     if seen is not None:
         rec["data"] = seen
-        rec["released_build"] = released_build(_result_doc(stdout))
+        rec["released_build"] = released_build(doc)
         if not data_override and seen != "embedded" and not error:
             error = ("priced with other data than the simulator release's embedded data "
                      "(the Result's data block does not name catalog and registry source embedded)")
@@ -1524,6 +1646,17 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
         "metrics": metrics, "metrics_all_instances": parse_all_instances(stdout) if rc == 0 else [],
         "error": error, "stdout_tail": stdout[-2000:], "stderr_tail": stderr[-2000:],
     })
+    if doc is not None and metrics:
+        # The window every figure above is on, the Result's measured-window metrics verbatim, and
+        # the whole-run aggregate kept as raw data only: nothing ranks or displays it.
+        rec["basis"] = BASIS
+        rec["feasibility_aggregate"] = FEASIBILITY_AGGREGATE
+        measured = measured_record(doc)
+        if measured:
+            rec["measured"] = measured
+        whole = (_engine_report(doc).get("cluster") or {}).get("whole_run")
+        if whole:
+            rec["whole_run"] = whole
     return rec
 
 

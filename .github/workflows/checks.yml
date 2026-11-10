@@ -6,6 +6,8 @@ name: checks
 
 on:
   pull_request:
+    # `edited` is how a retarget to main (a base change) reaches CI; the default types omit it.
+    types: [opened, edited, synchronize, reopened]
   push:
     branches: [main]
   # The bot's PRs (bump-blis-pin, regen-reports) dispatch this, since their PR event starts nothing.

@@ -28,7 +28,9 @@
     "scenario": {
       "description": "Shared by EVERY sweep: one model, one hardware type, one workload, one GPU budget, one load ladder. Comparing two hardware types or two workloads takes separate experiments.",
       "type": "object",
-      "required": ["model", "hardware", "workload", "gpus", "concurrency"],
+      "required": ["model", "hardware", "gpus", "concurrency"],
+      "oneOf": [{"required": ["workload"], "not": {"required": ["workload_spec"]}},
+                {"required": ["workload_spec"], "not": {"required": ["workload"]}}],
       "additionalProperties": false,
       "properties": {
         "model": {
@@ -43,6 +45,11 @@
         },
         "workload": {
           "description": "A catalog workload: a shape preset (chatbot, multidoc, ...) or a replay scenario (agentx-mvp). One per experiment.",
+          "type": "string",
+          "minLength": 1
+        },
+        "workload_spec": {
+          "description": "A workload named by a file in this repository instead of by catalog name: the replay block of a workload entry, with corpus.sha256 and corpus.source (a Hugging Face dataset and revision, or a url). Exactly one of `workload` and `workload_spec`. The report labels it \"custom (not in the catalog)\" and records the file's sha256.",
           "type": "string",
           "minLength": 1
         },

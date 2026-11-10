@@ -1,0 +1,20 @@
+# The uncapped AgentX corpus replayed as a custom workload, to show the form: a Replay document
+# whose corpus names its Hugging Face source, pinned revision and sha256. The catalog also has
+# this corpus (agentx-mvp-uncapped); a real custom workload is one the catalog does not have.
+scenario: inferencex-agentx-mvp
+corpus:
+  loader: semianalysis_cc_traces_weka_062126
+  format: weka-trace-v7
+  encoding: jsonl
+  source:
+    huggingface: semianalysisai/cc-traces-weka-062126
+    revision: 23f152f6f0f9399a85901b89a6458def0ef16729
+    file: traces.jsonl
+    split: train
+  sha256: 29b6a19e751ff5230771519aab755f80a0f43a4ba9cf96b72d3a6a437ec99276
+random_seed: 42
+benchmark_duration_s: 900
+grace_period_s: 30
+max_context_length: max_model_len
+category: coding
+thinking: "on"

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ExploreData, Scalar } from './types'
 import {
-  configFilters, overrideParts, sloMs, fieldValue, groupTies, liveFields, matches, rankConfigs, routerLabel, sortValues, isNumeric, toggle, topoLabel, unpack,
+  configFilters, overrideParts, sloMs, fieldValue, groupTies, liveFields, matches, rankConfigs, resolvedConfig, routerLabel, sortValues, isNumeric, sweepLine, toggle, topoLabel, unpack, loadLabel,
 } from './model'
 
 const KEYS = ['decode_instances', 'decode_tp', 'dp', 'max_num_seqs', 'num_instances', 'prefill_instances', 'prefill_tp', 'router_config', 'tp']
@@ -116,5 +116,50 @@ describe('ranking', () => {
     expect(g[0].lead.id).toBe(1)
     expect(g[0].ties.map((r) => r.id)).toEqual([2])
     expect(g).toHaveLength(3)
+  })
+})
+
+describe('load axis', () => {
+  it('writes a load as c<N> and never as a bare count', () => {
+    expect(loadLabel(512)).toBe('c512')
+    expect(loadLabel('64')).toBe('c64')
+  })
+})
+
+describe('the arm behind a card', () => {
+  const SPEC = [
+    '# header', 'name: x', 'scenario:', '  model: m', 'sweeps:',
+    '  - name: colo', '    narrative: first', '  - name: "pd"   # disaggregated', '    narrative: second', '',
+  ].join('\n')
+  it('finds the line of a sweep in the spec as written, plain or quoted, and only under sweeps', () => {
+    expect(sweepLine(SPEC, 'colo')).toBe(6)
+    expect(sweepLine(SPEC, 'pd')).toBe(8)
+    expect(sweepLine(SPEC, 'missing')).toBeNull()
+    expect(sweepLine('scenario:\n  - name: colo\nsweeps:\n', 'colo')).toBeNull()   // a name above `sweeps:` is not a sweep
+    expect(sweepLine('', 'colo')).toBeNull()
+  })
+  it('does not read a regex character in a sweep name as a pattern', () => {
+    expect(sweepLine('sweeps:\n  - name: a.b\n  - name: axb\n', 'axb')).toBe(3)
+    expect(sweepLine('sweeps:\n  - name: axb\n', 'a.b')).toBeNull()
+  })
+  it('shows every setting the run carries, what it set, and the value an unset knob ran at', () => {
+    const r = unpack({ ...FIXTURE, defaults: { max_num_seqs: 256 } })[0]
+    const cfg = resolvedConfig(r, { max_model_len: 262144 }, FIXTURE.keys)
+    const m = Object.fromEntries(cfg)
+    expect(m.max_model_len).toBe('262144')            // shared by every run
+    expect(m.tp).toBe('4')                            // set by this run
+    expect(m.max_num_seqs).toBe('64')                 // set, differs from the default
+    expect(cfg.map(([k]) => k)).not.toContain('prefill_tp')   // unset, no known default: not invented
+  })
+  it('names an unset knob with the default the report knows', () => {
+    const r = unpack({ ...FIXTURE, defaults: { prefill_tp: 8 } })[0]
+    expect(Object.fromEntries(resolvedConfig(r, {}, FIXTURE.keys)).prefill_tp).toBe('8 (default)')
+  })
+})
+
+describe('lexicon wording', () => {
+  it('has no sessions left for the load, in the shared lexicon', async () => {
+    const lex = JSON.stringify((await import('../lexicon.json')).default)
+    expect(lex).not.toMatch(/adding sessions|session count/)
   })
 })

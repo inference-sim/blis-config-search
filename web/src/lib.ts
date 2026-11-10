@@ -20,6 +20,7 @@ export const TAB_LABELS: [Tab, string][] = [
   ['coverage', 'Coverage'],
   ['submit', 'Submit'],
 ]
+export const REPO = 'https://github.com/inference-sim/blis-config-search'
 export const SPEC_DOC = 'https://github.com/inference-sim/blis-config-search/blob/main/experiments/README.md'
 
 /** blis-catalog's docs for the version we pin; the site is published per minor ("0.5.0" → /0.5/). */

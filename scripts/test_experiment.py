@@ -687,6 +687,17 @@ class Labelling(unittest.TestCase):
         self.assertEqual("prefix-affinity routing",
                          E.variant_of(cands[0], "prefix-affinity", base))
 
+    def test_variants_distinguish_offload_and_adaptive_states(self):
+        cands = [{"offload": None, "speculative": {"enable_adaptive_verification": False}},
+                 {"offload": {"tiers": [{"tier": "cpu_dram", "bytes": 1024}]},
+                  "speculative": {"enable_adaptive_verification": True}}]
+        baseline = E.sweep_baseline(cands)
+        variant = E.variant_of(cands[1], "", baseline)
+        self.assertIn("enable adaptive verification on", variant)
+        self.assertIn("KV offload", variant)
+        self.assertIn("cpu_dram", variant)
+        self.assertNotEqual(E.variant_of(cands[0], "", baseline), variant)
+
 
 class KnobSurfaceComesFromTheSimulator(unittest.TestCase):
     """The validator and the runner read one vocabulary, from the simulator (CFG-3)."""
@@ -2364,6 +2375,60 @@ class ReportSchemaDoc(unittest.TestCase):
         self.assertNotIn("mean inter-token latency", text, "schema.md still says mean ITL for pu")
         self.assertNotIn("1000 / mean itl", text, "schema.md still says 1000/mean ITL for pu")
         self.assertNotIn("1000/mean-itl", text, "schema.md still says 1000/mean-ITL for pu")
+
+
+class NativeDeploymentInputs(unittest.TestCase):
+    def test_fixed_drafting_fields_survive_a_swept_adaptive_state(self):
+        shared = {"speculative": {"draft_model": "muse-spark-open-dspark",
+                                  "draft_sample_method": "probabilistic"}}
+        chosen = {"speculative": {"enable_adaptive_verification": True},
+                  "speculative_method": "dspark", "num_speculative_tokens": 7}
+        candidate = E.merge_config(shared, chosen)
+        parallel, engine, cli, context = run_blis.classify_config(candidate, V.knob_vocabulary(BLIS))
+        self.assertEqual("muse-spark-open-dspark", engine["speculative"]["draft_model"])
+        self.assertEqual("probabilistic", engine["speculative"]["draft_sample_method"])
+        self.assertTrue(engine["speculative"]["enable_adaptive_verification"])
+        self.assertNotIn("enable_adaptive_verification", shared["speculative"])
+
+    def test_offload_control_and_native_block_cross_engine_values(self):
+        offload = {"tiers": [{"tier": "cpu_dram", "bytes": 1024}]}
+        sweep = {"name": "s", "num-instances": [2], "parallel": {"tp": [8]},
+                 "engine": {"max_num_seqs": [32, 64]}, "offload": [None, offload]}
+        kept, dropped = E.expand_sweep(sweep, 16)
+        self.assertEqual(4, len(kept))
+        self.assertFalse(dropped)
+        self.assertEqual(2, sum(candidate["offload"] is None for candidate in kept))
+        self.assertEqual(2, sum(candidate["offload"] == offload for candidate in kept))
+
+    def test_external_drafter_and_adaptive_states_remain_nested(self):
+        sweep = {"name": "s", "num-instances": [2], "parallel": {"tp": [8]},
+                 "engine": {"speculative": {"method": ["dspark"], "num_spec_tokens": [7],
+                           "draft_model": ["muse-spark-open-dspark"],
+                           "enable_adaptive_verification": [False, True]}}}
+        kept, dropped = E.expand_sweep(sweep, 16)
+        self.assertEqual(2, len(kept))
+        self.assertFalse(dropped)
+        for candidate in kept:
+            parallel, engine, cli, context = run_blis.classify_config(candidate, V.knob_vocabulary(BLIS))
+            self.assertEqual(7, engine["speculative"]["num_spec_tokens"])
+            self.assertEqual("muse-spark-open-dspark", engine["speculative"]["draft_model"])
+
+    def test_native_offload_schema_is_used_without_copying_fields(self):
+        self.assertEqual([], V.native_input_errors({"tiers": [{"tier": "cpu_dram", "bytes": 1024}]},
+                                                   "offload", BLIS, "deployment", "offload"))
+        errors = V.native_input_errors({"invented": True}, "offload", BLIS, "deployment", "offload")
+        self.assertTrue(errors)
+
+    def test_empty_offload_domain_is_rejected(self):
+        document = spec()
+        document["sweeps"][0]["offload"] = []
+        self.assertTrue(any("offload" in error for error in V.validate(document, BLIS)))
+
+    def test_inline_acceptance_is_validated_by_scenario_schema(self):
+        pin = {"value": {"num_spec_tokens": 7, "acceptance_length": 2.6, "source": "test source"}}
+        self.assertEqual([], V.native_input_errors(pin, "acceptance", BLIS, "scenario", "acceptance"))
+        self.assertTrue(V.native_input_errors({"value": {"invented": 1}}, "acceptance", BLIS,
+                                              "scenario", "acceptance"))
 
 
 def main():

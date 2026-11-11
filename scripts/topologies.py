@@ -66,7 +66,7 @@ KNOB_NAMES = {"num_speculative_tokens": "draft tokens", "speculative_method": "d
               "mamba_cache_mode": "mamba cache mode",
               # nested engine blocks and their inner fields
               "eplb": "expert balancing", "dbo": "dual-batch overlap",
-              "engram_config": "engram",
+              "engram_config": "engram", "speculative": "drafting settings", "offload": "KV offload",
               "enable_eplb": "expert balancing",
               "num_redundant_experts": "redundant experts",
               "window_size": "window", "step_interval": "step interval",
@@ -107,6 +107,8 @@ def routing_arm_name(path):
 
 def knob_phrase(key, value):
     """Spelled-out description of one knob setting, e.g. "batch tokens 2,048"."""
+    if key == "offload" and value is None:
+        return "KV offload off"
     if key == "num_speculative_tokens":
         return "no drafting" if not value else f"{value} draft token{'s' if value != 1 else ''}"
     if key == "router_config":

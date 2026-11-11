@@ -100,9 +100,25 @@ def _engine_candidates(engine):
         combos = grid(fields)
         out = [{**base, block: combo} for base in out for combo in combos]
     if spec:
-        spec_combos = grid({SPEC_TO_CANDIDATE.get(k, k): v for k, v in spec.items()})
+        mapped = {SPEC_TO_CANDIDATE[key]: values for key, values in spec.items()
+                  if key in SPEC_TO_CANDIDATE}
+        remaining = {key: values for key, values in spec.items() if key not in SPEC_TO_CANDIDATE}
+        spec_combos = grid(mapped)
+        if remaining:
+            spec_combos = [{**base, "speculative": extra}
+                           for base in spec_combos for extra in grid(remaining)]
         out = [{**b, **s} for b in out for s in spec_combos]
     return out
+
+
+def merge_config(shared, chosen):
+    result = dict(shared)
+    for key, value in chosen.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = merge_config(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 
 def expand_sweep(sweep, gpus):
@@ -114,6 +130,9 @@ def expand_sweep(sweep, gpus):
     """
     router_variants = _router_variants(sweep.get("router") or {})
     engine_combos = _engine_candidates(sweep.get("engine"))
+    if "offload" in sweep:
+        engine_combos = [{**base, "offload": offload}
+                         for base in engine_combos for offload in sweep["offload"]]
     kept, dropped = [], []
     if _is_disaggregated(sweep):
         pf_par = ((sweep.get("prefill") or {}).get("parallel")) or {}
@@ -335,7 +354,7 @@ def label_of(cand):
 # cudagraph_mode sweep spanning 147 to 263 tok/s/GPU first rendered as four identical rows. The
 # list is checked against run_blis.SCENARIO_ENGINE by test_experiment.py so it cannot fall behind
 # the runner again.
-VARIANT_KEYS = ("num_speculative_tokens", "speculative_method", "router_config",
+VARIANT_KEYS = ("num_speculative_tokens", "speculative_method", "router_config", "speculative", "offload",
                 # batching / admission
                 "max_num_seqs", "max_num_batched_tokens", "long_prefill_token_threshold",
                 "scheduling_policy", "async_scheduling",
@@ -652,11 +671,13 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
             label = label_of(resolved)
             variant = variant_of(cand, router_desc, baseline)
             for c in concurrency:
-                cfg = {**shared_engine, **resolved, "concurrency": c}
+                cfg = merge_config(shared_engine, {**resolved, "concurrency": c})
                 # Only a drafting candidate needs them; adding them elsewhere would change a
                 # non-drafting run's command line for no reason.
                 if cfg.get("speculative_method"):
                     cfg = {**accept_sel, **cfg}
+                    if sc.get("acceptance") is not None:
+                        cfg["acceptance"] = sc["acceptance"]
                 if dry_run:
                     rows.append({"sweep": sname, "label": label, "variant": variant,
                                  "concurrency": c, "gpus": gpus, "config": _jsonable(cfg),

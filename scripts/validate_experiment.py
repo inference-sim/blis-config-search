@@ -618,6 +618,26 @@ def advisories(spec, path=None):
     return notes
 
 
+def native_input_errors(value, where, blis, document, property_name):
+    import jsonschema
+    schema = blis_cli.schema(blis, document)
+    target = schema
+    while "$ref" in target:
+        reference = target["$ref"]
+        if not reference.startswith("#/"):
+            return [f"{where}: owner schema uses an unsupported external reference"]
+        target = schema
+        for part in reference[2:].split("/"):
+            target = target[part.replace("~1", "/").replace("~0", "~")]
+    fragment = target.get("properties", {}).get(property_name)
+    if fragment is None:
+        return [f"{where}: the pinned {document} schema has no {property_name} field"]
+    view = {"$schema": schema.get("$schema"), "$defs": schema["$defs"], **fragment}
+    validator = jsonschema.validators.validator_for(view)(view)
+    return [f"{where}{''.join('.' + str(part) for part in error.path)}: {error.message}"
+            for error in validator.iter_errors(value)]
+
+
 def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None):
     """Every error in `spec`, as readable `path: message` strings. Empty means valid.
 
@@ -652,7 +672,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None):
         sc = {}
     else:
         known_sc = {"model", "hardware", "workload", "workload_spec", "gpus", "slo", "concurrency",
-                    "seed", "engine", "replay", "cluster"}
+                    "seed", "engine", "replay", "cluster", "acceptance"}
         for key in sc:
             if key not in known_sc:
                 errs.append(f"scenario.{key}: unknown key "
@@ -664,6 +684,11 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None):
         # Present AND real: a name the catalog does not define cannot run anywhere.
         errs.extend(scenario_identity_errors(sc, blis, catalog))
         errs.extend(cluster_errors(sc, blis, catalog))
+        if "acceptance" in sc:
+            errs.extend(native_input_errors(sc["acceptance"], "scenario.acceptance", blis,
+                                            "scenario", "acceptance"))
+            if not isinstance(sc["acceptance"], dict) or not isinstance(sc["acceptance"].get("value"), dict):
+                errs.append("scenario.acceptance: this runner supports an inline value pin")
         gpus = sc.get("gpus")
         if not isinstance(gpus, int) or isinstance(gpus, bool) or gpus < 1:
             errs.append("scenario.gpus: required positive integer -- the budget EVERY run uses")
@@ -739,11 +764,20 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None):
             seen.add(sname)
 
         known_sw = {"name", "narrative", "num-instances", "parallel", "engine", "router",
-                    "prefill-instances", "decode-instances", "prefill", "decode"}
+                    "prefill-instances", "decode-instances", "prefill", "decode", "offload"}
         for key in sw:
             if key not in known_sw:
                 errs.append(f"{where}.{key}: unknown sweep key "
                             f"(allowed: {', '.join(sorted(known_sw))})")
+        if "offload" in sw:
+            values = sw["offload"]
+            if not _is_list(values) or not values:
+                errs.append(f"{where}.offload: must be a non-empty list of native deployment blocks or null controls")
+            else:
+                for index, value in enumerate(values):
+                    if value is not None:
+                        errs.extend(native_input_errors(value, f"{where}.offload[{index}]", blis,
+                                                        "deployment", "offload"))
 
         colocated = {"num-instances", "parallel"} & set(sw)
         disagg = {"prefill-instances", "decode-instances", "prefill", "decode"} & set(sw)

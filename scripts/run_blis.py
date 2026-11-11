@@ -65,7 +65,7 @@ CLI_FLAGS = {"num_instances": "--num-instances", "concurrency": "--concurrency",
 # The llm-d EndpointPickerConfig this deployment routes with, as a path. Named by the scenario's
 # DEPLOYMENT-level `router:` block (blis-schemas spec/deployment/deployment.go, pinned in
 # pins.env) -- see ROUTING_MOVED below for why this replaced the former --routing-policy flag.
-SCENARIO_ROUTER = ("router_config",)
+SCENARIO_ROUTER = ("router_config", "offload", "acceptance")
 PARALLEL_DEFAULTS = {"tp": 1, "pp": 1, "dp": 1, "enable_expert_parallel": False}
 
 
@@ -258,13 +258,23 @@ def classify_config(config, vocab, node_size=None):
             # `method` defaults to the speculator the model's own graph declares; naming it here
             # would hardcode one model's drafter (deepseek-v4.1-flash is dspark, glm-5.2 is mtp).
             method = spec.get("speculative_method")
-            engine["speculative"] = ({"method": method, "num_spec_tokens": k} if method
-                                     else {"num_spec_tokens": k})
+            extra = dict(engine.get("speculative") or {})
+            engine["speculative"] = {**extra, "num_spec_tokens": k}
+            if method:
+                engine["speculative"]["method"] = method
         elif spec.get("speculative_method"):
             raise ConfigError(
                 "speculative_method with num_speculative_tokens 0 (or unset): drafting 0 tokens is "
                 "speculative decoding OFF, so naming a method would record a drafter that never ran")
     rc = router.get("router_config")
+    pin = router.get("acceptance")
+    if pin is not None:
+        if not isinstance(pin, dict) or not isinstance(pin.get("value"), dict):
+            raise ConfigError("acceptance: this runner supports an inline value pin")
+        if any(key in cli for key in ("speculative_acceptance_length", "speculative_acceptance_rate")):
+            raise ConfigError("acceptance: do not combine an inline pin with a CLI acceptance override")
+        if pin["value"].get("num_spec_tokens") != (engine.get("speculative") or {}).get("num_spec_tokens"):
+            raise ConfigError("acceptance.value.num_spec_tokens does not match the draft depth")
     if rc is not None and not os.path.exists(rc):
         # Fail here rather than let BLIS fail per-run: a typo'd EPP path would otherwise cost a
         # whole sweep of identical "no such file" rows.
@@ -1135,15 +1145,23 @@ coefficients: [{", ".join(COEFFICIENTS)}]
 cluster:
   hardware: {hardware}
   fabric: {fabric}
-  nodes: {total_nodes}{node_size_line}
+  nodes: {total_nodes}{node_size_line}{_context_block(router, 'acceptance')}
 ---
 kind: Deployment
 name: {name}
 pools:
 {chr(10).join(pools)}
 pd_transfer:
-  connector: {pd.get("connector", DEFAULT_PD_CONNECTOR)}{router_block}
+  connector: {pd.get("connector", DEFAULT_PD_CONNECTOR)}{router_block}{_context_block(router, 'offload')}
 """
+
+
+def _context_block(context, name):
+    value = (context or {}).get(name)
+    if value is None:
+        return ""
+    import yaml
+    return "\n" + yaml.safe_dump({name: value}, sort_keys=False).rstrip()
 
 
 def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances=1,
@@ -1197,7 +1215,7 @@ model: {model}
 coefficients: [{", ".join(COEFFICIENTS)}]
 cluster:
   hardware: {hardware}{fabric_line}
-  nodes: {nodes}{node_size_line}
+  nodes: {nodes}{node_size_line}{_context_block(router, 'acceptance')}
 ---
 kind: Deployment
 name: {name}
@@ -1207,7 +1225,7 @@ pools:
     parallel:
 {block(parallel, 6)}
     engine:
-{block(engine, 6)}{router_block}
+{block(engine, 6)}{router_block}{_context_block(router, 'offload')}
 """
 
 
@@ -1331,6 +1349,8 @@ def build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed
             cmd += ["--format", "yaml"]
     if replay.get("corpus_cache"):
         cmd += ["--corpus-cache", replay["corpus_cache"]]
+    if replay.get("server_series_interval_s") is not None:
+        cmd += ["--server-series-interval-s", str(replay["server_series_interval_s"])]
     if seed is not None:
         cmd += ["--seed", str(seed)]
     for k, v in cli.items():
@@ -1503,7 +1523,7 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     # Resolve and RECORD the acceptance length a drafting run will be priced with. BLIS applies it
     # but never echoes it, and the per-user axis is wrong without it (see acceptance_length).
     acceptance = None
-    if spec:
+    if spec and not (router or {}).get("acceptance"):
         al, al_src = acceptance_length(registry, model, spec.get("method"),
                                        spec.get("num_spec_tokens"),
                                        cli.get("speculative_thinking"),
@@ -1517,6 +1537,10 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                           # asks that reuse be recorded, so a report can state it.
                           "reused_from_other_hardware": bool(
                               al_src and hardware and f"({hardware})" not in al_src)}
+    pin = (router or {}).get("acceptance")
+    if pin is not None:
+        acceptance = {**pin["value"], "method": spec.get("method"),
+                      "origin": "scenario-inline-pin"}
     # Fabric only reaches a multi-node YAML, so normalize it to the default on a single node:
     # the scenario hash then matches what the explorer reconstructs from the recorded fabric.
     multinode = bool(pd) or pool_nodes(parallel, num_instances, node_size) > 1
@@ -1582,7 +1606,9 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                        # it (a chip whose catalog entry fixes it states none), so the explorer
                        # rebuilds the same scenario text and file name (#96).
                        "gpus_per_node": node_size, "states_gpus_per_node": states_node_size,
-                       "scenario": scenario_name, "router": router or None,
+                       "scenario": scenario_name,
+                       "router": ({"router_config": router["router_config"]}
+                                  if router and router.get("router_config") else None),
                        # The acceptance the drafting run was priced with, so the report can
                        # derive a correct per-token rate instead of a per-STEP one.
                        "acceptance": acceptance,
@@ -1592,6 +1618,8 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
         "metrics": metrics, "metrics_all_instances": parse_all_instances(stdout) if rc == 0 else [],
         "error": error, "stdout_tail": stdout[-2000:], "stderr_tail": stderr[-2000:],
     })
+    if router and router.get("offload") is not None:
+        rec["deployment"]["offload"] = router["offload"]
     if doc is not None and metrics:
         # The window every figure above is on, the Result's measured-window metrics verbatim, and
         # the whole-run aggregate kept as raw data only: nothing ranks or displays it.

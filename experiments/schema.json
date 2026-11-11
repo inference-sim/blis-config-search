@@ -96,8 +96,12 @@
           "type": "object",
           "minProperties": 1
         },
+        "acceptance": {
+          "description": "An inline acceptance value in the pinned Scenario schema; its fields are validated from blis schema scenario, not defined here. Fixed per experiment, not optimized as a deployment knob.",
+          "type": "object"
+        },
         "replay": {
-          "description": "Replay knobs when `workload` names a trace corpus: corpus_sha256, benchmark_duration, grace_period, max_context_length, category, thinking.",
+          "description": "Replay knobs when `workload` names a trace corpus: corpus_sha256, benchmark_duration, grace_period, max_context_length, category, thinking. Optional server_series_interval_s requests native per-engine diagnostic series in the raw Result.",
           "type": "object",
           "minProperties": 1
         }
@@ -145,6 +149,12 @@
         "engine": {
           "description": "Engine knobs, which are blis-vllm's engine-block keys (== vLLM's own config field names). `speculative` is the one nested block.",
           "$ref": "#/$defs/engineKnobs"
+        },
+        "offload": {
+          "description": "A list of complete native Deployment.offload blocks, validated against blis schema deployment. Null is the no-tier control. Each engine receives the stated native capacity; no per-pool form is implied.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": ["object", "null"] }
         },
         "router": { "$ref": "#/$defs/router" },
         "prefill-instances": {

@@ -29,6 +29,7 @@ import run_blis                     # noqa: E402
 import blis_cli                     # noqa: E402
 import settings                     # noqa: E402
 import fetch_corpus as FC           # noqa: E402
+import shard_experiment as Shards
 
 # TEMPORARY: the inference-sim commands, from scripts/testdata/blis-m1 (inference-sim#2077).
 BLIS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata", "blis-m1", "blis")
@@ -686,6 +687,17 @@ class Labelling(unittest.TestCase):
         base = E.sweep_baseline(cands)
         self.assertEqual("prefix-affinity routing",
                          E.variant_of(cands[0], "prefix-affinity", base))
+
+    def test_variants_distinguish_offload_and_adaptive_states(self):
+        cands = [{"offload": None, "speculative": {"enable_adaptive_verification": False}},
+                 {"offload": {"tiers": [{"tier": "cpu_dram", "bytes": 1024}]},
+                  "speculative": {"enable_adaptive_verification": True}}]
+        baseline = E.sweep_baseline(cands)
+        variant = E.variant_of(cands[1], "", baseline)
+        self.assertIn("enable adaptive verification on", variant)
+        self.assertIn("KV offload", variant)
+        self.assertIn("cpu_dram", variant)
+        self.assertNotEqual(E.variant_of(cands[0], "", baseline), variant)
 
 
 class KnobSurfaceComesFromTheSimulator(unittest.TestCase):
@@ -1750,7 +1762,144 @@ class PdRunner(unittest.TestCase):
 # --- assembled report -------------------------------------------------------------------------
 
 
+class ShardPartition(unittest.TestCase):
+    def assert_partition(self, document, limit):
+        previous = copy.deepcopy(document)
+        expected, actual = [], []
+        loads = document["scenario"]["concurrency"]
+        for sweep in document["sweeps"]:
+            kept, dropped = E.expand_sweep(sweep, document["scenario"]["gpus"])
+            expected.extend(json.dumps([sweep["name"], "kept", candidate, load], sort_keys=True)
+                            for candidate in kept for load in loads)
+            expected.extend(json.dumps([sweep["name"], "dropped", candidate, budget, load], sort_keys=True)
+                            for candidate, budget in dropped for load in loads)
+        plans = Shards.plans_for(document, limit)
+        for index in range(sum(plan["shards"] for plan in plans)):
+            shard = Shards.compile_shard(document, index, limit, plans)
+            self.assertEqual(shard["scenario"], document["scenario"])
+            sweep = shard["sweeps"][0]
+            kept, dropped = E.expand_sweep(sweep, document["scenario"]["gpus"])
+            self.assertLessEqual((len(kept) + len(dropped)) * len(loads), limit)
+            actual.extend(json.dumps([sweep["name"], "kept", candidate, load], sort_keys=True)
+                          for candidate in kept for load in loads)
+            actual.extend(json.dumps([sweep["name"], "dropped", candidate, budget, load], sort_keys=True)
+                          for candidate, budget in dropped for load in loads)
+        self.assertEqual(sorted(expected), sorted(actual))
+        self.assertEqual(document, previous)
+
+    def test_colocated_nested_offload_and_router_product_is_preserved(self):
+        document = spec()
+        document["sweeps"][0].update({
+            "num-instances": [2, 4], "parallel": {"tp": [4, 8]},
+            "engine": {"max_num_seqs": [32, 64, 64], "speculative": {
+                "method": ["dspark"], "num_spec_tokens": [3, 7]}},
+            "offload": [None, {"connector": "OffloadingConnector", "tiers": [
+                {"tier": "cpu_dram", "bytes": 644245094400}]}],
+            "router": {"endpoint_picker_config": ["queue.yaml", "precise.yaml"]}})
+        document["sweeps"].append({"name": "second", "parallel": {"tp": [16]}})
+        self.assert_partition(document, 8)
+
+    def test_disaggregated_role_product_and_budget_refusals_are_preserved(self):
+        document = spec()
+        document["sweeps"] = [{"name": "pd", "prefill-instances": [1, 2],
+            "decode-instances": [1, 2],
+            "prefill": {"parallel": {"tp": [4, 8]},
+                        "engine": {"max_num_batched_tokens": [4096, 8192]}},
+            "decode": {"parallel": {"tp": [4, 8]},
+                       "engine": {"max_num_seqs": [32, 64]}},
+            "router": {"endpoint_picker_config": ["pd-prefix.yaml"]}}]
+        self.assert_partition(document, 8)
+
+    def test_large_product_is_planned_without_expanding_the_whole_grid(self):
+        document = spec()
+        document["sweeps"][0]["engine"] = {
+            "max_num_seqs": list(range(1, 1001)),
+            "max_num_batched_tokens": list(range(1, 1001))}
+        plans = Shards.plans_for(document, 8)
+        self.assertEqual(sum(plan["raw_points"] for plan in plans), 2000000)
+        last = sum(plan["shards"] for plan in plans) - 1
+        shard = Shards.compile_shard(document, last, 8, plans)
+        self.assertEqual(shard["sweeps"][0]["engine"]["max_num_seqs"], [1000])
+        with self.assertRaises(IndexError):
+            Shards.compile_shard(document, last + 1, 8, plans)
+
+    def test_ignored_axes_and_too_small_shards_are_refused(self):
+        with self.assertRaises(ValueError):
+            Shards.plans_for(spec(), 1)
+        document = spec()
+        document["sweeps"][0]["router"] = {
+            "plugins": {"x": {"parameters": {"weight": [1, 2]}}}}
+        with self.assertRaisesRegex(ValueError, "does not expand natively"):
+            Shards.plans_for(document, 8)
+
+
 class DryRunPlan(unittest.TestCase):
+    def test_checkpoint_is_opt_in_and_dry_run_does_not_create_it(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as out:
+            with patch.object(E.run_blis, "run_one", return_value={
+                    "metrics": {}, "cmd": None, "returncode": 1, "error": "startup refused"}):
+                E.run_experiment(spec(), BLIS, None, "/r", out, verbose=False)
+            self.assertFalse(os.path.exists(os.path.join(out, "t", "run-checkpoints.jsonl")))
+            dry_out = os.path.join(out, "dry")
+            E.run_experiment(spec(), BLIS, None, None, dry_out, dry_run=True,
+                             verbose=False, checkpoint_runs=True)
+            self.assertFalse(os.path.exists(dry_out))
+
+    def test_checkpoint_survives_later_failure_and_is_not_truncated(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as out:
+            checkpoint = os.path.join(out, "t", "run-checkpoints.jsonl")
+            calls = []
+
+            def fake_run_one(*args, **kwargs):
+                calls.append(1)
+                if len(calls) == 2:
+                    with open(checkpoint, encoding="utf-8") as stream:
+                        saved = [json.loads(line) for line in stream]
+                    self.assertEqual(len(saved), 1)
+                    raise RuntimeError("interrupted second attempt")
+                return {"metrics": {}, "cmd": None, "returncode": 1,
+                        "error": "startup refused", "config": dict(args[11])}
+
+            with patch.object(E.run_blis, "run_one", side_effect=fake_run_one), \
+                    patch.object(E.os, "fsync", wraps=os.fsync) as sync:
+                with self.assertRaisesRegex(RuntimeError, "interrupted second attempt"):
+                    E.run_experiment(spec(), BLIS, None, "/r", out, verbose=False,
+                                     checkpoint_runs=True)
+                self.assertEqual(sync.call_count, 1)
+                with open(checkpoint, "rb") as stream:
+                    previous = stream.read()
+                with self.assertRaises(FileExistsError):
+                    E.run_experiment(spec(), BLIS, None, "/r", out, verbose=False,
+                                     checkpoint_runs=True)
+                with open(checkpoint, "rb") as stream:
+                    self.assertEqual(stream.read(), previous)
+                self.assertEqual(len(calls), 2)
+
+    def test_parallel_checkpoint_contains_the_same_attempts_as_final_ledger(self):
+        from unittest.mock import patch
+
+        def fake_run_one(*args, **kwargs):
+            return {"metrics": {}, "cmd": None, "returncode": 1,
+                    "error": "startup refused", "config": dict(args[11])}
+
+        with tempfile.TemporaryDirectory() as out, \
+                patch.object(E.run_blis, "run_one", side_effect=fake_run_one):
+            document = spec()
+            document["scenario"]["concurrency"] = list(range(1, 17))
+            E.run_experiment(document, BLIS, None, "/r", out, verbose=False,
+                             max_parallel=4, checkpoint_runs=True)
+            contents = []
+            for name in ("run-checkpoints.jsonl", "runs.jsonl"):
+                with open(os.path.join(out, "t", name), encoding="utf-8") as stream:
+                    contents.append(sorted(json.dumps(json.loads(line), sort_keys=True)
+                                           for line in stream))
+            self.assertEqual(len(contents[0]), 16)
+            self.assertEqual(contents[0], contents[1])
+
     def test_dry_run_plans_without_touching_blis(self):
         report = E.run_experiment(spec(), blis=BLIS, catalog=None, registry=None,
                                   out_root="/nonexistent-should-not-be-written",
@@ -2364,6 +2513,60 @@ class ReportSchemaDoc(unittest.TestCase):
         self.assertNotIn("mean inter-token latency", text, "schema.md still says mean ITL for pu")
         self.assertNotIn("1000 / mean itl", text, "schema.md still says 1000/mean ITL for pu")
         self.assertNotIn("1000/mean-itl", text, "schema.md still says 1000/mean-ITL for pu")
+
+
+class NativeDeploymentInputs(unittest.TestCase):
+    def test_fixed_drafting_fields_survive_a_swept_adaptive_state(self):
+        shared = {"speculative": {"draft_model": "muse-spark-open-dspark",
+                                  "draft_sample_method": "probabilistic"}}
+        chosen = {"speculative": {"enable_adaptive_verification": True},
+                  "speculative_method": "dspark", "num_speculative_tokens": 7}
+        candidate = E.merge_config(shared, chosen)
+        parallel, engine, cli, context = run_blis.classify_config(candidate, V.knob_vocabulary(BLIS))
+        self.assertEqual("muse-spark-open-dspark", engine["speculative"]["draft_model"])
+        self.assertEqual("probabilistic", engine["speculative"]["draft_sample_method"])
+        self.assertTrue(engine["speculative"]["enable_adaptive_verification"])
+        self.assertNotIn("enable_adaptive_verification", shared["speculative"])
+
+    def test_offload_control_and_native_block_cross_engine_values(self):
+        offload = {"tiers": [{"tier": "cpu_dram", "bytes": 1024}]}
+        sweep = {"name": "s", "num-instances": [2], "parallel": {"tp": [8]},
+                 "engine": {"max_num_seqs": [32, 64]}, "offload": [None, offload]}
+        kept, dropped = E.expand_sweep(sweep, 16)
+        self.assertEqual(4, len(kept))
+        self.assertFalse(dropped)
+        self.assertEqual(2, sum(candidate["offload"] is None for candidate in kept))
+        self.assertEqual(2, sum(candidate["offload"] == offload for candidate in kept))
+
+    def test_external_drafter_and_adaptive_states_remain_nested(self):
+        sweep = {"name": "s", "num-instances": [2], "parallel": {"tp": [8]},
+                 "engine": {"speculative": {"method": ["dspark"], "num_spec_tokens": [7],
+                           "draft_model": ["muse-spark-open-dspark"],
+                           "enable_adaptive_verification": [False, True]}}}
+        kept, dropped = E.expand_sweep(sweep, 16)
+        self.assertEqual(2, len(kept))
+        self.assertFalse(dropped)
+        for candidate in kept:
+            parallel, engine, cli, context = run_blis.classify_config(candidate, V.knob_vocabulary(BLIS))
+            self.assertEqual(7, engine["speculative"]["num_spec_tokens"])
+            self.assertEqual("muse-spark-open-dspark", engine["speculative"]["draft_model"])
+
+    def test_native_offload_schema_is_used_without_copying_fields(self):
+        self.assertEqual([], V.native_input_errors({"tiers": [{"tier": "cpu_dram", "bytes": 1024}]},
+                                                   "offload", BLIS, "deployment", "offload"))
+        errors = V.native_input_errors({"invented": True}, "offload", BLIS, "deployment", "offload")
+        self.assertTrue(errors)
+
+    def test_empty_offload_domain_is_rejected(self):
+        document = spec()
+        document["sweeps"][0]["offload"] = []
+        self.assertTrue(any("offload" in error for error in V.validate(document, BLIS)))
+
+    def test_inline_acceptance_is_validated_by_scenario_schema(self):
+        pin = {"value": {"num_spec_tokens": 7, "acceptance_length": 2.6, "source": "test source"}}
+        self.assertEqual([], V.native_input_errors(pin, "acceptance", BLIS, "scenario", "acceptance"))
+        self.assertTrue(V.native_input_errors({"value": {"invented": 1}}, "acceptance", BLIS,
+                                              "scenario", "acceptance"))
 
 
 def main():

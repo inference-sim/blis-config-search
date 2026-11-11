@@ -206,13 +206,47 @@ engine:
   engram_config: {cpu_offload: [true, false]}
 ```
 
-`speculative` is also nested and needs **both** `method` and `num_spec_tokens`; acceptance comes
-from the registry, not a knob. It carries seven fields at this pin (it held two before v0.14.0),
-but only `method` and `num_spec_tokens` change a run. The sampling fields
-(`draft_sample_method`, `rejection_sample_method`, `enable_adaptive_verification`,
-`kv_cache_dtype`) are recorded as the launch gave them and never re-price acceptance, and
-`draft_model` cannot run on any catalog model (the drafter comes from the model's graph), so the
-validator refuses a sweep over any of them.
+`speculative` is also nested and needs **both** `method` and `num_spec_tokens`. Other fields
+stay nested, including an external catalog `draft_model` and
+`enable_adaptive_verification`. Their availability comes from the pinned engine's field list,
+not from a second list here. Fields marked inert remain fixed in `scenario.engine`, as the
+validator requires. Fixed nested fields survive a sweep over other fields in the same block.
+
+Acceptance normally comes from the registry. An experiment can instead fix
+`scenario.acceptance` to an inline value in the native Scenario schema:
+
+```yaml
+acceptance:
+  value:
+    num_spec_tokens: 7
+    acceptance_length: 2.5
+    source: "Explicit example assumption, not a measurement"
+```
+
+The runner validates the value against `blis schema scenario`, requires its depth to match,
+records its source, and derives per-token rates from that same value. Acceptance is a fixed
+workload assumption, not a deployment knob to optimize. Named-profile pins are not yet wired
+through this interface and are refused, as are competing CLI acceptance overrides. A borrowed
+or aggregate value does not establish measured accuracy at every load or hardware configuration.
+
+A sweep can cross complete native `Deployment.offload` blocks through `offload`. `null` is the
+no-tier control. The pinned deployment schema validates their fields; the runner does not keep
+another offload schema or translate weight/Engram offload into KV offload:
+
+```yaml
+offload:
+  - null
+  - connector: OffloadingConnector
+    spec: TieringOffloadingSpec
+    tiers:
+      - tier: cpu_dram
+        bytes: 1073741824
+```
+
+The native block is deployment-level: every engine receives its stated capacity, following the
+owner's connector semantics. It is not a per-pool or per-rank override. The block participates in
+the configuration identity, is retained in the ledger, and must produce read-back evidence in
+the raw Result before a report claims the CPU tier served requests.
 
 ### Not every accepted knob is a lever
 
@@ -249,6 +283,38 @@ Don't restate `scenario`, `corpus_sha256`, `benchmark_duration`, `max_context_le
 style note for each. Keep the corpus path **relative**: an absolute one pins the spec to one
 machine. A field that genuinely differs from the descriptor is recorded as an override, so the
 report can say the run departed from the catalog.
+
+For diagnostic collection, `scenario.replay.server_series_interval_s` passes the
+explicit interval to BLIS's native `--server-series-interval-s` flag. The raw
+Result contains per-engine counters, including CPU-tier prompt-token transfers,
+under `reports.engine.cluster.server_series`. Omission leaves collection unchanged;
+this setting does not change the ranking basis.
+
+For long sweeps, `run_experiment.py --checkpoint-runs` writes and syncs each
+finished attempt to `run-checkpoints.jsonl`, including refused and incomplete
+attempts. Use a fresh output directory: an existing journal is never truncated.
+The journal follows completion order and may be partial; it is not a report or
+a resume command. A completed sweep still writes the usual ordered `runs.jsonl`
+and `scenario.json`, with unchanged ranking rules. Use bounded experiment shards
+and retain the inputs and raw outputs alongside both files.
+
+`scripts/shard_experiment.py` splits a validated experiment into bounded native
+specs. It retains every listed choice and every load, and checks each generated
+batch with the reference `expand_sweep`. It does not price, rank or prune points.
+GPU-budget refusals remain the runner's decision, not a sharder filter.
+
+```bash
+SPEC=experiments/muse-spark-open-816b-a42b-gb200-agentx-rack.yaml
+python3 -I scripts/shard_experiment.py "$SPEC" --max-runs 64
+python3 -I scripts/shard_experiment.py "$SPEC" --max-runs 64 --index 0 --out shard-0.yaml
+```
+
+The first command gives the shard count and unfiltered point count. Generate
+every index from zero through shard count minus one; validate and execute each
+with the usual runner and keep its standard artifacts. Each generated filename
+must be new. The parent spec, its hash, runner pins, index mapping and completed
+batch records belong in the execution package. A completed batch is not evidence
+that the whole parent grid has finished.
 
 **To fetch the corpus**, let the descriptor drive it — it already names the dataset, the pinned
 revision and the digest:

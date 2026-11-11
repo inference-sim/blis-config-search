@@ -945,6 +945,16 @@ class ReplayCommand(unittest.TestCase):
         self.assertNotIn("--num-requests", cmd)
         self.assertNotIn("--workload", cmd)
 
+    def test_server_series_is_opt_in_and_preserves_interval(self):
+        cmd = run_blis.build_replay_cmd("/b", "/cat", "/reg", "/sc", "s.yaml", 42, None, {},
+                                        self.REPLAY)
+        self.assertNotIn("--server-series-interval-s", cmd)
+        for interval in (1, 10, 0.5):
+            cmd = run_blis.build_replay_cmd("/b", "/cat", "/reg", "/sc", "s.yaml", 42,
+                                            None, {}, dict(self.REPLAY,
+                                                           server_series_interval_s=interval))
+            self.assertEqual(cmd[cmd.index("--server-series-interval-s") + 1], str(interval))
+
     def test_requires_corpus_and_digest(self):
         class A:
             agentic_scenario = "inferencex-agentx-mvp"
@@ -1134,6 +1144,48 @@ class FailureLine(unittest.TestCase):
                          'time=x level=fatal msg="bad pool"')
         self.assertEqual(run_blis._failure_line("first\nlast\n"), "last")
         self.assertEqual(run_blis._failure_line(""), "")
+
+
+class NativeScenarioContext(unittest.TestCase):
+    def test_native_inputs_are_rendered_on_their_own_documents(self):
+        import yaml
+        pin = {"value": {"num_spec_tokens": 7, "acceptance_length": 2.6, "source": "test source"}}
+        offload = {"connector": "OffloadingConnector", "spec": "TieringOffloadingSpec",
+                   "tiers": [{"tier": "cpu_dram", "bytes": 1024}]}
+        config = {"tp": 8, "pp": 1, "dp": 1, "speculative_method": "dspark",
+                  "num_speculative_tokens": 7, "acceptance": pin, "offload": offload,
+                  "speculative": {"draft_model": "muse-spark-open-dspark"}}
+        parallel, engine, cli, context = classify(config)
+        text = run_blis.scenario_yaml("muse-spark-open-816b-a42b-nvfp4", "gb200-nvl72", "0.32.0",
+                                     parallel, engine, "test-native", 2, router=context)
+        scenario, deployment = list(yaml.safe_load_all(text))
+        self.assertEqual(pin, scenario["acceptance"])
+        self.assertEqual(offload, deployment["offload"])
+        self.assertNotIn("offload", scenario)
+        self.assertNotIn("acceptance", deployment)
+        self.assertNotIn("router", deployment)
+        self.assertEqual("muse-spark-open-dspark", deployment["pools"][0]["engine"]["speculative"]["draft_model"])
+
+    def test_acceptance_depth_mismatch_is_refused(self):
+        with self.assertRaisesRegex(run_blis.ConfigError, "draft depth"):
+            classify({"num_speculative_tokens": 3, "speculative_method": "dspark",
+                      "acceptance": {"value": {"num_spec_tokens": 7, "acceptance_length": 2.6}}})
+
+    def test_named_pin_is_not_silently_resolved_from_other_profiles(self):
+        with self.assertRaisesRegex(run_blis.ConfigError, "inline value"):
+            classify({"num_speculative_tokens": 7, "acceptance": {"profiles": ["unresolved"]}})
+
+    def test_competing_acceptance_inputs_are_refused(self):
+        with self.assertRaisesRegex(run_blis.ConfigError, "CLI acceptance"):
+            classify({"num_speculative_tokens": 7, "speculative_method": "dspark",
+                      "speculative_acceptance_length": 3.5,
+                      "acceptance": {"value": {"num_spec_tokens": 7, "acceptance_length": 2.6}}})
+
+    def test_context_changes_the_scenario_identity(self):
+        args = ("muse-spark-open-816b-a42b-nvfp4", "gb200-nvl72", "0.32.0", {"tp": 8}, {})
+        plain = run_blis.scenario_name(*args)
+        tiered = run_blis.scenario_name(*args, router={"offload": {"tiers": [{"tier": "cpu_dram", "bytes": 1024}]}})
+        self.assertNotEqual(plain, tiered)
 
 
 if __name__ == "__main__":

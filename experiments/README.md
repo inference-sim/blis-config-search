@@ -298,6 +298,23 @@ a resume command. A completed sweep still writes the usual ordered `runs.jsonl`
 and `scenario.json`, with unchanged ranking rules. Use bounded experiment shards
 and retain the inputs and raw outputs alongside both files.
 
+`scripts/shard_experiment.py` splits a validated experiment into bounded native
+specs. It retains every listed choice and every load, and checks each generated
+batch with the reference `expand_sweep`. It does not price, rank or prune points.
+GPU-budget refusals remain the runner's decision, not a sharder filter.
+
+```bash
+python3 -I scripts/shard_experiment.py experiments/example.yaml --max-runs 64
+python3 -I scripts/shard_experiment.py experiments/example.yaml --max-runs 64 --index 0 --out shard-0.yaml
+```
+
+The first command gives the shard count and unfiltered point count. Generate
+every index from zero through shard count minus one; validate and execute each
+with the usual runner and keep its standard artifacts. Each generated filename
+must be new. The parent spec, its hash, runner pins, index mapping and completed
+batch records belong in the execution package. A completed batch is not evidence
+that the whole parent grid has finished.
+
 **To fetch the corpus**, let the descriptor drive it — it already names the dataset, the pinned
 revision and the digest:
 

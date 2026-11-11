@@ -29,6 +29,7 @@ import run_blis                     # noqa: E402
 import blis_cli                     # noqa: E402
 import settings                     # noqa: E402
 import fetch_corpus as FC           # noqa: E402
+import shard_experiment as Shards
 
 # TEMPORARY: the inference-sim commands, from scripts/testdata/blis-m1 (inference-sim#2077).
 BLIS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata", "blis-m1", "blis")
@@ -1759,6 +1760,77 @@ class PdRunner(unittest.TestCase):
 
 
 # --- assembled report -------------------------------------------------------------------------
+
+
+class ShardPartition(unittest.TestCase):
+    def assert_partition(self, document, limit):
+        previous = copy.deepcopy(document)
+        expected, actual = [], []
+        loads = document["scenario"]["concurrency"]
+        for sweep in document["sweeps"]:
+            kept, dropped = E.expand_sweep(sweep, document["scenario"]["gpus"])
+            expected.extend(json.dumps([sweep["name"], "kept", candidate, load], sort_keys=True)
+                            for candidate in kept for load in loads)
+            expected.extend(json.dumps([sweep["name"], "dropped", candidate, budget, load], sort_keys=True)
+                            for candidate, budget in dropped for load in loads)
+        plans = Shards.plans_for(document, limit)
+        for index in range(sum(plan["shards"] for plan in plans)):
+            shard = Shards.compile_shard(document, index, limit, plans)
+            self.assertEqual(shard["scenario"], document["scenario"])
+            sweep = shard["sweeps"][0]
+            kept, dropped = E.expand_sweep(sweep, document["scenario"]["gpus"])
+            self.assertLessEqual((len(kept) + len(dropped)) * len(loads), limit)
+            actual.extend(json.dumps([sweep["name"], "kept", candidate, load], sort_keys=True)
+                          for candidate in kept for load in loads)
+            actual.extend(json.dumps([sweep["name"], "dropped", candidate, budget, load], sort_keys=True)
+                          for candidate, budget in dropped for load in loads)
+        self.assertEqual(sorted(expected), sorted(actual))
+        self.assertEqual(document, previous)
+
+    def test_colocated_nested_offload_and_router_product_is_preserved(self):
+        document = spec()
+        document["sweeps"][0].update({
+            "num-instances": [2, 4], "parallel": {"tp": [4, 8]},
+            "engine": {"max_num_seqs": [32, 64, 64], "speculative": {
+                "method": ["dspark"], "num_spec_tokens": [3, 7]}},
+            "offload": [None, {"connector": "OffloadingConnector", "tiers": [
+                {"tier": "cpu_dram", "bytes": 644245094400}]}],
+            "router": {"endpoint_picker_config": ["queue.yaml", "precise.yaml"]}})
+        document["sweeps"].append({"name": "second", "parallel": {"tp": [16]}})
+        self.assert_partition(document, 8)
+
+    def test_disaggregated_role_product_and_budget_refusals_are_preserved(self):
+        document = spec()
+        document["sweeps"] = [{"name": "pd", "prefill-instances": [1, 2],
+            "decode-instances": [1, 2],
+            "prefill": {"parallel": {"tp": [4, 8]},
+                        "engine": {"max_num_batched_tokens": [4096, 8192]}},
+            "decode": {"parallel": {"tp": [4, 8]},
+                       "engine": {"max_num_seqs": [32, 64]}},
+            "router": {"endpoint_picker_config": ["pd-prefix.yaml"]}}]
+        self.assert_partition(document, 8)
+
+    def test_large_product_is_planned_without_expanding_the_whole_grid(self):
+        document = spec()
+        document["sweeps"][0]["engine"] = {
+            "max_num_seqs": list(range(1, 1001)),
+            "max_num_batched_tokens": list(range(1, 1001))}
+        plans = Shards.plans_for(document, 8)
+        self.assertEqual(sum(plan["raw_points"] for plan in plans), 2000000)
+        last = sum(plan["shards"] for plan in plans) - 1
+        shard = Shards.compile_shard(document, last, 8, plans)
+        self.assertEqual(shard["sweeps"][0]["engine"]["max_num_seqs"], [1000])
+        with self.assertRaises(IndexError):
+            Shards.compile_shard(document, last + 1, 8, plans)
+
+    def test_ignored_axes_and_too_small_shards_are_refused(self):
+        with self.assertRaises(ValueError):
+            Shards.plans_for(spec(), 1)
+        document = spec()
+        document["sweeps"][0]["router"] = {
+            "plugins": {"x": {"parameters": {"weight": [1, 2]}}}}
+        with self.assertRaisesRegex(ValueError, "does not expand natively"):
+            Shards.plans_for(document, 8)
 
 
 class DryRunPlan(unittest.TestCase):

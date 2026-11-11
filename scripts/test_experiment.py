@@ -1762,6 +1762,72 @@ class PdRunner(unittest.TestCase):
 
 
 class DryRunPlan(unittest.TestCase):
+    def test_checkpoint_is_opt_in_and_dry_run_does_not_create_it(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as out:
+            with patch.object(E.run_blis, "run_one", return_value={
+                    "metrics": {}, "cmd": None, "returncode": 1, "error": "startup refused"}):
+                E.run_experiment(spec(), BLIS, None, "/r", out, verbose=False)
+            self.assertFalse(os.path.exists(os.path.join(out, "t", "run-checkpoints.jsonl")))
+            dry_out = os.path.join(out, "dry")
+            E.run_experiment(spec(), BLIS, None, None, dry_out, dry_run=True,
+                             verbose=False, checkpoint_runs=True)
+            self.assertFalse(os.path.exists(dry_out))
+
+    def test_checkpoint_survives_later_failure_and_is_not_truncated(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as out:
+            checkpoint = os.path.join(out, "t", "run-checkpoints.jsonl")
+            calls = []
+
+            def fake_run_one(*args, **kwargs):
+                calls.append(1)
+                if len(calls) == 2:
+                    with open(checkpoint, encoding="utf-8") as stream:
+                        saved = [json.loads(line) for line in stream]
+                    self.assertEqual(len(saved), 1)
+                    raise RuntimeError("interrupted second attempt")
+                return {"metrics": {}, "cmd": None, "returncode": 1,
+                        "error": "startup refused", "config": dict(args[11])}
+
+            with patch.object(E.run_blis, "run_one", side_effect=fake_run_one), \
+                    patch.object(E.os, "fsync", wraps=os.fsync) as sync:
+                with self.assertRaisesRegex(RuntimeError, "interrupted second attempt"):
+                    E.run_experiment(spec(), BLIS, None, "/r", out, verbose=False,
+                                     checkpoint_runs=True)
+                self.assertEqual(sync.call_count, 1)
+                with open(checkpoint, "rb") as stream:
+                    previous = stream.read()
+                with self.assertRaises(FileExistsError):
+                    E.run_experiment(spec(), BLIS, None, "/r", out, verbose=False,
+                                     checkpoint_runs=True)
+                with open(checkpoint, "rb") as stream:
+                    self.assertEqual(stream.read(), previous)
+                self.assertEqual(len(calls), 2)
+
+    def test_parallel_checkpoint_contains_the_same_attempts_as_final_ledger(self):
+        from unittest.mock import patch
+
+        def fake_run_one(*args, **kwargs):
+            return {"metrics": {}, "cmd": None, "returncode": 1,
+                    "error": "startup refused", "config": dict(args[11])}
+
+        with tempfile.TemporaryDirectory() as out, \
+                patch.object(E.run_blis, "run_one", side_effect=fake_run_one):
+            document = spec()
+            document["scenario"]["concurrency"] = list(range(1, 17))
+            E.run_experiment(document, BLIS, None, "/r", out, verbose=False,
+                             max_parallel=4, checkpoint_runs=True)
+            contents = []
+            for name in ("run-checkpoints.jsonl", "runs.jsonl"):
+                with open(os.path.join(out, "t", name), encoding="utf-8") as stream:
+                    contents.append(sorted(json.dumps(json.loads(line), sort_keys=True)
+                                           for line in stream))
+            self.assertEqual(len(contents[0]), 16)
+            self.assertEqual(contents[0], contents[1])
+
     def test_dry_run_plans_without_touching_blis(self):
         report = E.run_experiment(spec(), blis=BLIS, catalog=None, registry=None,
                                   out_root="/nonexistent-should-not-be-written",

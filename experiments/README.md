@@ -290,6 +290,14 @@ Result contains per-engine counters, including CPU-tier prompt-token transfers,
 under `reports.engine.cluster.server_series`. Omission leaves collection unchanged;
 this setting does not change the ranking basis.
 
+For long sweeps, `run_experiment.py --checkpoint-runs` writes and syncs each
+finished attempt to `run-checkpoints.jsonl`, including refused and incomplete
+attempts. Use a fresh output directory: an existing journal is never truncated.
+The journal follows completion order and may be partial; it is not a report or
+a resume command. A completed sweep still writes the usual ordered `runs.jsonl`
+and `scenario.json`, with unchanged ranking rules. Use bounded experiment shards
+and retain the inputs and raw outputs alongside both files.
+
 **To fetch the corpus**, let the descriptor drive it — it already names the dataset, the pinned
 revision and the digest:
 

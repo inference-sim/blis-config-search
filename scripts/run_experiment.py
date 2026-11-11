@@ -39,6 +39,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import time
 
 try:
@@ -554,7 +555,8 @@ def best_of(rows):
 
 
 def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dry_run=False,
-                   run_timeout=600, max_parallel=1, verbose=True, fields=None, data_override=False):
+                   run_timeout=600, max_parallel=1, verbose=True, fields=None, data_override=False,
+                   checkpoint_runs=False):
     """Expand, filter, run and rank one spec. Returns the assembled report dict.
 
     `catalog` and `registry` are where the scripts read files from (a blis-substrate checkout at
@@ -594,6 +596,12 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     generated_routing = os.path.join(out_dir, "routing")
     if not dry_run:
         os.makedirs(scenarios_dir, exist_ok=True)
+    checkpoint_path = None
+    checkpoint_lock = threading.Lock()
+    if checkpoint_runs and not dry_run:
+        checkpoint_path = os.path.join(out_dir, "run-checkpoints.jsonl")
+        with open(checkpoint_path, "x", encoding="utf-8"):
+            pass
 
     # Which simulator is about to price this sweep. Only the CI workflows verified BLIS_SHA, so a
     # contributor sweeping locally against an off-pin binary got real-looking numbers with no
@@ -713,6 +721,12 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
             row["servable"] = ok
             if why:
                 row["not_servable_because"] = why
+            if checkpoint_path is not None:
+                with checkpoint_lock:
+                    with open(checkpoint_path, "a", encoding="utf-8") as journal:
+                        journal.write(json.dumps(rec, sort_keys=True) + "\n")
+                        journal.flush()
+                        os.fsync(journal.fileno())
             return idx, rec, row
 
         if work:
@@ -1421,6 +1435,9 @@ def main(argv=None):
                          "expansion order, so a spec reproduces byte-for-byte at any setting.")
     ap.add_argument("--json", action="store_true", dest="as_json",
                     help="print the assembled report to stdout")
+    ap.add_argument("--checkpoint-runs", action="store_true",
+                    help="flush each finished attempt to run-checkpoints.jsonl; use a fresh output "
+                         "directory. This journal is not a completed report or a resume command.")
     args = ap.parse_args(argv)
 
     spec, err = validator.load(args.spec)
@@ -1443,7 +1460,7 @@ def main(argv=None):
     report = run_experiment(spec, args.blis, args.catalog, args.registry, args.out,
                             routing_dir=args.routing, dry_run=args.dry_run,
                             run_timeout=args.timeout, max_parallel=args.max_parallel, fields=args.fields,
-                            data_override=args.data_override)
+                            data_override=args.data_override, checkpoint_runs=args.checkpoint_runs)
     if args.as_json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:

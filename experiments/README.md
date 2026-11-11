@@ -304,8 +304,9 @@ batch with the reference `expand_sweep`. It does not price, rank or prune points
 GPU-budget refusals remain the runner's decision, not a sharder filter.
 
 ```bash
-python3 -I scripts/shard_experiment.py experiments/example.yaml --max-runs 64
-python3 -I scripts/shard_experiment.py experiments/example.yaml --max-runs 64 --index 0 --out shard-0.yaml
+SPEC=experiments/muse-spark-open-816b-a42b-gb200-agentx-rack.yaml
+python3 -I scripts/shard_experiment.py "$SPEC" --max-runs 64
+python3 -I scripts/shard_experiment.py "$SPEC" --max-runs 64 --index 0 --out shard-0.yaml
 ```
 
 The first command gives the shard count and unfiltered point count. Generate

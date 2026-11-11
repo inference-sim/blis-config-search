@@ -284,6 +284,12 @@ style note for each. Keep the corpus path **relative**: an absolute one pins the
 machine. A field that genuinely differs from the descriptor is recorded as an override, so the
 report can say the run departed from the catalog.
 
+For diagnostic collection, `scenario.replay.server_series_interval_s` passes the
+explicit interval to BLIS's native `--server-series-interval-s` flag. The raw
+Result contains per-engine counters, including CPU-tier prompt-token transfers,
+under `reports.engine.cluster.server_series`. Omission leaves collection unchanged;
+this setting does not change the ranking basis.
+
 **To fetch the corpus**, let the descriptor drive it — it already names the dataset, the pinned
 revision and the digest:
 

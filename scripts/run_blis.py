@@ -1349,6 +1349,8 @@ def build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed
             cmd += ["--format", "yaml"]
     if replay.get("corpus_cache"):
         cmd += ["--corpus-cache", replay["corpus_cache"]]
+    if replay.get("server_series_interval_s") is not None:
+        cmd += ["--server-series-interval-s", str(replay["server_series_interval_s"])]
     if seed is not None:
         cmd += ["--seed", str(seed)]
     for k, v in cli.items():

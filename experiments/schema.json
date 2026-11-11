@@ -101,7 +101,7 @@
           "type": "object"
         },
         "replay": {
-          "description": "Replay knobs when `workload` names a trace corpus: corpus_sha256, benchmark_duration, grace_period, max_context_length, category, thinking.",
+          "description": "Replay knobs when `workload` names a trace corpus: corpus_sha256, benchmark_duration, grace_period, max_context_length, category, thinking. Optional server_series_interval_s requests native per-engine diagnostic series in the raw Result.",
           "type": "object",
           "minProperties": 1
         }

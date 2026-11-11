@@ -945,6 +945,16 @@ class ReplayCommand(unittest.TestCase):
         self.assertNotIn("--num-requests", cmd)
         self.assertNotIn("--workload", cmd)
 
+    def test_server_series_is_opt_in_and_preserves_interval(self):
+        cmd = run_blis.build_replay_cmd("/b", "/cat", "/reg", "/sc", "s.yaml", 42, None, {},
+                                        self.REPLAY)
+        self.assertNotIn("--server-series-interval-s", cmd)
+        for interval in (1, 10, 0.5):
+            cmd = run_blis.build_replay_cmd("/b", "/cat", "/reg", "/sc", "s.yaml", 42,
+                                            None, {}, dict(self.REPLAY,
+                                                           server_series_interval_s=interval))
+            self.assertEqual(cmd[cmd.index("--server-series-interval-s") + 1], str(interval))
+
     def test_requires_corpus_and_digest(self):
         class A:
             agentic_scenario = "inferencex-agentx-mvp"

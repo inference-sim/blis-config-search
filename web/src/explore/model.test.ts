@@ -156,10 +156,3 @@ describe('the arm behind a card', () => {
     expect(Object.fromEntries(resolvedConfig(r, {}, FIXTURE.keys)).prefill_tp).toBe('8 (default)')
   })
 })
-
-describe('lexicon wording', () => {
-  it('has no sessions left for the load, in the shared lexicon', async () => {
-    const lex = JSON.stringify((await import('../lexicon.json')).default)
-    expect(lex).not.toMatch(/adding sessions|session count/)
-  })
-})

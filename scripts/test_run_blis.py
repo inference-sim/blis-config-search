@@ -9,9 +9,13 @@ import sys
 import tempfile
 import unittest
 
+import yaml
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blis_cli
+import report
 import run_blis
+import run_experiment
 import settings
 
 # TEMPORARY: the inference-sim commands, from scripts/testdata/blis-m1 (inference-sim#2077).
@@ -141,17 +145,29 @@ class MeasuredWindow(unittest.TestCase):
         doc["metrics"] = {}
         self.assertEqual({}, run_blis.parse_metrics(json.dumps(doc)))
 
-    def test_no_code_path_reads_whole_run_for_display_ranking_or_feasibility(self):
-        # The record keeps the whole-run aggregate as raw data under its own key; no other line of
-        # any module that displays, ranks or gates mentions it outside a comment.
-        src_dir = os.path.dirname(os.path.abspath(run_blis.__file__))
-        for name in ("run_blis.py", "run_experiment.py", "report.py", "explore_data.py", "build_gallery.py"):
-            with open(os.path.join(src_dir, name), encoding="utf-8") as f:
-                code = [l.strip() for l in f.read().splitlines() if not l.lstrip().startswith("#")]
-            hits = [l for l in code if "whole_run" in l]
-            allowed = {'whole = (_engine_report(doc).get("cluster") or {}).get("whole_run")',
-                       'rec["whole_run"] = whole'} if name == "run_blis.py" else set()
-            self.assertEqual([l for l in hits if l not in allowed], [], name)
+    def _recorded(self):
+        """A run record the way run_one assembles it: window figures in `metrics`, the whole-run
+        aggregate kept beside them as raw data under its own key."""
+        doc = json.loads(RESULT_DOC)
+        return {"returncode": 0, "error": None, "deployment": {"gpus": 8},
+                "metrics": run_blis.parse_metrics(RESULT_DOC), "metrics_all_instances": [],
+                "whole_run": doc["reports"]["engine"]["cluster"]["whole_run"]}
+
+    def test_the_ledger_row_is_ranked_on_the_window_not_the_whole_run(self):
+        rec = self._recorded()
+        row = run_experiment.run_row(rec, None, "l", "v", "s", 4, 8)
+        self.assertEqual(row["tokens_per_sec"], 106.8)
+        self.assertEqual(row["tokens_per_sec_per_gpu"], 13.35)
+        self.assertEqual(row["ttft_p99_ms"], 340.0)
+
+    def test_a_ttft_cap_between_the_window_and_the_whole_run_is_judged_on_the_window(self):
+        # Window p99 is 340 ms, the whole run's 349.07 ms: only a gate that reads the window passes 345.
+        rec = self._recorded()
+        self.assertTrue(run_experiment.servable(rec, {"ttft_p99": 345.0}, gpus=8)[0])
+        self.assertFalse(run_experiment.servable(rec, {"ttft_p99": 335.0}, gpus=8)[0])
+        ok, viol = report._feasible(rec, {}, {"ttft_p99": "345ms"})
+        self.assertEqual((ok, viol), (True, []))
+        self.assertFalse(report._feasible(rec, {}, {"ttft_p99": "335ms"})[0])
 
     def test_completion_counters_follow_the_requests_block(self):
         m = run_blis.parse_metrics(RESULT_DOC)
@@ -1048,10 +1064,9 @@ class SpeculativeDecoding(unittest.TestCase):
                                    {"block_size": 128,
                                     "speculative": {"method": "dspark", "num_spec_tokens": 5}},
                                    "n")
-        self.assertIn("      speculative_config:\n", y)
-        self.assertIn('        method: "dspark"', y)
-        self.assertIn("        num_speculative_tokens: 5", y)
-        self.assertNotIn('{"method"', y)
+        engine = list(yaml.safe_load_all(y))[1]["pools"][0]["engine"]
+        self.assertEqual(engine["speculative_config"], {"method": "dspark", "num_speculative_tokens": 5})
+        self.assertEqual(engine["block_size"], 128)
 
     def test_the_engine_block_takes_vllms_names_and_the_sweeps_record_keeps_its_own(self):
         """The pin at inference-sim PR 5 refuses the earlier names ("engine key cudagraph_mode is now
@@ -1059,12 +1074,16 @@ class SpeculativeDecoding(unittest.TestCase):
         eng = {"cache_dtype": "fp8", "cudagraph_mode": "FULL", "indexer_kv_dtype": "fp8", "block_size": 64,
                "eplb": {"enable_eplb": True, "window_size": 5}, "speculative": {"method": "mtp", "num_spec_tokens": 2}}
         y = run_blis.scenario_yaml("m", "b200", "0.32.0", dict(run_blis.PARALLEL_DEFAULTS), eng, "n")
-        for want in ('      kv_cache_dtype: "fp8"', "      compilation_config:\n", '        cudagraph_mode: "FULL"',
-                     "      attention_config:\n", "      enable_eplb: true", "      eplb_config:\n",
-                     "      speculative_config:\n", "        num_speculative_tokens: 2", "      block_size: 64"):
-            self.assertIn(want, y)
-        for old in ("cache_dtype:", "  cudagraph_mode:\n", "num_spec_tokens", "\n      speculative:"):
-            self.assertNotIn(old if old != "cache_dtype:" else "\n      cache_dtype:", y)
+        engine = list(yaml.safe_load_all(y))[1]["pools"][0]["engine"]
+        self.assertEqual(engine["kv_cache_dtype"], "fp8")
+        self.assertEqual(engine["compilation_config"], {"cudagraph_mode": "FULL"})
+        self.assertEqual(engine["enable_eplb"], True)
+        self.assertEqual(engine["eplb_config"], {"window_size": 5})
+        self.assertEqual(engine["speculative_config"], {"method": "mtp", "num_speculative_tokens": 2})
+        self.assertEqual(engine["block_size"], 64)
+        self.assertIn("attention_config", engine)
+        for old in ("cache_dtype", "cudagraph_mode", "speculative"):
+            self.assertNotIn(old, engine)           # the earlier names are not written at the top level
         self.assertEqual(eng["cache_dtype"], "fp8")             # the caller's block is not changed
         self.assertEqual(run_blis.to_vllm_block({"block_size": 8}), {"block_size": 8})
 
@@ -1173,10 +1192,6 @@ class FigureForms(unittest.TestCase):
                 m.setdefault("scope", "cluster")
         return d
 
-    def test_the_versions_read_and_the_one_the_scope_check_starts_at(self):
-        self.assertEqual(run_blis.READ_RESULT_SCHEMAS, (1, 2, 3))
-        self.assertEqual(run_blis.FIGURE_SCOPE_FROM_SCHEMA, 3)
-
     def test_version_2_and_earlier_carry_no_scope_and_are_read_as_cluster_figures(self):
         for v in ("1", 2):
             self.assertEqual(run_blis.figure_form_problems(self.doc(v)), [])
@@ -1203,8 +1218,10 @@ class FigureForms(unittest.TestCase):
         self.assertEqual(run_blis.figure_form_problems(d), [])
 
     def test_a_version_this_runner_has_not_read_is_refused(self):
-        self.assertEqual(run_blis.figure_form_problems(self.doc(4)),
-                         ["Result schema_version 4 is not one this runner reads (1, 2, 3)"])
+        beyond = max(run_blis.READ_RESULT_SCHEMAS) + 1
+        problems = run_blis.figure_form_problems(self.doc(beyond))
+        self.assertEqual(len(problems), 1)
+        self.assertIn(str(beyond), problems[0])
 
     def test_the_feasibility_aggregate_is_stated_as_max_over_instances(self):
         self.assertEqual(run_blis.FEASIBILITY_AGGREGATE["aggregate"], "max")

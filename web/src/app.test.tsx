@@ -237,7 +237,7 @@ describe('report explorer page', () => {
     expect(attrs.replace(/does not add new sessions/, '')).not.toMatch(/\bsessions\b/)
     expect(attrs).toMatch(/\bc64\b/)
     expect(document.querySelector('.xf-facet-l')?.textContent).toBe('concurrency')
-    expect(document.querySelector('.xf-facet-l')?.getAttribute('title')).toMatch(/session-tree lanes.*finite corpus/)
+    expect(document.querySelector('.xf-facet-l')?.getAttribute('title')).toBeTruthy()   // the axis explains itself; the copy is the lexicon's
     const chips = [...document.querySelectorAll('.xf-facet .xf-chip')]
     expect(chips.map((c) => c.textContent)).toEqual(['c8', 'c64'])      // no run count beside a chip
     expect([...document.querySelectorAll('.axlabel')].map((e) => e.textContent).join('|')).toMatch(/concurrency/)

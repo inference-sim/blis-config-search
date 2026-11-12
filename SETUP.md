@@ -37,6 +37,18 @@ such policy"): the nearest configurations are a `queue-scorer` or `load-aware-sc
 `max-score-picker`, or `random-picker`. So reports that compared routing policies before v0.12.0
 cannot be reproduced arm-for-arm.
 
+### The router's reference configs
+
+A spec's router arms are the router fork's own files, read at the commit `pins.env` pins:
+
+```bash
+set -a; . ./pins.env; set +a
+sh scripts/clone_pinned.sh "$ROUTER_CONFIGS_SHA" https://github.com/inference-sim/llm-d-router.git ../llm-d-router
+```
+
+The validator and the sweeper look in `../llm-d-router` (or `$ROUTER_CONFIGS_DIR`, or
+`--router-configs DIR`) and report a checkout at another commit.
+
 ## 2. Catalog + registry (embedded; a checkout only for the scripts' file reads)
 
 The simulator prices with the catalog and registry **embedded** in the blis-substrate release it

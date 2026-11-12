@@ -35,7 +35,7 @@ def label(cand):
 
 # Readable knob names, spelled out on purpose: "b2k" for max_num_batched_tokens=2048 tells a
 # reader nothing. Mirrors report.KNOB_NAMES, keyed by candidate-config key.
-KNOB_NAMES = {"num_speculative_tokens": "draft tokens", "speculative_method": "drafter",
+KNOB_NAMES = {"pd_transfer_contention": "handoff contention", "num_speculative_tokens": "draft tokens", "speculative_method": "drafter",
               "router_config": "routing", "routing_policy": "routing",
               "routing_scorers": "scorers",
               "max_num_batched_tokens": "batch tokens", "max_num_seqs": "max seqs",
@@ -92,6 +92,7 @@ _BOOL_KNOB_WORDS = {
     "disable_custom_all_reduce": ("custom all-reduce off", "custom all-reduce on"),
     "swa_bounded_replay": ("bounded SWA replay on", "bounded SWA replay off"),
     "dcp_q_replicate": ("decode-CP query replication on", "decode-CP query replication off"),
+    "pd_transfer_contention": ("handoff contention on", "handoff contention off"),
 }
 
 

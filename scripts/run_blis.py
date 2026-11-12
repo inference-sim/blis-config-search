@@ -16,7 +16,7 @@
 # Pinned stack: see pins.env, the single source of truth for the BLIS/catalog/registry refs that
 # price every run (scripts/test_build.py checks the docs and workflows against it). The registry
 # must carry the 7 coefficient sets named below, incl cost-model-memory and cost-model-fabric.
-import argparse, hashlib, json, os, subprocess, sys, tempfile, time
+import argparse, hashlib, json, os, re, subprocess, sys, tempfile, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blis_cli  # noqa: E402
@@ -62,6 +62,9 @@ SPECULATIVE_CLI = {"speculative_category": "--speculative-category",
                    "speculative_fallback_category": "--speculative-fallback-category"}
 CLI_FLAGS = {"num_instances": "--num-instances", "concurrency": "--concurrency",
              "scheduler": "--scheduler", "preemption_policy": "--preemption-policy"}
+# Simulator options that are bare switches (`--pd-transfer-contention`): passed when true, left off
+# when false, because the flag takes no value. A sweep states them under `simulator:`.
+CLI_SWITCHES = {"pd_transfer_contention": "--pd-transfer-contention"}
 # The llm-d EndpointPickerConfig this deployment routes with, as a path. Named by the scenario's
 # DEPLOYMENT-level `router:` block (blis-schemas spec/deployment/deployment.go, pinned in
 # pins.env) -- see ROUTING_MOVED below for why this replaced the former --routing-policy flag.
@@ -94,19 +97,17 @@ def cluster_node_size(blis, catalog, hardware, stated=None):
 
 # Cross-node cost resolves from the fabric (a catalog networks/ entry), required once nodes > 1.
 DEFAULT_FABRIC = "ib-400g"   # InfiniBand NDR 400 Gb/s; the standard H100 multi-node interconnect
-# NON-PRECISION engine defaults only. quantization/cache_dtype are intentionally NOT defaulted: an
-# empty precision lets the checkpoint format govern (e.g. qwen3-14b stays BF16), so forcing FP8 here
-# would silently mis-price every non-FP8 model. `block_size` is also absent here because its right
-# value depends on the MODEL -- see default_block_size(), which fills it in per run.
+# The ONE engine value the runner supplies when a spec omits it. Every other omitted knob is left
+# out of the generated scenario, so the engine applies vLLM's own default and records it as an
+# "engine assumption" in the run's log (the README's promise: an omitted knob takes the vLLM
+# default). quantization and cache_dtype stay unset for the same reason: the checkpoint's format
+# governs. `block_size` depends on the MODEL: see default_block_size(), which fills it in per run.
 #
-# `max_model_len` is not merely a convenience here: blis-vllm v0.32.0's rules make it MANDATORY
-# ("must be stated; an unstated or auto window is the model's or the memory's"), so the pinned
-# stack refuses a scenario without it. Because this default always emits one, the five shipped
-# specs that never mention max_model_len still run at the pin -- the requirement is met
-# by the runner, not by the spec. Do not "fix" those specs by adding it; stating it there would
-# pin a context window the spec does not actually care about.
-ENGINE_DEFAULTS = {"max_num_batched_tokens": 8192, "max_num_seqs": 256,
-                   "max_model_len": 32768, "cudagraph_mode": "PIECEWISE", "gpu_memory_utilization": 0.9}
+# `max_model_len` is the exception because blis-vllm v0.32.0 makes it MANDATORY ("must be stated;
+# an unstated or auto window is the model's or the memory's"). 32768 is this runner's choice, not
+# vLLM's (vLLM's is the model's own window). Do not state it in every spec: a spec that does not
+# care about the window should not pin one.
+ENGINE_DEFAULTS = {"max_model_len": 32768}
 # A DSA sparse-MLA model's indexer runs on 64-token kernel blocks, so a stated block_size must be a
 # multiple of 64 or the engine refuses the layout at startup (blis-latency-kernel sparse_mla.go,
 # `dsaBlockSize`). vLLM v0.31.0 picks 64 for these models for the same reason.
@@ -243,6 +244,10 @@ def classify_config(config, vocab, node_size=None):
             cli[k] = v
         elif k in CLI_FLAGS:
             cli[k] = v
+        elif k in CLI_SWITCHES:
+            if not isinstance(v, bool):
+                raise ConfigError(f"{k!r}: {v!r} is not true or false (it is a bare flag)")
+            cli[k] = v
         elif role in PD_ROLES and knob in vocab.parallel:
             pd_parallel[role][knob] = v
         elif role in PD_ROLES and (knob in vocab.engine_names() or k in PD_SPECULATIVE):
@@ -251,7 +256,7 @@ def classify_config(config, vocab, node_size=None):
             raise ConfigError(
                 f"{k!r}: unknown key: not a pool-layout key or engine setting in {vocab.source}, "
                 f"and not one of this runner's own keys "
-                f"({', '.join(sorted([*SCENARIO_SPECULATIVE, *SPECULATIVE_CLI, *SCENARIO_ROUTER, *CLI_FLAGS, *PD_CLI, *PD_DEPLOYMENT]))})")
+                f"({', '.join(sorted([*SCENARIO_SPECULATIVE, *SPECULATIVE_CLI, *SCENARIO_ROUTER, *CLI_FLAGS, *CLI_SWITCHES, *PD_CLI, *PD_DEPLOYMENT]))})")
     if spec:
         k = int(spec.get("num_speculative_tokens") or 0)
         if k > 0:
@@ -300,6 +305,9 @@ def classify_config(config, vocab, node_size=None):
             f"multi-node instance must fill whole {node_size}-GPU nodes (use a footprint that "
             f"is a multiple of {node_size}, or scale out with num_instances instead)")
     pd = resolve_pd(cli, pd_parallel, pd_engine, parallel, engine, node_size)
+    if cli.get("pd_transfer_contention") and not pd:
+        raise ConfigError("pd_transfer_contention: concurrent handoffs only exist in a disaggregated "
+                          "run, and the simulator refuses the flag on any other")
     if pd:
         parallel = {**parallel, "pd": pd}
     return parallel, engine, cli, router
@@ -934,7 +942,13 @@ _MEASURED_KEYS = {"tokens_per_sec": "output_tok_s", "responses_per_sec": "reques
                   "tpot_p95_ms": "tpot_p95_ms", "tpot_p99_ms": "tpot_p99_ms",
                   "itl_mean_ms": "tpot_mean_ms", "itl_p90_ms": "tpot_p90_ms",
                   "itl_p95_ms": "tpot_p95_ms", "itl_p99_ms": "tpot_p99_ms",
-                  "preemption_count": "preemptions"}
+                  "preemption_count": "preemptions",
+                  # The registry's per-GPU rates and the interactivity of the mean TPOT: the figures the
+                  # Pareto objective is stated in (pareto.py). A Result that lacks one leaves the slot
+                  # empty; interactivity is then derived from tpot_mean_ms (pareto.interactivity_of).
+                  "total_tokens_per_sec_per_gpu": "total_tokens_per_second_per_gpu",
+                  "output_tokens_per_sec_per_decode_gpu": "output_tokens_per_second_per_decode_gpu",
+                  "interactivity_of_mean_tpot": "interactivity_of_mean_tpot"}
 
 # Counters that live in the document's own `requests` block, under the Result's names.
 _REQUEST_COUNTS = {"injected_requests": "generated", "completed_requests": "completed",
@@ -1371,10 +1385,23 @@ def resolve_defaults(blis, defaults):
 def _cli_flag(key):
     """The CLI flag for a cli-slot candidate key: a deployment knob, a P/D instance count, or an
     acceptance selector."""
-    for table in (CLI_FLAGS, PD_CLI, SPECULATIVE_CLI):
+    for table in (CLI_FLAGS, CLI_SWITCHES, PD_CLI, SPECULATIVE_CLI):
         if key in table:
             return table[key]
     raise KeyError(key)
+
+
+def _cli_args(cli):
+    """The command-line words for the cli-slot keys: `--flag value`, or a bare `--flag` for a switch
+    that is true (a false switch adds nothing)."""
+    out = []
+    for k, v in cli.items():
+        if k in CLI_SWITCHES:
+            if v:
+                out.append(CLI_SWITCHES[k])
+        else:
+            out += [_cli_flag(k), str(v)]
+    return out
 
 
 # The Result document echoes its input, and JSON has no infinity: an infinite grace makes BLIS exit
@@ -1439,8 +1466,7 @@ def build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed
         cmd += ["--corpus-cache", replay["corpus_cache"]]
     if seed is not None:
         cmd += ["--seed", str(seed)]
-    for k, v in cli.items():
-        cmd += [_cli_flag(k), str(v)]
+    cmd += _cli_args(cli)
     return cmd
 
 
@@ -1466,8 +1492,7 @@ def build_cmd(blis, catalog, registry, scenarios_dir, scenario_name, workload, n
         cmd += ["--seed", str(seed)]
     if horizon is not None:
         cmd += ["--horizon", str(horizon)]
-    for k, v in cli.items():
-        cmd += [_cli_flag(k), str(v)]
+    cmd += _cli_args(cli)
     return cmd
 
 
@@ -1535,6 +1560,71 @@ def _failure_line(stderr):
         if hits:
             return hits[-1]
     return lines[-1] if lines else ""
+
+
+# --- what became of a run -----------------------------------------------------------------------
+#
+# A candidate the simulator or this runner REFUSES is a different fact from one that ran and missed
+# an SLO: the first says nothing about the deployment's speed, the second does. Reporting both as
+# "not servable" turned a sweep of refused P/D arms into a negative finding about P/D.
+_LOG_MSG = re.compile(r'\bmsg="((?:[^"\\]|\\.)*)"')
+_ISSUE_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/issues/\d+")
+# Text that differs between two candidates refused for the SAME reason and so must not split a group:
+# the instance that raised it and the generated scenario's hashed file name.
+_INSTANCE_PREFIX = re.compile(r"\binstance [\w-]+: ")
+_SCENARIO_NAME = re.compile(r'scenario \\?"[^"\\]*\.yaml\\?"')
+
+
+def refusal_reason(line):
+    """(reason, issue_url) from the fatal log line the simulator printed when it refused a run.
+
+    The reason is the log's own message with the per-candidate parts (instance id, scenario file name)
+    removed, so two candidates refused for one cause share one reason string. The issue URL, if the
+    message cites one, is returned apart and left in the reason as well."""
+    m = _LOG_MSG.search(line or "")
+    text = m.group(1).replace('\\"', '"').replace("\\\\", "\\") if m else (line or "").strip()
+    text = _INSTANCE_PREFIX.sub("", text)
+    text = _SCENARIO_NAME.sub("scenario", text)
+    url = _ISSUE_URL.search(text)
+    return text.strip(), (url.group(0) if url else None)
+
+
+def outcome_of(rec):
+    """(outcome, refusal) for one run record, judged from how the run ended and nothing else.
+
+    outcome is one of
+      ran            the simulator returned a usable Result (an SLO verdict is the caller's)
+      refused        the simulator (a fatal log line, exit 1) or this runner (an unsupported or
+                     unrenderable candidate, never run) declined the candidate
+      overloaded     it ran but did not finish its requests, so it is no capacity point
+      timeout        it hit the run timeout
+      crash          it died without a refusal message (a panic, or an exit with no fatal line)
+      invalid_result it exited cleanly but its Result is unusable (refused by the schema, figures
+                     that cannot be ranked on, other pricing data, no metrics)
+    refusal is {"source": "engine"|"runner", "reason": ..., "issue": url or None} for a refusal,
+    else None."""
+    err = rec.get("error")
+    rc = rec.get("returncode")
+    if not err:
+        return "ran", None
+    if rc is None:
+        if err.startswith(("unsupported config:", "generated scenario refused:")):
+            reason = err.split(":", 1)[1].strip()
+            return "refused", {"source": "runner", "reason": reason,
+                               "issue": refusal_reason(reason)[1]}
+        return "invalid_result", None
+    if rc == -1 and (rec.get("stderr_tail") or "").strip() == "timeout":
+        return "timeout", None
+    if rc != 0:
+        if "panic:" in err:
+            return "crash", None
+        if "level=fatal" in err or err.startswith("fatal"):
+            reason, issue = refusal_reason(err)
+            return "refused", {"source": "engine", "reason": reason, "issue": issue}
+        return "crash", None
+    if err.startswith(("incomplete:", "overloaded:")):
+        return "overloaded", None
+    return "invalid_result", None
 
 
 def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_version,

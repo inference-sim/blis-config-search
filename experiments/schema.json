@@ -17,6 +17,7 @@
       "type": "string"
     },
     "scenario": { "$ref": "#/$defs/scenario" },
+    "objective": { "$ref": "#/$defs/objective" },
     "sweeps": {
       "description": "The sweeps, in the order a reader should meet them. Each is one arm of the story.",
       "type": "array",
@@ -25,6 +26,26 @@
     }
   },
   "$defs": {
+    "objective": {
+      "description": "How the report ranks. The Pareto front of throughput per GPU against interactivity (1000 / mean TPOT) is always emitted; `ranking` picks which rule heads the report (scalar: most output tok/s per accelerator; pareto: the front's throughput end). P/D displaces an aggregated point it is within `tie_tolerance` of on both axes.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "ranking": { "description": "scalar (default) or pareto.", "enum": ["scalar", "pareto"] },
+        "throughput": { "description": "total: total_tokens_per_second_per_gpu (default); decode: output_tokens_per_second_per_decode_gpu.", "enum": ["total", "decode"] },
+        "tie_tolerance": { "description": "Relative tolerance of the P/D tie rule, a fraction. Default 0.016 (the dashboard's noise floor).", "type": "number", "minimum": 0, "exclusiveMaximum": 0.5 }
+      }
+    },
+    "simulator": {
+      "description": "Simulator switches swept per sweep. pd_transfer_contention: concurrent KV handoffs share the fabric links (disaggregated sweeps only).",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "pd_transfer_contention": { "type": "array", "minItems": 1, "items": { "type": "boolean" } }
+      }
+    },
     "scenario": {
       "description": "Shared by EVERY sweep: one model, one hardware type, one workload, one GPU budget, one load ladder. Comparing two hardware types or two workloads takes separate experiments.",
       "type": "object",
@@ -147,6 +168,7 @@
           "$ref": "#/$defs/engineKnobs"
         },
         "router": { "$ref": "#/$defs/router" },
+        "simulator": { "$ref": "#/$defs/simulator" },
         "prefill-instances": {
           "description": "Prefill replica counts for a DISAGGREGATED sweep. Requires decode-instances; BLIS refuses a prefill pool with no decode pool.",
           "$ref": "#/$defs/intList"
@@ -198,7 +220,7 @@
       "additionalProperties": false,
       "properties": {
         "endpoint_picker_config": {
-          "description": "EndpointPickerConfig files, relative to routing/. A new routing policy is a new file, never an invented knob.",
+          "description": "EndpointPickerConfig files: a file of routing/ or of the router's reference-configs/ at the commit pins.env pins. A new routing policy is a new file, never an invented knob.",
           "type": "array",
           "minItems": 1,
           "items": { "type": "string", "minLength": 1 }
@@ -214,7 +236,7 @@
           }
         },
         "plugins": {
-          "description": "plugin name -> parameters -> field -> list of values. Field names are llm-d-router's own; it rejects unknown parameters.",
+          "description": "plugin name -> parameters -> field -> list of values. Field names are llm-d-router's own; it rejects unknown parameters. A parameter or plugin the file lacks is added when the router's index lists it as a knob; a parameter the index marks ineffective in the hosted boundary is refused by name.",
           "type": "object",
           "minProperties": 1,
           "additionalProperties": {

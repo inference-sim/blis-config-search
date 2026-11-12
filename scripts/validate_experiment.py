@@ -45,6 +45,8 @@ except ImportError:
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blis_cli  # noqa: E402
 import settings  # noqa: E402
+import pareto  # noqa: E402
+import router_configs  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 ROUTING_DIR = os.path.join(ROOT, "routing")
@@ -381,27 +383,30 @@ def _check_gpu_math_pd(sweep, gpus, where, errs):
                     f"{list(dc_i)}), so this sweep expands to no runs")
 
 
-def _check_router(router, where, errs, routing_dir=ROUTING_DIR):
-    """Router files must exist, and override trees must name list-valued fields.
+def _check_router(router, where, errs, routing_dir=ROUTING_DIR, router_cfg=None):
+    """Router files must exist, and every override combination must apply to its base file.
 
     A missing EndpointPickerConfig is the cheapest possible catch: BLIS would fail once per
-    run in the sweep, all for the same typo.
+    run in the sweep, all for the same typo. A file is the local routing/ one or one of the router's
+    reference configs; the overrides are applied to the parsed file here, exactly as the runner
+    will, so a knob the index does not list (or a decider the file cannot take) is rejected before
+    any run.
     """
+    resolved = {}
     for rel in (router.get("endpoint_picker_config") or []):
         if not isinstance(rel, str):
             continue
         if os.path.isabs(rel) or ".." in rel.split("/"):
-            errs.append(f"{where}.endpoint_picker_config: {rel!r} must be a plain file name "
-                        f"under routing/")
+            errs.append(f"{where}.endpoint_picker_config: {rel!r} must be a plain file name")
             continue
-        if not os.path.isfile(os.path.join(routing_dir, rel)):
-            have = sorted(f for f in os.listdir(routing_dir) if f.endswith(".yaml")) \
-                if os.path.isdir(routing_dir) else []
-            errs.append(f"{where}.endpoint_picker_config: no such file routing/{rel} "
-                        f"(available: {', '.join(have) or 'none'})")
+        try:
+            resolved[rel] = router_configs.resolve(rel, routing_dir, router_cfg)
+        except router_configs.RouterConfigsError as e:
+            errs.append(f"{where}.endpoint_picker_config: {e}")
     for profile, refs in (router.get("schedulingProfiles") or {}).items():
         for ref, fields in (refs or {}).items():
             _check_value_lists(fields, f"{where}.schedulingProfiles.{profile}.{ref}", errs)
+    indexed = any(src == "router" for src, _p, _k in resolved.values())
     for plugin, block in (router.get("plugins") or {}).items():
         known = ROUTER_PLUGIN_PARAMS.get(plugin)
         for section, fields in (block or {}).items():
@@ -411,10 +416,28 @@ def _check_router(router, where, errs, routing_dir=ROUTING_DIR):
                 continue
             _check_value_lists(fields, f"{where}.plugins.{plugin}.parameters", errs)
             for field in (fields or {}):
-                if known is not None and field not in known:
+                # The router's index is the authority for its files; the table is the local files' subset.
+                if known is not None and field not in known and not indexed:
                     errs.append(f"{where}.plugins.{plugin}.parameters.{field}: not a documented "
                                 f"parameter of {plugin} (RFC #21 lists: "
                                 f"{', '.join(sorted(known))})")
+    if len(resolved) == 1 and (router.get("schedulingProfiles") or router.get("plugins")):
+        rel, (_src, path, knobs) = next(iter(resolved.items()))
+        try:
+            with open(path, encoding="utf-8") as f:
+                base = yaml.safe_load(f) or {}
+        except (OSError, yaml.YAMLError) as e:
+            errs.append(f"{where}.endpoint_picker_config: cannot read {rel}: {e}")
+            return
+        seen = set()
+        for combo in router_configs.override_combos(router):
+            try:
+                router_configs.apply_overrides(base, combo, knobs)
+            except KeyError as e:
+                msg = e.args[0] if e.args else str(e)
+                if msg not in seen:
+                    seen.add(msg)
+                    errs.append(f"{where}.router: {rel}: {msg}")
 
 
 def _node_size(sc, blis, catalog=None):
@@ -680,8 +703,105 @@ def advisories(spec, path=None):
     return notes
 
 
-def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None):
+def runner_refusals(sw, sc, vocab, node_size=None):
+    """(arms, {reason: arms}) for a sweep: how many candidates it expands to and, for those the
+    runner would refuse before any simulator run, the reason (run_blis.classify_config's, which
+    mirrors the engine's own pool rules). Arms the engine alone can refuse (a model-dependent
+    cache group, say) are only known by running them, and are reported as refused with the
+    engine's reason."""
+    import collections
+    import run_blis
+    import run_experiment
+    kept, _dropped = run_experiment.expand_sweep(sw, sc["gpus"])
+    reasons = collections.Counter()
+    for cand in kept:
+        cand = {k: v for k, v in cand.items() if k not in ("router_config", "router_overrides")}
+        try:
+            run_blis.classify_config(cand, vocab, node_size)
+        except run_blis.ConfigError as e:
+            reasons[str(e)] += 1
+    return len(kept), dict(reasons)
+
+
+def refusal_notes(spec, blis, fields=None, catalog=None):
+    """Notes for sweeps where some, but not all, arms are refused by the runner: they run as
+    `refused` rows, not as failures to meet an SLO, and the report counts them by reason."""
+    if not isinstance(spec, dict) or not isinstance(spec.get("sweeps"), list):
+        return []
+    sc = spec.get("scenario")
+    if not isinstance(sc, dict) or not isinstance(sc.get("gpus"), int):
+        return []
+    vocab = knob_vocabulary(blis, fields)
+    notes = []
+    for i, sw in enumerate(spec["sweeps"]):
+        if not isinstance(sw, dict):
+            continue
+        try:
+            n, reasons = runner_refusals(sw, sc, vocab, _node_size(sc, blis, catalog))
+        except Exception:
+            continue                    # a malformed sweep is validate()'s to report
+        bad = sum(reasons.values())
+        if 0 < bad < n:
+            where = f"sweeps[{i}]({sw.get('name', '?')})"
+            top = max(reasons, key=reasons.get)
+            notes.append(f"{where}: {bad} of {n} arms are refused by the runner and will be reported "
+                         f"as refused: {top}")
+    return notes
+
+
+def objective_errors(obj):
+    """Errors in the optional top-level `objective:` block (see pareto.py)."""
+    if obj is None:
+        return []
+    if not isinstance(obj, dict) or not obj:
+        return ["objective: must be a non-empty mapping"]
+    errs = []
+    for key in obj:
+        if key not in pareto.DEFAULT_OBJECTIVE:
+            errs.append(f"objective.{key}: unknown key (allowed: {', '.join(sorted(pareto.DEFAULT_OBJECTIVE))})")
+    if obj.get("ranking") is not None and obj["ranking"] not in pareto.RANKINGS:
+        errs.append(f"objective.ranking: {obj['ranking']!r} must be one of {', '.join(pareto.RANKINGS)}")
+    if obj.get("throughput") is not None and obj["throughput"] not in pareto.THROUGHPUT_FORMS:
+        errs.append(f"objective.throughput: {obj['throughput']!r} must be one of "
+                    f"{', '.join(pareto.THROUGHPUT_FORMS)}")
+    tol = obj.get("tie_tolerance")
+    if tol is not None and (isinstance(tol, bool) or not isinstance(tol, (int, float)) or not 0 <= tol < 0.5):
+        errs.append(f"objective.tie_tolerance: {tol!r} must be a fraction in [0, 0.5), e.g. 0.016 for 1.6%")
+    return errs
+
+
+def simulator_errors(sw, where):
+    """Errors in a sweep's `simulator:` block: simulator switches, each a list of booleans. The
+    simulator refuses --pd-transfer-contention on a run that is not disaggregated, so a colocated
+    sweep may not turn it on."""
+    block = sw.get("simulator")
+    if block is None:
+        return []
+    import run_blis
+    if not isinstance(block, dict) or not block:
+        return [f"{where}.simulator: must be a non-empty mapping"]
+    errs = []
+    for key, vals in block.items():
+        if key not in run_blis.CLI_SWITCHES:
+            errs.append(f"{where}.simulator.{key}: unknown simulator option "
+                        f"(allowed: {', '.join(sorted(run_blis.CLI_SWITCHES))})")
+        elif not _is_list(vals) or not vals or any(not isinstance(v, bool) for v in vals):
+            errs.append(f"{where}.simulator.{key}: must be a non-empty list of true/false")
+        elif key == "pd_transfer_contention" and True in vals and _sweep_is_colocated(sw):
+            errs.append(f"{where}.simulator.pd_transfer_contention: true needs a disaggregated sweep "
+                        f"(prefill/decode pools); the simulator refuses the flag on a colocated run")
+    return errs
+
+
+def _sweep_is_colocated(sw):
+    return not ({"prefill-instances", "decode-instances", "prefill", "decode"} & set(sw))
+
+
+def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, router_cfg=None):
     """Every error in `spec`, as readable `path: message` strings. Empty means valid.
+
+    `router_cfg` is the router repository checkout (router_configs.open_checkout) whose reference
+    files a spec may name; None when there is none.
 
     `blis` is the simulator binary whose commands supply the names (`blis fields`, `blis
     schema deployment`) and the catalog identities (`blis catalog resolve`). `catalog` names a
@@ -693,6 +813,8 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None):
     errs = []
     if not isinstance(spec, dict):
         return ["spec must be a mapping"]
+    if router_cfg is None:
+        router_cfg = router_configs.open_checkout()
     vocab = knob_vocabulary(blis, fields)
     par_vocab, eng_vocab, source = vocab.parallel, vocab.engine_names(), vocab.source
 
@@ -703,11 +825,12 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None):
         errs.append(f"name: {name!r} must be lowercase letters, digits and dashes "
                     f"(it is also the reports/<name>/ directory)")
 
-    known_top = {"name", "description", "scenario", "sweeps"}
+    known_top = {"name", "description", "scenario", "sweeps", "objective"}
     for key in spec:
         if key not in known_top:
             errs.append(f"{key}: unknown top-level key (allowed: {', '.join(sorted(known_top))})")
 
+    errs.extend(objective_errors(spec.get("objective")))
     sc = spec.get("scenario")
     if not isinstance(sc, dict):
         errs.append("scenario: required mapping (model, hardware, workload or workload_spec, gpus, concurrency)")
@@ -801,7 +924,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None):
             seen.add(sname)
 
         known_sw = {"name", "narrative", "num-instances", "parallel", "engine", "router",
-                    "prefill-instances", "decode-instances", "prefill", "decode"}
+                    "prefill-instances", "decode-instances", "prefill", "decode", "simulator"}
         for key in sw:
             if key not in known_sw:
                 errs.append(f"{where}.{key}: unknown sweep key "
@@ -852,13 +975,19 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None):
                               "parallel", errs, source)
             _check_engine(block.get("engine") or {}, f"{where}.{role}.engine", vocab, errs)
 
+        errs.extend(simulator_errors(sw, where))
         router = sw.get("router")
         if router is not None:
             if not isinstance(router, dict) or not router:
                 errs.append(f"{where}.router: must be a non-empty mapping")
             else:
                 for key in router:
-                    if key not in ("endpoint_picker_config", "schedulingProfiles", "plugins"):
+                    if key == "decider":
+                        errs.append(f"{where}.router.decider: the decider is not a knob. Swapping it is "
+                                    f"choosing a complete policy variant: list that policy's file in "
+                                    f"endpoint_picker_config (for the prefix-based decider, the router's "
+                                    f"pd-prefix-based.yaml)")
+                    elif key not in ("endpoint_picker_config", "schedulingProfiles", "plugins"):
                         errs.append(f"{where}.router.{key}: unknown router key (allowed: "
                                     f"endpoint_picker_config, schedulingProfiles, plugins)")
                 if not _is_list(router.get("endpoint_picker_config", [])):
@@ -874,7 +1003,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None):
                         errs.append(f"{where}.router: overrides apply to ONE base file, but "
                                     f"{len(bases)} are listed ({', '.join(map(str, bases))}); "
                                     f"split into separate sweeps")
-                _check_router(router, f"{where}.router", errs, routing_dir)
+                _check_router(router, f"{where}.router", errs, routing_dir, router_cfg)
 
         if isinstance(sc.get("gpus"), int) and not isinstance(sc.get("gpus"), bool):
             if disagg:
@@ -885,6 +1014,12 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None):
         # run once the individual knobs are known to be well-formed.
         if isinstance(sc, dict):
             _check_cross_knob(sw, sc, where, errs)
+        # A sweep whose every arm the runner refuses expands to no runs worth making: say so now.
+        if not errs and isinstance(sc.get("gpus"), int) and not isinstance(sc.get("gpus"), bool):
+            n, reasons = runner_refusals(sw, sc, vocab, _node_size(sc, blis, catalog))
+            if n and sum(reasons.values()) == n:
+                top = max(reasons, key=reasons.get)
+                errs.append(f"{where}: the runner refuses every arm ({n}): {top}")
     return errs
 
 
@@ -942,6 +1077,9 @@ def main(argv=None):
                     help="machine-readable {file: [errors]} instead of text")
     ap.add_argument("--routing", default=ROUTING_DIR,
                     help="directory holding the EndpointPickerConfig files (default: routing/)")
+    ap.add_argument("--router-configs", dest="router_configs", default=None,
+                    help="checkout of the router repository at the commit pins.env pins, holding "
+                         "reference-configs/ (default: $ROUTER_CONFIGS_DIR, else ../llm-d-router)")
     ap.add_argument("--blis", default=os.environ.get("BLIS"),
                     help="the simulator binary whose commands supply setting names and catalog "
                          "identities (default: $BLIS)")
@@ -962,6 +1100,13 @@ def main(argv=None):
     except blis_cli.BlisCommandError as e:
         print(f"validate_experiment: {e}", file=sys.stderr)
         return 2
+    try:
+        router_cfg = router_configs.open_checkout(args.router_configs)
+    except router_configs.RouterConfigsError as e:
+        print(f"validate_experiment: {e}", file=sys.stderr)
+        return 2
+    if router_cfg is not None and router_cfg.problem:
+        print(f"WARNING: router configs: {router_cfg.problem}", file=sys.stderr)
     report, notes, failed = {}, {}, 0
     for path in paths:
         # Inside the repo a relative path is what a contributor recognises; outside it (a spec
@@ -971,12 +1116,13 @@ def main(argv=None):
             rel = path
         spec, err = load(path)
         try:
-            errs = [err] if err else validate(spec, args.blis, args.routing, args.catalog, args.fields)
+            errs = [err] if err else validate(spec, args.blis, args.routing, args.catalog, args.fields, router_cfg)
         except blis_cli.BlisCommandError as e:
             print(f"validate_experiment: {rel}: {e}", file=sys.stderr)
             return 2
         report[rel] = errs
-        notes[rel] = [] if err else advisories(spec, path)
+        notes[rel] = [] if err else advisories(spec, path) + (
+            [] if errs else refusal_notes(spec, args.blis, args.fields, args.catalog))
         if errs:
             failed += 1
     if args.as_json:

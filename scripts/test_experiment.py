@@ -2678,7 +2678,9 @@ FATAL = ('time="2026-11-11T20:50:44-05:00" level=fatal msg="instance instance_0:
 
 
 def _ran(tps, tpot_ms, itl_p99=1.0, **extra):
-    m = {"tokens_per_sec": tps, "itl_p99_ms": itl_p99, "tpot_mean_ms": tpot_ms}
+    # a Result that states the registry's interactivity of the mean TPOT (1000 / mean TPOT)
+    m = {"tokens_per_sec": tps, "itl_p99_ms": itl_p99, "tpot_mean_ms": tpot_ms,
+         "interactivity_of_mean_tpot": 1000.0 / tpot_ms}
     m.update(extra)
     return {"returncode": 0, "error": None, "metrics": m, "metrics_all_instances": [], "cmd": None}
 
@@ -2794,17 +2796,23 @@ class Refusals(unittest.TestCase):
 
 
 class InteractivityAndFigures(unittest.TestCase):
-    def test_interactivity_is_one_thousand_over_the_mean_tpot(self):
-        self.assertEqual((125.0, "1000 / tpot_mean_ms"), PA.interactivity_of({"tpot_mean_ms": 8.0}))
-
-    def test_a_result_that_states_the_figure_wins(self):
+    def test_a_result_that_states_the_figure_is_used_as_stated(self):
         self.assertEqual((130.0, "result"), PA.interactivity_of(
             {"interactivity_of_mean_tpot": 130.0, "tpot_mean_ms": 8.0}))
-        self.assertEqual((None, ""), PA.interactivity_of({}))
 
-    def test_it_is_not_the_mean_of_reciprocals(self):
-        # two requests at 5 ms and 20 ms: 1000/mean = 80, mean of 1000/x = 125
-        self.assertEqual(80.0, PA.interactivity_of({"tpot_mean_ms": 12.5})[0])
+    def test_a_result_without_the_figure_is_unrated_not_rebuilt_from_tpot(self):
+        # DEV-8: a definition is read from the registry, never recomputed from another field
+        self.assertEqual((None, ""), PA.interactivity_of({"tpot_mean_ms": 8.0}))
+        self.assertEqual((None, ""), PA.interactivity_of({}))
+        self.assertEqual((None, ""), PA.interactivity_of({"interactivity_of_mean_tpot": 0}))
+
+    def test_a_row_of_a_result_without_the_figure_is_counted_unrated(self):
+        rep = _sweep_with(_pd_and_agg_spec(ranking="pareto"), lambda cfg: {
+            "returncode": 0, "error": None, "cmd": None, "metrics_all_instances": [],
+            "metrics": {"tokens_per_sec": 100.0, "itl_p99_ms": 1.0, "tpot_mean_ms": 8.0,
+                        "total_tokens_per_sec_per_gpu": 480.0}})
+        self.assertIsNone(rep["best_overall"])
+        self.assertEqual(rep["totals"]["servable"], rep["pareto"]["overall"]["total"]["unrated"])
 
     def test_the_flattened_result_keeps_the_registry_figures(self):
         doc = {"metrics": {"output_tok_s": {"value": 1.0}, "total_tokens_per_second_per_gpu": {"value": 480.5},
@@ -2851,26 +2859,35 @@ class ParetoFront(unittest.TestCase):
         f = PA.front([_row("a", 100, 500), _row("old", None, None)])
         self.assertEqual((1, 1), (f["points"], f["unrated"]))
 
-    def test_pd_displaces_an_aggregated_point_it_ties_within_the_tolerance(self):
-        agg, pd = _row("agg", 100, 1000), _row("pd", 99, 990, pd=True)   # 1% below on both
-        f = PA.front([agg, pd], tie_tolerance=0.016)
-        self.assertEqual([("pd", "tie_preferred")], self.labels(f))
-        self.assertEqual(["agg c=1"], f["members"][0]["displaces"])
-        self.assertEqual("agg", f["displaced"][0]["point"]["label"])
+    def test_a_pd_point_that_ties_within_one_percent_does_not_displace_the_aggregated_point(self):
+        # no tolerance: one run per arm gives no interval (DEV-11), so 1% below is below
+        agg, pd = _row("agg", 100, 1000), _row("pd", 99, 990, pd=True)
+        self.assertEqual([("agg", "front")], self.labels(PA.front([agg, pd])))
 
-    def test_pd_outside_the_tolerance_does_not_displace(self):
-        agg, pd = _row("agg", 100, 1000), _row("pd", 90, 990, pd=True)   # 10% below on interactivity
-        self.assertEqual([("agg", "front")], self.labels(PA.front([agg, pd], tie_tolerance=0.016)))
-        # the same pair ties under a wider tolerance, so the tolerance is the field that decides
-        self.assertEqual([("pd", "tie_preferred")], self.labels(PA.front([agg, pd], tie_tolerance=0.2)))
+    def test_the_review_counterexample_a_dominated_pd_point_is_never_a_member(self):
+        # A and B are the exact front; P/D point P is dominated by B. The old tie rule let P
+        # displace A (P within 1.6% of A on both axes) and then reported B and P.
+        a, b = _row("A", 100, 100), _row("B", 99, 105)
+        p = _row("P", 99, 99, pd=True)
+        f = PA.front([a, b, p])
+        self.assertEqual([("A", "front"), ("B", "front")], sorted(self.labels(f)))
+        pts = [(m["interactivity"], m["throughput_per_gpu"]) for m in f["members"]]
+        for x, y in pts:
+            self.assertFalse(any(x2 >= x and y2 >= y and (x2 > x or y2 > y) for x2, y2 in pts))
+
+    def test_no_member_is_dominated_by_any_point_in_a_mixed_set(self):
+        rows = [_row("A", 100, 100), _row("B", 99, 105), _row("P", 99, 99, pd=True),
+                _row("Q", 98, 104, pd=True), _row("R", 100, 100, pd=True), _row("S", 50, 200)]
+        f = PA.front(rows)
+        pts = [(r["interactivity"], r["total_tokens_per_sec_per_gpu"]) for r in rows]
+        for m in f["members"]:
+            x, y = m["interactivity"], m["throughput_per_gpu"]
+            self.assertFalse(any(x2 >= x and y2 >= y and (x2 > x or y2 > y) for x2, y2 in pts), m)
+        self.assertEqual({"A", "R", "B", "S"}, {m["label"] for m in f["members"]})
 
     def test_a_pd_point_that_beats_aggregated_is_just_on_the_front(self):
         f = PA.front([_row("agg", 100, 1000), _row("pd", 120, 1200, pd=True)])
         self.assertEqual([("pd", "front")], self.labels(f))
-
-    def test_aggregated_is_never_preferred_over_pd(self):
-        agg, pd = _row("agg", 101, 1010), _row("pd", 100, 1000, pd=True)   # pd 1% worse
-        self.assertEqual([("pd", "tie_preferred")], self.labels(PA.front([agg, pd])))
 
     def test_two_aggregated_points_are_compared_exactly(self):
         f = PA.front([_row("a", 100, 1000), _row("b", 99.9, 999.9)])
@@ -2881,17 +2898,16 @@ class ParetoFront(unittest.TestCase):
         self.assertEqual("b", PA.front(rows, "total")["members"][0]["label"])
         self.assertEqual("a", PA.front(rows, "decode")["members"][0]["label"])
 
-    def test_the_default_tolerance_is_a_spec_field_with_a_stated_default(self):
-        self.assertEqual(0.016, PA.objective_of(None)["tie_tolerance"])
-        self.assertEqual(0.05, PA.objective_of({"tie_tolerance": 0.05})["tie_tolerance"])
+    def test_a_spec_that_sets_a_tie_tolerance_is_refused_with_the_reason(self):
+        errs = [e for e in V.validate(spec(objective={"ranking": "pareto", "tie_tolerance": 0.016}),
+                                      BLIS, ROUTING) if e.startswith("objective")]
+        self.assertTrue(errs and "DEV-11" in errs[0], errs)
 
     def test_the_spec_rejects_a_bad_objective(self):
         def errs(obj):
             return [e for e in V.validate(spec(objective=obj), BLIS, ROUTING) if e.startswith("objective")]
-        self.assertEqual([], errs({"ranking": "pareto", "throughput": "decode", "tie_tolerance": 0.02}))
+        self.assertEqual([], errs({"ranking": "pareto", "throughput": "decode"}))
         self.assertTrue(errs({"ranking": "best"}))
-        self.assertTrue(errs({"tie_tolerance": 0.9}))
-        self.assertTrue(errs({"tie_tolerance": True}))
         self.assertTrue(errs({"colour": "red"}))
 
     def test_the_report_emits_the_front_and_labels_the_ranking_used(self):
@@ -2904,8 +2920,8 @@ class ParetoFront(unittest.TestCase):
             out = E._pareto_json(rep)
             self.assertEqual(ranking, out["ranking"]["used"])
             overall = out["front"]["overall"]["total"]["members"]
-            self.assertTrue(overall and all(m["disaggregated"] for m in overall),
-                            "aggregated is within 1.6% of P/D on both axes, so P/D is preferred")
+            self.assertTrue(overall and not any(m["disaggregated"] for m in overall),
+                            "aggregated is slightly better on both axes, and no tolerance displaces it")
             self.assertEqual("pd", out["front"]["sweeps"][0]["name"])
             self.assertIn("front" if ranking == "pareto" else "output tok/s", out["ranking"]["description"])
         self.assertTrue(all(f["front_status"] for f in out["finalists"]), "pareto finalists are front members")

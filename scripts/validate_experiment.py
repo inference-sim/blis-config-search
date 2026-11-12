@@ -757,16 +757,17 @@ def objective_errors(obj):
         return ["objective: must be a non-empty mapping"]
     errs = []
     for key in obj:
-        if key not in pareto.DEFAULT_OBJECTIVE:
+        if key == "tie_tolerance":
+            errs.append("objective.tie_tolerance: removed. A fixed tolerance cannot say two deployments "
+                        "are not distinguished; that needs paired replications with an interval on the "
+                        "difference (design DEV-11), so points are compared exactly until then")
+        elif key not in pareto.DEFAULT_OBJECTIVE:
             errs.append(f"objective.{key}: unknown key (allowed: {', '.join(sorted(pareto.DEFAULT_OBJECTIVE))})")
     if obj.get("ranking") is not None and obj["ranking"] not in pareto.RANKINGS:
         errs.append(f"objective.ranking: {obj['ranking']!r} must be one of {', '.join(pareto.RANKINGS)}")
     if obj.get("throughput") is not None and obj["throughput"] not in pareto.THROUGHPUT_FORMS:
         errs.append(f"objective.throughput: {obj['throughput']!r} must be one of "
                     f"{', '.join(pareto.THROUGHPUT_FORMS)}")
-    tol = obj.get("tie_tolerance")
-    if tol is not None and (isinstance(tol, bool) or not isinstance(tol, (int, float)) or not 0 <= tol < 0.5):
-        errs.append(f"objective.tie_tolerance: {tol!r} must be a fraction in [0, 0.5), e.g. 0.016 for 1.6%")
     return errs
 
 

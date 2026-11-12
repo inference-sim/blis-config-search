@@ -23,10 +23,9 @@ measured window, not defined here:
 | y, tokens/s per GPU | `total_tokens_per_second_per_gpu` | (input + output tokens)/s over all GPUs. `throughput: total`, the default. |
 | y, decode form | `output_tokens_per_second_per_decode_gpu` | output tokens/s over the decode GPUs (all GPUs when there is no decode pool). `throughput: decode`. |
 
-When the Result states `interactivity_of_mean_tpot` it is used. Otherwise it is computed from the
-Result's `tpot_mean_ms` by the registry's formula, and the row says which (`interactivity_basis`).
-Example from an AgentX replay: `tpot_mean_ms` 8.7707 gives 114.0; the Result's `interactivity_mean`
-was 114.9.
+The Result's own `interactivity_of_mean_tpot` is the only source (a definition is read from the
+registry, never rebuilt from another field). A Result that does not state it leaves the run unrated:
+it is counted (`unrated`) and not placed on the front.
 
 Only runs that held the scenario's SLOs are points; the SLO gate is a separate constraint. A point
 is dominated when another is at least as good on both axes and better on one. The non-dominated set
@@ -34,15 +33,13 @@ is the front. It is computed for every sweep and for all sweeps together (a P/D 
 aggregated sweep are compared in the all-sweeps front), for both throughput forms, and written to
 `pareto.json` under `front`.
 
-**Tie rule.** The team prefers P/D when it ties an aggregated deployment. Two measurements closer
-than the run-to-run noise are not distinguished, so P/D point P ties aggregated front point A when
-`P.x >= (1 - tol) * A.x` and `P.y >= (1 - tol) * A.y`. Then P displaces A: A is listed under
-`displaced`, and P, if it is not on the exact front, is a member with `status: tie_preferred`. Two
-aggregated points, or two P/D points, are compared exactly. `tol` is the spec field
-`objective.tie_tolerance`, default 0.016: the accuracy dashboard's documented fallback noise floor
-(1.6 percent), to be replaced when repeat noise is measured. A P/D point that is itself dominated by
-another aggregated point beyond the tolerance can still be promoted by tying A; it is reported with
-the points that displace it so the reader can see this.
+**No tie rule.** Points are compared exactly. Preferring P/D when it "does no worse" requires knowing
+when two deployments are not distinguished, which needs paired replications under common random
+numbers, an interval on the difference, three outcomes and control of the false-winner rate over all
+comparisons (design DEV-11). One run per arm gives no interval, and a fixed relative tolerance would
+copy another repository's noise figure (X7). So nothing displaces a point; `objective.tie_tolerance`
+is an error that says so. The front has no interval and says so (`pareto.interval: null`). The P/D
+preference is not delivered here; it arrives with the replications.
 
 **Which ranking headlines.** `objective.ranking` is `scalar` (default: the previous rule, one
 finalist per sweep by output tok/s per accelerator) or `pareto` (the finalists are the all-sweeps
@@ -51,12 +48,11 @@ end of the front, and the front itself is the result). `pareto.json` and the rep
 used under `ranking`.
 
 ```yaml
-objective: {ranking: pareto, throughput: total, tie_tolerance: 0.016}
+objective: {ranking: pareto, throughput: total}
 ```
 
-**Worked example.** Aggregated (interactivity 100, 1000 tok/s/GPU) and P/D (99, 990): P/D is 1 percent
-below on both axes, inside 1.6 percent, so the front is the P/D point alone. At (90, 990) it is
-not, and the front is the aggregated point.
+**Worked example.** Aggregated A (interactivity 100, 100 tok/s/GPU), aggregated B (99, 105) and P/D P
+(99, 99): A and B are the front; P is dominated by B and is not a member.
 
 **Reproduce.** `python3 -I scripts/test_experiment.py ParetoFront` (hermetic).
 
@@ -138,11 +134,8 @@ tokens/s differ by about 1.5 percent from the old constants.
 ## What this does not show
 
 - The front is as good as the runs under it: a coarse concurrency list gives a coarse front, and
-  with one seed the tolerance, not a confidence interval, decides ties.
+  with one run per arm there is no interval, so no claim that two deployments differ or tie.
 - It does not say a refused P/D arm would have won; it says nothing about it.
-- `interactivity_of_mean_tpot` derived from `tpot_mean_ms` equals the Result's figure only when both
-  use the same request population (at least two output tokens); a Result that states the figure is
-  preferred.
 - A simulator build whose Result does not state `total_tokens_per_second_per_gpu` (the build
   `BLIS_SHA` names today is one) gives rows without the figure. The front is then empty, the
   `unrated` count says how many runs could not be placed, and the report says so instead of

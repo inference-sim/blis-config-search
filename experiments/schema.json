@@ -27,14 +27,13 @@
   },
   "$defs": {
     "objective": {
-      "description": "How the report ranks. The Pareto front of throughput per GPU against interactivity (1000 / mean TPOT) is always emitted; `ranking` picks which rule heads the report (scalar: most output tok/s per accelerator; pareto: the front's throughput end). P/D displaces an aggregated point it is within `tie_tolerance` of on both axes.",
+      "description": "How the report ranks. The Pareto front of throughput per GPU against interactivity (1000 / mean TPOT) is always emitted; `ranking` picks which rule heads the report (scalar: most output tok/s per accelerator; pareto: the front's throughput end). Points are compared exactly, one run per arm; there is no tie tolerance.",
       "type": "object",
       "minProperties": 1,
       "additionalProperties": false,
       "properties": {
         "ranking": { "description": "scalar (default) or pareto.", "enum": ["scalar", "pareto"] },
-        "throughput": { "description": "total: total_tokens_per_second_per_gpu (default); decode: output_tokens_per_second_per_decode_gpu.", "enum": ["total", "decode"] },
-        "tie_tolerance": { "description": "Relative tolerance of the P/D tie rule, a fraction. Default 0.016 (the dashboard's noise floor).", "type": "number", "minimum": 0, "exclusiveMaximum": 0.5 }
+        "throughput": { "description": "total: total_tokens_per_second_per_gpu (default); decode: output_tokens_per_second_per_decode_gpu.", "enum": ["total", "decode"] }
       }
     },
     "simulator": {

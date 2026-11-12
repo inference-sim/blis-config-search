@@ -568,20 +568,18 @@ def ranked_best(rows, objective):
     """The row the report headlines: the scalar rule (best_of) or the head of the Pareto front,
     as the spec's `objective.ranking` says."""
     if objective["ranking"] == "pareto":
-        return pareto.best_on_front(rows, objective["throughput"], objective["tie_tolerance"])
+        return pareto.best_on_front(rows, objective["throughput"])
     return best_of(rows)
 
 
 def pareto_report(sweep_results, all_rows, objective):
     """The non-dominated front of every sweep and of all sweeps together, for both throughput
     forms. Always computed, whichever ranking headlines the report."""
-    tol = objective["tie_tolerance"]
-
     def both(rows):
-        return {form: pareto.front(rows, form, tol) for form in pareto.THROUGHPUT_FORMS}
+        return {form: pareto.front(rows, form) for form in pareto.THROUGHPUT_FORMS}
     return {"x": pareto.X_METRIC,
             "y": {form: pareto.THROUGHPUT_FORMS[form][1] for form in pareto.THROUGHPUT_FORMS},
-            "tie_tolerance": tol, "throughput": objective["throughput"],
+            "interval": None, "throughput": objective["throughput"],
             "overall": both(all_rows),
             "sweeps": [{"name": s["name"], **both(s["rows"])} for s in sweep_results]}
 
@@ -833,8 +831,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
         "interactivity_floor": {"tok_per_s_per_user": floor_rate_from(slo_ms)},
         "objective": pareto.describe(objective),
         # Which ranking picked best/best_overall/finalists, and the figures it used.
-        "ranking": {"used": objective["ranking"], "throughput": objective["throughput"],
-                    "tie_tolerance": objective["tie_tolerance"]},
+        "ranking": {"used": objective["ranking"], "throughput": objective["throughput"]},
         "sweeps": sweep_results,
         "best_overall": ranked_best(all_rows, objective),
         "pareto": pareto_report(sweep_results, all_rows, objective),

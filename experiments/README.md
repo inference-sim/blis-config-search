@@ -415,7 +415,7 @@ fields the file already sets can change, as before.
 ## Objective and simulator switches
 
 ```yaml
-objective: {ranking: pareto, throughput: total, tie_tolerance: 0.016}   # all optional
+objective: {ranking: pareto, throughput: total}   # all optional
 sweeps:
 - name: disaggregated
   simulator: {pd_transfer_contention: [false, true]}    # disaggregated sweeps only
@@ -423,7 +423,7 @@ sweeps:
 
 Every report carries the Pareto front of throughput per GPU against interactivity
 (`interactivity_of_mean_tpot`, 1000 / mean TPOT) in `pareto.json`, for the total and the decode-GPU
-form, with P/D preferred over an aggregated point it is within `tie_tolerance` of. `ranking`
+form, points compared exactly (no tolerance; a P/D preference waits for replications with intervals, design DEV-11). `ranking`
 (`scalar` by default, or `pareto`) says which rule picks the finalists and the winner card, and the
 report states it. A candidate the simulator refuses is reported as refused, counted and grouped by
 reason, never as a missed SLO. The rules, the worked example and the limits are in

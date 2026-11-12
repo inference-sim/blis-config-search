@@ -72,7 +72,10 @@ sweeps:
 - **Every knob value is a list**, even a single one: `tp: [8]`, never `tp: 8`. One rule, so a grid
   always reads as a product.
 - **An omitted knob takes the vLLM default.** Don't restate defaults — it doubles the grid and
-  measures nothing.
+  measures nothing. The one exception is `max_model_len`, which the engine requires: when omitted
+  the runner states 32768 (vLLM's own default is the model's window). Every other omitted engine
+  knob is left out of the generated scenario, and the engine applies vLLM's default and logs it as
+  an "engine assumption".
 - **Every run uses exactly `scenario.gpus`.** The sweeper keeps only combos where
   `tp x dp x num-instances == gpus` (for a disaggregated sweep, both pools together), so every
   comparison is like-for-like. A grid where nothing totals `gpus` expands to **no runs**, and the
@@ -347,9 +350,16 @@ worthless with the cache off).
 
 Any run with more than one instance is already a routing experiment, because the llm-d router
 decides where every request goes. So routing is a knob like any other:
-`router.endpoint_picker_config` lists **EndpointPickerConfig** files from [`routing/`](../routing),
-which BLIS runs unchanged. A new policy is a new file, never an invented knob. Omit `router` to
-use the llm-d default (itself a legitimate baseline arm).
+`router.endpoint_picker_config` lists **EndpointPickerConfig** files, which BLIS runs unchanged. A
+file is either one of [`routing/`](../routing) or one of the router fork's reference configs
+(`reference-configs/`: `default`, `round-robin`, `random-picker`, `least-active-requests`, each
+with a `-pd` form where one exists, and `pd-prefix-based.yaml`). The router's files are not copied
+here: the runner reads them from a checkout of the router repository at the commit `pins.env`
+pins (`ROUTER_CONFIGS_SHA`), found at `--router-configs DIR`, `$ROUTER_CONFIGS_DIR` or
+`../llm-d-router`, and clones it with `sh scripts/clone_pinned.sh <sha> <url> ../llm-d-router`. A
+checkout at another commit is reported. With no override, the arm runs the router's file byte for
+byte (staged in `reports/<name>/routing/`). A new policy is a new file, never an invented knob.
+Omit `router` to use the llm-d default (itself a legitimate baseline arm).
 
 ```yaml
 router:
@@ -358,9 +368,10 @@ router:
 
 ### Sweeping fields inside a router config
 
-Name one base file, then list values for fields **the base file already has**, using its own
-names. The sweeper writes one config per combination into `reports/<name>/routing/`, each named by
-a hash of its contents:
+Name one base file, then list values for its knobs, using the router's own names. The sweeper
+parses the base file, applies one combination of overrides, writes the result into
+`reports/<name>/routing/` named by a hash of its contents, and records on every run row the base
+file (name, commit, sha256), the overrides and the file the run read:
 
 ```yaml
 router:
@@ -374,25 +385,54 @@ router:
       parameters: {lruCapacityPerServer: [15625, 31250, 62500]}
 ```
 
-Overrides only **change** existing fields; adding or removing a plugin takes a separate base file.
-An override naming a field the base lacks is refused, so a typo can't silently produce the base
-config and read as "this knob does nothing".
+On a **router reference file**, every knob in the router's index (`policies.json` `knobs`, each
+proven to move a decision in the hosted boundary) is reachable, whether or not the file sets it: a
+scorer `weight` in a profile entry, and a plugin parameter (the parameter is added, and so is a
+plugin the file does not declare, such as `approx-prefix-cache-producer`):
 
-Parameters worth sweeping, per #21:
+```yaml
+router:
+  endpoint_picker_config: [pd-prefix-based.yaml]
+  plugins:
+    prefix-based-pd-decider: {parameters: {nonCachedTokens: [16, 256, 4096]}}
+    approx-prefix-cache-producer: {parameters: {autoTune: [false], blockSizeTokens: [64, 128]}}
+  schedulingProfiles:
+    prefill: {prefix-cache-scorer: {weight: [1, 2, 4]}}
+```
 
-| Plugin | Parameters |
-|---|---|
-| any scorer | `weight` |
-| `approx-prefix-cache-producer` | `lruCapacityPerServer`, `blockSizeTokens`, `maxPrefixTokensToMatch` |
-| `prefix-cache-scorer` | `matchLengthWeight`, `matchLengthScaleTokens` |
-| `load-aware-scorer` | `threshold` |
-| `prefix-based-pd-decider` | `nonCachedTokens`, `promptTokens` |
-| `probabilistic-admitter` | `queueDepthThreshold`, `kvCacheUtilThreshold`, `power`, `k` |
+A name the index does not list for the file is refused before any run, so a typo cannot silently
+produce the base config and read as "this knob does nothing". A parameter the index lists under
+`ineffective_parameters` (`picker.maxNumOfEndpoints`, `addEstimatedOutputTokens`,
+`prefixMatchInfoProducerName`, `maxPrefixBlocksToMatch`) is refused by name: "accepted by the router,
+no effect in the hosted boundary", with the index's reason.
+
+The P/D decider is not a knob. A different decider is a different complete policy, and the index
+names it (`pd_decider.complete_variant`, `pd-prefix-based` for the three `-pd` files). Choose it by
+listing its file, unedited, next to the other: `endpoint_picker_config: [round-robin-pd.yaml,
+pd-prefix-based.yaml]`. A `router.decider` key is an error that says so. On a file in `routing/` only
+fields the file already sets can change, as before.
+
+## Objective and simulator switches
+
+```yaml
+objective: {ranking: pareto, throughput: total, tie_tolerance: 0.016}   # all optional
+sweeps:
+- name: disaggregated
+  simulator: {pd_transfer_contention: [false, true]}    # disaggregated sweeps only
+```
+
+Every report carries the Pareto front of throughput per GPU against interactivity
+(`interactivity_of_mean_tpot`, 1000 / mean TPOT) in `pareto.json`, for the total and the decode-GPU
+form, with P/D preferred over an aggregated point it is within `tie_tolerance` of. `ranking`
+(`scalar` by default, or `pareto`) says which rule picks the finalists and the winner card, and the
+report states it. A candidate the simulator refuses is reported as refused, counted and grouped by
+reason, never as a missed SLO. The rules, the worked example and the limits are in
+[docs/objective-refusals-router-files.md](../docs/objective-refusals-router-files.md).
 
 ## Disaggregated (P/D) sweeps
 
 In BLIS the P/D split is a **router** decision, so a disaggregated sweep states two pools and
-varies the P/D decider. The budget counts both pools together.
+varies the P/D policy (the router file). The budget counts both pools together.
 
 ```yaml
 - name: disaggregated
@@ -401,7 +441,7 @@ varies the P/D decider. The budget counts both pools together.
   decode-instances: [4, 5, 6]
   prefill: {parallel: {tp: [8], enable_expert_parallel: [true]}}
   decode:  {parallel: {tp: [8], enable_expert_parallel: [true]}}
-  router: {endpoint_picker_config: [pd-always.yaml, pd-prefix.yaml]}
+  router: {endpoint_picker_config: [pd-always.yaml, pd-prefix-based.yaml]}
 ```
 
 BLIS imposes real constraints on P/D, all checked before any run:

@@ -47,6 +47,7 @@ ROUTER_SUMMARY = {
     "prefix-affinity": "Keeps requests that share a prefix on the instance that served it first.",
     "pd-always": "Disaggregated: every request prefills on the prefill pool, then decodes on the decode pool.",
     "pd-prefix": "Disaggregated: a request goes to the prefill pool only when enough of its prompt is uncached.",
+    "pd-prefix-based": "Disaggregated, the router's own sample: a request goes to the prefill pool only when enough of its prompt is uncached.",
     "default": "llm-d-router's built-in config, used when a run names none: queue depth, KV cache and prefix scorers, then the highest score.",
 }
 # What llm-d-router loads when BLIS passes it no config (loadDefaultConfig in pkg/epp/config/loader

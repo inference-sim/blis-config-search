@@ -403,8 +403,10 @@ router:
 A name the index does not list for the file is refused before any run, so a typo cannot silently
 produce the base config and read as "this knob does nothing". A parameter the index lists under
 `ineffective_parameters` (`picker.maxNumOfEndpoints`, `addEstimatedOutputTokens`,
-`prefixMatchInfoProducerName`, `maxPrefixBlocksToMatch`) is refused by name: "accepted by the router,
-no effect in the hosted boundary", with the index's reason.
+`prefixMatchInfoProducerName`) is refused by name: "accepted by the router,
+no effect in the hosted boundary", with the index's reason. A knob the index marks `requires` another
+(`maxPrefixBlocksToMatch` needs `maxPrefixTokensToMatch: 0`) is refused in a combination that does
+not meet it, naming the requirement.
 
 The P/D decider is not a knob. A different decider is a different complete policy, and the index
 names it (`pd_decider.complete_variant`, `pd-prefix-based` for the three `-pd` files). Choose it by

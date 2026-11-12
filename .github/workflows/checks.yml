@@ -45,11 +45,6 @@ jobs:
           test "$(git -C ../inference-sim rev-parse 'FETCH_HEAD^{commit}')" = "$BLIS_SHA" || {
             echo "::error::$BLIS_REF no longer points at $BLIS_SHA" >&2; exit 1; }
           git -C ../inference-sim fetch --depth 1 origin "$BLIS_SHA"
-      - name: Clone the pinned router configs (the files a spec's router arms use)
-        run: |
-          set -euo pipefail
-          . ./pins.env
-          sh scripts/clone_pinned.sh "$ROUTER_CONFIGS_SHA" https://github.com/inference-sim/llm-d-router.git ../llm-d-router
       - name: Build + catalog + pin tests
         run: |
           python3 -I scripts/test_build.py
@@ -81,11 +76,6 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with: { go-version-file: upstream/go.mod, cache-dependency-path: upstream/go.sum }
       - run: cd upstream && go build -o blis main.go
-      - name: Clone the pinned router configs (the files a spec's router arms use)
-        run: |
-          set -euo pipefail
-          . ./pins.env
-          sh scripts/clone_pinned.sh "$ROUTER_CONFIGS_SHA" https://github.com/inference-sim/llm-d-router.git ../llm-d-router
       - name: Fetch the pinned engine field list
         run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
       - name: Validate experiments/

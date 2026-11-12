@@ -354,10 +354,9 @@ decides where every request goes. So routing is a knob like any other:
 file is either one of [`routing/`](../routing) or one of the router fork's reference configs
 (`reference-configs/`: `default`, `round-robin`, `random-picker`, `least-active-requests`, each
 with a `-pd` form where one exists, and `pd-prefix-based.yaml`). The router's files are not copied
-here: the runner reads them from a checkout of the router repository at the commit `pins.env`
-pins (`ROUTER_CONFIGS_SHA`), found at `--router-configs DIR`, `$ROUTER_CONFIGS_DIR` or
-`../llm-d-router`, and clones it with `sh scripts/clone_pinned.sh <sha> <url> ../llm-d-router`. A
-checkout at another commit is reported. With no override, the arm runs the router's file byte for
+here: the runner reads them from the pinned simulator (`blis router-configs --json`), and refuses
+a file whose bytes do not match the sha256 the simulator states. `--router-configs DIR` or
+`$ROUTER_CONFIGS_DIR` is a developer override that reads a router checkout instead. With no override, the arm runs the router's file byte for
 byte (staged in `reports/<name>/routing/`). A new policy is a new file, never an invented knob.
 Omit `router` to use the llm-d default (itself a legitimate baseline arm).
 

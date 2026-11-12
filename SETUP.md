@@ -39,15 +39,10 @@ cannot be reproduced arm-for-arm.
 
 ### The router's reference configs
 
-A spec's router arms are the router fork's own files, read at the commit `pins.env` pins:
-
-```bash
-set -a; . ./pins.env; set +a
-sh scripts/clone_pinned.sh "$ROUTER_CONFIGS_SHA" https://github.com/inference-sim/llm-d-router.git ../llm-d-router
-```
-
-The validator and the sweeper look in `../llm-d-router` (or `$ROUTER_CONFIGS_DIR`, or
-`--router-configs DIR`) and report a checkout at another commit.
+A spec's router arms are the router fork's own files, embedded in the pinned simulator. The
+validator and the sweeper read them with `blis router-configs --json`; there is nothing to clone.
+(Developer override: `$ROUTER_CONFIGS_DIR`, or `--router-configs DIR`, names a router checkout
+whose `reference-configs/` is read instead, to try a router change before a simulator embeds it.)
 
 ## 2. Catalog + registry (embedded; a checkout only for the scripts' file reads)
 

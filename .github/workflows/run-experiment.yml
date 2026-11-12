@@ -131,11 +131,6 @@ jobs:
           echo "SUBSTRATE_REGISTRY=$PWD/blis-substrate/registry" >> "$GITHUB_ENV"
           echo "BLIS_BIN=$PWD/upstream/blis"      >> "$GITHUB_ENV"
 
-      - name: Clone the pinned router configs (the files a spec's router arms use)
-        run: |
-          set -euo pipefail
-          . ./pins.env
-          sh scripts/clone_pinned.sh "$ROUTER_CONFIGS_SHA" https://github.com/inference-sim/llm-d-router.git ../llm-d-router
       - name: Fetch the pinned engine field list
         run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
 

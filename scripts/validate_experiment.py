@@ -801,8 +801,8 @@ def _sweep_is_colocated(sw):
 def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, router_cfg=None):
     """Every error in `spec`, as readable `path: message` strings. Empty means valid.
 
-    `router_cfg` is the router repository checkout (router_configs.open_checkout) whose reference
-    files a spec may name; None when there is none.
+    `router_cfg` is the router's reference configs (router_configs.open_checkout) a spec may name;
+    None reads them from `blis router-configs --json`.
 
     `blis` is the simulator binary whose commands supply the names (`blis fields`, `blis
     schema deployment`) and the catalog identities (`blis catalog resolve`). `catalog` names a
@@ -815,7 +815,10 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
     if not isinstance(spec, dict):
         return ["spec must be a mapping"]
     if router_cfg is None:
-        router_cfg = router_configs.open_checkout()
+        try:
+            router_cfg = router_configs.open_checkout(blis=blis)
+        except router_configs.RouterConfigsError as e:
+            return [f"router configs: {e}"]
     vocab = knob_vocabulary(blis, fields)
     par_vocab, eng_vocab, source = vocab.parallel, vocab.engine_names(), vocab.source
 
@@ -1079,8 +1082,9 @@ def main(argv=None):
     ap.add_argument("--routing", default=ROUTING_DIR,
                     help="directory holding the EndpointPickerConfig files (default: routing/)")
     ap.add_argument("--router-configs", dest="router_configs", default=None,
-                    help="checkout of the router repository at the commit pins.env pins, holding "
-                         "reference-configs/ (default: $ROUTER_CONFIGS_DIR, else ../llm-d-router)")
+                    help="developer override: a router checkout whose reference-configs/ replace the "
+                         "ones the simulator embeds (default: $ROUTER_CONFIGS_DIR, else "
+                         "`blis router-configs --json`)")
     ap.add_argument("--blis", default=os.environ.get("BLIS"),
                     help="the simulator binary whose commands supply setting names and catalog "
                          "identities (default: $BLIS)")
@@ -1102,7 +1106,7 @@ def main(argv=None):
         print(f"validate_experiment: {e}", file=sys.stderr)
         return 2
     try:
-        router_cfg = router_configs.open_checkout(args.router_configs)
+        router_cfg = router_configs.open_checkout(args.router_configs, blis=args.blis)
     except router_configs.RouterConfigsError as e:
         print(f"validate_experiment: {e}", file=sys.stderr)
         return 2

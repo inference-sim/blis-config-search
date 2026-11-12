@@ -148,8 +148,8 @@ tokens/s differ by about 1.5 percent from the old constants.
 - The front is as good as the runs under it: a coarse concurrency list gives a coarse front, and
   with one run per arm there is no interval, so no claim that two deployments differ or tie.
 - It does not say a refused P/D arm would have won; it says nothing about it.
-- A simulator build whose Result does not state `total_tokens_per_second_per_gpu` (the build
-  `BLIS_SHA` names today is one) gives rows without the figure. The front is then empty, the
+- A simulator build whose Result does not state `total_tokens_per_second_per_gpu` (an earlier
+  stack head is one; the build `BLIS_SHA` names states it) gives rows without the figure. The front is then empty, the
   `unrated` count says how many runs could not be placed, and the report says so instead of
   reporting a missed SLO. The decode form and `interactivity_of_mean_tpot` have the same rule
   (a Result without `interactivity_of_mean_tpot` is unrated; the throughput forms have no fallback).

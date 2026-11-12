@@ -119,7 +119,7 @@ The P/D decider is not an override. The index names the complete variant
 (`pd_decider.complete_variant`, `pd-prefix-based`): replacing only the decider's name makes the file
 fail to load, and the variant scores differently (prefix-cache 2, queue 1) from the files it
 replaces. A sweep compares policies by listing the files, each run unedited; `router.decider` is
-rejected with that instruction. The local `routing/pd-prefix.yaml` is deleted: it set
+rejected with that instruction. The local pd-prefix routing file is deleted: it set
 `nonCachedTokens: 256` where the router's file sets 16, so existing arms that did not sweep the
 threshold now run at 16.
 
@@ -151,9 +151,9 @@ tokens/s differ by about 1.5 percent from the old constants.
   `BLIS_SHA` names today is one) gives rows without the figure. The front is then empty, the
   `unrated` count says how many runs could not be placed, and the report says so instead of
   reporting a missed SLO. The decode form and `interactivity_of_mean_tpot` have the same rule
-  (interactivity falls back to `tpot_mean_ms`; the throughput forms have no fallback).
+  (a Result without `interactivity_of_mean_tpot` is unrated; the throughput forms have no fallback).
 - Committed reports were not regenerated here; the regeneration bot does that at the next pin move.
 
 Data and revisions: the metric definitions are the substrate registry's (`contracts/metrics`); the
-noise floor is the accuracy dashboard's `docs/limits.md`; the router files are llm-d-router at the
+noise floor is the accuracy dashboard's limits page; the router files are llm-d-router at the
 commit in `pins.env`.

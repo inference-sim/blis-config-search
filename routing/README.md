@@ -5,7 +5,7 @@ routing is now the embedded llm-d router, configured by a real **EndpointPickerC
 scenario's deployment-level `router:` block names. So a routing arm in this search is a *file*
 here, passed as the `router_config` knob, not a policy name.
 
-The per-flag mapping is upstream in inference-sim `docs/guide/routing.md`, section "From BLIS's
+The per-flag mapping is upstream in inference-sim's routing guide, section "From BLIS's
 former routing features". The rows that matter for this search:
 
 | former BLIS routing | here |

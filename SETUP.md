@@ -31,7 +31,7 @@ embedded llm-d router") removed every routing and admission CLI flag — `--rout
 `--routing-scorers`, `--admission-policy`, `--flow-control`, `--pd-decider` and ~25 more. Routing
 is now a real llm-d **EndpointPickerConfig**, named by the scenario's deployment-level `router:`
 block, so the sweep knob is `router_config` (a path to an EPP YAML). The per-flag mapping is
-upstream in `docs/guide/routing.md`, "From BLIS's former routing features". Note that
+upstream in inference-sim's routing guide, section "From BLIS's former routing features". Note that
 `round-robin`, `least-loaded` and `always-busiest` are **dropped** there ("the llm-d router has no
 such policy"): the nearest configurations are a `queue-scorer` or `load-aware-scorer` profile with
 `max-score-picker`, or `random-picker`. So reports that compared routing policies before v0.12.0

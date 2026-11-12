@@ -102,14 +102,24 @@ def validate_and_project(run_dir):
         raise Invalid(f"{name}: hardware {hardware!r} is not a safe catalog key")
 
     finalists = [_finalist(f, name) for f in pareto.get("finalists") or []]
-    if not finalists:
-        raise Invalid(f"{name}: pareto.json has no finalists")
-    # Match the winner on (label, variant): finalists share a topology once knobs are swept.
     win = pareto.get("winner") or {}
-    winner = next((r for r in finalists if r["label"] == win.get("label")
-                   and r["variant"] == (win.get("variant") or "")), None)
-    if winner is None:
-        raise Invalid(f"{name}: winner {win.get('label')!r} does not match any finalist")
+    outcomes = pareto.get("outcomes") if isinstance(pareto.get("outcomes"), dict) else {}
+    if finalists:
+        # Match the winner on (label, variant): finalists share a topology once knobs are swept.
+        winner = next((r for r in finalists if r["label"] == win.get("label")
+                       and r["variant"] == (win.get("variant") or "")), None)
+        if winner is None:
+            raise Invalid(f"{name}: winner {win.get('label')!r} does not match any finalist")
+        state = "winner"
+    else:
+        # No finalists is a valid report: nothing held the SLOs, or the simulator refused every
+        # candidate. It is published as a no-winner card, not rejected. A winner without finalists
+        # is inconsistent.
+        if win:
+            raise Invalid(f"{name}: pareto.json names a winner but has no finalists")
+        winner = None
+        ran = sum(n for k, n in outcomes.items() if isinstance(n, int))
+        state = "all_refused" if ran and outcomes.get("refused") == ran else "no_winner"
 
     floor = scenario.get("interactivity_floor") or {}
     floor_str = ""
@@ -131,10 +141,42 @@ def validate_and_project(run_dir):
         "n_runs": int(totals.get("runs", 0) or 0),
         "n_servable": int(totals.get("servable", 0) or 0),
         "winner": winner,
+        "state": state,
         "finalists": finalists,
         "reason": str(win.get("reason", "")),
+        "outcomes": outcomes,
+        "refusals": [_refusal(g) for g in pareto.get("refusals") or []],
+        "ranking": _ranking(pareto),
+        "front": _front(pareto),
         "caveat": f"Provenance: {split}." if split else "",
     }
+
+
+def _refusal(g):
+    return {"reason": str(g.get("reason", "")), "runs": int(g.get("runs", 0) or 0),
+            "configs": int(g.get("configs", 0) or 0)}
+
+
+def _ranking(pareto):
+    r = pareto.get("ranking") or {}
+    return {"used": str(r.get("used", "scalar")), "description": str(r.get("description", ""))}
+
+
+def _front(pareto):
+    """The report's exact front (all sweeps together) in the throughput form it ranked on, or None
+    for a report written before the front existed."""
+    front = pareto.get("front") or {}
+    form = (pareto.get("ranking") or {}).get("throughput") or "total"
+    overall = (front.get("overall") or {}).get(form)
+    if not isinstance(overall, dict):
+        return None
+    return {"throughput": form, "points": int(overall.get("points", 0) or 0),
+            "unrated": int(overall.get("unrated", 0) or 0),
+            "members": [{"label": str(m.get("label", "")), "variant": str(m.get("variant") or ""),
+                         "concurrency": m.get("concurrency"),
+                         "interactivity": m.get("interactivity"),
+                         "throughput_per_gpu": m.get("throughput_per_gpu")}
+                        for m in overall.get("members") or []]}
 
 
 def _write_run_data(run_dir, dest):

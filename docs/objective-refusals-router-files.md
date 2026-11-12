@@ -80,7 +80,12 @@ example a connector beside a sliding-window cache group, which depends on the mo
 running, and appear as `refused` rows with the engine's reason. The simulator gives no reason code,
 so the reason is its message.
 
-**Reproduce.** `python3 -I scripts/test_experiment.py Refusals`.
+A run with no winner publishes. `scenarios.json` carries `winner: null`, `state` (`all_refused` when
+every run was refused, else `no_winner`), the outcome counts and the refusal reasons, and the
+single-page app shows a card that says which. The all-sweeps front (`front`, exact, no interval) is
+published for a run that has a winner. The explorer draws no front of its own.
+
+**Reproduce.** `python3 -I scripts/test_experiment.py Refusals GalleryOfTheRunsOutcome`.
 
 ## The router's reference files
 

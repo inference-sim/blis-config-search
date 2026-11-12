@@ -616,3 +616,6 @@ svg.chart .xf-path.hot circle{r:4.6}
 .xf-stack{border-collapse:collapse;font-size:12.5px}
 .xf-stack th{text-align:left;font-weight:600;padding:3px 14px 3px 0}
 .xf-stack td{padding:3px 14px 3px 0}
+
+.nowin{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border:1px dashed var(--line-strong);border-radius:6px}
+.nowin .sub{font-size:12px;color:var(--muted)}

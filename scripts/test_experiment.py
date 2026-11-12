@@ -146,6 +146,14 @@ def make_router_fixture(root):
             _knob("plugin_parameter", "prefix-based-pd-decider", "promptTokens"),
             _knob("plugin_parameter", "approx-prefix-cache-producer", "autoTune"),
             _knob("plugin_parameter", "approx-prefix-cache-producer", "blockSizeTokens"),
+            _knob("plugin_parameter", "approx-prefix-cache-producer", "maxPrefixTokensToMatch",
+                  in_file=True, file_value=16384, router_default=131072),
+            # conditional: read only while maxPrefixTokensToMatch is 0 (the router's index states it as data)
+            _knob("plugin_parameter", "approx-prefix-cache-producer", "maxPrefixBlocksToMatch",
+                  router_default=2048,
+                  requires=[{"id": "plugin_parameter.approx-prefix-cache-producer.maxPrefixTokensToMatch",
+                             "value": 0}],
+                  effective_when="read only while maxPrefixTokensToMatch is 0"),
             _knob("plugin_parameter", "prefix-cache-scorer", "matchLengthWeight")],
          "ineffective_parameters": [pick]},
         {"name": "round-robin", "files": {"colocated": "round-robin.yaml", "pd": "round-robin-pd.yaml"},
@@ -3081,6 +3089,53 @@ class RouterKnobs(unittest.TestCase):
         self.assertTrue(any("no effect in the hosted boundary" in e and "maxNumOfEndpoints" in e
                             for e in errs), errs)
 
+    BLOCKS = ("plugins", "approx-prefix-cache-producer", "parameters", "maxPrefixBlocksToMatch")
+    TOKENS = ("plugins", "approx-prefix-cache-producer", "parameters", "maxPrefixTokensToMatch")
+
+    def test_a_conditional_knob_applies_when_the_other_override_meets_its_condition(self):
+        doc = RC.apply_overrides(self.base(self.PD), {self.BLOCKS: 512, self.TOKENS: 0},
+                                 self.router.knobs(self.PD))
+        params = next(p for p in doc["plugins"] if p["type"] == "approx-prefix-cache-producer")["parameters"]
+        self.assertEqual((512, 0), (params["maxPrefixBlocksToMatch"], params["maxPrefixTokensToMatch"]))
+
+    def test_a_conditional_knob_is_refused_while_the_condition_fails(self):
+        knobs = self.router.knobs(self.PD)
+        for overrides, why in (({self.BLOCKS: 512}, "the file sets 16384"),
+                               ({self.BLOCKS: 512, self.TOKENS: 8192}, "the override sets 8192")):
+            with self.assertRaises(KeyError, msg=why) as cm:
+                RC.apply_overrides(self.base(self.PD), overrides, knobs)
+            self.assertIn("maxPrefixTokensToMatch must be 0", str(cm.exception))
+
+    def test_a_conditional_knob_reads_the_router_default_when_the_file_is_silent(self):
+        # round-robin.yaml has no producer, so the requirement sees the required knob's router_default
+        index = os.path.join(self.root, "reference-configs", "policies.json")
+        with open(index, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        doc["policies"][1]["knobs"] = doc["policies"][0]["knobs"]
+        with open(index, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+        router = RC.open_checkout(self.root, verify=False)
+        with self.assertRaises(KeyError):
+            RC.apply_overrides(self.base("round-robin.yaml"), {self.BLOCKS: 512}, router.knobs("round-robin.yaml"))
+        RC.apply_overrides(self.base("round-robin.yaml"), {self.BLOCKS: 512, self.TOKENS: 0},
+                           router.knobs("round-robin.yaml"))
+
+    def test_the_validator_refuses_a_sweep_that_would_run_the_condition_unmet(self):
+        def errs(tokens):
+            params = {"maxPrefixBlocksToMatch": [512]}
+            if tokens is not None:
+                params["maxPrefixTokensToMatch"] = tokens
+            return V.validate(spec(sweeps=[{"name": "s", "prefill-instances": [1], "decode-instances": [1],
+                                            "prefill": {"parallel": {"tp": [8]}},
+                                            "decode": {"parallel": {"tp": [8]}},
+                                            "router": {"endpoint_picker_config": [self.PD],
+                                                       "plugins": {"approx-prefix-cache-producer":
+                                                                   {"parameters": params}}}}]),
+                              BLIS, ROUTING, router_cfg=self.router)
+        self.assertTrue(any("maxPrefixTokensToMatch must be 0" in e for e in errs(None)), errs(None))
+        self.assertTrue(any("maxPrefixTokensToMatch must be 0" in e for e in errs([0, 8192])))
+        self.assertEqual([], [e for e in errs([0]) if "maxPrefix" in e])
+
     def test_the_sweep_exposes_only_the_hosted_knobs(self):
         f = self.router.files[self.PD]
         self.assertTrue(all(k["hosted_effect"] for k in f["knobs"]))
@@ -3188,7 +3243,11 @@ class RealRouterConfigs(unittest.TestCase):
                         self.assertEqual(7, ref["weight"], (name, knob["id"]))
                 elif knob["kind"] == "plugin_parameter":
                     path = ("plugins", knob["plugin"], "parameters", knob["parameter"])
-                    doc = RC.apply_overrides(base, {path: 12345}, self.router.knobs(name))
+                    ov = {path: 12345}
+                    for req in knob.get("requires") or []:
+                        need = next(k for k in info["knobs"] if k["id"] == req["id"])
+                        ov[("plugins", need["plugin"], "parameters", need["parameter"])] = req["value"]
+                    doc = RC.apply_overrides(base, ov, self.router.knobs(name))
                     got = next(p for p in doc["plugins"] if p["type"] == knob["plugin"])
                     self.assertEqual(12345, got["parameters"][knob["parameter"]], (name, knob["id"]))
                 else:

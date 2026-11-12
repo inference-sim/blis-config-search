@@ -190,6 +190,42 @@ def _allowed(knobs):
     return weights, params, ineffective
 
 
+def _same(a, b):
+    """Equal values; numbers compare as numbers, so 0 equals 0.0."""
+    num = (int, float)
+    if isinstance(a, num) and isinstance(b, num) and not isinstance(a, bool) and not isinstance(b, bool):
+        return float(a) == float(b)
+    return a == b
+
+
+def unmet_requirements(knob, doc, overrides, knobs):
+    """The `requires` of an index knob that the config does not meet, as readable strings.
+
+    A conditional knob (the router's index states `requires: [{id, value}]`) moves a decision only
+    while each named knob has that value. The value a requirement sees is the one this combination
+    overrides, else the one the base file sets, else the router's default from the required knob's
+    own entry; nothing here knows which knobs are conditional or on what. `doc` is the base file
+    parsed; `overrides` is one combination {path: value}."""
+    by_id = {k.get("id"): k for k in knobs["knobs"]}
+    out = []
+    for req in knob.get("requires") or []:
+        need = by_id.get(req.get("id"))
+        if need is None or need.get("kind") != "plugin_parameter":
+            out.append(f"{req.get('id')} (not a knob this index lists)")
+            continue
+        plugin, name = need["plugin"], need["parameter"]
+        key = ("plugins", plugin, "parameters", name)
+        if key in overrides:
+            have = overrides[key]
+        else:
+            entry = _plugin(doc, plugin)
+            params = (entry or {}).get("parameters") or {}
+            have = params[name] if name in params else need.get("router_default")
+        if not _same(have, req.get("value")):
+            out.append(f"{name} must be {req.get('value')!r}, it is {have!r}")
+    return out
+
+
 def _plugin(doc, type_):
     return next((p for p in (doc.get("plugins") or []) if p.get("type") == type_), None)
 
@@ -227,6 +263,13 @@ def apply_overrides(base_doc, overrides, knobs=None):
             _, plugin, _params, field = path
             if (plugin, field) in ineffective:
                 raise KeyError(f"{plugin}.{field}: {HOSTED_NOTE}. {ineffective[(plugin, field)]}")
+            knob = next((k for k in (knobs or {}).get("knobs", []) if k.get("kind") == "plugin_parameter"
+                         and k["plugin"] == plugin and k["parameter"] == field), None)
+            unmet = unmet_requirements(knob, base_doc, overrides, knobs) if knob else []
+            if unmet:
+                raise KeyError(f"{plugin}.{field} changes no decision unless "
+                               f"{'; '.join(unmet)} in the same configuration "
+                               f"({knob.get('effective_when', '')})".rstrip(" ()"))
             entry = _plugin(doc, plugin)
             listed = (plugin, field) in params_ok
             if entry is None:

@@ -105,9 +105,15 @@ the hosted boundary) is reachable: a scorer `weight` in a profile entry
 (`schedulingProfiles.<profile>.<plugin>.weight`) and a plugin parameter whether or not the file sets
 it (`plugins.<plugin>.parameters.<name>`, adding the plugin if the file lacks it). A parameter under
 `ineffective_parameters` (`hosted_effect: false`: `maxNumOfEndpoints`, `addEstimatedOutputTokens`,
-`prefixMatchInfoProducerName`, `maxPrefixBlocksToMatch`) is refused by name, "accepted by the router,
+`prefixMatchInfoProducerName`) is refused by name, "accepted by the router,
 no effect in the hosted boundary", with the index's reason; any other unlisted name is refused as
-unlisted. Both refusals happen in the validator, before any run.
+unlisted. A knob with `requires: [{id, value}]` in the index is conditional (for example
+`maxPrefixBlocksToMatch`, read only while `maxPrefixTokensToMatch` is 0). It is accepted in a
+configuration only when each required knob has that value there: as this combination overrides it,
+else as the base file sets it, else the router's default from the index. A combination that fails is
+refused with the requirement named, since it would run the base file again under a different label.
+The runner knows no knob by name; it reads the condition from the index. Refusals happen in the
+validator, before any run.
 
 The P/D decider is not an override. The index names the complete variant
 (`pd_decider.complete_variant`, `pd-prefix-based`): replacing only the decider's name makes the file

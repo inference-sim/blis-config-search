@@ -117,7 +117,7 @@ sweeps:
     prefill: {parallel: {tp: [8], enable_expert_parallel: [true]}}
     decode: {parallel: {tp: [8], enable_expert_parallel: [true]}}
     router:
-      endpoint_picker_config: [pd-prefix.yaml]
+      endpoint_picker_config: [pd-prefix-based.yaml]
       plugins:
         prefix-based-pd-decider: {parameters: {nonCachedTokens: [256, 1024, 4096, 16384]}}
 
@@ -138,7 +138,7 @@ sweeps:
     prefill: {parallel: {tp: [8], enable_expert_parallel: [true]}}
     decode: {parallel: {tp: [16], enable_expert_parallel: [true]}}
     router:
-      endpoint_picker_config: [pd-prefix.yaml]
+      endpoint_picker_config: [pd-prefix-based.yaml]
       plugins:
         prefix-based-pd-decider: {parameters: {nonCachedTokens: [256, 4096]}}
 
@@ -155,7 +155,7 @@ sweeps:
     decode:
       parallel: {tp: [8], enable_expert_parallel: [true]}
       engine: {long_prefill_token_threshold: [0, 2048]}
-    router: {endpoint_picker_config: [pd-prefix.yaml]}
+    router: {endpoint_picker_config: [pd-prefix-based.yaml]}
 
   - name: pd-decode-cudagraph
     # Per-step host cost on the decode pool; does not interact with topology, so one layout.
@@ -166,7 +166,7 @@ sweeps:
     decode:
       parallel: {tp: [8], enable_expert_parallel: [true]}
       engine: {cudagraph_mode: [FULL, FULL_DECODE_ONLY]}
-    router: {endpoint_picker_config: [pd-prefix.yaml]}
+    router: {endpoint_picker_config: [pd-prefix-based.yaml]}
 
   - name: cudagraph
     # Per-step host cost; measured not to interact with topology, so one shape.

@@ -36,7 +36,7 @@ sweeps:
       parallel: {tp: [8, 16], enable_expert_parallel: [true]}
       engine: {long_prefill_token_threshold: [0, 1024]}
     router: &threshold
-      endpoint_picker_config: [pd-prefix.yaml]
+      endpoint_picker_config: [pd-prefix-based.yaml]
       plugins:
         prefix-based-pd-decider: {parameters: {nonCachedTokens: [256, 10240, 12288]}}
 

@@ -111,8 +111,10 @@ class RouterConfigs:
         atexit.register(shutil.rmtree, tmp, True)
         label = f"{payload.get('router_module') or 'router'}@{payload.get('version') or 'unknown'}"
         for name, entry in sorted(payload["files"].items()):
-            if os.path.basename(name) != name or name.startswith("."):
-                raise RouterConfigsError(f"{label}: file name {name!r} is not a plain file name")
+            parts = name.split("/")
+            if name.startswith("/") or any(p in ("", ".", "..") or p.startswith(".") for p in parts):
+                raise RouterConfigsError(f"{label}: file name {name!r} is not a relative file name "
+                                         f"inside the reference configs")
             body = (entry or {}).get("content")
             if not isinstance(body, str):
                 raise RouterConfigsError(f"{label}: {name} has no content")
@@ -120,6 +122,7 @@ class RouterConfigs:
             if hashlib.sha256(data).hexdigest() != (entry or {}).get("sha256"):
                 raise RouterConfigsError(f"{label}: {name} does not hash to the sha256 the simulator "
                                          f"states for it; refusing to use it")
+            os.makedirs(os.path.dirname(os.path.join(tmp, name)), exist_ok=True)
             with open(os.path.join(tmp, name), "wb") as f:
                 f.write(data)
         self = cls(payload["index"], label, tmp)

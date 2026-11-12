@@ -167,21 +167,24 @@ def make_router_fixture(root):
     return root
 
 
-def make_fake_blis(path, fixture_root, tamper=None, drop=None, fail=False):
+def make_fake_blis(path, fixture_root, tamper=None, drop=None, fail=False, extra=None):
     """A stand-in `blis` that answers only `router-configs [--json] [--file NAME]`, printing the
     documented JSON: {"router_module","version","index","files":{name:{"sha256","content"}}} built
     from the fixture directory. `tamper` names a file whose content is changed after its sha256 is
-    taken; `drop` names a file left out; `fail` makes the command exit 2."""
+    taken; `drop` names a file left out; `fail` makes the command exit 2; `extra` maps added names
+    (the real command names the guides' files `guides/NAME.yaml`) to their content."""
     d = os.path.join(fixture_root, "reference-configs")
     with open(os.path.join(d, "policies.json"), encoding="utf-8") as f:
         index = json.load(f)
     files = {}
-    for name in sorted(os.listdir(d)):
-        if name == "policies.json" or name == drop:
-            continue
+    listed = {os.path.relpath(os.path.join(top, n), d).replace(os.sep, "/")
+              for top, _dirs, names in os.walk(d) for n in names}
+    for name in sorted(listed - {"policies.json", drop}):
         with open(d + "/" + name, "rb") as f:
             raw = f.read()
         files[name] = {"sha256": hashlib.sha256(raw).hexdigest(), "content": raw.decode("utf-8")}
+    for name, text in (extra or {}).items():
+        files[name] = {"sha256": hashlib.sha256(text.encode()).hexdigest(), "content": text}
     if tamper:
         files[tamper]["content"] += "# edited after hashing\n"
     payload = {"router_module": "github.com/inference-sim/llm-d-router", "version": "v1.0.0-blis.fake",
@@ -3294,6 +3297,31 @@ class RouterConfigsFromTheSimulator(unittest.TestCase):
         doc = RC.apply_overrides(base, {self.BLOCKS: 512, self.TOKENS: 0}, r.knobs(self.PD))
         got = next(p for p in doc["plugins"] if p["type"] == "approx-prefix-cache-producer")
         self.assertEqual(512, got["parameters"]["maxPrefixBlocksToMatch"])
+
+    def test_a_file_in_a_subdirectory_of_reference_configs_is_materialised(self):
+        # The real command names the llm-d guides' files "guides/NAME.yaml" in the index and in `files`.
+        guide = os.path.join(self.fixture, "reference-configs", "guides")
+        os.makedirs(guide)
+        with open(os.path.join(self.fixture, "reference-configs", self.PD), encoding="utf-8") as f:
+            text = f.read()
+        with open(os.path.join(guide, "wide.yaml"), "w", encoding="utf-8") as f:
+            f.write(text)
+        ipath = os.path.join(self.fixture, "reference-configs", "policies.json")
+        with open(ipath, encoding="utf-8") as f:
+            index = json.load(f)
+        index["policies"].append({"name": "llm-d-wide", "knobs": [],
+                                  "files": {"colocated": None, "pd": "guides/wide.yaml"}})
+        with open(ipath, "w", encoding="utf-8") as f:
+            json.dump(index, f)
+        r = self.load()
+        self.assertIn("guides/wide.yaml", r.files)
+        with open(r.path("guides/wide.yaml"), encoding="utf-8") as f:
+            self.assertEqual(text, f.read())
+
+    def test_a_file_name_that_leaves_the_directory_is_refused(self):
+        for bad in ("../escape.yaml", "/abs.yaml", "guides/../../x.yaml", ".hidden.yaml", "a//b.yaml"):
+            with self.assertRaises(RC.RouterConfigsError, msg=bad):
+                self.load(extra={bad: "x: 1\n"})
 
     def test_a_file_whose_sha256_does_not_match_is_refused(self):
         with self.assertRaises(RC.RouterConfigsError) as cm:

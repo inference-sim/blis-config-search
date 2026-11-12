@@ -91,9 +91,10 @@ published for a run that has a winner. The explorer draws no front of its own.
 
 The router fork publishes complete EndpointPicker files and an index of their knobs
 (`reference-configs/policies.json`, llm-d-router pull request 7). Config search keeps no copy: a
-spec names one of those files, and `pins.env` pins the commit (`ROUTER_CONFIGS_SHA`). Fetch it
-with `sh scripts/clone_pinned.sh "$ROUTER_CONFIGS_SHA" https://github.com/inference-sim/llm-d-router.git ../llm-d-router`.
-A checkout at another commit is reported, and every report records the pin in `pinned_stack`.
+spec names one of those files. The pinned simulator embeds them and prints them with
+`blis router-configs --json`, so no second pin exists; a file whose bytes do not match the stated
+sha256 is refused, and every report records where the files came from in `pinned_stack`.
+(Developer override: `ROUTER_CONFIGS_DIR` names a router checkout to read instead.)
 
 With no override the arm runs the router's file byte for byte, staged in `reports/<name>/routing/`.
 With overrides the file is parsed, edited and written back there, named by a hash of its bytes
@@ -123,7 +124,7 @@ rejected with that instruction. The local pd-prefix routing file is deleted: it 
 `nonCachedTokens: 256` where the router's file sets 16, so existing arms that did not sweep the
 threshold now run at 16.
 
-**Reproduce.** `ROUTER_CONFIGS_DIR=../llm-d-router python3 -I scripts/test_experiment.py RealRouterConfigs`
+**Reproduce.** With `$BLIS` a simulator that has `router-configs` (or `ROUTER_CONFIGS_DIR` a router checkout), `python3 -I scripts/test_experiment.py RealRouterConfigs RealRouterConfigsCommand`
 applies an override for every `knobs` entry of every file in the index and checks it landed, and checks that every `ineffective_parameters` entry is refused by name.
 
 **Cost.** Parsing and writing a file takes milliseconds per arm.
@@ -155,5 +156,5 @@ tokens/s differ by about 1.5 percent from the old constants.
 - Committed reports were not regenerated here; the regeneration bot does that at the next pin move.
 
 Data and revisions: the metric definitions are the substrate registry's (`contracts/metrics`); the
-noise floor is the accuracy dashboard's limits page; the router files are llm-d-router at the
-commit in `pins.env`.
+noise floor is the accuracy dashboard's limits page; the router files are those the pinned
+simulator embeds.

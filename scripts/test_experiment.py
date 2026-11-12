@@ -9,6 +9,9 @@ the property that lets CI run the sweeper unattended -- so these tests are the g
 import copy
 import yaml
 import glob
+import hashlib
+import subprocess
+from unittest import mock
 import json
 import os
 import sys
@@ -164,11 +167,44 @@ def make_router_fixture(root):
     return root
 
 
+def make_fake_blis(path, fixture_root, tamper=None, drop=None, fail=False):
+    """A stand-in `blis` that answers only `router-configs [--json] [--file NAME]`, printing the
+    documented JSON: {"router_module","version","index","files":{name:{"sha256","content"}}} built
+    from the fixture directory. `tamper` names a file whose content is changed after its sha256 is
+    taken; `drop` names a file left out; `fail` makes the command exit 2."""
+    d = os.path.join(fixture_root, "reference-configs")
+    with open(os.path.join(d, "policies.json"), encoding="utf-8") as f:
+        index = json.load(f)
+    files = {}
+    for name in sorted(os.listdir(d)):
+        if name == "policies.json" or name == drop:
+            continue
+        with open(d + "/" + name, "rb") as f:
+            raw = f.read()
+        files[name] = {"sha256": hashlib.sha256(raw).hexdigest(), "content": raw.decode("utf-8")}
+    if tamper:
+        files[tamper]["content"] += "# edited after hashing\n"
+    payload = {"router_module": "github.com/inference-sim/llm-d-router", "version": "v1.0.0-blis.fake",
+               "index": index, "files": files}
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("#!/usr/bin/env python3\nimport json, sys\n"
+                f"PAYLOAD = json.loads({json.dumps(json.dumps(payload))})\n"
+                f"FAIL = {fail!r}\n"
+                "if FAIL:\n    sys.stderr.write('unknown command \"router-configs\"\\n'); sys.exit(2)\n"
+                "a = sys.argv[1:]\n"
+                "if a[:1] != ['router-configs']:\n    sys.exit(3)\n"
+                "if '--file' in a:\n"
+                "    sys.stdout.write(PAYLOAD['files'][a[a.index('--file') + 1]]['content'])\n"
+                "else:\n    json.dump(PAYLOAD, sys.stdout)\n")
+    os.chmod(path, 0o755)
+    return path
+
+
 def _router_checkout():
-    """The pinned checkout when it is present and exact, else the fixture above."""
-    real = RC.open_checkout()
-    if real is not None and not real.problem:
-        return real.root, True
+    """A developer's real router checkout when $ROUTER_CONFIGS_DIR names one, else the fixture."""
+    given = os.environ.get("ROUTER_CONFIGS_DIR")
+    if given and os.path.isfile(os.path.join(given, "reference-configs", "policies.json")):
+        return os.path.abspath(given), True
     fixture = tempfile.mkdtemp(prefix="router-fixture-")
     import atexit
     import shutil
@@ -176,8 +212,21 @@ def _router_checkout():
     return make_router_fixture(fixture), False
 
 
-ROUTER_ROOT, ROUTER_IS_PINNED = _router_checkout()
+ROUTER_ROOT, ROUTER_IS_REAL = _router_checkout()
 os.environ["ROUTER_CONFIGS_DIR"] = ROUTER_ROOT
+
+
+def _real_blis_has_router_configs():
+    """True when $BLIS names a simulator that prints its router configs (not the case until the
+    pinned simulator carries `blis router-configs`)."""
+    blis = os.environ.get("BLIS")
+    if not blis or not os.path.isfile(blis):
+        return False
+    try:
+        return subprocess.run([blis, "router-configs", "--json"], capture_output=True,
+                              timeout=60).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def spec(**over):
@@ -3202,21 +3251,103 @@ class RouterKnobs(unittest.TestCase):
         self.assertTrue(errs({"endpoint_picker_config": ["round-robin-pd.yaml"],
                               "decider": ["prefix-based-pd-decider"]}))
 
-    def test_the_router_pin_is_a_full_commit(self):
-        ref, sha = RC.pins()
-        self.assertTrue(ref)
-        self.assertRegex(sha, r"^[0-9a-f]{40}$")
-
-    def test_a_checkout_at_another_commit_is_reported_not_used_silently(self):
-        r = RC.RouterConfigs(ROUTER_ROOT, verify=True, want_sha="0" * 40)
-        self.assertTrue(r.problem)
-
-    def test_the_pinned_commit_is_recorded_in_the_stack(self):
+    def test_the_source_of_the_router_files_is_recorded_in_the_stack(self):
         st = E._pinned_stack(None, None, None, "0.32.0", False, self.router)
-        self.assertEqual(RC.pins()[1], st["router_configs"]["pinned"])
+        self.assertEqual(self.router.commit, st["router_configs"]["resolved"])
+        self.assertNotIn("pinned", st["router_configs"])
 
 
-@unittest.skipUnless(ROUTER_IS_PINNED, "needs the router checkout at the pinned commit (ROUTER_CONFIGS_DIR)")
+class RouterConfigsFromTheSimulator(unittest.TestCase):
+    """The reference files and index come from `blis router-configs --json`, not a router checkout."""
+    PD = "pd-prefix-based.yaml"
+    TOKENS = ("plugins", "approx-prefix-cache-producer", "parameters", "maxPrefixTokensToMatch")
+    BLOCKS = ("plugins", "approx-prefix-cache-producer", "parameters", "maxPrefixBlocksToMatch")
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.fixture = make_router_fixture(os.path.join(self._tmp.name, "fx"))
+        self.blis = os.path.join(self._tmp.name, "blis")
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("ROUTER_CONFIGS_DIR", None)       # the developer override is not in play
+
+    def load(self, **kw):
+        return RC.open_checkout(blis=make_fake_blis(self.blis, self.fixture, **kw))
+
+    def test_files_and_index_are_read_from_the_command_with_no_checkout(self):
+        r = self.load()
+        self.assertEqual({"pd-prefix-based.yaml", "round-robin-pd.yaml", "round-robin.yaml"}, set(r.files))
+        with open(r.path(self.PD), encoding="utf-8") as f, \
+                open(os.path.join(self.fixture, "reference-configs", self.PD), encoding="utf-8") as want:
+            self.assertEqual(want.read(), f.read())
+        self.assertIn("v1.0.0-blis.fake", r.commit)
+
+    def test_a_conditional_knob_decision_follows_the_commands_index(self):
+        r = self.load()
+        with open(r.path(self.PD), encoding="utf-8") as f:
+            base = yaml.safe_load(f)
+        with self.assertRaises(KeyError) as cm:
+            RC.apply_overrides(base, {self.BLOCKS: 512}, r.knobs(self.PD))
+        self.assertIn("maxPrefixTokensToMatch must be 0", str(cm.exception))
+        doc = RC.apply_overrides(base, {self.BLOCKS: 512, self.TOKENS: 0}, r.knobs(self.PD))
+        got = next(p for p in doc["plugins"] if p["type"] == "approx-prefix-cache-producer")
+        self.assertEqual(512, got["parameters"]["maxPrefixBlocksToMatch"])
+
+    def test_a_file_whose_sha256_does_not_match_is_refused(self):
+        with self.assertRaises(RC.RouterConfigsError) as cm:
+            self.load(tamper=self.PD)
+        self.assertIn(self.PD, str(cm.exception))
+        self.assertIn("sha256", str(cm.exception))
+
+    def test_a_file_the_index_names_but_the_command_omits_is_refused(self):
+        with self.assertRaises(RC.RouterConfigsError) as cm:
+            self.load(drop="round-robin.yaml")
+        self.assertIn("round-robin.yaml", str(cm.exception))
+
+    def test_a_simulator_without_the_command_is_reported_not_papered_over(self):
+        with self.assertRaises(RC.RouterConfigsError) as cm:
+            self.load(fail=True)
+        self.assertIn("router-configs", str(cm.exception))
+
+    def test_the_validator_reports_it_as_an_error_not_a_crash(self):
+        make_fake_blis(self.blis, self.fixture, fail=True)
+        errs = V.validate(spec(), self.blis, ROUTING)
+        self.assertTrue(any(e.startswith("router configs:") for e in errs), errs)
+
+    def test_a_name_the_command_does_not_list_is_refused_by_the_validator_path(self):
+        r = self.load()
+        with self.assertRaises(RC.RouterConfigsError):
+            RC.resolve("no-such.yaml", None, r)
+
+    def test_the_developer_override_wins_over_the_command(self):
+        os.environ["ROUTER_CONFIGS_DIR"] = self.fixture
+        r = RC.open_checkout(blis=make_fake_blis(self.blis, self.fixture, fail=True))
+        self.assertEqual(os.path.join(self.fixture, "reference-configs"), r.dir)
+
+    def test_no_source_at_all_yields_none(self):
+        self.assertIsNone(RC.open_checkout())
+
+    def test_a_pin_for_the_router_is_gone(self):
+        self.assertFalse(hasattr(RC, "pins"))
+        with open(os.path.join(ROOT, "pins.env"), encoding="utf-8") as f:
+            self.assertNotIn("ROUTER_CONFIGS", f.read())
+
+
+@unittest.skipUnless(_real_blis_has_router_configs(),
+                     "needs $BLIS to be a simulator that has `blis router-configs` (the pinned one, after the repin)")
+class RealRouterConfigsCommand(unittest.TestCase):
+    def test_the_real_command_loads_and_every_file_the_index_names_is_there(self):
+        saved = os.environ.pop("ROUTER_CONFIGS_DIR")
+        self.addCleanup(os.environ.__setitem__, "ROUTER_CONFIGS_DIR", saved)
+        r = RC.open_checkout(blis=os.environ["BLIS"])
+        self.assertTrue(r.files)
+        for name in r.files:
+            self.assertTrue(os.path.isfile(r.path(name)), name)
+
+
+@unittest.skipUnless(ROUTER_IS_REAL, "needs the router checkout at the pinned commit (ROUTER_CONFIGS_DIR)")
 class RealRouterConfigs(unittest.TestCase):
     """Against the router's own published files and index at the pinned commit."""
 

@@ -134,11 +134,6 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with: { python-version: "3.12" }
       - run: pip install --require-hashes -r requirements.txt
-      - name: Clone the pinned router configs (the files a spec's router arms use)
-        run: |
-          set -euo pipefail
-          . ./pins.env
-          sh scripts/clone_pinned.sh "$ROUTER_CONFIGS_SHA" https://github.com/inference-sim/llm-d-router.git ../llm-d-router
       - name: Fetch the pinned engine field list
         run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
       - name: Refuse to regenerate on specs the stack does not accept
@@ -184,11 +179,6 @@ jobs:
         with:
           path: .corpus/traces.jsonl
           key: replay-corpus-${{ steps.stack.outputs.substrate_ref }}
-      - name: Clone the pinned router configs (the files a spec's router arms use)
-        run: |
-          set -euo pipefail
-          . ./pins.env
-          sh scripts/clone_pinned.sh "$ROUTER_CONFIGS_SHA" https://github.com/inference-sim/llm-d-router.git ../llm-d-router
       - name: Fetch the pinned engine field list
         run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
       - name: Regenerate ${{ matrix.report.id }}

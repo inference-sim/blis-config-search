@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""The router's reference EndpointPicker configs, taken at a pinned commit, and the sweep overrides.
+"""The router's reference EndpointPicker configs, read from the simulator, and the sweep overrides.
 
-The llm-d router fork publishes complete configuration files and an index (`policies.json`) that
-names every knob a search may sweep (llm-d-router `reference-configs/`). Config search does not keep
-copies: a spec names a file of that directory, the run uses the file unchanged, and an override
-edits the PARSED file and writes it back (design X1: router configuration reaches the router parser
-as the router writes it).
+The simulator embeds the llm-d router fork's reference configs and their index (`policies.json`)
+and prints them with `blis router-configs --json`:
 
-pins.env: ROUTER_CONFIGS_REF (the branch or tag cloned) and ROUTER_CONFIGS_SHA (the commit required).
-A checkout at another commit is reported (`problem`), never silently used: CI clones the pin.
+  {"router_module", "version", "index": <policies.json>, "files": {name: {"sha256", "content"}}}
+
+Config search keeps no copy and clones no router: a spec names a file, the run uses it unchanged, and
+an override edits the PARSED file and writes it back (design X1: router configuration reaches the
+router parser as the router writes it). The files are therefore exactly those of the pinned simulator
+(pins.env BLIS_REF/BLIS_SHA). A file whose bytes do not hash to the stated sha256 is refused.
+
+Developer override: set $ROUTER_CONFIGS_DIR (or pass --router-configs DIR) to a router checkout to
+read its reference-configs/ directory instead of the simulator's, for trying a router change before
+it is embedded in a simulator build. Nothing in CI or in a committed report uses it.
 
 Override grammar (spec `router:` block, every value a list):
 
@@ -23,31 +28,24 @@ instead of producing the base file and being read as "this knob does nothing". A
 decider is not an override: the index names the complete policy variant (`pd_decider.complete_variant`),
 and choosing it is listing that policy's file in `endpoint_picker_config`.
 """
+import atexit
 import copy
 import hashlib
 import itertools
 import json
 import os
+import shutil
 import subprocess
+import tempfile
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 REFERENCE_DIR = "reference-configs"
 HOSTED_NOTE = "accepted by the router, no effect in the hosted boundary"
+COMMAND = ("router-configs", "--json")
 
 
 class RouterConfigsError(Exception):
     pass
-
-
-def pins(path=None):
-    import build_catalog
-    p = build_catalog.read_pins(path) if path else build_catalog.read_pins()
-    return p.get("ROUTER_CONFIGS_REF"), p.get("ROUTER_CONFIGS_SHA")
-
-
-def default_dir():
-    """$ROUTER_CONFIGS_DIR, else the sibling checkout ../llm-d-router."""
-    return os.environ.get("ROUTER_CONFIGS_DIR") or os.path.join(os.path.dirname(ROOT), "llm-d-router")
 
 
 def sha256_of(path):
@@ -63,26 +61,40 @@ def _git(root, *args):
     return pr.stdout.strip() if pr.returncode == 0 else None
 
 
+def _command_payload(blis):
+    """The parsed output of `blis router-configs --json`; RouterConfigsError when it cannot be had."""
+    try:
+        pr = subprocess.run([blis, *COMMAND], capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise RouterConfigsError(f"`{blis} {' '.join(COMMAND)}` could not run: {e}")
+    if pr.returncode != 0:
+        detail = pr.stderr.decode("utf-8", "replace").strip().splitlines()
+        raise RouterConfigsError(f"`{blis} {' '.join(COMMAND)}` failed (exit {pr.returncode}): "
+                                 f"{detail[-1] if detail else 'no message'}; the simulator pinned in "
+                                 f"pins.env must be one that embeds the router's reference configs")
+    try:
+        payload = json.loads(pr.stdout)
+    except ValueError as e:
+        raise RouterConfigsError(f"`{blis} {' '.join(COMMAND)}` did not print JSON: {e}")
+    if not isinstance(payload, dict) or not isinstance(payload.get("index"), dict) \
+            or not isinstance(payload.get("files"), dict):
+        raise RouterConfigsError(f"`{blis} {' '.join(COMMAND)}`: expected an object with `index` and `files`")
+    return payload
+
+
 class RouterConfigs:
-    """A checkout of the router repository: its reference files and index.
+    """The router's reference files and index, materialised under `self.dir` (path(name) is a file).
 
-    `problem` is "" when the checkout is the pinned commit with the reference directory unmodified,
-    else one line saying how it differs (a warning locally; CI refuses by cloning the pin)."""
+    Built by `from_command` (the simulator's embedded copy) or `from_dir` (the developer override).
+    `commit` names where they came from, for the report. `problem` is "" or one line of warning."""
 
-    def __init__(self, root, verify=True, want_sha=None):
-        self.root = os.path.abspath(root)
-        self.dir = os.path.join(self.root, REFERENCE_DIR)
-        index_path = os.path.join(self.dir, "policies.json")
-        try:
-            with open(index_path, encoding="utf-8") as f:
-                self.index = json.load(f)
-        except (OSError, ValueError) as e:
-            raise RouterConfigsError(f"{index_path}: {e}")
-        if self.index.get("schema") != 1:
-            raise RouterConfigsError(f"{index_path}: schema {self.index.get('schema')!r} is not one "
+    def __init__(self, index, source, directory):
+        if index.get("schema") != 1:
+            raise RouterConfigsError(f"{source}: index schema {index.get('schema')!r} is not one "
                                      f"this runner reads (1)")
+        self.index, self.commit, self.dir, self.problem = index, source, directory, ""
         self.files = {}
-        for pol in self.index.get("policies") or []:
+        for pol in index.get("policies") or []:
             for role, name in (pol.get("files") or {}).items():
                 if name:
                     self.files[name] = {
@@ -91,22 +103,47 @@ class RouterConfigs:
                         "knobs": [k for k in pol.get("knobs") or [] if k.get("hosted_effect", True)],
                         "ineffective": list(pol.get("ineffective_parameters") or []),
                         "pd_decider": pol.get("pd_decider")}
-        self.commit = _git(self.root, "rev-parse", "HEAD") if verify else None
-        self.want = want_sha if want_sha is not None else pins()[1]
-        self.problem = ""
-        if verify:
-            self.problem = self._problem()
 
-    def _problem(self):
-        if not self.commit:
-            return f"{self.root} is not a git checkout, so the pinned commit cannot be confirmed"
-        if self.want and self.commit != self.want:
-            return (f"pins.env pins the router configs at {self.want[:12]}, but {self.root} is at "
-                    f"{self.commit[:12]}")
-        dirty = _git(self.root, "status", "--porcelain", "--", REFERENCE_DIR)
-        if dirty:
-            return f"{os.path.join(self.root, REFERENCE_DIR)} has uncommitted changes"
-        return ""
+    @classmethod
+    def from_command(cls, blis):
+        payload = _command_payload(blis)
+        tmp = tempfile.mkdtemp(prefix="router-configs-")
+        atexit.register(shutil.rmtree, tmp, True)
+        label = f"{payload.get('router_module') or 'router'}@{payload.get('version') or 'unknown'}"
+        for name, entry in sorted(payload["files"].items()):
+            if os.path.basename(name) != name or name.startswith("."):
+                raise RouterConfigsError(f"{label}: file name {name!r} is not a plain file name")
+            body = (entry or {}).get("content")
+            if not isinstance(body, str):
+                raise RouterConfigsError(f"{label}: {name} has no content")
+            data = body.encode("utf-8")
+            if hashlib.sha256(data).hexdigest() != (entry or {}).get("sha256"):
+                raise RouterConfigsError(f"{label}: {name} does not hash to the sha256 the simulator "
+                                         f"states for it; refusing to use it")
+            with open(os.path.join(tmp, name), "wb") as f:
+                f.write(data)
+        self = cls(payload["index"], label, tmp)
+        for name in self.files:
+            if name not in payload["files"]:
+                raise RouterConfigsError(f"{label}: the index names {name} but the simulator printed no such file")
+        return self
+
+    @classmethod
+    def from_dir(cls, root):
+        root = os.path.abspath(root)
+        dirpath = os.path.join(root, REFERENCE_DIR)
+        index_path = os.path.join(dirpath, "policies.json")
+        try:
+            with open(index_path, encoding="utf-8") as f:
+                index = json.load(f)
+        except (OSError, ValueError) as e:
+            raise RouterConfigsError(f"{index_path}: {e}")
+        head = _git(root, "rev-parse", "HEAD")
+        self = cls(index, f"{root} ({head[:12] if head else 'not a git checkout'})", dirpath)
+        for name in self.files:
+            if not os.path.isfile(os.path.join(dirpath, name)):
+                raise RouterConfigsError(f"{dirpath}: the index names {name} but the file is missing")
+        return self
 
     def path(self, name):
         return os.path.join(self.dir, name)
@@ -122,18 +159,18 @@ class RouterConfigs:
         return f"{v}.yaml" if v else None
 
 
-def open_checkout(path=None, verify=True):
-    """The checkout at `path` (default: default_dir()), or None when there is none there."""
-    path = path or default_dir()
-    if not os.path.isfile(os.path.join(path, REFERENCE_DIR, "policies.json")):
-        return None
-    return RouterConfigs(path, verify=verify)
-
-
-def clone_hint():
-    ref, sha = pins()
-    return (f"clone it with `sh scripts/clone_pinned.sh {sha} https://github.com/inference-sim/llm-d-router.git "
-            f"../llm-d-router` or pass --router-configs DIR" if sha else "pin ROUTER_CONFIGS_SHA in pins.env")
+def open_checkout(path=None, verify=True, blis=None):
+    """The router's reference configs. Order: `path`, else $ROUTER_CONFIGS_DIR (developer override: a
+    router checkout), else the simulator `blis` (`blis router-configs --json`). None when none of
+    the three is given. `verify` is kept for callers; the simulator's files are always hash-checked."""
+    path = path or os.environ.get("ROUTER_CONFIGS_DIR")
+    if path:
+        if not os.path.isfile(os.path.join(path, REFERENCE_DIR, "policies.json")):
+            return None
+        return RouterConfigs.from_dir(path)
+    if blis:
+        return RouterConfigs.from_command(blis)
+    return None
 
 
 def resolve(name, routing_dir, router):
@@ -156,8 +193,8 @@ def resolve(name, routing_dir, router):
         if routing_dir and os.path.isdir(routing_dir) else []
     ref = sorted(router.files) if router else []
     where = (f"available: {', '.join(have) or 'none'}; router reference configs: {', '.join(ref)}"
-             if router else f"available: {', '.join(have) or 'none'}; no router checkout was found "
-                            f"({clone_hint()})")
+             if router else f"available: {', '.join(have) or 'none'}; no router configs were found "
+                            f"(use a simulator that has `blis router-configs`, or set ROUTER_CONFIGS_DIR)")
     raise RouterConfigsError(f"no such file routing/{name} ({where})")
 
 

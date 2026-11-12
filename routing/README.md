@@ -32,7 +32,7 @@ what decides whether a request is split at all:
 
 The prefix-based P/D arm is not kept here. The router fork publishes it as `pd-prefix-based.yaml`
 in its `reference-configs/` (with seven other files and an index of every knob), and a spec names
-that file: it is taken unchanged at the commit `pins.env` pins as `ROUTER_CONFIGS_SHA`. Files in
+that file: it is taken unchanged from the pinned simulator (`blis router-configs --json`). Files in
 `routing/` and in the router's directory must not share a name. See
 [the router section of the spec guide](../experiments/README.md#routing).
 

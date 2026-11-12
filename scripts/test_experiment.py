@@ -2943,6 +2943,49 @@ class ParetoFront(unittest.TestCase):
         self.assertEqual(2, len(E._pareto_json(rep)["finalists"]))
 
 
+class GalleryOfTheRunsOutcome(unittest.TestCase):
+    """The report the SPA reads, end to end: run, write the run directory, build the site data."""
+
+    def site_row(self, fake, **obj):
+        import build_gallery as BG
+        doc = _pd_and_agg_spec(**obj)
+        doc["scenario"]["run_id"] = "gallery-case-0001"
+        rep = _sweep_with(doc, fake)
+        with tempfile.TemporaryDirectory() as tmp:
+            run = os.path.join(tmp, "reports", "gallery-case-0001")
+            E._write_run_dir(run, doc, rep, [])
+            out = os.path.join(tmp, "site")
+            rows = BG.build(os.path.join(tmp, "reports"), out)
+            with open(os.path.join(out, "scenarios.json"), encoding="utf-8") as f:
+                self.assertEqual(rows, json.load(f), "what is returned is what is published")
+            self.assertTrue(os.path.isfile(os.path.join(out, rows[0]["run_id"], "pareto.json")))
+        [row] = rows
+        return row
+
+    def test_a_run_the_simulator_refused_everywhere_publishes_as_a_no_winner_card(self):
+        row = self.site_row(lambda cfg: _refused(), ranking="pareto")
+        self.assertIsNone(row["winner"])
+        self.assertEqual([], row["finalists"])
+        self.assertEqual("all_refused", row["state"])
+        self.assertEqual({"refused": 4}, row["outcomes"])
+        self.assertEqual(4, sum(g["runs"] for g in row["refusals"]))
+        self.assertEqual(0, row["front"]["points"])
+
+    def test_a_run_that_ran_but_held_no_slo_publishes_as_no_winner_not_refused(self):
+        row = self.site_row(lambda cfg: _ran(100.0, 50.0, itl_p99=50.0))
+        self.assertIsNone(row["winner"])
+        self.assertEqual("no_winner", row["state"])
+        self.assertEqual({"slo_miss": 4}, row["outcomes"])
+
+    def test_a_run_with_a_winner_publishes_the_exact_front_and_the_ranking_used(self):
+        row = self.site_row(lambda cfg: _ran(100.0, 10.0, total_tokens_per_sec_per_gpu=500.0),
+                            ranking="pareto")
+        self.assertEqual("winner", row["state"])
+        self.assertEqual("pareto", row["ranking"]["used"])
+        self.assertTrue(row["front"]["members"])
+        self.assertTrue(all(f["tps_per_gpu"] is not None for f in row["finalists"]))
+
+
 class RouterKnobs(unittest.TestCase):
     PD = "pd-prefix-based.yaml"
 

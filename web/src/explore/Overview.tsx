@@ -56,12 +56,6 @@ export function Scatter({ x }: { x: Explorer }) {
   const { ym, slo } = yRange(x, y, rs.map((r) => r[y] as number))
   const px = (v: number) => M.l + (v / xm) * (W - M.l - M.r)
   const py = yScale(y, ym)
-  const front: Run[] = []
-  let best: number | null = null
-  for (const r of rs.filter((r) => r.ok).sort((a, b) => (b[xk] as number) - (a[xk] as number))) {
-    const v = r[y] as number
-    if (best === null || (hi ? v > best : v < best)) { front.push(r); best = v }
-  }
   const focus = x.hover ?? x.picked
   const on = (r: Run) => !focus || r.cfg === focus
   const over = rs.filter((r) => (r[y] as number) > ym).length
@@ -76,7 +70,6 @@ export function Scatter({ x }: { x: Explorer }) {
       {xticks.map((v) => <text key={v} x={px(v)} y={H - M.b + 13} textAnchor="middle" className="tick">{fmt(v, 0)}</text>)}
       <text x={(M.l + W - M.r) / 2} y={H - 3} textAnchor="middle" className="axlabel">{METRIC[xk].label} →</text>
       {slo !== null && slo <= ym && <g className="xf-slo"><line x1={M.l} x2={W - M.r} y1={py(slo)} y2={py(slo)} /><text x={W - M.r} y={py(slo) - 4} textAnchor="end">SLO</text></g>}
-      {front.length > 1 && <polyline className="xf-front" points={front.map((r) => `${px(r[xk] as number)},${py(r[y] as number)}`).join(' ')} />}
       {[...rs].sort((a, b) => Number(on(a)) - Number(on(b))).map((r) => (
         <circle key={r.id} cx={px(r[xk] as number)} cy={py(r[y] as number)} r={focus && on(r) ? 5.2 : small}
           style={on(r) ? { color: color.of(r) } : undefined}

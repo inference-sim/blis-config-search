@@ -13,11 +13,46 @@ import { Coverage } from './components/Coverage'
 import { Footer } from './components/Footer'
 
 const w = { label: '1x TP8', tp: 8, ni: 1, gpus: 8, c_use: 1, tps: 1, tps_per_gpu: 1, per_user: 1, itl_p99: 1 }
-const mk = (id: string, model: string, hw: string, wl: string, gpu: number): Scenario => ({
+type Won = Scenario & { winner: NonNullable<Scenario['winner']> }
+const mk = (id: string, model: string, hw: string, wl: string, gpu: number): Won => ({
   run_id: id, model, hardware: hw, gpu_budget: gpu, workload: wl, caveat: '', floor: 'f', headroom: null,
-  n_runs: 1, n_servable: 1, winner: w, finalists: [], reason: '',
+  n_runs: 1, n_servable: 1, winner: w, state: 'winner', finalists: [], reason: '',
+  outcomes: { served: 1 }, refusals: [], ranking: { used: 'scalar', description: '' }, front: null,
 })
 const S = [mk('a', 'm1', 'H100', 'chatbot', 16), mk('b', 'm1', 'H200', 'chatbot', 16), mk('c', 'm2', 'H100', 'multidoc', 8)]
+
+describe('a report with no winner', () => {
+  const none = (state: Scenario['state'], outcomes: Record<string, number>): Scenario => ({
+    ...mk('n', 'm1', 'H100', 'chatbot', 16), winner: null, state, finalists: [], outcomes,
+    refusals: outcomes.refused ? [{ reason: 'a KV connector beside a sliding-window cache group is not modelled', runs: outcomes.refused, configs: 2 }] : [],
+  })
+
+  it('says the simulator refused every configuration and why, with no config or numbers', () => {
+    render(<Reports scenarios={[none('all_refused', { refused: 4 })]} params={{}} />)
+    const card = document.querySelector('.card') as Element
+    expect(card.textContent).toContain('The simulator refused every configuration')
+    expect(card.textContent).toContain('4 refused')
+    expect(card.textContent).toContain('not modelled')
+    expect(card.querySelector('.perf')).toBeNull()
+    expect(card.querySelector('.winlbl')).toBeNull()
+  })
+
+  it('says no configuration held the SLOs when runs happened but none qualified', () => {
+    render(<Reports scenarios={[none('no_winner', { slo_miss: 6 })]} params={{}} />)
+    const card = document.querySelector('.card') as Element
+    expect(card.textContent).toContain('No configuration held the SLOs')
+    expect(card.textContent).not.toContain('refused every')
+  })
+
+  it('leaves coverage without a recommendation and never recommends it over a report that has a winner', () => {
+    const rows = coverageRows([none('all_refused', { refused: 4 }), mk('w', 'm1', 'H100', 'chatbot', 16)])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].best?.run_id).toBe('w')
+    expect(coverageRows([none('all_refused', { refused: 4 })])[0].best).toBeNull()
+    render(<Coverage scenarios={[none('all_refused', { refused: 4 })]} />)
+    expect(document.querySelector('.covwin')).toBeNull()
+  })
+})
 
 describe('filters', () => {
   it('filters and gives live facet counts that ignore the facet itself', () => {

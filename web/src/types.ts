@@ -47,9 +47,27 @@ export interface Scenario {
   headroom: number | null
   n_runs: number
   n_servable: number
-  winner: Winner
+  /** null when the report has no winner: nothing held the SLOs, or the simulator refused every candidate. */
+  winner: Winner | null
+  /** winner: a winner; no_winner: runs happened, none held the SLOs; all_refused: the simulator refused every run. */
+  state: 'winner' | 'no_winner' | 'all_refused'
   finalists: Finalist[]
   reason: string
+  /** Runs by outcome (served, slo_miss, refused, overloaded, timeout, crash, invalid_result). */
+  outcomes: Record<string, number>
+  /** Simulator refusals grouped by reason. */
+  refusals: { reason: string; runs: number; configs: number }[]
+  ranking: { used: 'scalar' | 'pareto'; description: string }
+  /** The report's exact front over all sweeps (no tolerance, one run per arm); null for a report written before it existed. */
+  front: { throughput: string; points: number; unrated: number; members: FrontMember[] } | null
+}
+
+export interface FrontMember {
+  label: string
+  variant: string
+  concurrency: number | null
+  interactivity: number
+  throughput_per_gpu: number
 }
 
 export interface ModelEntry {

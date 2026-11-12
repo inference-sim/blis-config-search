@@ -130,7 +130,8 @@ export interface CoverageRow {
 function pickBest(scenarios: Scenario[]): Scenario | null {
   let best: Scenario | null = null
   for (const s of scenarios) {
-    if (best === null || s.winner.tps_per_gpu > best.winner.tps_per_gpu) best = s
+    if (s.winner === null) continue
+    if (best === null || best.winner === null || s.winner.tps_per_gpu > best.winner.tps_per_gpu) best = s
   }
   return best
 }

@@ -19,6 +19,7 @@ const FACETS: { key: FilterKey; label: string; fmt?: (v: string) => string }[] =
  *  total under it), per-user speed, and token latency, each its own column. */
 export function Metrics({ s }: { s: Scenario }) {
   const w = s.winner
+  if (w === null) return null
   return (
     <div className="perf">
       <div className="m key"><span className="l">Per accelerator</span><b className="num">{fnum(w.tps_per_gpu, w.tps_per_gpu >= 100 ? 0 : 1)}<small>tok/s</small></b><span className="sub"><span className="num">{fnum(w.tps, 0)}</span> total</span></div>
@@ -28,8 +29,40 @@ export function Metrics({ s }: { s: Scenario }) {
   )
 }
 
+/** What a report with no winner says: why, and how the runs ended. */
+export function NoWinner({ s }: { s: Scenario }) {
+  const refused = s.outcomes.refused ?? 0
+  const top = s.refusals[0]
+  const headline = s.state === 'all_refused'
+    ? 'The simulator refused every configuration'
+    : 'No configuration held the SLOs'
+  return (
+    <div className="nowin" role="note">
+      <b>{headline}</b>
+      <span className="sub">
+        {Object.entries(s.outcomes).map(([k, n]) => `${n} ${k.replace(/_/g, ' ')}`).join(', ') || 'no runs recorded'}
+      </span>
+      {refused > 0 && top && <span className="sub">Most common refusal: {top.reason}</span>}
+    </div>
+  )
+}
+
 function ScenarioCard({ s }: { s: Scenario }) {
   const w = s.winner
+  if (w === null) {
+    return (
+      <a className="card" href={scenarioHash(s.run_id)}>
+        <div className="cardhead"><h3>{s.model}</h3>{s.caveat && <CaveatBadge caveat={s.caveat} />}</div>
+        <dl className="specrows">
+          <div><dt>Cluster</dt><dd><span className="num">{s.gpu_budget}</span> × {s.hardware}</dd></div>
+          <div><dt>Workload</dt><dd>{s.workload}</dd></div>
+        </dl>
+        <div className="cardsec"><NoWinner s={s} /></div>
+        <div className="foot"><span /><span className="open">details</span></div>
+      </a>
+    )
+  }
+  const front = s.front && s.front.members.length > 0 ? s.front.members.length : null
   return (
     <a className="card" href={scenarioHash(s.run_id)}>
       <div className="cardhead"><h3>{s.model}</h3>{s.caveat && <CaveatBadge caveat={s.caveat} />}</div>
@@ -45,7 +78,8 @@ function ScenarioCard({ s }: { s: Scenario }) {
         <Metrics s={s} />
       </div>
       <div className="foot">
-        <span>{w.c_use != null && <>At <span className="num">{fnum(w.c_use, 0)}</span> concurrent users</>}</span>
+        <span>{w.c_use != null && <>At <span className="num">{fnum(w.c_use, 0)}</span> concurrent users</>}
+          {front !== null && s.ranking.used === 'pareto' && <> · front of <span className="num">{front}</span></>}</span>
         <span className="open">details</span>
       </div>
     </a>

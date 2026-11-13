@@ -2,6 +2,8 @@ name: kimi-k2-5-h200-multidoc-pd
 scenario:
   model: kimi-k2.5
   hardware: h200
+  cluster:
+    gpus_per_node: 8
   workload: multidoc
   gpus: 64
   slo:
@@ -79,7 +81,7 @@ sweeps:
       - 1024
   router:
     endpoint_picker_config:
-    - pd-prefix.yaml
+    - pd-prefix-based.yaml
     plugins:
       prefix-based-pd-decider:
         parameters:

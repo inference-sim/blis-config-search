@@ -1,4 +1,5 @@
 {
+  "basis": "measured_window",
   "experiment": {
     "description": "",
     "name": "kimi-k2-5-h200-multidoc-pd",
@@ -26,29 +27,31 @@
   "model": "kimi-k2.5",
   "objective": "max output tok/s per accelerator subject to the scenario's SLOs",
   "pinned_stack": {
-    "blis": "v0.15.0",
-    "catalog": "0.5.0",
+    "blis": "v0.17.0",
+    "data": "override",
     "engine_version": "0.32.0",
-    "kernel": "v0.5.0",
-    "registry": "v0.3.0",
+    "kernel": "unpinned",
     "resolved": {
       "blis": {
-        "commit": "762f1605ff27cd825d6b2cb2d9e991cd4b864c91",
-        "describe": "v0.15.0",
-        "sha256": "46bf00c739eafba4cdb347d4bfdd30bd63e815acaff1525c291b5b8ea947b197"
+        "sha256": "81252e86283ddc2dc3bca7d2fd41853321956d431711ff12dc2f95edff7b6d10"
       },
       "catalog": {
-        "commit": "b5550f750cb51571498577fbdc1c68f78cda67db",
-        "describe": "0.5.0"
+        "commit": "965b05834c47882bc0f9f1a960c90327a756ef3d",
+        "describe": "v0.14.0"
       },
       "registry": {
-        "commit": "96bead697172ab7f2cf8346e04e65b837014d867",
-        "describe": "v0.3.0"
+        "commit": "965b05834c47882bc0f9f1a960c90327a756ef3d",
+        "describe": "v0.14.0"
       }
     },
-    "router": "v1.0.0-blis.2"
+    "router": "v1.0.0-blis.4",
+    "router_configs": {
+      "resolved": "github.com/llm-d/llm-d-router@v1.0.0-blis.4"
+    },
+    "substrate": "v0.14.0"
   },
   "run_id": "kimi-k2-5-h200-multidoc-pd",
+  "scope": "cluster; worst instance for TTFT and end-to-end gates",
   "seed": 42,
   "slos": {
     "itl_p99": "20ms",

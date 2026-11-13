@@ -204,10 +204,12 @@
   "finalists": [
     {
       "at_c_use": {
-        "itl_p99_ms": 15.576,
-        "tok_per_s_per_user": 64.2,
-        "tokens_per_sec": 3605.7,
-        "tokens_per_sec_per_gpu": 56.34
+        "interactivity": 68.012,
+        "itl_p99_ms": 18.383,
+        "tok_per_s_per_user": 54.4,
+        "tokens_per_sec": 3776.0,
+        "tokens_per_sec_per_gpu": 59.0,
+        "total_tokens_per_sec_per_gpu": 897.425
       },
       "c_star": 64,
       "c_use": 64,
@@ -223,43 +225,43 @@
       "curve": [
         {
           "concurrency": 8,
-          "itl_p99_ms": 9.92,
+          "itl_p99_ms": 10.405,
           "preemption_count": 0,
-          "tok_per_s_per_user": 100.8,
-          "tokens_per_sec": 723.9,
-          "ttft_p99_ms": 1413.7
+          "tok_per_s_per_user": 96.1,
+          "tokens_per_sec": 777.8,
+          "ttft_p99_ms": 1333.6
         },
         {
           "concurrency": 16,
-          "itl_p99_ms": 10.946,
+          "itl_p99_ms": 11.421,
           "preemption_count": 0,
-          "tok_per_s_per_user": 91.4,
-          "tokens_per_sec": 1359.9,
-          "ttft_p99_ms": 2058.7
+          "tok_per_s_per_user": 87.6,
+          "tokens_per_sec": 1356.2,
+          "ttft_p99_ms": 1889.6
         },
         {
           "concurrency": 32,
-          "itl_p99_ms": 11.912,
+          "itl_p99_ms": 13.937,
           "preemption_count": 0,
-          "tok_per_s_per_user": 83.9,
-          "tokens_per_sec": 2128.7,
-          "ttft_p99_ms": 2607.3
+          "tok_per_s_per_user": 71.7,
+          "tokens_per_sec": 2380.6,
+          "ttft_p99_ms": 2754.7
         },
         {
           "concurrency": 64,
-          "itl_p99_ms": 15.576,
+          "itl_p99_ms": 18.383,
           "preemption_count": 0,
-          "tok_per_s_per_user": 64.2,
-          "tokens_per_sec": 3605.7,
-          "ttft_p99_ms": 4801.5
+          "tok_per_s_per_user": 54.4,
+          "tokens_per_sec": 3776.0,
+          "ttft_p99_ms": 4622.1
         },
         {
           "concurrency": 128,
-          "itl_p99_ms": 18.758,
+          "itl_p99_ms": 24.801,
           "preemption_count": 0,
-          "tok_per_s_per_user": 53.3,
-          "tokens_per_sec": 5216.4,
-          "ttft_p99_ms": 7415.3
+          "tok_per_s_per_user": 40.3,
+          "tokens_per_sec": 5374.7,
+          "ttft_p99_ms": 7822.6
         }
       ],
       "gpus": 64,
@@ -269,520 +271,524 @@
     },
     {
       "at_c_use": {
-        "itl_p99_ms": 19.486,
-        "tok_per_s_per_user": 51.3,
-        "tokens_per_sec": 3571.9,
-        "tokens_per_sec_per_gpu": 55.81
+        "interactivity": 98.572,
+        "itl_p99_ms": 13.571,
+        "tok_per_s_per_user": 73.7,
+        "tokens_per_sec": 2724.5,
+        "tokens_per_sec_per_gpu": 42.57,
+        "total_tokens_per_sec_per_gpu": 322.826
       },
-      "c_star": 64,
-      "c_use": 64,
+      "c_star": 32,
+      "c_use": 32,
       "config": {
-        "concurrency": 64,
+        "concurrency": 32,
         "decode_enable_expert_parallel": true,
-        "decode_instances": 5,
+        "decode_instances": 6,
         "decode_long_prefill_token_threshold": 0,
         "decode_tp": 8,
         "num_instances": 8,
         "prefill_enable_expert_parallel": true,
-        "prefill_instances": 3,
-        "prefill_max_num_batched_tokens": 32768,
+        "prefill_instances": 2,
+        "prefill_max_num_batched_tokens": 8192,
         "prefill_tp": 8,
-        "router_config": "reports/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-1b515287eb.yaml",
+        "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-0d7cb7b841.yaml",
         "tp": 8
       },
       "curve": [
         {
           "concurrency": 8,
-          "itl_p99_ms": 8.952,
+          "itl_p99_ms": 8.548,
           "preemption_count": 0,
-          "tok_per_s_per_user": 111.7,
-          "tokens_per_sec": 961.3,
-          "ttft_p99_ms": 2201.5
+          "tok_per_s_per_user": 117.0,
+          "tokens_per_sec": 1019.8,
+          "ttft_p99_ms": 1707.5
         },
         {
           "concurrency": 16,
-          "itl_p99_ms": 10.183,
+          "itl_p99_ms": 9.156,
           "preemption_count": 0,
-          "tok_per_s_per_user": 98.2,
-          "tokens_per_sec": 1672.2,
-          "ttft_p99_ms": 3891.9
+          "tok_per_s_per_user": 109.2,
+          "tokens_per_sec": 1694.2,
+          "ttft_p99_ms": 3603.0
         },
         {
           "concurrency": 32,
-          "itl_p99_ms": 13.346,
+          "itl_p99_ms": 11.892,
           "preemption_count": 0,
-          "tok_per_s_per_user": 74.9,
-          "tokens_per_sec": 2568.3,
-          "ttft_p99_ms": 6183.9
+          "tok_per_s_per_user": 84.1,
+          "tokens_per_sec": 2720.2,
+          "ttft_p99_ms": 6949.7
         },
         {
           "concurrency": 64,
-          "itl_p99_ms": 18.593,
+          "itl_p99_ms": 17.823,
           "preemption_count": 0,
-          "tok_per_s_per_user": 53.8,
-          "tokens_per_sec": 3876.3,
-          "ttft_p99_ms": 12847.1
+          "tok_per_s_per_user": 56.1,
+          "tokens_per_sec": 4203.0,
+          "ttft_p99_ms": 13691.3
         },
         {
           "concurrency": 128,
-          "itl_p99_ms": 26.914,
+          "itl_p99_ms": 26.819,
           "preemption_count": 0,
-          "tok_per_s_per_user": 37.2,
-          "tokens_per_sec": 5257.4,
-          "ttft_p99_ms": 20964.4
+          "tok_per_s_per_user": 37.3,
+          "tokens_per_sec": 5641.9,
+          "ttft_p99_ms": 28834.7
         },
         {
           "concurrency": 8,
-          "itl_p99_ms": 10.187,
+          "itl_p99_ms": 8.947,
           "preemption_count": 0,
-          "tok_per_s_per_user": 98.2,
-          "tokens_per_sec": 903.7,
-          "ttft_p99_ms": 1101.4
+          "tok_per_s_per_user": 111.8,
+          "tokens_per_sec": 1012.3,
+          "ttft_p99_ms": 1246.8
         },
         {
           "concurrency": 16,
-          "itl_p99_ms": 11.29,
+          "itl_p99_ms": 9.814,
           "preemption_count": 0,
-          "tok_per_s_per_user": 88.6,
-          "tokens_per_sec": 1556.9,
-          "ttft_p99_ms": 1555.4
+          "tok_per_s_per_user": 101.9,
+          "tokens_per_sec": 1692.5,
+          "ttft_p99_ms": 1648.5
         },
         {
           "concurrency": 32,
-          "itl_p99_ms": 13.914,
+          "itl_p99_ms": 13.571,
           "preemption_count": 0,
-          "tok_per_s_per_user": 71.9,
-          "tokens_per_sec": 2496.2,
-          "ttft_p99_ms": 2798.4
+          "tok_per_s_per_user": 73.7,
+          "tokens_per_sec": 2724.5,
+          "ttft_p99_ms": 3237.5
         },
         {
           "concurrency": 64,
-          "itl_p99_ms": 20.417,
+          "itl_p99_ms": 23.869,
           "preemption_count": 0,
-          "tok_per_s_per_user": 49.0,
-          "tokens_per_sec": 3531.3,
-          "ttft_p99_ms": 4589.7
+          "tok_per_s_per_user": 41.9,
+          "tokens_per_sec": 3775.2,
+          "ttft_p99_ms": 5993.2
         },
         {
           "concurrency": 128,
-          "itl_p99_ms": 137.735,
+          "itl_p99_ms": 33.446,
           "preemption_count": 0,
-          "tok_per_s_per_user": 7.3,
-          "tokens_per_sec": 4829.4,
-          "ttft_p99_ms": 12410.1
+          "tok_per_s_per_user": 29.9,
+          "tokens_per_sec": 5194.7,
+          "ttft_p99_ms": 12657.6
         },
         {
           "concurrency": 8,
-          "itl_p99_ms": 9.449,
+          "itl_p99_ms": 9.29,
           "preemption_count": 0,
-          "tok_per_s_per_user": 105.8,
-          "tokens_per_sec": 913.5,
-          "ttft_p99_ms": 1652.7
+          "tok_per_s_per_user": 107.6,
+          "tokens_per_sec": 983.9,
+          "ttft_p99_ms": 1293.4
         },
         {
           "concurrency": 16,
-          "itl_p99_ms": 11.515,
+          "itl_p99_ms": 11.211,
           "preemption_count": 0,
-          "tok_per_s_per_user": 86.8,
-          "tokens_per_sec": 1506.9,
-          "ttft_p99_ms": 2107.5
+          "tok_per_s_per_user": 89.2,
+          "tokens_per_sec": 1584.2,
+          "ttft_p99_ms": 1974.0
         },
         {
           "concurrency": 32,
-          "itl_p99_ms": 14.827,
+          "itl_p99_ms": 15.344,
           "preemption_count": 0,
-          "tok_per_s_per_user": 67.4,
-          "tokens_per_sec": 2218.6,
-          "ttft_p99_ms": 4095.6
+          "tok_per_s_per_user": 65.2,
+          "tokens_per_sec": 2409.4,
+          "ttft_p99_ms": 3700.1
         },
         {
           "concurrency": 64,
-          "itl_p99_ms": 163.45,
+          "itl_p99_ms": 22.373,
           "preemption_count": 0,
-          "tok_per_s_per_user": 6.1,
-          "tokens_per_sec": 3244.1,
-          "ttft_p99_ms": 6768.8
+          "tok_per_s_per_user": 44.7,
+          "tokens_per_sec": 3589.6,
+          "ttft_p99_ms": 6063.4
         },
         {
           "concurrency": 128,
-          "itl_p99_ms": 332.486,
+          "itl_p99_ms": 41.542,
           "preemption_count": 0,
-          "tok_per_s_per_user": 3.0,
-          "tokens_per_sec": 4189.5,
-          "ttft_p99_ms": 12739.5
+          "tok_per_s_per_user": 24.1,
+          "tokens_per_sec": 4690.2,
+          "ttft_p99_ms": 12553.4
         },
         {
           "concurrency": 8,
-          "itl_p99_ms": 8.952,
+          "itl_p99_ms": 8.548,
           "preemption_count": 0,
-          "tok_per_s_per_user": 111.7,
-          "tokens_per_sec": 961.3,
-          "ttft_p99_ms": 2201.5
+          "tok_per_s_per_user": 117.0,
+          "tokens_per_sec": 1019.8,
+          "ttft_p99_ms": 1707.5
         },
         {
           "concurrency": 16,
-          "itl_p99_ms": 10.183,
+          "itl_p99_ms": 9.156,
           "preemption_count": 0,
-          "tok_per_s_per_user": 98.2,
-          "tokens_per_sec": 1672.2,
-          "ttft_p99_ms": 3891.9
+          "tok_per_s_per_user": 109.2,
+          "tokens_per_sec": 1694.2,
+          "ttft_p99_ms": 3603.0
         },
         {
           "concurrency": 32,
-          "itl_p99_ms": 13.346,
+          "itl_p99_ms": 11.892,
           "preemption_count": 0,
-          "tok_per_s_per_user": 74.9,
-          "tokens_per_sec": 2568.3,
-          "ttft_p99_ms": 6183.9
+          "tok_per_s_per_user": 84.1,
+          "tokens_per_sec": 2720.2,
+          "ttft_p99_ms": 6949.7
         },
         {
           "concurrency": 64,
-          "itl_p99_ms": 18.593,
+          "itl_p99_ms": 17.823,
           "preemption_count": 0,
-          "tok_per_s_per_user": 53.8,
-          "tokens_per_sec": 3876.3,
-          "ttft_p99_ms": 12847.1
+          "tok_per_s_per_user": 56.1,
+          "tokens_per_sec": 4203.0,
+          "ttft_p99_ms": 13691.3
         },
         {
           "concurrency": 128,
-          "itl_p99_ms": 26.914,
+          "itl_p99_ms": 26.819,
           "preemption_count": 0,
-          "tok_per_s_per_user": 37.2,
-          "tokens_per_sec": 5257.4,
-          "ttft_p99_ms": 20964.4
+          "tok_per_s_per_user": 37.3,
+          "tokens_per_sec": 5641.9,
+          "ttft_p99_ms": 28834.7
         },
         {
           "concurrency": 8,
-          "itl_p99_ms": 10.19,
+          "itl_p99_ms": 10.102,
           "preemption_count": 0,
-          "tok_per_s_per_user": 98.1,
-          "tokens_per_sec": 909.7,
-          "ttft_p99_ms": 1131.8
+          "tok_per_s_per_user": 99.0,
+          "tokens_per_sec": 999.5,
+          "ttft_p99_ms": 1485.0
         },
         {
           "concurrency": 16,
-          "itl_p99_ms": 59.637,
+          "itl_p99_ms": 10.51,
           "preemption_count": 0,
-          "tok_per_s_per_user": 16.8,
-          "tokens_per_sec": 1556.2,
-          "ttft_p99_ms": 1556.5
+          "tok_per_s_per_user": 95.1,
+          "tokens_per_sec": 1586.4,
+          "ttft_p99_ms": 1877.5
         },
         {
           "concurrency": 32,
-          "itl_p99_ms": 70.951,
+          "itl_p99_ms": 15.885,
           "preemption_count": 0,
-          "tok_per_s_per_user": 14.1,
-          "tokens_per_sec": 2347.4,
-          "ttft_p99_ms": 2812.9
+          "tok_per_s_per_user": 63.0,
+          "tokens_per_sec": 2538.3,
+          "ttft_p99_ms": 3279.3
         },
         {
           "concurrency": 64,
-          "itl_p99_ms": 84.517,
+          "itl_p99_ms": 24.487,
           "preemption_count": 0,
-          "tok_per_s_per_user": 11.8,
-          "tokens_per_sec": 3474.0,
-          "ttft_p99_ms": 4756.6
+          "tok_per_s_per_user": 40.8,
+          "tokens_per_sec": 3868.4,
+          "ttft_p99_ms": 6166.0
         },
         {
           "concurrency": 128,
-          "itl_p99_ms": 95.37,
+          "itl_p99_ms": 32.845,
           "preemption_count": 0,
-          "tok_per_s_per_user": 10.5,
-          "tokens_per_sec": 4421.4,
-          "ttft_p99_ms": 12359.6
+          "tok_per_s_per_user": 30.4,
+          "tokens_per_sec": 5127.3,
+          "ttft_p99_ms": 12692.9
         },
         {
           "concurrency": 8,
-          "itl_p99_ms": 61.275,
+          "itl_p99_ms": 9.99,
           "preemption_count": 0,
-          "tok_per_s_per_user": 16.3,
-          "tokens_per_sec": 886.4,
-          "ttft_p99_ms": 1871.0
+          "tok_per_s_per_user": 100.1,
+          "tokens_per_sec": 934.1,
+          "ttft_p99_ms": 1563.6
         },
         {
           "concurrency": 16,
-          "itl_p99_ms": 76.322,
+          "itl_p99_ms": 11.603,
           "preemption_count": 0,
-          "tok_per_s_per_user": 13.1,
-          "tokens_per_sec": 1394.7,
-          "ttft_p99_ms": 2340.8
+          "tok_per_s_per_user": 86.2,
+          "tokens_per_sec": 1493.3,
+          "ttft_p99_ms": 2207.9
         },
         {
           "concurrency": 32,
-          "itl_p99_ms": 83.773,
+          "itl_p99_ms": 17.411,
           "preemption_count": 0,
-          "tok_per_s_per_user": 11.9,
-          "tokens_per_sec": 2146.4,
-          "ttft_p99_ms": 4280.3
+          "tok_per_s_per_user": 57.4,
+          "tokens_per_sec": 2217.9,
+          "ttft_p99_ms": 3797.2
         },
         {
           "concurrency": 64,
-          "itl_p99_ms": 88.606,
+          "itl_p99_ms": 23.223,
           "preemption_count": 0,
-          "tok_per_s_per_user": 11.3,
-          "tokens_per_sec": 3135.8,
-          "ttft_p99_ms": 6946.1
+          "tok_per_s_per_user": 43.1,
+          "tokens_per_sec": 3344.0,
+          "ttft_p99_ms": 6282.2
         },
         {
           "concurrency": 128,
-          "itl_p99_ms": 126.77,
+          "itl_p99_ms": 44.066,
           "preemption_count": 0,
-          "tok_per_s_per_user": 7.9,
-          "tokens_per_sec": 3972.0,
-          "ttft_p99_ms": 12782.4
+          "tok_per_s_per_user": 22.7,
+          "tokens_per_sec": 4488.5,
+          "ttft_p99_ms": 13051.8
         },
         {
           "concurrency": 8,
-          "itl_p99_ms": 8.921,
+          "itl_p99_ms": 8.557,
           "preemption_count": 0,
-          "tok_per_s_per_user": 112.1,
-          "tokens_per_sec": 966.6,
-          "ttft_p99_ms": 2072.5
+          "tok_per_s_per_user": 116.9,
+          "tokens_per_sec": 1011.6,
+          "ttft_p99_ms": 1637.8
         },
         {
           "concurrency": 16,
-          "itl_p99_ms": 10.164,
+          "itl_p99_ms": 9.246,
           "preemption_count": 0,
-          "tok_per_s_per_user": 98.4,
-          "tokens_per_sec": 1680.3,
-          "ttft_p99_ms": 3680.8
+          "tok_per_s_per_user": 108.2,
+          "tokens_per_sec": 1720.7,
+          "ttft_p99_ms": 3550.9
         },
         {
           "concurrency": 32,
-          "itl_p99_ms": 14.609,
+          "itl_p99_ms": 11.746,
           "preemption_count": 0,
-          "tok_per_s_per_user": 68.5,
-          "tokens_per_sec": 2492.4,
-          "ttft_p99_ms": 5887.3
+          "tok_per_s_per_user": 85.1,
+          "tokens_per_sec": 2723.3,
+          "ttft_p99_ms": 6825.5
         },
         {
           "concurrency": 64,
-          "itl_p99_ms": 20.255,
+          "itl_p99_ms": 16.87,
           "preemption_count": 0,
-          "tok_per_s_per_user": 49.4,
-          "tokens_per_sec": 3731.2,
-          "ttft_p99_ms": 12062.7
+          "tok_per_s_per_user": 59.3,
+          "tokens_per_sec": 4183.0,
+          "ttft_p99_ms": 12551.3
         },
         {
           "concurrency": 128,
-          "itl_p99_ms": 31.42,
+          "itl_p99_ms": 24.703,
           "preemption_count": 0,
-          "tok_per_s_per_user": 31.8,
-          "tokens_per_sec": 5066.7,
-          "ttft_p99_ms": 19801.4
+          "tok_per_s_per_user": 40.5,
+          "tokens_per_sec": 5513.2,
+          "ttft_p99_ms": 27339.3
         },
         {
           "concurrency": 8,
-          "itl_p99_ms": 10.187,
+          "itl_p99_ms": 8.94,
           "preemption_count": 0,
-          "tok_per_s_per_user": 98.2,
-          "tokens_per_sec": 904.4,
-          "ttft_p99_ms": 1031.8
+          "tok_per_s_per_user": 111.9,
+          "tokens_per_sec": 1013.0,
+          "ttft_p99_ms": 1246.8
         },
         {
           "concurrency": 16,
-          "itl_p99_ms": 10.827,
+          "itl_p99_ms": 10.391,
           "preemption_count": 0,
-          "tok_per_s_per_user": 92.4,
-          "tokens_per_sec": 1596.0,
-          "ttft_p99_ms": 1463.2
+          "tok_per_s_per_user": 96.2,
+          "tokens_per_sec": 1684.8,
+          "ttft_p99_ms": 1650.6
         },
         {
           "concurrency": 32,
-          "itl_p99_ms": 13.853,
+          "itl_p99_ms": 14.076,
           "preemption_count": 0,
-          "tok_per_s_per_user": 72.2,
-          "tokens_per_sec": 2475.1,
-          "ttft_p99_ms": 2651.6
+          "tok_per_s_per_user": 71.0,
+          "tokens_per_sec": 2681.1,
+          "ttft_p99_ms": 3238.9
         },
         {
           "concurrency": 64,
-          "itl_p99_ms": 19.486,
+          "itl_p99_ms": 23.478,
           "preemption_count": 0,
-          "tok_per_s_per_user": 51.3,
-          "tokens_per_sec": 3571.9,
-          "ttft_p99_ms": 4589.7
+          "tok_per_s_per_user": 42.6,
+          "tokens_per_sec": 4016.9,
+          "ttft_p99_ms": 5995.1
         },
         {
           "concurrency": 128,
-          "itl_p99_ms": 326.098,
+          "itl_p99_ms": 34.31,
           "preemption_count": 0,
-          "tok_per_s_per_user": 3.1,
-          "tokens_per_sec": 4787.3,
-          "ttft_p99_ms": 11956.7
+          "tok_per_s_per_user": 29.1,
+          "tokens_per_sec": 5327.4,
+          "ttft_p99_ms": 12348.4
         },
         {
           "concurrency": 8,
-          "itl_p99_ms": 9.449,
+          "itl_p99_ms": 9.29,
           "preemption_count": 0,
-          "tok_per_s_per_user": 105.8,
-          "tokens_per_sec": 913.5,
-          "ttft_p99_ms": 1652.7
+          "tok_per_s_per_user": 107.6,
+          "tokens_per_sec": 983.9,
+          "ttft_p99_ms": 1293.4
         },
         {
           "concurrency": 16,
-          "itl_p99_ms": 11.515,
+          "itl_p99_ms": 11.211,
           "preemption_count": 0,
-          "tok_per_s_per_user": 86.8,
-          "tokens_per_sec": 1506.9,
-          "ttft_p99_ms": 2107.5
+          "tok_per_s_per_user": 89.2,
+          "tokens_per_sec": 1584.2,
+          "ttft_p99_ms": 1974.0
         },
         {
           "concurrency": 32,
-          "itl_p99_ms": 14.827,
+          "itl_p99_ms": 15.345,
           "preemption_count": 0,
-          "tok_per_s_per_user": 67.4,
-          "tokens_per_sec": 2218.9,
-          "ttft_p99_ms": 4095.6
+          "tok_per_s_per_user": 65.2,
+          "tokens_per_sec": 2409.9,
+          "ttft_p99_ms": 3700.1
         },
         {
           "concurrency": 64,
-          "itl_p99_ms": 167.231,
+          "itl_p99_ms": 22.373,
           "preemption_count": 0,
-          "tok_per_s_per_user": 6.0,
-          "tokens_per_sec": 3361.3,
-          "ttft_p99_ms": 6764.0
+          "tok_per_s_per_user": 44.7,
+          "tokens_per_sec": 3679.6,
+          "ttft_p99_ms": 6063.4
         },
         {
           "concurrency": 128,
-          "itl_p99_ms": 330.274,
+          "itl_p99_ms": 42.655,
           "preemption_count": 0,
-          "tok_per_s_per_user": 3.0,
-          "tokens_per_sec": 4196.2,
-          "ttft_p99_ms": 12740.2
+          "tok_per_s_per_user": 23.4,
+          "tokens_per_sec": 4734.0,
+          "ttft_p99_ms": 12568.8
         },
         {
           "concurrency": 8,
-          "itl_p99_ms": 8.921,
+          "itl_p99_ms": 8.557,
           "preemption_count": 0,
-          "tok_per_s_per_user": 112.1,
-          "tokens_per_sec": 966.6,
-          "ttft_p99_ms": 2072.5
+          "tok_per_s_per_user": 116.9,
+          "tokens_per_sec": 1011.6,
+          "ttft_p99_ms": 1637.8
         },
         {
           "concurrency": 16,
-          "itl_p99_ms": 10.164,
+          "itl_p99_ms": 9.246,
           "preemption_count": 0,
-          "tok_per_s_per_user": 98.4,
-          "tokens_per_sec": 1680.3,
-          "ttft_p99_ms": 3680.8
+          "tok_per_s_per_user": 108.2,
+          "tokens_per_sec": 1720.7,
+          "ttft_p99_ms": 3550.9
         },
         {
           "concurrency": 32,
-          "itl_p99_ms": 14.609,
+          "itl_p99_ms": 11.746,
           "preemption_count": 0,
-          "tok_per_s_per_user": 68.5,
-          "tokens_per_sec": 2492.4,
-          "ttft_p99_ms": 5887.3
+          "tok_per_s_per_user": 85.1,
+          "tokens_per_sec": 2723.3,
+          "ttft_p99_ms": 6825.5
         },
         {
           "concurrency": 64,
-          "itl_p99_ms": 20.255,
+          "itl_p99_ms": 16.87,
           "preemption_count": 0,
-          "tok_per_s_per_user": 49.4,
-          "tokens_per_sec": 3731.2,
-          "ttft_p99_ms": 12062.7
+          "tok_per_s_per_user": 59.3,
+          "tokens_per_sec": 4183.0,
+          "ttft_p99_ms": 12551.3
         },
         {
           "concurrency": 128,
-          "itl_p99_ms": 31.42,
+          "itl_p99_ms": 24.703,
           "preemption_count": 0,
-          "tok_per_s_per_user": 31.8,
-          "tokens_per_sec": 5066.7,
-          "ttft_p99_ms": 19801.4
+          "tok_per_s_per_user": 40.5,
+          "tokens_per_sec": 5513.2,
+          "ttft_p99_ms": 27339.3
         },
         {
           "concurrency": 8,
-          "itl_p99_ms": 10.189,
+          "itl_p99_ms": 8.853,
           "preemption_count": 0,
-          "tok_per_s_per_user": 98.1,
-          "tokens_per_sec": 896.1,
-          "ttft_p99_ms": 1108.2
+          "tok_per_s_per_user": 113.0,
+          "tokens_per_sec": 993.1,
+          "ttft_p99_ms": 1486.2
         },
         {
           "concurrency": 16,
-          "itl_p99_ms": 10.821,
+          "itl_p99_ms": 10.964,
           "preemption_count": 0,
-          "tok_per_s_per_user": 92.4,
-          "tokens_per_sec": 1545.3,
-          "ttft_p99_ms": 1519.0
+          "tok_per_s_per_user": 91.2,
+          "tokens_per_sec": 1580.4,
+          "ttft_p99_ms": 1877.5
         },
         {
           "concurrency": 32,
-          "itl_p99_ms": 73.741,
+          "itl_p99_ms": 14.621,
           "preemption_count": 0,
-          "tok_per_s_per_user": 13.6,
-          "tokens_per_sec": 2375.2,
-          "ttft_p99_ms": 2656.3
+          "tok_per_s_per_user": 68.4,
+          "tokens_per_sec": 2601.6,
+          "ttft_p99_ms": 3279.6
         },
         {
           "concurrency": 64,
-          "itl_p99_ms": 79.826,
+          "itl_p99_ms": 22.126,
           "preemption_count": 0,
-          "tok_per_s_per_user": 12.5,
-          "tokens_per_sec": 3424.0,
-          "ttft_p99_ms": 4758.8
+          "tok_per_s_per_user": 45.2,
+          "tokens_per_sec": 3809.1,
+          "ttft_p99_ms": 6019.4
         },
         {
           "concurrency": 128,
-          "itl_p99_ms": 91.518,
+          "itl_p99_ms": 37.284,
           "preemption_count": 0,
-          "tok_per_s_per_user": 10.9,
-          "tokens_per_sec": 4656.9,
-          "ttft_p99_ms": 11956.7
+          "tok_per_s_per_user": 26.8,
+          "tokens_per_sec": 5249.1,
+          "ttft_p99_ms": 12358.2
         },
         {
           "concurrency": 8,
-          "itl_p99_ms": 61.275,
+          "itl_p99_ms": 9.99,
           "preemption_count": 0,
-          "tok_per_s_per_user": 16.3,
-          "tokens_per_sec": 886.4,
-          "ttft_p99_ms": 1871.0
+          "tok_per_s_per_user": 100.1,
+          "tokens_per_sec": 934.5,
+          "ttft_p99_ms": 1563.6
         },
         {
           "concurrency": 16,
-          "itl_p99_ms": 76.322,
+          "itl_p99_ms": 11.604,
           "preemption_count": 0,
-          "tok_per_s_per_user": 13.1,
-          "tokens_per_sec": 1394.7,
-          "ttft_p99_ms": 2340.8
+          "tok_per_s_per_user": 86.2,
+          "tokens_per_sec": 1493.3,
+          "ttft_p99_ms": 2207.9
         },
         {
           "concurrency": 32,
-          "itl_p99_ms": 83.509,
+          "itl_p99_ms": 17.475,
           "preemption_count": 0,
-          "tok_per_s_per_user": 12.0,
-          "tokens_per_sec": 2148.7,
-          "ttft_p99_ms": 4268.2
+          "tok_per_s_per_user": 57.2,
+          "tokens_per_sec": 2175.2,
+          "ttft_p99_ms": 3797.2
         },
         {
           "concurrency": 64,
-          "itl_p99_ms": 90.299,
+          "itl_p99_ms": 23.281,
           "preemption_count": 0,
-          "tok_per_s_per_user": 11.1,
-          "tokens_per_sec": 3063.7,
-          "ttft_p99_ms": 6946.1
+          "tok_per_s_per_user": 43.0,
+          "tokens_per_sec": 3426.0,
+          "ttft_p99_ms": 6283.2
         },
         {
           "concurrency": 128,
-          "itl_p99_ms": 125.141,
+          "itl_p99_ms": 44.032,
           "preemption_count": 0,
-          "tok_per_s_per_user": 8.0,
-          "tokens_per_sec": 4040.1,
-          "ttft_p99_ms": 12782.4
+          "tok_per_s_per_user": 22.7,
+          "tokens_per_sec": 4492.3,
+          "ttft_p99_ms": 13051.8
         }
       ],
       "gpus": 64,
-      "label": "3P/5D TP8 + EP",
+      "label": "2P/6D TP8 + EP",
       "sweep": "pd-dp1",
       "variant": ""
     },
     {
       "at_c_use": {
-        "itl_p99_ms": 17.819,
-        "tok_per_s_per_user": 56.1,
-        "tokens_per_sec": 2297.8,
-        "tokens_per_sec_per_gpu": 35.9
+        "interactivity": 92.086,
+        "itl_p99_ms": 13.665,
+        "tok_per_s_per_user": 73.2,
+        "tokens_per_sec": 2528.7,
+        "tokens_per_sec_per_gpu": 39.51,
+        "total_tokens_per_sec_per_gpu": 301.268
       },
       "c_star": 32,
       "c_use": 32,
@@ -802,83 +808,83 @@
       "curve": [
         {
           "concurrency": 8,
-          "itl_p99_ms": 10.762,
+          "itl_p99_ms": 8.979,
           "preemption_count": 0,
-          "tok_per_s_per_user": 92.9,
-          "tokens_per_sec": 913.8,
-          "ttft_p99_ms": 1665.9
+          "tok_per_s_per_user": 111.4,
+          "tokens_per_sec": 979.2,
+          "ttft_p99_ms": 1605.3
         },
         {
           "concurrency": 16,
-          "itl_p99_ms": 13.913,
+          "itl_p99_ms": 10.041,
           "preemption_count": 0,
-          "tok_per_s_per_user": 71.9,
-          "tokens_per_sec": 1522.1,
-          "ttft_p99_ms": 2139.8
+          "tok_per_s_per_user": 99.6,
+          "tokens_per_sec": 1617.3,
+          "ttft_p99_ms": 2487.0
         },
         {
           "concurrency": 32,
-          "itl_p99_ms": 17.819,
+          "itl_p99_ms": 13.665,
           "preemption_count": 0,
-          "tok_per_s_per_user": 56.1,
-          "tokens_per_sec": 2297.8,
-          "ttft_p99_ms": 4328.7
+          "tok_per_s_per_user": 73.2,
+          "tokens_per_sec": 2528.7,
+          "ttft_p99_ms": 4164.6
         },
         {
           "concurrency": 64,
-          "itl_p99_ms": 25.642,
+          "itl_p99_ms": 19.933,
           "preemption_count": 0,
-          "tok_per_s_per_user": 39.0,
-          "tokens_per_sec": 3378.5,
-          "ttft_p99_ms": 9113.2
+          "tok_per_s_per_user": 50.2,
+          "tokens_per_sec": 3469.5,
+          "ttft_p99_ms": 7985.6
         },
         {
           "concurrency": 128,
-          "itl_p99_ms": 36.396,
+          "itl_p99_ms": 29.463,
           "preemption_count": 0,
-          "tok_per_s_per_user": 27.5,
-          "tokens_per_sec": 4540.9,
-          "ttft_p99_ms": 15213.3
+          "tok_per_s_per_user": 33.9,
+          "tokens_per_sec": 4784.6,
+          "ttft_p99_ms": 14753.8
         },
         {
           "concurrency": 8,
-          "itl_p99_ms": 10.83,
+          "itl_p99_ms": 8.954,
           "preemption_count": 0,
-          "tok_per_s_per_user": 92.3,
-          "tokens_per_sec": 907.4,
-          "ttft_p99_ms": 1626.0
+          "tok_per_s_per_user": 111.7,
+          "tokens_per_sec": 978.9,
+          "ttft_p99_ms": 1637.0
         },
         {
           "concurrency": 16,
-          "itl_p99_ms": 13.889,
+          "itl_p99_ms": 10.044,
           "preemption_count": 0,
-          "tok_per_s_per_user": 72.0,
-          "tokens_per_sec": 1465.8,
-          "ttft_p99_ms": 2031.9
+          "tok_per_s_per_user": 99.6,
+          "tokens_per_sec": 1613.0,
+          "ttft_p99_ms": 2463.4
         },
         {
           "concurrency": 32,
-          "itl_p99_ms": 17.898,
+          "itl_p99_ms": 13.619,
           "preemption_count": 0,
-          "tok_per_s_per_user": 55.9,
-          "tokens_per_sec": 2271.2,
-          "ttft_p99_ms": 4205.1
+          "tok_per_s_per_user": 73.4,
+          "tokens_per_sec": 2517.0,
+          "ttft_p99_ms": 3984.2
         },
         {
           "concurrency": 64,
-          "itl_p99_ms": 25.41,
+          "itl_p99_ms": 19.337,
           "preemption_count": 0,
-          "tok_per_s_per_user": 39.4,
-          "tokens_per_sec": 3447.2,
-          "ttft_p99_ms": 8633.6
+          "tok_per_s_per_user": 51.7,
+          "tokens_per_sec": 3593.8,
+          "ttft_p99_ms": 7862.3
         },
         {
           "concurrency": 128,
-          "itl_p99_ms": 36.411,
+          "itl_p99_ms": 27.706,
           "preemption_count": 0,
-          "tok_per_s_per_user": 27.5,
-          "tokens_per_sec": 4710.4,
-          "ttft_p99_ms": 14464.0
+          "tok_per_s_per_user": 36.1,
+          "tokens_per_sec": 4879.4,
+          "ttft_p99_ms": 13831.6
         }
       ],
       "gpus": 64,
@@ -887,11 +893,2450 @@
       "variant": ""
     }
   ],
+  "front": {
+    "interval": null,
+    "overall": {
+      "decode": {
+        "members": [
+          {
+            "concurrency": 32,
+            "config": {
+              "concurrency": 32,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 3,
+              "decode_long_prefill_token_threshold": 0,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 5,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 79.669,
+            "label": "5P/3D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 91.228,
+            "variant": ""
+          },
+          {
+            "concurrency": 32,
+            "config": {
+              "concurrency": 32,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 3,
+              "decode_long_prefill_token_threshold": 1024,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 5,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 79.669,
+            "label": "5P/3D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 91.228,
+            "variant": ""
+          },
+          {
+            "concurrency": 32,
+            "config": {
+              "concurrency": 32,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 3,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 5,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "routing/pd-always.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 79.669,
+            "label": "5P/3D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-always",
+            "throughput_per_gpu": 91.228,
+            "variant": ""
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 2,
+              "decode_long_prefill_token_threshold": 0,
+              "decode_tp": 8,
+              "num_instances": 5,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 16,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 16
+            },
+            "disaggregated": true,
+            "interactivity": 91.821,
+            "label": "3P TP16 + EP / 2D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 79.313,
+            "variant": ""
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 2,
+              "decode_long_prefill_token_threshold": 1024,
+              "decode_tp": 8,
+              "num_instances": 5,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 16,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 16
+            },
+            "disaggregated": true,
+            "interactivity": 91.821,
+            "label": "3P TP16 + EP / 2D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 79.313,
+            "variant": ""
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 2,
+              "decode_tp": 8,
+              "num_instances": 5,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 16,
+              "router_config": "routing/pd-always.yaml",
+              "tp": 16
+            },
+            "disaggregated": true,
+            "interactivity": 91.821,
+            "label": "3P TP16 + EP / 2D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-always",
+            "throughput_per_gpu": 79.313,
+            "variant": ""
+          },
+          {
+            "concurrency": 32,
+            "config": {
+              "concurrency": 32,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 4,
+              "decode_long_prefill_token_threshold": 0,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 92.086,
+            "label": "4P/4D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 79.023,
+            "variant": ""
+          },
+          {
+            "concurrency": 32,
+            "config": {
+              "concurrency": 32,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 4,
+              "decode_long_prefill_token_threshold": 1024,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 92.086,
+            "label": "4P/4D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 79.023,
+            "variant": ""
+          },
+          {
+            "concurrency": 32,
+            "config": {
+              "concurrency": 32,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 4,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 8,
+              "router_config": "routing/pd-always.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 92.086,
+            "label": "4P/4D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-always",
+            "throughput_per_gpu": 79.023,
+            "variant": ""
+          },
+          {
+            "concurrency": 32,
+            "config": {
+              "concurrency": 32,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 4,
+              "decode_long_prefill_token_threshold": 0,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 92.108,
+            "label": "4P/4D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 78.657,
+            "variant": ""
+          },
+          {
+            "concurrency": 32,
+            "config": {
+              "concurrency": 32,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 4,
+              "decode_long_prefill_token_threshold": 1024,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 92.108,
+            "label": "4P/4D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 78.657,
+            "variant": ""
+          },
+          {
+            "concurrency": 32,
+            "config": {
+              "concurrency": 32,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 4,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "routing/pd-always.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 92.108,
+            "label": "4P/4D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-always",
+            "throughput_per_gpu": 78.657,
+            "variant": ""
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 3,
+              "decode_long_prefill_token_threshold": 0,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 5,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 104.746,
+            "label": "5P/3D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 61.585,
+            "variant": ""
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 3,
+              "decode_long_prefill_token_threshold": 1024,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 5,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 104.746,
+            "label": "5P/3D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 61.585,
+            "variant": ""
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 3,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 5,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "routing/pd-always.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 104.746,
+            "label": "5P/3D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-always",
+            "throughput_per_gpu": 61.585,
+            "variant": ""
+          },
+          {
+            "concurrency": 8,
+            "config": {
+              "concurrency": 8,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 2,
+              "decode_long_prefill_token_threshold": 0,
+              "decode_tp": 8,
+              "num_instances": 5,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 16,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 16
+            },
+            "disaggregated": true,
+            "interactivity": 115.922,
+            "label": "3P TP16 + EP / 2D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 53.376,
+            "variant": ""
+          },
+          {
+            "concurrency": 8,
+            "config": {
+              "concurrency": 8,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 2,
+              "decode_long_prefill_token_threshold": 1024,
+              "decode_tp": 8,
+              "num_instances": 5,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 16,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 16
+            },
+            "disaggregated": true,
+            "interactivity": 115.922,
+            "label": "3P TP16 + EP / 2D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 53.376,
+            "variant": ""
+          },
+          {
+            "concurrency": 8,
+            "config": {
+              "concurrency": 8,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 2,
+              "decode_tp": 8,
+              "num_instances": 5,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 16,
+              "router_config": "routing/pd-always.yaml",
+              "tp": 16
+            },
+            "disaggregated": true,
+            "interactivity": 115.922,
+            "label": "3P TP16 + EP / 2D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-always",
+            "throughput_per_gpu": 53.376,
+            "variant": ""
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 4,
+              "decode_long_prefill_token_threshold": 0,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 118.183,
+            "label": "4P/4D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 50.542,
+            "variant": ""
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 4,
+              "decode_long_prefill_token_threshold": 1024,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 118.183,
+            "label": "4P/4D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 50.542,
+            "variant": ""
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 4,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 8,
+              "router_config": "routing/pd-always.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 118.183,
+            "label": "4P/4D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-always",
+            "throughput_per_gpu": 50.542,
+            "variant": ""
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 5,
+              "decode_long_prefill_token_threshold": 0,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 122.427,
+            "label": "3P/5D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 42.195,
+            "variant": ""
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 5,
+              "decode_long_prefill_token_threshold": 1024,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 122.427,
+            "label": "3P/5D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 42.195,
+            "variant": ""
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 5,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "routing/pd-always.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 122.427,
+            "label": "3P/5D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-always",
+            "throughput_per_gpu": 42.195,
+            "variant": ""
+          },
+          {
+            "concurrency": 8,
+            "config": {
+              "concurrency": 8,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 3,
+              "decode_long_prefill_token_threshold": 0,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 5,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 127.724,
+            "label": "5P/3D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 39.503,
+            "variant": ""
+          },
+          {
+            "concurrency": 8,
+            "config": {
+              "concurrency": 8,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 3,
+              "decode_long_prefill_token_threshold": 1024,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 5,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 127.724,
+            "label": "5P/3D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 39.503,
+            "variant": ""
+          },
+          {
+            "concurrency": 8,
+            "config": {
+              "concurrency": 8,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 3,
+              "decode_tp": 8,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 5,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 8,
+              "router_config": "routing/pd-always.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 127.724,
+            "label": "5P/3D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-always",
+            "throughput_per_gpu": 39.503,
+            "variant": ""
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 3,
+              "decode_long_prefill_token_threshold": 0,
+              "decode_tp": 16,
+              "num_instances": 5,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 2,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 132.518,
+            "label": "2P TP8 + EP / 3D TP16 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 37.186,
+            "variant": ""
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 3,
+              "decode_long_prefill_token_threshold": 1024,
+              "decode_tp": 16,
+              "num_instances": 5,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 2,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 132.518,
+            "label": "2P TP8 + EP / 3D TP16 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 37.186,
+            "variant": ""
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 3,
+              "decode_tp": 16,
+              "num_instances": 5,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 2,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "routing/pd-always.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 132.518,
+            "label": "2P TP8 + EP / 3D TP16 + EP",
+            "status": "front",
+            "sweep": "pd-always",
+            "throughput_per_gpu": 37.186,
+            "variant": ""
+          },
+          {
+            "concurrency": 8,
+            "config": {
+              "concurrency": 8,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 2,
+              "decode_long_prefill_token_threshold": 0,
+              "decode_tp": 16,
+              "num_instances": 6,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 139.504,
+            "label": "4P TP8 + EP / 2D TP16 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 32.014,
+            "variant": ""
+          },
+          {
+            "concurrency": 8,
+            "config": {
+              "concurrency": 8,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 2,
+              "decode_long_prefill_token_threshold": 1024,
+              "decode_tp": 16,
+              "num_instances": 6,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 139.504,
+            "label": "4P TP8 + EP / 2D TP16 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 32.014,
+            "variant": ""
+          },
+          {
+            "concurrency": 8,
+            "config": {
+              "concurrency": 8,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 2,
+              "decode_tp": 16,
+              "num_instances": 6,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 8,
+              "router_config": "routing/pd-always.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 139.504,
+            "label": "4P TP8 + EP / 2D TP16 + EP",
+            "status": "front",
+            "sweep": "pd-always",
+            "throughput_per_gpu": 32.014,
+            "variant": ""
+          },
+          {
+            "concurrency": 8,
+            "config": {
+              "concurrency": 8,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 3,
+              "decode_long_prefill_token_threshold": 0,
+              "decode_tp": 16,
+              "num_instances": 5,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 2,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 152.982,
+            "label": "2P TP8 + EP / 3D TP16 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 23.405,
+            "variant": ""
+          },
+          {
+            "concurrency": 8,
+            "config": {
+              "concurrency": 8,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 3,
+              "decode_long_prefill_token_threshold": 1024,
+              "decode_tp": 16,
+              "num_instances": 5,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 2,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 152.982,
+            "label": "2P TP8 + EP / 3D TP16 + EP",
+            "status": "front",
+            "sweep": "pd-dp1",
+            "throughput_per_gpu": 23.405,
+            "variant": ""
+          },
+          {
+            "concurrency": 8,
+            "config": {
+              "concurrency": 8,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 3,
+              "decode_tp": 16,
+              "num_instances": 5,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 2,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "routing/pd-always.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 152.982,
+            "label": "2P TP8 + EP / 3D TP16 + EP",
+            "status": "front",
+            "sweep": "pd-always",
+            "throughput_per_gpu": 23.405,
+            "variant": ""
+          }
+        ],
+        "points": 359,
+        "unrated": 117
+      },
+      "total": {
+        "members": [
+          {
+            "concurrency": 32,
+            "config": {
+              "concurrency": 32,
+              "dp": 4,
+              "enable_expert_parallel": true,
+              "long_prefill_token_threshold": 4096,
+              "max_num_batched_tokens": 32768,
+              "num_instances": 4,
+              "tp": 4
+            },
+            "disaggregated": false,
+            "interactivity": 71.41,
+            "label": "4x TP4xDP4 + EP",
+            "status": "front",
+            "sweep": "colocated",
+            "throughput_per_gpu": 949.907,
+            "variant": "batch tokens 32,768 \u00b7 prefill chunk 4,096"
+          },
+          {
+            "concurrency": 32,
+            "config": {
+              "concurrency": 32,
+              "dp": 4,
+              "enable_expert_parallel": true,
+              "long_prefill_token_threshold": 0,
+              "max_num_batched_tokens": 32768,
+              "num_instances": 4,
+              "tp": 4
+            },
+            "disaggregated": false,
+            "interactivity": 71.898,
+            "label": "4x TP4xDP4 + EP",
+            "status": "front",
+            "sweep": "colocated",
+            "throughput_per_gpu": 943.943,
+            "variant": "batch tokens 32,768"
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "dp": 4,
+              "enable_expert_parallel": true,
+              "long_prefill_token_threshold": 0,
+              "max_num_batched_tokens": 32768,
+              "num_instances": 4,
+              "tp": 4
+            },
+            "disaggregated": false,
+            "interactivity": 86.504,
+            "label": "4x TP4xDP4 + EP",
+            "status": "front",
+            "sweep": "colocated",
+            "throughput_per_gpu": 574.942,
+            "variant": "batch tokens 32,768"
+          },
+          {
+            "concurrency": 32,
+            "config": {
+              "concurrency": 32,
+              "dp": 2,
+              "enable_expert_parallel": true,
+              "long_prefill_token_threshold": 0,
+              "max_num_batched_tokens": 32768,
+              "num_instances": 8,
+              "tp": 4
+            },
+            "disaggregated": false,
+            "interactivity": 86.694,
+            "label": "8x TP4xDP2 + EP",
+            "status": "front",
+            "sweep": "colocated",
+            "throughput_per_gpu": 566.974,
+            "variant": "batch tokens 32,768"
+          },
+          {
+            "concurrency": 32,
+            "config": {
+              "concurrency": 32,
+              "dp": 1,
+              "enable_expert_parallel": true,
+              "long_prefill_token_threshold": 4096,
+              "max_num_batched_tokens": 8192,
+              "num_instances": 8,
+              "tp": 8
+            },
+            "disaggregated": false,
+            "interactivity": 109.914,
+            "label": "8x TP8 + EP",
+            "status": "front",
+            "sweep": "colocated",
+            "throughput_per_gpu": 364.337,
+            "variant": "prefill chunk 4,096"
+          },
+          {
+            "concurrency": 32,
+            "config": {
+              "concurrency": 32,
+              "dp": 1,
+              "enable_expert_parallel": true,
+              "long_prefill_token_threshold": 4096,
+              "max_num_batched_tokens": 32768,
+              "num_instances": 8,
+              "tp": 8
+            },
+            "disaggregated": false,
+            "interactivity": 110.58,
+            "label": "8x TP8 + EP",
+            "status": "front",
+            "sweep": "colocated",
+            "throughput_per_gpu": 362.523,
+            "variant": "batch tokens 32,768 \u00b7 prefill chunk 4,096"
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "dp": 1,
+              "enable_expert_parallel": true,
+              "long_prefill_token_threshold": 0,
+              "max_num_batched_tokens": 32768,
+              "num_instances": 4,
+              "tp": 16
+            },
+            "disaggregated": false,
+            "interactivity": 130.517,
+            "label": "4x TP16 + EP",
+            "status": "front",
+            "sweep": "colocated",
+            "throughput_per_gpu": 220.713,
+            "variant": "batch tokens 32,768"
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "dp": 1,
+              "enable_expert_parallel": true,
+              "long_prefill_token_threshold": 4096,
+              "max_num_batched_tokens": 32768,
+              "num_instances": 8,
+              "tp": 8
+            },
+            "disaggregated": false,
+            "interactivity": 134.509,
+            "label": "8x TP8 + EP",
+            "status": "front",
+            "sweep": "colocated",
+            "throughput_per_gpu": 219.14,
+            "variant": "batch tokens 32,768 \u00b7 prefill chunk 4,096"
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "dp": 1,
+              "enable_expert_parallel": true,
+              "long_prefill_token_threshold": 0,
+              "max_num_batched_tokens": 8192,
+              "num_instances": 8,
+              "tp": 8
+            },
+            "disaggregated": false,
+            "interactivity": 134.53,
+            "label": "8x TP8 + EP",
+            "status": "front",
+            "sweep": "colocated",
+            "throughput_per_gpu": 213.476,
+            "variant": ""
+          },
+          {
+            "concurrency": 16,
+            "config": {
+              "concurrency": 16,
+              "dp": 1,
+              "enable_expert_parallel": true,
+              "long_prefill_token_threshold": 0,
+              "max_num_batched_tokens": 32768,
+              "num_instances": 8,
+              "tp": 8
+            },
+            "disaggregated": false,
+            "interactivity": 134.783,
+            "label": "8x TP8 + EP",
+            "status": "front",
+            "sweep": "colocated",
+            "throughput_per_gpu": 211.183,
+            "variant": "batch tokens 32,768"
+          },
+          {
+            "concurrency": 8,
+            "config": {
+              "concurrency": 8,
+              "dp": 1,
+              "enable_expert_parallel": true,
+              "long_prefill_token_threshold": 0,
+              "max_num_batched_tokens": 32768,
+              "num_instances": 4,
+              "tp": 16
+            },
+            "disaggregated": false,
+            "interactivity": 157.097,
+            "label": "4x TP16 + EP",
+            "status": "front",
+            "sweep": "colocated",
+            "throughput_per_gpu": 138.154,
+            "variant": "batch tokens 32,768"
+          }
+        ],
+        "points": 476,
+        "unrated": 0
+      }
+    },
+    "sweeps": [
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 117
+        },
+        "name": "colocated",
+        "total": {
+          "members": [
+            {
+              "concurrency": 32,
+              "config": {
+                "concurrency": 32,
+                "dp": 4,
+                "enable_expert_parallel": true,
+                "long_prefill_token_threshold": 4096,
+                "max_num_batched_tokens": 32768,
+                "num_instances": 4,
+                "tp": 4
+              },
+              "disaggregated": false,
+              "interactivity": 71.41,
+              "label": "4x TP4xDP4 + EP",
+              "status": "front",
+              "sweep": "colocated",
+              "throughput_per_gpu": 949.907,
+              "variant": "batch tokens 32,768 \u00b7 prefill chunk 4,096"
+            },
+            {
+              "concurrency": 32,
+              "config": {
+                "concurrency": 32,
+                "dp": 4,
+                "enable_expert_parallel": true,
+                "long_prefill_token_threshold": 0,
+                "max_num_batched_tokens": 32768,
+                "num_instances": 4,
+                "tp": 4
+              },
+              "disaggregated": false,
+              "interactivity": 71.898,
+              "label": "4x TP4xDP4 + EP",
+              "status": "front",
+              "sweep": "colocated",
+              "throughput_per_gpu": 943.943,
+              "variant": "batch tokens 32,768"
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "dp": 4,
+                "enable_expert_parallel": true,
+                "long_prefill_token_threshold": 0,
+                "max_num_batched_tokens": 32768,
+                "num_instances": 4,
+                "tp": 4
+              },
+              "disaggregated": false,
+              "interactivity": 86.504,
+              "label": "4x TP4xDP4 + EP",
+              "status": "front",
+              "sweep": "colocated",
+              "throughput_per_gpu": 574.942,
+              "variant": "batch tokens 32,768"
+            },
+            {
+              "concurrency": 32,
+              "config": {
+                "concurrency": 32,
+                "dp": 2,
+                "enable_expert_parallel": true,
+                "long_prefill_token_threshold": 0,
+                "max_num_batched_tokens": 32768,
+                "num_instances": 8,
+                "tp": 4
+              },
+              "disaggregated": false,
+              "interactivity": 86.694,
+              "label": "8x TP4xDP2 + EP",
+              "status": "front",
+              "sweep": "colocated",
+              "throughput_per_gpu": 566.974,
+              "variant": "batch tokens 32,768"
+            },
+            {
+              "concurrency": 32,
+              "config": {
+                "concurrency": 32,
+                "dp": 1,
+                "enable_expert_parallel": true,
+                "long_prefill_token_threshold": 4096,
+                "max_num_batched_tokens": 8192,
+                "num_instances": 8,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 109.914,
+              "label": "8x TP8 + EP",
+              "status": "front",
+              "sweep": "colocated",
+              "throughput_per_gpu": 364.337,
+              "variant": "prefill chunk 4,096"
+            },
+            {
+              "concurrency": 32,
+              "config": {
+                "concurrency": 32,
+                "dp": 1,
+                "enable_expert_parallel": true,
+                "long_prefill_token_threshold": 4096,
+                "max_num_batched_tokens": 32768,
+                "num_instances": 8,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 110.58,
+              "label": "8x TP8 + EP",
+              "status": "front",
+              "sweep": "colocated",
+              "throughput_per_gpu": 362.523,
+              "variant": "batch tokens 32,768 \u00b7 prefill chunk 4,096"
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "dp": 1,
+                "enable_expert_parallel": true,
+                "long_prefill_token_threshold": 0,
+                "max_num_batched_tokens": 32768,
+                "num_instances": 4,
+                "tp": 16
+              },
+              "disaggregated": false,
+              "interactivity": 130.517,
+              "label": "4x TP16 + EP",
+              "status": "front",
+              "sweep": "colocated",
+              "throughput_per_gpu": 220.713,
+              "variant": "batch tokens 32,768"
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "dp": 1,
+                "enable_expert_parallel": true,
+                "long_prefill_token_threshold": 4096,
+                "max_num_batched_tokens": 32768,
+                "num_instances": 8,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 134.509,
+              "label": "8x TP8 + EP",
+              "status": "front",
+              "sweep": "colocated",
+              "throughput_per_gpu": 219.14,
+              "variant": "batch tokens 32,768 \u00b7 prefill chunk 4,096"
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "dp": 1,
+                "enable_expert_parallel": true,
+                "long_prefill_token_threshold": 0,
+                "max_num_batched_tokens": 8192,
+                "num_instances": 8,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 134.53,
+              "label": "8x TP8 + EP",
+              "status": "front",
+              "sweep": "colocated",
+              "throughput_per_gpu": 213.476,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "dp": 1,
+                "enable_expert_parallel": true,
+                "long_prefill_token_threshold": 0,
+                "max_num_batched_tokens": 32768,
+                "num_instances": 8,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 134.783,
+              "label": "8x TP8 + EP",
+              "status": "front",
+              "sweep": "colocated",
+              "throughput_per_gpu": 211.183,
+              "variant": "batch tokens 32,768"
+            },
+            {
+              "concurrency": 8,
+              "config": {
+                "concurrency": 8,
+                "dp": 1,
+                "enable_expert_parallel": true,
+                "long_prefill_token_threshold": 0,
+                "max_num_batched_tokens": 32768,
+                "num_instances": 4,
+                "tp": 16
+              },
+              "disaggregated": false,
+              "interactivity": 157.097,
+              "label": "4x TP16 + EP",
+              "status": "front",
+              "sweep": "colocated",
+              "throughput_per_gpu": 138.154,
+              "variant": "batch tokens 32,768"
+            }
+          ],
+          "points": 117,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [
+            {
+              "concurrency": 32,
+              "config": {
+                "concurrency": 32,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 79.669,
+              "label": "5P/3D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 91.228,
+              "variant": ""
+            },
+            {
+              "concurrency": 32,
+              "config": {
+                "concurrency": 32,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_long_prefill_token_threshold": 1024,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 79.669,
+              "label": "5P/3D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 91.228,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 2,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "num_instances": 5,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 91.821,
+              "label": "3P TP16 + EP / 2D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 79.313,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 2,
+                "decode_long_prefill_token_threshold": 1024,
+                "decode_tp": 8,
+                "num_instances": 5,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 91.821,
+              "label": "3P TP16 + EP / 2D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 79.313,
+              "variant": ""
+            },
+            {
+              "concurrency": 32,
+              "config": {
+                "concurrency": 32,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 92.086,
+              "label": "4P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 79.023,
+              "variant": ""
+            },
+            {
+              "concurrency": 32,
+              "config": {
+                "concurrency": 32,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_long_prefill_token_threshold": 1024,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 92.086,
+              "label": "4P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 79.023,
+              "variant": ""
+            },
+            {
+              "concurrency": 32,
+              "config": {
+                "concurrency": 32,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 92.108,
+              "label": "4P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 78.657,
+              "variant": ""
+            },
+            {
+              "concurrency": 32,
+              "config": {
+                "concurrency": 32,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_long_prefill_token_threshold": 1024,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 92.108,
+              "label": "4P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 78.657,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 104.746,
+              "label": "5P/3D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 61.585,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_long_prefill_token_threshold": 1024,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 104.746,
+              "label": "5P/3D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 61.585,
+              "variant": ""
+            },
+            {
+              "concurrency": 8,
+              "config": {
+                "concurrency": 8,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 2,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "num_instances": 5,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 115.922,
+              "label": "3P TP16 + EP / 2D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 53.376,
+              "variant": ""
+            },
+            {
+              "concurrency": 8,
+              "config": {
+                "concurrency": 8,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 2,
+                "decode_long_prefill_token_threshold": 1024,
+                "decode_tp": 8,
+                "num_instances": 5,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 115.922,
+              "label": "3P TP16 + EP / 2D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 53.376,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 118.183,
+              "label": "4P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 50.542,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_long_prefill_token_threshold": 1024,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 118.183,
+              "label": "4P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 50.542,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 122.427,
+              "label": "3P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 42.195,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_long_prefill_token_threshold": 1024,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 122.427,
+              "label": "3P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 42.195,
+              "variant": ""
+            },
+            {
+              "concurrency": 8,
+              "config": {
+                "concurrency": 8,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 127.724,
+              "label": "5P/3D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 39.503,
+              "variant": ""
+            },
+            {
+              "concurrency": 8,
+              "config": {
+                "concurrency": 8,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_long_prefill_token_threshold": 1024,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 127.724,
+              "label": "5P/3D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 39.503,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 16,
+                "num_instances": 5,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 132.518,
+              "label": "2P TP8 + EP / 3D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 37.186,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_long_prefill_token_threshold": 1024,
+                "decode_tp": 16,
+                "num_instances": 5,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 132.518,
+              "label": "2P TP8 + EP / 3D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 37.186,
+              "variant": ""
+            },
+            {
+              "concurrency": 8,
+              "config": {
+                "concurrency": 8,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 2,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 16,
+                "num_instances": 6,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 139.504,
+              "label": "4P TP8 + EP / 2D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 32.014,
+              "variant": ""
+            },
+            {
+              "concurrency": 8,
+              "config": {
+                "concurrency": 8,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 2,
+                "decode_long_prefill_token_threshold": 1024,
+                "decode_tp": 16,
+                "num_instances": 6,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 139.504,
+              "label": "4P TP8 + EP / 2D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 32.014,
+              "variant": ""
+            },
+            {
+              "concurrency": 8,
+              "config": {
+                "concurrency": 8,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 16,
+                "num_instances": 5,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 152.982,
+              "label": "2P TP8 + EP / 3D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 23.405,
+              "variant": ""
+            },
+            {
+              "concurrency": 8,
+              "config": {
+                "concurrency": 8,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_long_prefill_token_threshold": 1024,
+                "decode_tp": 16,
+                "num_instances": 5,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 152.982,
+              "label": "2P TP8 + EP / 3D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 23.405,
+              "variant": ""
+            }
+          ],
+          "points": 315,
+          "unrated": 0
+        },
+        "name": "pd-dp1",
+        "total": {
+          "members": [
+            {
+              "concurrency": 32,
+              "config": {
+                "concurrency": 32,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-0d7cb7b841.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 98.572,
+              "label": "2P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 322.826,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 16,
+                "num_instances": 5,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 132.518,
+              "label": "2P TP8 + EP / 3D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 214.175,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_long_prefill_token_threshold": 1024,
+                "decode_tp": 16,
+                "num_instances": 5,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 132.518,
+              "label": "2P TP8 + EP / 3D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 214.175,
+              "variant": ""
+            },
+            {
+              "concurrency": 8,
+              "config": {
+                "concurrency": 8,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 16,
+                "num_instances": 5,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 152.982,
+              "label": "2P TP8 + EP / 3D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 135.285,
+              "variant": ""
+            },
+            {
+              "concurrency": 8,
+              "config": {
+                "concurrency": 8,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_long_prefill_token_threshold": 1024,
+                "decode_tp": 16,
+                "num_instances": 5,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/kimi-k2-5-h200-multidoc-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 152.982,
+              "label": "2P TP8 + EP / 3D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-dp1",
+              "throughput_per_gpu": 135.285,
+              "variant": ""
+            }
+          ],
+          "points": 315,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [
+            {
+              "concurrency": 32,
+              "config": {
+                "concurrency": 32,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 79.669,
+              "label": "5P/3D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 91.228,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 2,
+                "decode_tp": 8,
+                "num_instances": 5,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 16,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 91.821,
+              "label": "3P TP16 + EP / 2D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 79.313,
+              "variant": ""
+            },
+            {
+              "concurrency": 32,
+              "config": {
+                "concurrency": 32,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 92.086,
+              "label": "4P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 79.023,
+              "variant": ""
+            },
+            {
+              "concurrency": 32,
+              "config": {
+                "concurrency": 32,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 92.108,
+              "label": "4P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 78.657,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 104.746,
+              "label": "5P/3D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 61.585,
+              "variant": ""
+            },
+            {
+              "concurrency": 8,
+              "config": {
+                "concurrency": 8,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 2,
+                "decode_tp": 8,
+                "num_instances": 5,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 16,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 115.922,
+              "label": "3P TP16 + EP / 2D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 53.376,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 118.183,
+              "label": "4P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 50.542,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 122.427,
+              "label": "3P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 42.195,
+              "variant": ""
+            },
+            {
+              "concurrency": 8,
+              "config": {
+                "concurrency": 8,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 127.724,
+              "label": "5P/3D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 39.503,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 16,
+                "num_instances": 5,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 132.518,
+              "label": "2P TP8 + EP / 3D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 37.186,
+              "variant": ""
+            },
+            {
+              "concurrency": 8,
+              "config": {
+                "concurrency": 8,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 2,
+                "decode_tp": 16,
+                "num_instances": 6,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 139.504,
+              "label": "4P TP8 + EP / 2D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 32.014,
+              "variant": ""
+            },
+            {
+              "concurrency": 8,
+              "config": {
+                "concurrency": 8,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 16,
+                "num_instances": 5,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 152.982,
+              "label": "2P TP8 + EP / 3D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 23.405,
+              "variant": ""
+            }
+          ],
+          "points": 44,
+          "unrated": 0
+        },
+        "name": "pd-always",
+        "total": {
+          "members": [
+            {
+              "concurrency": 32,
+              "config": {
+                "concurrency": 32,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 92.086,
+              "label": "4P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 301.268,
+              "variant": ""
+            },
+            {
+              "concurrency": 32,
+              "config": {
+                "concurrency": 32,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_tp": 8,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 92.108,
+              "label": "4P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 299.968,
+              "variant": ""
+            },
+            {
+              "concurrency": 16,
+              "config": {
+                "concurrency": 16,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 16,
+                "num_instances": 5,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 132.518,
+              "label": "2P TP8 + EP / 3D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 214.175,
+              "variant": ""
+            },
+            {
+              "concurrency": 8,
+              "config": {
+                "concurrency": 8,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 16,
+                "num_instances": 5,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 152.982,
+              "label": "2P TP8 + EP / 3D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 135.285,
+              "variant": ""
+            }
+          ],
+          "points": 44,
+          "unrated": 0
+        }
+      }
+    ],
+    "throughput": "total",
+    "x": "interactivity_of_mean_tpot",
+    "y": {
+      "decode": "output_tokens_per_second_per_decode_gpu",
+      "total": "total_tokens_per_second_per_gpu"
+    }
+  },
+  "outcomes": {
+    "served": 476,
+    "slo_miss": 474
+  },
+  "ranking": {
+    "description": "max output tok/s per accelerator subject to the scenario's SLOs",
+    "throughput": "total",
+    "used": "scalar"
+  },
+  "refusals": [],
   "run_id": "kimi-k2-5-h200-multidoc-pd",
+  "sweep_outcomes": [
+    {
+      "name": "colocated",
+      "outcomes": {
+        "served": 117,
+        "slo_miss": 63
+      },
+      "refusals": []
+    },
+    {
+      "name": "pd-dp1",
+      "outcomes": {
+        "served": 315,
+        "slo_miss": 345
+      },
+      "refusals": []
+    },
+    {
+      "name": "pd-always",
+      "outcomes": {
+        "served": 44,
+        "slo_miss": 66
+      },
+      "refusals": []
+    }
+  ],
   "winner": {
     "chosen": "8x TP4xDP2 + EP (batch tokens 32,768)",
     "label": "8x TP4xDP2 + EP",
-    "reason": "8x TP4xDP2 + EP (batch tokens 32,768) in sweep 'colocated' gives the most tok/s/accelerator (56.34 tok/s/accelerator, 3605.7 tok/s fleet) while holding the scenario's SLOs, at concurrency 64.",
+    "reason": "8x TP4xDP2 + EP (batch tokens 32,768) in sweep 'colocated' gives the most tok/s/accelerator (59 tok/s/accelerator, 3776 tok/s fleet) while holding the scenario's SLOs, at concurrency 64.",
     "sweep": "colocated",
     "variant": "batch tokens 32,768"
   }

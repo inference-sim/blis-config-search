@@ -109,6 +109,21 @@ def test_smoke_fetches_the_corpus_a_workload_file_names():
           f"a spec that names its workload by file is smoked on that file's corpus: {asked}")
 
 
+def test_smoke_skips_rows_of_a_shape_the_spec_dropped():
+    print("test_smoke_skips_rows_of_a_shape_the_spec_dropped")
+    spec = {"sweeps": [{"name": "a", "num-instances": [1], "parallel": {"tp": [8], "dp": [1]},
+                        "engine": {"max_num_seqs": [8, 16], "speculative": {"method": ["x"]}}}]}
+    keep = {"sweep": "a", "config": {"tp": 8, "dp": 1, "num_instances": 1, "max_num_seqs": 8, "concurrency": 4}}
+    gone = {"sweep": "a", "config": {"tp": 2, "dp": 4, "num_instances": 1, "max_num_seqs": 8, "concurrency": 4}}
+    knob = {"sweep": "a", "config": {"tp": 8, "dp": 1, "num_instances": 1, "max_num_seqs": 99}}
+    check(B.live_rows([keep, gone, knob], spec) == [keep],
+          "a row whose deployment or knob value the spec no longer lists is not re-run")
+    spec = {"sweeps": [{"name": "a", "engine": {"engram_config": {"cpu_offload": [True]}}}]}
+    on = {"sweep": "a", "config": {"engram_config": {"cpu_offload": True}}}
+    off = {"sweep": "a", "config": {"engram_config": {"cpu_offload": False}}}
+    check(B.live_rows([on, off], spec) == [on], "the same for a knob given as a block of lists")
+
+
 def test_rewrite_pins_keeps_comments():
     print("test_rewrite_pins_keeps_comments")
     text = "# BLIS_REF=v0.0.1 is a comment\nBLIS_REF=v0.14.0\nBLIS_SHA=aaa\n\nSUBSTRATE_REF=v0.13.0\n"
@@ -506,6 +521,7 @@ if __name__ == "__main__":
     test_go_mod_versions()
     test_sync_pins_reads_replace()
     test_smoke_skips_dropped_sweeps()
+    test_smoke_skips_rows_of_a_shape_the_spec_dropped()
     test_smoke_fetches_the_corpus_a_workload_file_names()
     test_rewrite_pins_keeps_comments()
     test_setup_md_sources_the_pins()

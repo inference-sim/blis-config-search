@@ -517,11 +517,34 @@ def ensure_corpus(entry, catalog, dest, root=ROOT):
     return dest
 
 
+def _row_in_sweep(row, sweep):
+    """True unless the row's deployment or a scalar knob value is one the sweep no longer lists."""
+    allowed = {}
+    for block in (sweep.get("parallel"), sweep.get("engine")):
+        for k, v in (block or {}).items():
+            if isinstance(v, list) and all(not isinstance(x, (dict, list)) for x in v):
+                allowed[k] = v
+    if isinstance(sweep.get("num-instances"), list):
+        allowed["num_instances"] = sweep["num-instances"]
+    nested = {}
+    for k, v in (sweep.get("engine") or {}).items():
+        if isinstance(v, dict) and all(isinstance(x, list) for x in v.values()):
+            nested[k] = v
+    cfg = row.get("config") or {}
+    if not all(cfg[k] in vals for k, vals in allowed.items() if k in cfg):
+        return False
+    return all(cfg[k].get(sub, val) in vals for k, subs in nested.items()
+               if isinstance(cfg.get(k), dict) for sub, vals in subs.items() for val in [cfg[k].get(sub)])
+
+
 def live_rows(runs, spec):
-    """The ledger rows whose sweep the spec still runs. A sweep the spec dropped (because the stack
-    now refuses it) is not a regression; regeneration removes its rows."""
-    names = {s.get("name") for s in (spec or {}).get("sweeps") or []}
-    return [r for r in runs if r.get("sweep") in names] if names else runs
+    """The ledger rows the spec still runs. A sweep the spec dropped, or a deployment or knob value
+    it no longer lists (because the stack refuses it), is not a regression; regeneration removes
+    those rows."""
+    sweeps = {s.get("name"): s for s in (spec or {}).get("sweeps") or []}
+    if not sweeps:
+        return runs
+    return [r for r in runs if r.get("sweep") in sweeps and _row_in_sweep(r, sweeps[r["sweep"]])]
 
 
 def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=None,

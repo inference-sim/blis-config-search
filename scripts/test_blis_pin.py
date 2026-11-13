@@ -86,6 +86,29 @@ def test_smoke_skips_dropped_sweeps():
     check(B.live_rows(runs, {}) == runs, "with no sweep list, every row is still checked")
 
 
+def test_smoke_fetches_the_corpus_a_workload_file_names():
+    print("test_smoke_fetches_the_corpus_a_workload_file_names")
+    import fetch_corpus
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(os.path.join(d, "workloads"))
+        os.makedirs(os.path.join(d, "experiments"))
+        with open(os.path.join(d, "workloads", "w.yaml"), "w") as f:
+            f.write("corpus:\n  source: {huggingface: org/ds, revision: rev1, file: t.jsonl}\n"
+                    "  sha256: abc\n")
+        with open(os.path.join(d, "experiments", "e.yaml"), "w") as f:
+            f.write("scenario:\n  workload_spec: workloads/w.yaml\n")
+        asked = []
+        real = fetch_corpus.fetch
+        fetch_corpus.fetch = lambda dest, url, sha, token=None: asked.append((url, sha))
+        try:
+            B.ensure_corpus({"source": "experiments/e.yaml"}, os.path.join(d, "no-catalog"),
+                            os.path.join(d, "out"), root=d)
+        finally:
+            fetch_corpus.fetch = real
+    check(asked == [("https://huggingface.co/datasets/org/ds/resolve/rev1/t.jsonl", "abc")],
+          f"a spec that names its workload by file is smoked on that file's corpus: {asked}")
+
+
 def test_rewrite_pins_keeps_comments():
     print("test_rewrite_pins_keeps_comments")
     text = "# BLIS_REF=v0.0.1 is a comment\nBLIS_REF=v0.14.0\nBLIS_SHA=aaa\n\nSUBSTRATE_REF=v0.13.0\n"
@@ -483,6 +506,7 @@ if __name__ == "__main__":
     test_go_mod_versions()
     test_sync_pins_reads_replace()
     test_smoke_skips_dropped_sweeps()
+    test_smoke_fetches_the_corpus_a_workload_file_names()
     test_rewrite_pins_keeps_comments()
     test_setup_md_sources_the_pins()
     test_bump_end_to_end_on_copies()

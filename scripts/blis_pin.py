@@ -504,8 +504,12 @@ def ensure_corpus(entry, catalog, dest, root=ROOT):
     """Fetch + digest-check a replay report's corpus to `dest` unless it is already there."""
     import fetch_corpus
     import run_experiment
-    wl = (_load_yaml(os.path.join(root, entry["source"])).get("scenario") or {}).get("workload")
-    corpus = (run_experiment.replay_descriptor(wl, catalog) or {}).get("corpus") or {}
+    sc = _load_yaml(os.path.join(root, entry["source"])).get("scenario") or {}
+    if sc.get("workload_spec"):
+        desc = _load_yaml(os.path.join(root, sc["workload_spec"]))
+    else:
+        desc = run_experiment.replay_descriptor(sc.get("workload"), catalog)
+    corpus = (desc or {}).get("corpus") or {}
     src = corpus.get("source") or {}
     url = fetch_corpus.HF_URL.format(dataset=src.get("huggingface"), revision=src.get("revision"),
                                      path=src.get("file", "traces.jsonl"))

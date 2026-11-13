@@ -2,7 +2,9 @@ name: muse-spark-open-816b-a42b-h200-agentx-8node-pd
 scenario:
   model: muse-spark-open-816b-a42b-nvfp4
   hardware: h200
-  workload: agentx-mvp
+  cluster:
+    gpus_per_node: 8
+  workload_spec: workloads/agentx-run-recipe.yaml
   gpus: 64
   engine:
     max_model_len: 262144
@@ -14,7 +16,6 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-muse-h200-8node-pd
-    grace_period: inf
 sweeps:
 - name: colocated
   narrative: Eight single-node TP8 instances should lead, since wider dp groups pay
@@ -83,7 +84,7 @@ sweeps:
       - true
   router:
     endpoint_picker_config: &id001
-    - pd-prefix.yaml
+    - pd-prefix-based.yaml
     plugins:
       prefix-based-pd-decider:
         parameters:
@@ -182,7 +183,7 @@ sweeps:
       - 2048
   router:
     endpoint_picker_config:
-    - pd-prefix.yaml
+    - pd-prefix-based.yaml
 - name: pd-decode-cudagraph
   narrative: Full graph capture on the decode pool should lower ITL by a few percent,
     with FULL_DECODE_ONLY matching FULL there.
@@ -208,4 +209,4 @@ sweeps:
       - FULL_DECODE_ONLY
   router:
     endpoint_picker_config:
-    - pd-prefix.yaml
+    - pd-prefix-based.yaml

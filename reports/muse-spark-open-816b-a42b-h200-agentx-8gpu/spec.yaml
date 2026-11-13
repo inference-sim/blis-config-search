@@ -2,7 +2,9 @@ name: muse-spark-open-816b-a42b-h200-agentx-8gpu
 scenario:
   model: muse-spark-open-816b-a42b-nvfp4
   hardware: h200
-  workload: agentx-mvp
+  cluster:
+    gpus_per_node: 8
+  workload_spec: workloads/agentx-run-recipe.yaml
   gpus: 8
   engine:
     max_model_len: 262144
@@ -15,7 +17,6 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-muse-h200
-    grace_period: inf
 sweeps:
 - name: topology-pp
   narrative: TP8 should peak highest, since every pipeline stage adds a boundary hop
@@ -33,33 +34,16 @@ sweeps:
     - 4
     enable_expert_parallel:
     - true
-- name: topology-dp
-  narrative: Data-parallel attention should beat pipeline stages at the same tp, and
-    EP should matter more at dp 4 than dp 2.
-  num-instances:
-  - 1
-  parallel:
-    tp:
-    - 4
-    - 2
-    dp:
-    - 2
-    - 4
-    enable_expert_parallel:
-    - true
-    - false
 - name: batch-caps
-  narrative: A seq cap of 8 should bind on TP8 but not on TP2 DP4, whose four attention
-    ranks each see a quarter of the lanes.
+  narrative: A seq cap of 8 should bind on TP8, where one attention rank sees every
+    lane.
   num-instances:
   - 1
   parallel:
     tp:
     - 8
-    - 2
     dp:
     - 1
-    - 4
     enable_expert_parallel:
     - true
   engine:
@@ -72,17 +56,14 @@ sweeps:
     - 16384
     - 32768
 - name: kv-capacity
-  narrative: fp8 KV and higher memory utilization should substitute on TP8 but add
-    on TP2 DP4, which replicates attention weights.
+  narrative: fp8 KV and higher memory utilization should substitute on TP8.
   num-instances:
   - 1
   parallel:
     tp:
     - 8
-    - 2
     dp:
     - 1
-    - 4
     enable_expert_parallel:
     - true
   engine:
@@ -93,17 +74,14 @@ sweeps:
     - 0.85
     - 0.95
 - name: moe-collective
-  narrative: DeepEP low-latency should win on TP8, and the gap should shrink on TP2
-    DP4, where sequence-parallel MoE splits the batch.
+  narrative: DeepEP low-latency should win on TP8.
   num-instances:
   - 1
   parallel:
     tp:
     - 8
-    - 2
     dp:
     - 1
-    - 4
     enable_expert_parallel:
     - true
   engine:

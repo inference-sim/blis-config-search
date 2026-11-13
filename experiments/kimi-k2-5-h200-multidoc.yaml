@@ -50,11 +50,13 @@ sweeps:
       max_num_batched_tokens: [8192, 32768]
 
   - name: cudagraph
-    narrative: FULL capture should edge PIECEWISE and NONE should lose heavily, by a similar margin at both fleet ends.
+    # An unset cudagraph_mode resolves to vLLM's default, FULL_AND_PIECEWISE, and FULL measures the same as
+    # unset at c64 (7703.42 tok/s), so FULL is not a comparison. PIECEWISE (7428.82) and NONE (3927.10) differ.
+    narrative: PIECEWISE should trail the default capture mode and NONE should lose heavily, by a similar margin at both fleet ends.
     num-instances: [64, 8]
     parallel: {tp: [8], dp: [1, 8], enable_expert_parallel: [true]}
     engine:
-      cudagraph_mode: [NONE, PIECEWISE, FULL]
+      cudagraph_mode: [NONE, PIECEWISE]
       max_num_batched_tokens: [32768]
 
   - name: routing

@@ -1,0 +1,23 @@
+name: scope
+description: Which CI jobs do the files this change touches select (scripts/ci_scope.py)?
+inputs:
+  base:
+    description: commit or branch to diff HEAD against; blank selects every job
+    default: ""
+  pins-moved:
+    description: "true when a pin VALUE moved against the base"
+    default: "false"
+outputs:
+  python: { value: "${{ steps.s.outputs.python }}" }
+  experiments: { value: "${{ steps.s.outputs.experiments }}" }
+  web: { value: "${{ steps.s.outputs.web }}" }
+  pages: { value: "${{ steps.s.outputs.pages }}" }
+  smoke: { value: "${{ steps.s.outputs.smoke }}" }
+  smoke_reports: { value: "${{ steps.s.outputs.smoke_reports }}" }
+runs:
+  using: composite
+  steps:
+    - id: s
+      shell: bash
+      env: { BASE: "${{ inputs.base }}", MOVED: "${{ inputs.pins-moved }}" }
+      run: python3 -I scripts/ci_scope.py --base "$BASE" --pins-moved "$MOVED" --github-output

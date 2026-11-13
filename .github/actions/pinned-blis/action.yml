@@ -1,0 +1,37 @@
+name: pinned-blis
+description: The simulator binary at pins.env's BLIS_SHA, at upstream/blis. Built once per commit and cached.
+runs:
+  using: composite
+  steps:
+    - id: pin
+      shell: bash
+      run: |
+        set -euo pipefail
+        set -a; . ./pins.env; set +a
+        echo "sha=$BLIS_SHA" >> "$GITHUB_OUTPUT"
+        # A tag or branch can move; refuse it even when the binary is cached.
+        url=https://github.com/inference-sim/inference-sim.git
+        now="$(git ls-remote "$url" "refs/heads/$BLIS_REF" "refs/tags/$BLIS_REF^{}" "refs/tags/$BLIS_REF" | awk '{print $1}' | head -2 | tail -1)"
+        [ "$now" = "$BLIS_SHA" ] || { echo "::error::$BLIS_REF no longer resolves to $BLIS_SHA" >&2; exit 1; }
+    - id: cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      with:
+        path: upstream/blis
+        key: blis-bin-${{ runner.os }}-${{ runner.arch }}-${{ steps.pin.outputs.sha }}-${{ hashFiles('.github/actions/pinned-blis/action.yml') }}
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        set -a; . ./pins.env; set +a
+        rm -rf upstream
+        git clone --branch "$BLIS_REF" --depth 1 https://github.com/inference-sim/inference-sim.git upstream
+        test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
+          echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
+    - if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      with: { go-version-file: upstream/go.mod, cache-dependency-path: upstream/go.sum }
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: cd upstream && go build -o blis main.go
+    - shell: bash
+      run: chmod +x upstream/blis && upstream/blis --help >/dev/null

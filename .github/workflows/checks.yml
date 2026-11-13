@@ -2,7 +2,8 @@ name: checks
 
 # The hermetic test gate: runs on every PR and every push to main. No BLIS, no network
 # beyond npm install, no port binding. If this is red, pages.yml should not publish — so keep
-# this fast and deterministic. Two parallel jobs (Python and web) since they share no toolchain.
+# this fast and deterministic. Every job always runs and reports (a required check must), but its
+# steps run only when scripts/ci_scope.py says a file it reads changed; a push or dispatch runs all.
 
 on:
   pull_request:
@@ -12,6 +13,10 @@ on:
     branches: [main]
   # The bot's PRs (bump-blis-pin, regen-reports) dispatch this, since their PR event starts nothing.
   workflow_dispatch:
+    inputs:
+      base:
+        description: "branch to diff against, to run only the jobs its changes select (blank = every job)"
+        required: false
 
 permissions:
   contents: read
@@ -21,18 +26,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { fetch-depth: 0 }
+      - id: scope
+        uses: ./.github/actions/scope
+        with: { base: "${{ github.event.pull_request.base.sha || inputs.base }}" }
+      - name: Nothing this job reads changed
+        if: steps.scope.outputs.python != 'true'
+        run: echo "nothing this job reads changed in this change; skipped by scripts/ci_scope.py"
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
-        with: { python-version: "3.12" }
+        if: steps.scope.outputs.python == 'true'
+        with: { python-version: "3.12", cache: pip }
       # The second package is a TEST-only dependency, and only this job's: it is what checks that
       # the published experiments/schema.json still agrees with the validator that actually runs.
       # Those tests skip when it is absent, so it goes here rather than in the five other
       # workflows that only need pyyaml -- notably NOT in the fork-safe `experiments` job below.
-      - run: pip install --require-hashes -r requirements.txt
+      - if: steps.scope.outputs.python == 'true'
+        run: pip install --require-hashes -r requirements.txt
       # test_build.py checks pins.env's generated block against inference-sim's go.mod, and SKIPS
       # when there is no sibling checkout to derive from -- so without this clone the drift guard
       # silently passes in CI and only ever fires on a developer's machine, which is backwards.
       # Shallow: the test reads `git show <BLIS_SHA>:go.mod` and nothing else.
       - name: Clone the pinned inference-sim (for the derived-pins drift check)
+        if: steps.scope.outputs.python == 'true'
         run: |
           set -euo pipefail
           . ./pins.env
@@ -46,14 +61,22 @@ jobs:
             echo "::error::$BLIS_REF no longer points at $BLIS_SHA" >&2; exit 1; }
           git -C ../inference-sim fetch --depth 1 origin "$BLIS_SHA"
       - name: Build + catalog + pin tests
+        if: steps.scope.outputs.python == 'true'
         run: |
           python3 -I scripts/test_build.py
           python3 -I scripts/test_blis_pin.py
       - name: BLIS runner tests
+        if: steps.scope.outputs.python == 'true'
         run: |
           python3 -I scripts/test_run_blis.py
       - name: Experiment spec pipeline tests (validator, grids, overrides, ranking)
+        if: steps.scope.outputs.python == 'true'
         run: python3 -I scripts/test_experiment.py
+      - name: Which jobs a change selects (scripts/ci_scope.py)
+        if: steps.scope.outputs.python == 'true'
+        run: |
+          python3 -I scripts/test_ci_scope.py
+          sh scripts/ci_scope_harness.sh
 
   # Validate every committed Experiment Spec. Separate from the test job because this is the
   # check a CONTRIBUTOR's PR is judged on: it needs no secrets and runs only the simulator's
@@ -63,28 +86,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { fetch-depth: 0 }
+      - id: scope
+        uses: ./.github/actions/scope
+        with: { base: "${{ github.event.pull_request.base.sha || inputs.base }}" }
+      - name: Nothing this job reads changed
+        if: steps.scope.outputs.experiments != 'true'
+        run: echo "nothing this job reads changed in this change; skipped by scripts/ci_scope.py"
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
-        with: { python-version: "3.12" }
-      - run: pip install --require-hashes -r requirements.txt
-      - name: Clone the pinned simulator
-        run: |
-          set -euo pipefail
-          set -a; . ./pins.env; set +a
-          git clone --branch "$BLIS_REF" --depth 1 https://github.com/inference-sim/inference-sim.git upstream
-          test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
-            echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with: { go-version-file: upstream/go.mod, cache-dependency-path: upstream/go.sum }
-      - run: cd upstream && go build -o blis main.go
+        if: steps.scope.outputs.experiments == 'true'
+        with: { python-version: "3.12", cache: pip }
+      - if: steps.scope.outputs.experiments == 'true'
+        run: pip install --require-hashes -r requirements.txt
+      # The binary is built once per BLIS_SHA and cached; pin-compat uses the same action.
+      - if: steps.scope.outputs.experiments == 'true'
+        uses: ./.github/actions/pinned-blis
       - name: Fetch the pinned engine field list
+        if: steps.scope.outputs.experiments == 'true'
         run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
       - name: Validate experiments/
+        if: steps.scope.outputs.experiments == 'true'
         env: { BLIS: upstream/blis }
         run: python3 -I scripts/validate_experiment.py experiments/ --fields "$RUNNER_TEMP/fields.json"
       - name: Knob profile smoke test (no catalog checkout -> must degrade, not crash)
+        if: steps.scope.outputs.experiments == 'true'
         run: |
           python3 -I -c "import sys; sys.path.insert(0,'scripts'); import knob_profile; print('ok')"
       - name: Expand every spec's grids (catches a spec that would run nothing)
+        if: steps.scope.outputs.experiments == 'true'
         run: |
           set -euo pipefail
           for spec in experiments/*.yaml; do
@@ -95,12 +124,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { fetch-depth: 0 }
+      - id: scope
+        uses: ./.github/actions/scope
+        with: { base: "${{ github.event.pull_request.base.sha || inputs.base }}" }
+      - name: Nothing this job reads changed
+        if: steps.scope.outputs.web != 'true'
+        run: echo "nothing this job reads changed in this change; skipped by scripts/ci_scope.py"
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
-        with: { python-version: "3.12" }
-      - run: pip install --require-hashes -r requirements.txt
+        if: steps.scope.outputs.web == 'true'
+        with: { python-version: "3.12", cache: pip }
+      - if: steps.scope.outputs.web == 'true'
+        run: pip install --require-hashes -r requirements.txt
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with: { node-version: "22" }
+        if: steps.scope.outputs.web == 'true'
+        with: { node-version: "22", cache: npm, cache-dependency-path: web/package-lock.json }
       - name: Install, typecheck, test, build
+        if: steps.scope.outputs.web == 'true'
         working-directory: web
         run: |
           npm ci

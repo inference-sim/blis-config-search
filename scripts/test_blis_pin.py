@@ -472,8 +472,8 @@ def test_workflow_wiring():
     check("pull_request:" in compat and "paths:" not in compat.split("\njobs:")[0].replace(
               "without a `paths:` filter", ""),
           "the gate triggers on EVERY PR: a path-filtered required check stays pending forever")
-    check("blis_pin.py changed" in compat and "needs.changed.outputs.moved == 'true'" in compat,
-          "the heavy jobs run only when a pin's VALUE moved against the base branch")
+    check("blis_pin.py changed" in compat and "needs.changed.outputs.run == 'true'" in compat,
+          "the heavy jobs run only when a pin's VALUE moved, or a spec, ledger or smoke script changed")
     gate = compat.split("\n  gate:", 1)[-1]
     check("if: always()" in gate and "needs: [changed, build, smoke]" in gate,
           "`gate` always reports, so it is the one check that can be marked required")
@@ -482,7 +482,10 @@ def test_workflow_wiring():
               f"{name} validates every spec against the new binary's commands")
         check("blis_pin.py drift" not in text and "blis-schemas" not in text,
               f"{name} compares no copied settings table against sibling checkouts")
-    check(sha not in compat and ". ./pins.env" in compat and "$BLIS_SHA" in compat,
+    action = open(os.path.join(ROOT, ".github", "actions", "pinned-blis", "action.yml")).read()
+    check(sha not in compat and ". ./pins.env" in compat and "pinned-blis" in compat
+          and ". ./pins.env" in action and "no longer resolves to $BLIS_SHA" in action
+          and "git ls-remote" in action,
           "pin-compat.yml reads the pin from pins.env and refuses a moved tag")
     for step in ("blis_pin.py smoke",):
         check(step in compat, f"the gate runs `{step}`")
@@ -491,7 +494,7 @@ def test_workflow_wiring():
           "the gate comment is found by its marker, not as the token user's latest comment")
     check("head.repo.full_name == github.repository" in compat,
           "a fork's pin move does not run fork code on the regen runner")
-    check("needs.build.outputs.reports != '[]'" in compat and 'REPORTS" = "[]"' in gate,
+    check("needs.changed.outputs.reports != '[]'" in compat and 'REPORTS" = "[]"' in gate,
           "no committed reports means no smoke matrix, and the gate still passes")
     check("--draft" in bump, "the bot's pin PR opens as a draft: it is where fixes get pushed")
     check("test_experiment.py" not in bump,

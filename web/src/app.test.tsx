@@ -13,11 +13,46 @@ import { Coverage } from './components/Coverage'
 import { Footer } from './components/Footer'
 
 const w = { label: '1x TP8', tp: 8, ni: 1, gpus: 8, c_use: 1, tps: 1, tps_per_gpu: 1, per_user: 1, itl_p99: 1 }
-const mk = (id: string, model: string, hw: string, wl: string, gpu: number): Scenario => ({
+type Won = Scenario & { winner: NonNullable<Scenario['winner']> }
+const mk = (id: string, model: string, hw: string, wl: string, gpu: number): Won => ({
   run_id: id, model, hardware: hw, gpu_budget: gpu, workload: wl, caveat: '', floor: 'f', headroom: null,
-  n_runs: 1, n_servable: 1, winner: w, finalists: [], reason: '',
+  n_runs: 1, n_servable: 1, winner: w, state: 'winner', finalists: [], reason: '',
+  outcomes: { served: 1 }, refusals: [], ranking: { used: 'scalar', description: '' }, front: null,
 })
 const S = [mk('a', 'm1', 'H100', 'chatbot', 16), mk('b', 'm1', 'H200', 'chatbot', 16), mk('c', 'm2', 'H100', 'multidoc', 8)]
+
+describe('a report with no winner', () => {
+  const none = (state: Scenario['state'], outcomes: Record<string, number>): Scenario => ({
+    ...mk('n', 'm1', 'H100', 'chatbot', 16), winner: null, state, finalists: [], outcomes,
+    refusals: outcomes.refused ? [{ reason: 'a KV connector beside a sliding-window cache group is not modelled', runs: outcomes.refused, configs: 2 }] : [],
+  })
+
+  it('says the simulator refused every configuration and why, with no config or numbers', () => {
+    render(<Reports scenarios={[none('all_refused', { refused: 4 })]} params={{}} />)
+    const card = document.querySelector('.card') as Element
+    expect(card.textContent).toContain('The simulator refused every configuration')
+    expect(card.textContent).toContain('4 refused')
+    expect(card.textContent).toContain('not modelled')
+    expect(card.querySelector('.perf')).toBeNull()
+    expect(card.querySelector('.winlbl')).toBeNull()
+  })
+
+  it('says no configuration held the SLOs when runs happened but none qualified', () => {
+    render(<Reports scenarios={[none('no_winner', { slo_miss: 6 })]} params={{}} />)
+    const card = document.querySelector('.card') as Element
+    expect(card.textContent).toContain('No configuration held the SLOs')
+    expect(card.textContent).not.toContain('refused every')
+  })
+
+  it('leaves coverage without a recommendation and never recommends it over a report that has a winner', () => {
+    const rows = coverageRows([none('all_refused', { refused: 4 }), mk('w', 'm1', 'H100', 'chatbot', 16)])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].best?.run_id).toBe('w')
+    expect(coverageRows([none('all_refused', { refused: 4 })])[0].best).toBeNull()
+    render(<Coverage scenarios={[none('all_refused', { refused: 4 })]} />)
+    expect(document.querySelector('.covwin')).toBeNull()
+  })
+})
 
 describe('filters', () => {
   it('filters and gives live facet counts that ignore the facet itself', () => {
@@ -224,6 +259,44 @@ describe('report explorer page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'TTFT p99' }))
     expect(cards()[0].querySelector('.xf-hero-l')?.textContent).toBe('TTFT p99 (lower is better)')
     expect(cards()[0].querySelectorAll('.xf-kpi-l')).toHaveLength(4)
+  })
+
+  it('writes the load as c<N> and labels the axis concurrency, with no bare "sessions" left', async () => {
+    page()
+    await waitFor(() => expect(cards().length).toBeGreaterThan(0))
+    expect(cards()[0].querySelector('.xf-cfg-rank .xf-sub')?.textContent).toBe('c64')
+    const text = document.body.textContent ?? ''
+    expect(text).not.toMatch(/\bsessions\b/)
+    // title and aria-label attributes are not text content, so read them too
+    const attrs = [...document.querySelectorAll('[title],[aria-label]')].map((e) => `${e.getAttribute('title') ?? ''} ${e.getAttribute('aria-label') ?? ''}`).join(' ')
+    expect(attrs.replace(/does not add new sessions/, '')).not.toMatch(/\bsessions\b/)
+    expect(attrs).toMatch(/\bc64\b/)
+    expect(document.querySelector('.xf-facet-l')?.textContent).toBe('concurrency')
+    expect(document.querySelector('.xf-facet-l')?.getAttribute('title')).toMatch(/session-tree lanes.*finite corpus/)
+    const chips = [...document.querySelectorAll('.xf-facet .xf-chip')]
+    expect(chips.map((c) => c.textContent)).toEqual(['c8', 'c64'])      // no run count beside a chip
+    expect([...document.querySelectorAll('.axlabel')].map((e) => e.textContent).join('|')).toMatch(/concurrency/)
+    fireEvent.click(chips[1])
+    expect([...document.querySelectorAll('.xf-achip')].map((b) => b.textContent)).toContain('concurrency c64 ✕')
+  })
+
+  it('names the sweep and hypothesis behind each card, links to it in the spec, and shows the full config on request', async () => {
+    render(<ScenarioPage runId="a" scenarios={[mk('a', 'm1', 'H100', 'chatbot', 16)]}
+      load={() => Promise.resolve({ ...FIXTURE, run_id: 'a', fixed_engine: { max_model_len: 262144 },
+        sweeps: FIXTURE.sweeps.map((s) => ({ ...s, narrative: `hypothesis of ${s.name}` })),
+        spec_yaml: 'name: a\nsweeps:\n  - name: colo\n    narrative: x\n  - name: pd\n    narrative: y\n' })} />)
+    await waitFor(() => expect(cards().length).toBeGreaterThan(0))
+    const arm = document.querySelector('.xf-arm') as Element
+    expect(arm.querySelector('.xf-arm-h b')?.textContent).toBe('colo')
+    expect(arm.querySelector('.xf-arm-hyp')?.textContent).toBe('hypothesis of colo')
+    expect(arm.querySelector('a.xf-armlink')?.getAttribute('href')).toMatch(/experiments\/a\.yaml#L3$/)
+    const details = arm.querySelector('details') as HTMLDetailsElement
+    expect(details.open).toBe(false)                                  // on request, not by default
+    const keys = [...details.querySelectorAll('dt')].map((e) => e.textContent)
+    expect(keys).toContain('max_model_len')
+    expect(keys).toContain('tp')
+    fireEvent.click(arm.querySelector('.linkbtn') as Element)
+    expect([...document.querySelectorAll('.xf-achip')].map((b) => b.textContent)).toContain('sweep colo ✕')
   })
 
   it('re-ranks every view when the target changes', async () => {

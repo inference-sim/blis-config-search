@@ -43,26 +43,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    # A closed PR has nothing to build -- the preview job below just removes its folder.
+  # A PR that changes nothing the site is built from keeps its earlier preview and builds nothing.
+  scope:
     if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    outputs:
+      pages: ${{ steps.scope.outputs.pages }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { fetch-depth: 0 }
+      - id: scope
+        uses: ./.github/actions/scope
+        with: { base: "${{ github.event.pull_request.base.sha }}" }
+
+  build:
+    needs: scope
+    # A closed PR has nothing to build -- the preview job below just removes its folder.
+    if: github.event.action != 'closed' && needs.scope.outputs.pages == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
-        with: { python-version: "3.12" }
+        with: { python-version: "3.12", cache: pip }
       - run: pip install --require-hashes -r requirements.txt
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
-        with: { node-version: "22" }
+        with: { node-version: "22", cache: npm, cache-dependency-path: web/package-lock.json }
       - name: Clone the pinned substrate release
         # build_catalog.py reads its catalog/ and registry/ (the data the simulator embeds) from
         # ../blis-substrate; without it the Submit pickers and spec-sheets are empty.
         run: |
           set -euo pipefail
           set -a; . ./pins.env; set +a
-          git clone --branch "$SUBSTRATE_REF" --depth 1 https://github.com/inference-sim/blis-substrate.git ../blis-substrate
-          test "$(git -C ../blis-substrate describe --tags --exact-match)" = "$SUBSTRATE_REF" || {
-            echo "blis-substrate is not $SUBSTRATE_REF -- aborting" >&2; exit 1; }
+          sh scripts/clone_pinned.sh "$SUBSTRATE_REF" https://github.com/inference-sim/blis-substrate.git ../blis-substrate
       - name: Build + stage data, then build the SPA
         working-directory: web
         run: |

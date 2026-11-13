@@ -5,7 +5,7 @@ routing is now the embedded llm-d router, configured by a real **EndpointPickerC
 scenario's deployment-level `router:` block names. So a routing arm in this search is a *file*
 here, passed as the `router_config` knob, not a policy name.
 
-The per-flag mapping is upstream in inference-sim `docs/guide/routing.md`, section "From BLIS's
+The per-flag mapping is upstream in inference-sim's routing guide, section "From BLIS's
 former routing features". The rows that matter for this search:
 
 | former BLIS routing | here |
@@ -29,9 +29,14 @@ what decides whether a request is split at all:
 | file | behaviour |
 |---|---|
 | `pd-always.yaml` | `always-disagg-pd-decider` — **every** request is disaggregated. The upper bound on what the KV handoff costs. Copied from inference-sim/blis-vllm's own P/D test scenario, so the simulated router runs the same file the upstream tests do. |
-| `pd-prefix.yaml` | `prefix-based-pd-decider` — split only when at least `nonCachedTokens` of the prompt is uncached, so a request whose prefix is already cached decodes where it prefilled. `nonCachedTokens` is the knob worth sweeping. |
 
-Both use `prefill-filter` / `decode-filter`, which need role-labelled pods: on a **colocated**
+The prefix-based P/D arm is not kept here. The router fork publishes it as `pd-prefix-based.yaml`
+in its `reference-configs/` (with seven other files and an index of every knob), and a spec names
+that file: it is taken unchanged from the pinned simulator (`blis router-configs --json`). Files in
+`routing/` and in the router's directory must not share a name. See
+[the router section of the spec guide](../experiments/README.md#routing).
+
+`pd-always.yaml` and the prefix-based file use `prefill-filter` / `decode-filter`, which need role-labelled pods: on a **colocated**
 deployment there are none, so these arms belong only to a sweep that states two pools.
 
 Omitting `router_config` entirely runs the router's built-in standalone configuration over every

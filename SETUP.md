@@ -31,11 +31,18 @@ embedded llm-d router") removed every routing and admission CLI flag — `--rout
 `--routing-scorers`, `--admission-policy`, `--flow-control`, `--pd-decider` and ~25 more. Routing
 is now a real llm-d **EndpointPickerConfig**, named by the scenario's deployment-level `router:`
 block, so the sweep knob is `router_config` (a path to an EPP YAML). The per-flag mapping is
-upstream in `docs/guide/routing.md`, "From BLIS's former routing features". Note that
+upstream in inference-sim's routing guide, section "From BLIS's former routing features". Note that
 `round-robin`, `least-loaded` and `always-busiest` are **dropped** there ("the llm-d router has no
 such policy"): the nearest configurations are a `queue-scorer` or `load-aware-scorer` profile with
 `max-score-picker`, or `random-picker`. So reports that compared routing policies before v0.12.0
 cannot be reproduced arm-for-arm.
+
+### The router's reference configs
+
+A spec's router arms are the router fork's own files, embedded in the pinned simulator. The
+validator and the sweeper read them with `blis router-configs --json`; there is nothing to clone.
+(Developer override: `$ROUTER_CONFIGS_DIR`, or `--router-configs DIR`, names a router checkout
+whose `reference-configs/` is read instead, to try a router change before a simulator embeds it.)
 
 ## 2. Catalog + registry (embedded; a checkout only for the scripts' file reads)
 
@@ -45,11 +52,11 @@ source `embedded`. A model runs only if that embedded catalog carries it (NS-6).
 
 Some scripts read catalog and registry *files* (a workload's descriptor, a model's graph, the
 speculative-decoding acceptance profiles). They read them from a checkout of the same release,
-`SUBSTRATE_REF` in `pins.env`:
+`SUBSTRATE_REF` in `pins.env` (a release tag, or while a stack is open a Go pseudo-version, which `scripts/clone_pinned.sh` checks out at its commit):
 
 ```bash
 set -a; . ./pins.env; set +a
-git clone --branch "$SUBSTRATE_REF" --depth 1 https://github.com/inference-sim/blis-substrate.git
+sh scripts/clone_pinned.sh "$SUBSTRATE_REF" https://github.com/inference-sim/blis-substrate.git blis-substrate
 export SUBSTRATE_CATALOG=$PWD/blis-substrate/catalog
 export SUBSTRATE_REGISTRY=$PWD/blis-substrate/registry
 ```

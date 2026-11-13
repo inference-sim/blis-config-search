@@ -22,6 +22,11 @@ name: pin-compat
 #          a row that ran before and fails now (LOUD), or a knob that moved the numbers before
 #          and now measures identically to its baseline (SILENT -- the v0.14.0 failure mode).
 #
+# Which work runs (scripts/ci_scope.py): a moved pin VALUE or a changed script the smoke imports selects
+# every report; a changed spec, report ledger, or routing/workload file it names selects only those
+# reports. A fork's pin move is refused; a fork's other changes run no smoke (its code must not reach the
+# regen runner). The simulator is built once per BLIS_SHA (.github/actions/pinned-blis) and shared as an artifact.
+#
 # Trigger: EVERY pull request, deliberately without a `paths:` filter. A workflow skipped by a
 # path filter never reports, so a required check on it would sit "pending" forever on every PR
 # that does not touch pins.env. Instead `changed` compares pin VALUES against the base branch --
@@ -54,11 +59,13 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       moved: ${{ steps.diff.outputs.moved }}
+      run: ${{ steps.reports.outputs.run }}
+      reports: ${{ steps.reports.outputs.reports }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { fetch-depth: 0 }
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
-        with: { python-version: "3.12" }
+        with: { python-version: "3.12", cache: pip }
       - run: pip install --require-hashes -r requirements.txt
       - name: Did this PR move a pin's value?
         id: diff
@@ -79,32 +86,39 @@ jobs:
           else
             echo "moved=true" >> "$GITHUB_OUTPUT"
           fi
+      - id: scope
+        uses: ./.github/actions/scope
+        with:
+          base: ${{ github.event.pull_request.base.sha || inputs.base }}
+          pins-moved: ${{ steps.diff.outputs.moved }}
+      - name: Reports to smoke
+        id: reports
+        env: { SELECTED: "${{ steps.scope.outputs.smoke_reports }}", MOVED: "${{ steps.diff.outputs.moved }}" }
+        run: |
+          python3 -I - >> "$GITHUB_OUTPUT" <<'PY'
+          import json, os, sys
+          sys.path.insert(0, "scripts")
+          import blis_pin
+          sel = set(json.loads(os.environ["SELECTED"]))
+          out = [{"id": r["id"], "replay": r["replay"]} for r in blis_pin.plan()["reports"] if r["id"] in sel]
+          print("reports=" + json.dumps(out))
+          print("run=" + ("true" if out or os.environ["MOVED"] == "true" else "false"))
+          PY
 
   build:
     needs: changed
     # A fork's pin move would run the fork's code on REGEN_RUNS_ON (possibly self-hosted): no.
     if: >-
-      needs.changed.outputs.moved == 'true' &&
+      needs.changed.outputs.run == 'true' &&
       (github.event_name != 'pull_request' ||
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
-    outputs:
-      reports: ${{ steps.ids.outputs.reports }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
-        with: { python-version: "3.12" }
+        with: { python-version: "3.12", cache: pip }
       - run: pip install --require-hashes -r requirements.txt
-      - name: Clone the pinned simulator, and the modules its go.mod names
-        run: |
-          set -euo pipefail
-          set -a; . ./pins.env; set +a
-          git clone --branch "$BLIS_REF" --depth 1 https://github.com/inference-sim/inference-sim.git upstream
-          test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
-            echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with: { go-version-file: upstream/go.mod, cache-dependency-path: upstream/go.sum }
-      - run: cd upstream && go build -o blis main.go && ./blis --help >/dev/null
+      - uses: ./.github/actions/pinned-blis
       - name: Fetch the pinned engine field list
         run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
       - name: Every spec against the new binary's field list, schemas and catalog
@@ -121,26 +135,21 @@ jobs:
           name: pin-compat-blis
           path: upstream/blis
           retention-days: 3
-      - name: Reports to smoke
-        id: ids
-        run: |
-          python3 -I scripts/blis_pin.py plan > /tmp/plan.json
-          echo "reports=$(python3 -c 'import json;print(json.dumps([{"id":r["id"],"replay":r["replay"]} for r in json.load(open("/tmp/plan.json"))["reports"]]))')" >> "$GITHUB_OUTPUT"
 
   smoke:
-    needs: build
-    if: needs.build.outputs.reports != '[]'
+    needs: [changed, build]
+    if: needs.changed.outputs.reports != '[]'
     runs-on: ${{ fromJSON(vars.REGEN_RUNS_ON || '"ubuntu-latest"') }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        report: ${{ fromJSON(needs.build.outputs.reports) }}
+        report: ${{ fromJSON(needs.changed.outputs.reports) }}
     name: smoke ${{ matrix.report.id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
-        with: { python-version: "3.12" }
+        with: { python-version: "3.12", cache: pip }
       - run: pip install --require-hashes -r requirements.txt
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with: { name: pin-compat-blis, path: .build }
@@ -150,9 +159,7 @@ jobs:
           set -euo pipefail
           chmod +x .build/blis
           set -a; . ./pins.env; set +a
-          git clone --branch "$SUBSTRATE_REF" --depth 1 https://github.com/inference-sim/blis-substrate.git ../blis-substrate
-          test "$(git -C ../blis-substrate describe --tags --exact-match)" = "$SUBSTRATE_REF" || {
-            echo "blis-substrate is not $SUBSTRATE_REF -- aborting" >&2; exit 1; }
+          sh scripts/clone_pinned.sh "$SUBSTRATE_REF" https://github.com/inference-sim/blis-substrate.git ../blis-substrate
           echo "substrate_ref=$SUBSTRATE_REF" >> "$GITHUB_OUTPUT"
       - name: Restore the replay corpus
         if: matrix.report.replay
@@ -241,13 +248,15 @@ jobs:
           CHANGED: ${{ needs.changed.result }}
           BUILD: ${{ needs.build.result }}
           SMOKE: ${{ needs.smoke.result }}
-          REPORTS: ${{ needs.build.outputs.reports }}
+          RUN: ${{ needs.changed.outputs.run }}
+          REPORTS: ${{ needs.changed.outputs.reports }}
           FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
           echo "changed=$CHANGED moved=$MOVED build=$BUILD smoke=$SMOKE"
           [ "$CHANGED" = success ] || { echo "could not tell whether a pin moved"; exit 1; }
-          if [ "$MOVED" != true ]; then echo "no pin value moved -- nothing to check"; exit 0; fi
+          if [ "$RUN" != true ]; then echo "no pin moved and no spec, report or runner script the smoke reads changed -- nothing to check"; exit 0; fi
           if [ "$FORK" = true ]; then
+            [ "$MOVED" != true ] && { echo "a fork's change runs no smoke here; a maintainer re-runs it from a branch"; exit 0; }
             echo "a pin move from a fork is not run here -- push the branch to this repo"; exit 1; fi
           # smoke is skipped (not failed) only when there is no committed report to re-run.
           [ "$SMOKE" = skipped ] && [ "$REPORTS" = "[]" ] && SMOKE=success

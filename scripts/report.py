@@ -211,24 +211,18 @@ def _feasible(run, floor, slos):
         viol.append(f"timed_out_requests = {m['timed_out_requests']}")
     if m.get("dropped_unservable"):
         viol.append(f"dropped_unservable = {m['dropped_unservable']}")
-    # The interactivity floor is a per-TOKEN promise, so test the per-TOKEN rate. Comparing the raw
-    # p99 ITL to the cap is wrong under drafting, where BLIS reports a VERIFICATION-STEP latency:
-    # the checked-in B200 K=1/c=102 row was displayed at 101.9 tok/s/user and simultaneously marked
-    # infeasible at "itl_p99_ms = 31.8 > 20.0". Both numbers came from this function and
-    # _per_user_rate disagreeing on two axes at once -- acceptance scaling, and aggregate vs worst
-    # instance. One definition now serves both (namasl review #2).
+    # The interactivity floor is a per-TOKEN promise, and the rate tested is 1000 over the worst p99 time
+    # per output token (run_blis.per_user_rate), the one definition the display and the sweeper's
+    # `servable` also use. TPOT is per token and already holds what speculation gains, so no acceptance
+    # factor enters; this replaces the engine's per-step interval, which needed one.
     itl_max = _floor_itl_p99_max(floor)
     if itl_max is not None:
         rate, basis, itl = run_blis.per_user_rate(run)
         floor_rate = _floor_rate(floor)
-        if basis == "step-estimate-withheld":
-            viol.append("drafting run with no resolved acceptance length (cannot verify floor)")
-        elif rate is None:
+        if rate is None:
             viol.append("itl_p99_ms missing (cannot verify interactivity floor)")
         elif rate < floor_rate:
-            # Report the step latency AND the per-token basis, so a drafting violation is legible.
-            extra = f" (step itl {itl:.1f} ms)" if basis == "derived-from-acceptance" else ""
-            viol.append(f"tok_per_s_per_user = {rate:.1f} < {floor_rate:g}{extra}")
+            viol.append(f"tok_per_s_per_user = {rate:.1f} < {floor_rate:g} (tpot p99 {itl:.1f} ms)")
     slos = dict(slos or {})
     # Experiment specs write throughput_per_gpu as a floor, not a cap.
     tput = _as_num(slos.pop("throughput_per_gpu", None))
@@ -255,8 +249,8 @@ def _per_user_rate(run, mtp=0):
     the same one _feasible judges on, so a row can no longer be displayed above the floor while
     being marked infeasible (namasl review #2).
 
-    The basis is AL x 1000/worst-instance ITL under drafting and 1000/worst-instance ITL without
-    it. `mtp` is accepted for call-site compatibility but the depth is read from the run itself.
+    The rate is 1000 over the worst-instance p99 time per output token, drafting or not (no acceptance
+    factor: TPOT is per token). `mtp` is accepted for call-site compatibility but the depth is read from the run itself.
 
     There is deliberately NO short-circuit on a `metrics.tok_per_s_per_user` field. An earlier
     version preferred it and returned it raw -- an aggregate, neither acceptance-scaled nor
@@ -265,8 +259,7 @@ def _per_user_rate(run, mtp=0):
     and the feasibility verdict would diverge again, which is the exact split this unification
     closed. One definition means one definition (susiejojo review #1).
 
-    Returns (pu_or_None, basis) where basis is "" for a direct rate, "derived-from-acceptance" for
-    an AL-scaled one, and "step-estimate-withheld" when drafting is on and AL is unknown."""
+    Returns (pu_or_None, basis); basis is always "" (a direct rate), kept so callers need no change."""
     pu, basis, _itl = run_blis.per_user_rate(run)
     return (round(pu, 2) if pu is not None else None), basis
 
@@ -286,8 +279,14 @@ def provenance_split(runs):
     each row recorded. A split in either means the rows are not comparable, and the report must say
     so rather than presenting a matched-load table across the boundary.
     """
-    seeds, stacks = set(), set()
+    seeds, stacks, bases = set(), set(), set()
     for r in runs:
+        # A record written before the basis was recorded was ranked on the whole run; a new one on
+        # the measured window. Figures on the two are different populations (DEV-8).
+        # Only a run that produced metrics has a basis; an error row (refused config, failed or
+        # invalid Result) has none to disagree about.
+        if r.get("metrics"):
+            bases.add(r.get("basis") or "unrecorded")
         cmd = r.get("cmd") or []
         if "--seed" in cmd:
             try:
@@ -304,4 +303,7 @@ def provenance_split(runs):
     if len(stacks) > 1:
         issues.append(f"runs span {len(stacks)} distinct resolved stacks: they were not priced by "
                       f"one cost model")
+    if len(bases) > 1:
+        issues.append(f"runs mix bases ({sorted(bases)}): a whole-run figure and a measured-window "
+                      f"figure are different populations and are never compared (DEV-8)")
     return "; ".join(issues)

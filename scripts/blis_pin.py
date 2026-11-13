@@ -478,14 +478,19 @@ def _run_context(entry, root, blis, catalog, corpus, corpus_cache, fields=None):
         local["corpus_cache"] = os.path.abspath(corpus_cache)
     replay = None
     if entry["replay"]:
-        replay = run_experiment.resolve_replay(sc["workload"], catalog,
-                                               dict(sc.get("replay") or {}, **local))
-        replay = {k: v for k, v in replay.items() if k != "_overrides"}
+        stated = dict(sc.get("replay") or {}, **local)
+        if sc.get("workload_spec"):
+            replay = run_experiment.resolve_workload_spec(
+                sc["workload_spec"], run_experiment.load_workload_spec(sc["workload_spec"]), stated)
+        else:
+            replay = run_experiment.resolve_replay(sc["workload"], catalog, stated)
+        replay = {k: v for k, v in replay.items() if k not in run_experiment.RECORD_ONLY_REPLAY}
     fabric = (sc.get("cluster") or {}).get("fabric") or run_experiment.run_blis.DEFAULT_FABRIC
     gpus_per_node = (sc.get("cluster") or {}).get("gpus_per_node")
     return (sc["model"], sc["hardware"],
             run_experiment.blis_cli.engine_release(blis, run_experiment.run_blis.ENGINE_KIND, fields),
-            sc["workload"], int(sc.get("seed", 42)), replay,
+            sc.get("workload") or run_experiment.workload_spec_label(sc["workload_spec"]),
+            int(sc.get("seed", 42)), replay,
             (lambda c: None) if replay else (lambda c: max(80, c * 4)), fabric, gpus_per_node)
 
 
@@ -499,8 +504,12 @@ def ensure_corpus(entry, catalog, dest, root=ROOT):
     """Fetch + digest-check a replay report's corpus to `dest` unless it is already there."""
     import fetch_corpus
     import run_experiment
-    wl = (_load_yaml(os.path.join(root, entry["source"])).get("scenario") or {}).get("workload")
-    corpus = (run_experiment.replay_descriptor(wl, catalog) or {}).get("corpus") or {}
+    sc = _load_yaml(os.path.join(root, entry["source"])).get("scenario") or {}
+    if sc.get("workload_spec"):
+        desc = _load_yaml(os.path.join(root, sc["workload_spec"]))
+    else:
+        desc = run_experiment.replay_descriptor(sc.get("workload"), catalog)
+    corpus = (desc or {}).get("corpus") or {}
     src = corpus.get("source") or {}
     url = fetch_corpus.HF_URL.format(dataset=src.get("huggingface"), revision=src.get("revision"),
                                      path=src.get("file", "traces.jsonl"))
@@ -508,11 +517,34 @@ def ensure_corpus(entry, catalog, dest, root=ROOT):
     return dest
 
 
+def _row_in_sweep(row, sweep):
+    """True unless the row's deployment or a scalar knob value is one the sweep no longer lists."""
+    allowed = {}
+    for block in (sweep.get("parallel"), sweep.get("engine")):
+        for k, v in (block or {}).items():
+            if isinstance(v, list) and all(not isinstance(x, (dict, list)) for x in v):
+                allowed[k] = v
+    if isinstance(sweep.get("num-instances"), list):
+        allowed["num_instances"] = sweep["num-instances"]
+    nested = {}
+    for k, v in (sweep.get("engine") or {}).items():
+        if isinstance(v, dict) and all(isinstance(x, list) for x in v.values()):
+            nested[k] = v
+    cfg = row.get("config") or {}
+    if not all(cfg[k] in vals for k, vals in allowed.items() if k in cfg):
+        return False
+    return all(cfg[k].get(sub, val) in vals for k, subs in nested.items()
+               if isinstance(cfg.get(k), dict) for sub, vals in subs.items() for val in [cfg[k].get(sub)])
+
+
 def live_rows(runs, spec):
-    """The ledger rows whose sweep the spec still runs. A sweep the spec dropped (because the stack
-    now refuses it) is not a regression; regeneration removes its rows."""
-    names = {s.get("name") for s in (spec or {}).get("sweeps") or []}
-    return [r for r in runs if r.get("sweep") in names] if names else runs
+    """The ledger rows the spec still runs. A sweep the spec dropped, or a deployment or knob value
+    it no longer lists (because the stack refuses it), is not a regression; regeneration removes
+    those rows."""
+    sweeps = {s.get("name"): s for s in (spec or {}).get("sweeps") or []}
+    if not sweeps:
+        return runs
+    return [r for r in runs if r.get("sweep") in sweeps and _row_in_sweep(r, sweeps[r["sweep"]])]
 
 
 def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=None,

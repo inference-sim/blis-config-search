@@ -53,7 +53,7 @@ One pipeline feeds one static site:
 Spec rules worth knowing: every knob value is a list; omitted knobs take the vLLM default; only
 combos with `tp × dp × num-instances == scenario.gpus` are run; knob names are read from the
 simulator (`blis fields`, `blis schema deployment`; `scripts/settings.py`), never kept here.
-Routing policies live in `routing/*.yaml`.
+Routing policies live in `routing/*.yaml` and in the router fork's `reference-configs/`, read from the pinned simulator (`blis router-configs --json`).
 `report/lexicon.json` is mirrored byte-for-byte at `web/src/lexicon.json`; edit the first, copy it over.
 
 ### Pinned stack and siblings

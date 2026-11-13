@@ -12,7 +12,7 @@ scenario:
   model: deepseek-v4.1-flash
   hardware: b200
   cluster: {gpus_per_node: 8}   # an 8-GPU HGX server; the catalog fixes no node size for this chip
-  workload: agentx-mvp
+  workload_spec: workloads/agentx-run-recipe.yaml   # the full AgentX run recipe
   gpus: 32
   slo: {itl_p99: 20ms}
   engine:
@@ -22,8 +22,8 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-b200
-    grace_period: 87600h   # = never ends within a run (ten years). TEMPORARY: `inf` is refused by the strict Result loader until blis-substrate#28 ships (M2); restore `inf` then (blis-config-search#102)
-    # the descriptor's 30s marks saturated loads as incomplete
+    # grace_period: the recipe's 30 s. An infinite grace makes the measured window run to the drain
+    # (output_tok_s falls 100-fold); restoring it waits on the simulator's window semantics (blis-config-search#102).
 
 sweeps:
   - name: topology-ep
@@ -33,11 +33,15 @@ sweeps:
     parallel: {tp: [2, 4, 8], dp: [1, 2], enable_expert_parallel: [true, false]}
 
   - name: batch-tokens
+    # An unset max_num_batched_tokens resolves to 16384 on B200 (vLLM arg_utils.py 2923-2927), so 16384 and 32768
+    # are not a comparison with the default; 2048 and 4096 are. The replay drives the load, so throughput moves
+    # about 0.6% at 2048 (1248.69 against 1256.04 tok/s); the cap shows in itl_p99 (11.83 against 7.89 ms) and
+    # ttft_p99 (4584 against 1173 ms), so read the effect there rather than in throughput.
     narrative: The per-step token cap should bind harder on four wide instances than on eight narrow ones, since long agentic prompts concentrate per instance.
     num-instances: [4, 8]
     parallel: {tp: [8, 4], dp: [1], enable_expert_parallel: [true]}
     engine:
-      max_num_batched_tokens: [2048, 16384, 32768]
+      max_num_batched_tokens: [2048, 4096]
 
   - name: prefill-chunking
     narrative: Capping prefill chunks should cost throughput at both widths, more where fewer decodes share each instance's token budget.

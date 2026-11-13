@@ -126,9 +126,7 @@ jobs:
           ( cd upstream && go build -o blis main.go )
           # The simulator prices with this release's EMBEDDED catalog and registry (CFG-1) and is
           # given neither flag-by-path; the checkout is only where the scripts read files from.
-          git clone --branch "$SUBSTRATE_REF" --depth 1 https://github.com/inference-sim/blis-substrate.git
-          test "$(git -C blis-substrate describe --tags --exact-match)" = "$SUBSTRATE_REF" || {
-            echo "blis-substrate is not $SUBSTRATE_REF -- aborting" >&2; exit 1; }
+          sh scripts/clone_pinned.sh "$SUBSTRATE_REF" https://github.com/inference-sim/blis-substrate.git blis-substrate
           echo "SUBSTRATE_CATALOG=$PWD/blis-substrate/catalog" >> "$GITHUB_ENV"
           echo "SUBSTRATE_REGISTRY=$PWD/blis-substrate/registry" >> "$GITHUB_ENV"
           echo "BLIS_BIN=$PWD/upstream/blis"      >> "$GITHUB_ENV"

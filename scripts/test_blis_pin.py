@@ -86,6 +86,44 @@ def test_smoke_skips_dropped_sweeps():
     check(B.live_rows(runs, {}) == runs, "with no sweep list, every row is still checked")
 
 
+def test_smoke_fetches_the_corpus_a_workload_file_names():
+    print("test_smoke_fetches_the_corpus_a_workload_file_names")
+    import fetch_corpus
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(os.path.join(d, "workloads"))
+        os.makedirs(os.path.join(d, "experiments"))
+        with open(os.path.join(d, "workloads", "w.yaml"), "w") as f:
+            f.write("corpus:\n  source: {huggingface: org/ds, revision: rev1, file: t.jsonl}\n"
+                    "  sha256: abc\n")
+        with open(os.path.join(d, "experiments", "e.yaml"), "w") as f:
+            f.write("scenario:\n  workload_spec: workloads/w.yaml\n")
+        asked = []
+        real = fetch_corpus.fetch
+        fetch_corpus.fetch = lambda dest, url, sha, token=None: asked.append((url, sha))
+        try:
+            B.ensure_corpus({"source": "experiments/e.yaml"}, os.path.join(d, "no-catalog"),
+                            os.path.join(d, "out"), root=d)
+        finally:
+            fetch_corpus.fetch = real
+    check(asked == [("https://huggingface.co/datasets/org/ds/resolve/rev1/t.jsonl", "abc")],
+          f"a spec that names its workload by file is smoked on that file's corpus: {asked}")
+
+
+def test_smoke_skips_rows_of_a_shape_the_spec_dropped():
+    print("test_smoke_skips_rows_of_a_shape_the_spec_dropped")
+    spec = {"sweeps": [{"name": "a", "num-instances": [1], "parallel": {"tp": [8], "dp": [1]},
+                        "engine": {"max_num_seqs": [8, 16], "speculative": {"method": ["x"]}}}]}
+    keep = {"sweep": "a", "config": {"tp": 8, "dp": 1, "num_instances": 1, "max_num_seqs": 8, "concurrency": 4}}
+    gone = {"sweep": "a", "config": {"tp": 2, "dp": 4, "num_instances": 1, "max_num_seqs": 8, "concurrency": 4}}
+    knob = {"sweep": "a", "config": {"tp": 8, "dp": 1, "num_instances": 1, "max_num_seqs": 99}}
+    check(B.live_rows([keep, gone, knob], spec) == [keep],
+          "a row whose deployment or knob value the spec no longer lists is not re-run")
+    spec = {"sweeps": [{"name": "a", "engine": {"engram_config": {"cpu_offload": [True]}}}]}
+    on = {"sweep": "a", "config": {"engram_config": {"cpu_offload": True}}}
+    off = {"sweep": "a", "config": {"engram_config": {"cpu_offload": False}}}
+    check(B.live_rows([on, off], spec) == [on], "the same for a knob given as a block of lists")
+
+
 def test_rewrite_pins_keeps_comments():
     print("test_rewrite_pins_keeps_comments")
     text = "# BLIS_REF=v0.0.1 is a comment\nBLIS_REF=v0.14.0\nBLIS_SHA=aaa\n\nSUBSTRATE_REF=v0.13.0\n"
@@ -434,8 +472,8 @@ def test_workflow_wiring():
     check("pull_request:" in compat and "paths:" not in compat.split("\njobs:")[0].replace(
               "without a `paths:` filter", ""),
           "the gate triggers on EVERY PR: a path-filtered required check stays pending forever")
-    check("blis_pin.py changed" in compat and "needs.changed.outputs.moved == 'true'" in compat,
-          "the heavy jobs run only when a pin's VALUE moved against the base branch")
+    check("blis_pin.py changed" in compat and "needs.changed.outputs.run == 'true'" in compat,
+          "the heavy jobs run only when a pin's VALUE moved, or a spec, ledger or smoke script changed")
     gate = compat.split("\n  gate:", 1)[-1]
     check("if: always()" in gate and "needs: [changed, build, smoke]" in gate,
           "`gate` always reports, so it is the one check that can be marked required")
@@ -444,7 +482,10 @@ def test_workflow_wiring():
               f"{name} validates every spec against the new binary's commands")
         check("blis_pin.py drift" not in text and "blis-schemas" not in text,
               f"{name} compares no copied settings table against sibling checkouts")
-    check(sha not in compat and ". ./pins.env" in compat and "$BLIS_SHA" in compat,
+    action = open(os.path.join(ROOT, ".github", "actions", "pinned-blis", "action.yml")).read()
+    check(sha not in compat and ". ./pins.env" in compat and "pinned-blis" in compat
+          and ". ./pins.env" in action and "no longer resolves to $BLIS_SHA" in action
+          and "git ls-remote" in action,
           "pin-compat.yml reads the pin from pins.env and refuses a moved tag")
     for step in ("blis_pin.py smoke",):
         check(step in compat, f"the gate runs `{step}`")
@@ -453,7 +494,7 @@ def test_workflow_wiring():
           "the gate comment is found by its marker, not as the token user's latest comment")
     check("head.repo.full_name == github.repository" in compat,
           "a fork's pin move does not run fork code on the regen runner")
-    check("needs.build.outputs.reports != '[]'" in compat and 'REPORTS" = "[]"' in gate,
+    check("needs.changed.outputs.reports != '[]'" in compat and 'REPORTS" = "[]"' in gate,
           "no committed reports means no smoke matrix, and the gate still passes")
     check("--draft" in bump, "the bot's pin PR opens as a draft: it is where fixes get pushed")
     check("test_experiment.py" not in bump,
@@ -483,6 +524,8 @@ if __name__ == "__main__":
     test_go_mod_versions()
     test_sync_pins_reads_replace()
     test_smoke_skips_dropped_sweeps()
+    test_smoke_skips_rows_of_a_shape_the_spec_dropped()
+    test_smoke_fetches_the_corpus_a_workload_file_names()
     test_rewrite_pins_keeps_comments()
     test_setup_md_sources_the_pins()
     test_bump_end_to_end_on_copies()

@@ -101,3 +101,33 @@ Assembled in `scripts/explore_data.py`. Knobs the engine doesn't vary come throu
 `cl (=tokens_per_sec), itl (=mean ITL ms), ttft (=ttft_p99_ms),`
 `hit (prefix hit or null), to (timed out), drop (unservable), p95 (=e2e_p95_ms),`
 `ok (met completion+floor+SLOs; absent SLO metric = violation), status, viol[] (reasons when not ok)`
+
+### The basis of every figure
+
+Every figure a report shows, ranks on or gates on is the Result's **measured window**, the
+profiling window after warm-up, at the **cluster** scope. The TTFT and end-to-end gates are also
+judged on the worst instance, rebuilt from the measured window's per-request rows
+(`phase == "profile"`, grouped by the instance that served them, percentile by linear
+interpolation). The ITL gate is the cluster's measured decode-step interval, because a step is not
+a per-request quantity. Whole-run figures include warm-up and drain and are never ranked on. The
+report states this in `scenario.json` (`basis`, `scope`) and in its meta line. A ledger that mixes
+records with and without a basis is flagged, not rendered as one comparison.
+
+### `runs.jsonl` records
+
+A record keeps the run's inputs and outputs as written. The fields added with the measured window:
+
+| field | what |
+|---|---|
+| `basis` | `measured_window`: the basis of `metrics` and of everything derived from it |
+| `measured.metrics` | the Result's top-level `metrics`, verbatim, each `{value, samples}`, under BLIS's names (`interactivity_mean`, `interactivity_p50`, `itl_*`, `ttft_p50_ms`, `e2e_p50_ms`, ...) |
+| `measured.metric_defs` | the Result's `metric_defs`, verbatim, when the document has them; absent otherwise |
+| `measured.window` | the Result's measured window: start, end, duration, requests |
+| `measured.instances` | per-instance TTFT, end-to-end and TPOT figures for the window, rebuilt from the per-request rows until the simulator emits them (inference-sim #2087) |
+| `whole_run` | the whole-run cluster aggregate, raw data only; nothing ranks or displays it |
+| `config_key` | the hash of `config` with `concurrency` removed: the records of one configuration across loads share it |
+
+`config_hash` is unchanged: the hash of the whole `config`, so one run at one load. `measured` is
+absent, not empty, when the Result has no top-level `metrics`. BLIS's `interactivity_p90` is
+`1000 / itl_p90`, the slow tail of the per-user distribution (the benchmark client's per-user p10),
+not its p90.

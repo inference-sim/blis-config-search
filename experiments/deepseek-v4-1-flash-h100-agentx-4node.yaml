@@ -11,7 +11,7 @@ scenario:
   model: deepseek-v4.1-flash
   hardware: h100
   cluster: {gpus_per_node: 8}   # an 8-GPU HGX server; the catalog fixes no node size for this chip
-  workload: agentx-mvp
+  workload_spec: workloads/agentx-run-recipe.yaml   # the full AgentX run recipe
   gpus: 32
   slo: {itl_p99: 20ms}
   # V4.1 serves only fp8_ds_mla on SM90, and at the 32k default every AgentX trace is filtered out.
@@ -20,8 +20,8 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-h100
-    grace_period: 87600h   # = never ends within a run (ten years). TEMPORARY: `inf` is refused by the strict Result loader until blis-substrate#28 ships (M2); restore `inf` then (blis-config-search#102)
-    # 30s default misreads saturated loads as incomplete
+    # grace_period: the recipe's 30 s. An infinite grace makes the measured window run to the drain
+    # (output_tok_s falls 100-fold); restoring it waits on the simulator's window semantics (blis-config-search#102).
 
 sweeps:
   - name: topology
@@ -62,12 +62,23 @@ sweeps:
 
   - name: kv-and-engram
     # Probe at 4xTP8 c=96: Engram in HBM pushed p99 ITL to 143ms at gmu 0.9 but 11ms at 0.95.
-    narrative: Moving Engram tables into HBM should only pay when gmu leaves KV room for them, and cost more on narrow tp.
+    narrative: Raising gmu should add KV room when the Engram tables stay in host memory, and cost more on narrow tp.
     num-instances: [4]
     parallel: {tp: [8, 2], dp: [1, 4], enable_expert_parallel: [true]}
     engine:
       gpu_memory_utilization: [0.9, 0.95]
-      engram_config: {cpu_offload: [true, false]}
+      engram_config: {cpu_offload: [true]}
+
+  # Tables in HBM at gmu 0.9 on TP8 leave 0.17 GiB of KV cache against the 0.84 GiB one 262144-token sequence
+  # needs, and vLLM refuses to start ("To serve at least one request with the model's max seq len (262144), ...
+  # larger than the available KV cache memory", kv_cache_utils.py:2636-2646); this sweep keeps gmu 0.95.
+  - name: engram-in-hbm
+    narrative: Moving Engram tables into HBM should only pay when gmu leaves KV room for them, and cost more on narrow tp.
+    num-instances: [4]
+    parallel: {tp: [8, 2], dp: [1, 4], enable_expert_parallel: [true]}
+    engine:
+      gpu_memory_utilization: [0.95]
+      engram_config: {cpu_offload: [false]}
 
   - name: cudagraph
     # Per-step host cost; measured not to interact with topology, so one shape.

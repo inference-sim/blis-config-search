@@ -47,107 +47,223 @@ class ParseMetrics(unittest.TestCase):
         self.assertEqual([o["instance_id"] for o in run_blis.parse_all_instances(s)], ["i0", "i1"])
 
 
-# The schema 2 Result document (the engine report is under `reports.engine`), trimmed to the sections parse_metrics reads. Values are a real
-# single-instance Muse run's, so the numbers below are the pinned simulator's own.
+# A schema 2 Result document trimmed to the sections run_blis reads, with the figures of a real
+# two-instance run on the pinned simulator (qwen3-14b on H100, 40 requests, tp 1, two instances).
+# The measured window and the whole run disagree on purpose: whole-run throughput and step-interval
+# p99 differ from the window's, so a test that reads the wrong block gets the wrong number.
+def _m(value, samples=40):
+    return {"value": value, "samples": samples}
+
+
+def _row(i, inst, ttft_ms, e2e_ms, tpot_ms, phase="profile", fate="completed"):
+    return {"id": f"request_{i}", "fate": fate, "phase": phase, "instance": inst, "arrival_us": 0,
+            "ttft_us": ttft_ms * 1000, "e2e_us": e2e_ms * 1000, "tpot_us": tpot_ms * 1000}
+
+
 RESULT_DOC = json.dumps({
     "kind": "Result", "schema_version": "1",
-    "window": {"start": "first_arrival_after_warmup", "duration_s": 4.792675, "requests": 8},
+    "window": {"start_us": 100, "end_us": 4_900_000, "duration_s": 4.8, "requests": 8},
     "requests": {"generated": 8, "completed": 8, "queued_at_horizon": 0,
                  "in_flight_at_horizon": 0, "timed_out": 0, "length_capped": 0},
-    # The MEASURED WINDOW: per-request TPOT, deliberately NOT the source of itl_*.
-    "metrics": {"itl_p99_ms": 33.87192666666667, "itl_mean_ms": 27.831343253968253,
-                "output_tok_s": 106.82969322977252, "request_throughput": 1.6692139567151956},
+    "metrics": {"output_tok_s": _m(106.83, 8), "request_throughput": _m(1.67, 8),
+                "ttft_mean_ms": _m(300.0, 8), "ttft_p99_ms": _m(340.0, 8),
+                "e2e_mean_ms": _m(2000.0, 8), "e2e_p99_ms": _m(2400.0, 8),
+                "step_interval_mean_ms": _m(27.8, 400), "step_interval_p99_ms": _m(33.9, 400),
+                # The per-request time per output token disagrees with the engine's step interval, so
+                # reading the wrong one fails with a number: TPOT passes a 20 ms gate (18 ms), the
+                # step interval does not (33.9 ms).
+                "tpot_mean_ms": _m(15.0, 8), "tpot_p50_ms": _m(14.5, 8), "tpot_p90_ms": _m(16.5, 8),
+                "tpot_p95_ms": _m(17.2, 8), "tpot_p99_ms": _m(18.0, 8),
+                "preemptions": _m(1, 400), "interactivity_mean": _m(57.2, 8),
+                "interactivity_p50": _m(57.1, 8), "ttft_p50_ms": _m(290.0, 8)},
     "engine": {"kind": "vllm", "version": "0.32.0"},
+    "request_rows": [
+        _row(0, "instance_0", 100, 1000, 20), _row(1, "instance_0", 200, 1500, 21),
+        _row(2, "instance_1", 300, 2000, 22), _row(3, "instance_1", 900, 2600, 25),
+        _row(4, "instance_0", 5000, 9000, 40, phase="warmup"),
+        _row(5, "instance_1", 7000, 9500, 41, phase="warmup")],
     "reports": {"engine": {"cluster": {
         "preemptions": 2, "kv_allocation_failures": 0, "scheduling_delay_p99_ms": 1.5,
         "total_input_tokens": 32768, "total_output_tokens": 512, "simulated_duration_s": 5.29,
-        "step_interval_p99_ms": 294.031,
+        "step_interval_p99_ms": 111.0,
         "whole_run": {"tokens_per_sec": 96.80435952382842, "responses_per_sec": 1.5125681175598191,
                       "ttft_p99_ms": 349.06543, "ttft_mean_ms": 342.987,
                       "e2e_p99_ms": 2479.9476, "e2e_mean_ms": 2097.138625,
-                      "step_interval_mean_ms": 27.831343253968253, "step_interval_p90_ms": 16.729,
-                      "step_interval_p95_ms": 16.729, "step_interval_p99_ms": 294.031}}}}})
+                      "step_interval_mean_ms": 31.0, "step_interval_p90_ms": 16.729,
+                      "step_interval_p95_ms": 16.729, "step_interval_p99_ms": 294.031}},
+        "instances": {"instance_0": {"instance_id": "instance_0", "tokens_per_sec": 1.0,
+                                     "ttft_p99_ms": 6000.0, "itl_p99_ms": 400.0},
+                      "instance_1": {"instance_id": "instance_1", "tokens_per_sec": 2.0,
+                                     "ttft_p99_ms": 8000.0, "itl_p99_ms": 500.0}}}}})
 
 
-class ResultDocument(unittest.TestCase):
-    """v0.15.0 made stdout one Result document; these pin the legacy field names to it.
+class MeasuredWindow(unittest.TestCase):
+    """Every figure the report ranks and gates on is the measured window (CFG-4, DEV-8).
 
-    The bump restructured the cluster aggregate but left `engine.instances` emitting a verbatim
-    MetricsOutput, so before the remapping a SINGLE-instance run had no itl_* anywhere (every ITL
-    SLO failing as "declared but not measured", a whole sweep reporting 0 servable) while a
-    multi-instance run still resolved off its per-instance rows. A test per field, because that
-    asymmetry reads as a finding rather than failing loudly.
+    The window and the whole run differ in RESULT_DOC on every figure below, so reading the wrong
+    block fails each test with a number, not a shrug.
     """
 
-    def test_throughput_comes_from_whole_run(self):
-        self.assertEqual(run_blis.parse_metrics(RESULT_DOC)["tokens_per_sec"], 96.80435952382842)
-
-    def test_itl_is_the_renamed_step_interval_not_the_measured_window(self):
-        # Not the measured window's itl_p99 (33.87); see run_blis._ITL_FROM_STEP_INTERVAL.
+    def test_throughput_is_the_measured_windows_not_the_whole_runs(self):
         m = run_blis.parse_metrics(RESULT_DOC)
-        self.assertEqual(m["itl_p99_ms"], 294.031)
-        self.assertEqual(m["itl_mean_ms"], 27.831343253968253)
-        self.assertEqual(m["itl_p90_ms"], 16.729)
+        self.assertEqual(m["tokens_per_sec"], 106.83)
+        self.assertNotEqual(m["tokens_per_sec"], 96.80435952382842)
+        self.assertEqual(m["responses_per_sec"], 1.67)
 
-    def test_an_itl_slo_can_be_judged_at_all(self):
-        rec = {"metrics": run_blis.parse_metrics(RESULT_DOC), "metrics_all_instances": []}
+    def test_latency_is_the_measured_windows(self):
+        m = run_blis.parse_metrics(RESULT_DOC)
+        self.assertEqual((m["ttft_p99_ms"], m["e2e_p99_ms"]), (340.0, 2400.0))
+        self.assertEqual((m["ttft_mean_ms"], m["e2e_mean_ms"]), (300.0, 2000.0))
+
+    def test_the_itl_gate_is_the_registrys_per_request_tpot_not_the_step_interval(self):
+        m = run_blis.parse_metrics(RESULT_DOC)
+        self.assertEqual((m["itl_p99_ms"], m["itl_mean_ms"]), (18.0, 15.0))
+        self.assertEqual((m["tpot_p99_ms"], m["tpot_mean_ms"]), (18.0, 15.0))
+        self.assertNotEqual(m["itl_p99_ms"], 33.9)         # the measured window's step interval
+        self.assertNotEqual(m["itl_p99_ms"], 294.031)      # the whole run's
+        self.assertNotEqual(m["itl_p99_ms"], 111.0)        # the cluster block's own copy
+
+    def test_a_result_whose_tpot_passes_and_step_interval_fails_clears_a_20_ms_gate(self):
+        doc = json.loads(RESULT_DOC)
+        doc["metrics"]["tpot_p99_ms"] = _m(10.0, 8)
+        doc["metrics"]["step_interval_p99_ms"] = _m(100.0, 400)
+        rec = {"metrics": run_blis.parse_metrics(json.dumps(doc)), "metrics_all_instances": []}
+        self.assertEqual(rec["metrics"]["itl_p99_ms"], 10.0)
         worst, missing = run_blis.worst_itl_p99(rec)
-        self.assertFalse(missing, "a single-instance v0.15.0 run must still measure ITL")
-        self.assertEqual(worst, 294.031)
+        self.assertEqual((worst, missing), (10.0, False))
+        self.assertAlmostEqual(run_blis.per_user_rate(rec)[0], 100.0)
+
+    def test_a_document_without_a_measured_window_yields_nothing(self):
+        # Never a fall back to the whole run: the run fails as "no cluster metrics parsed".
+        doc = json.loads(RESULT_DOC)
+        del doc["metrics"]
+        self.assertEqual({}, run_blis.parse_metrics(json.dumps(doc)))
+        doc["metrics"] = {}
+        self.assertEqual({}, run_blis.parse_metrics(json.dumps(doc)))
+
+    def test_no_code_path_reads_whole_run_for_display_ranking_or_feasibility(self):
+        # The record keeps the whole-run aggregate as raw data under its own key; no other line of
+        # any module that displays, ranks or gates mentions it outside a comment.
+        src_dir = os.path.dirname(os.path.abspath(run_blis.__file__))
+        for name in ("run_blis.py", "run_experiment.py", "report.py", "explore_data.py", "build_gallery.py"):
+            with open(os.path.join(src_dir, name), encoding="utf-8") as f:
+                code = [l.strip() for l in f.read().splitlines() if not l.lstrip().startswith("#")]
+            hits = [l for l in code if "whole_run" in l]
+            allowed = {'whole = (_engine_report(doc).get("cluster") or {}).get("whole_run")',
+                       'rec["whole_run"] = whole'} if name == "run_blis.py" else set()
+            self.assertEqual([l for l in hits if l not in allowed], [], name)
 
     def test_completion_counters_follow_the_requests_block(self):
-        # They moved out of the metrics dict under shorter names; unmapped, _completion_issue can
-        # never fire and an overloaded run ranks as a clean capacity point.
         m = run_blis.parse_metrics(RESULT_DOC)
         self.assertEqual((m["injected_requests"], m["completed_requests"]), (8, 8))
         self.assertIsNone(run_blis._completion_issue(m))
 
     def test_an_overloaded_result_is_still_caught(self):
         doc = json.loads(RESULT_DOC)
-        doc["requests"].update({"completed": 6, "still_queued": 2})
+        doc["requests"].update({"completed": 6, "queued_at_horizon": 2})
         issue = run_blis._completion_issue(run_blis.parse_metrics(json.dumps(doc)))
         self.assertIsNotNone(issue)
         self.assertIn("injected=8", issue)
 
-    def test_cluster_counters_survive(self):
+    def test_run_totals_that_are_counts_survive(self):
         m = run_blis.parse_metrics(RESULT_DOC)
-        self.assertEqual(m["preemption_count"], 2)
-        self.assertEqual(m["total_output_tokens"], 512)
-        self.assertEqual(m["vllm_estimated_duration_s"], 5.29)
+        self.assertEqual(m["preemption_count"], 1)
+        self.assertNotIn("total_output_tokens", m)     # whole-run totals nothing reads are not copied
 
-    def test_instances_are_read_from_the_engine_report(self):
+    def test_instances_are_rebuilt_from_profile_rows_not_read_from_the_whole_run_blocks(self):
+        inst = run_blis.parse_all_instances(RESULT_DOC)
+        self.assertEqual([o["instance_id"] for o in inst], ["instance_0", "instance_1"])
+        by = {o["instance_id"]: o for o in inst}
+        # instance_1's profile requests: ttft 300 and 900 ms. Its warm-up request (7000 ms) and the
+        # whole-run block's 8000 ms are both outside the window.
+        self.assertEqual(by["instance_1"]["requests"], 2)
+        self.assertAlmostEqual(by["instance_1"]["ttft_p99_ms"], 300 + 0.99 * 600)
+        self.assertAlmostEqual(by["instance_0"]["ttft_p99_ms"], 100 + 0.99 * 100)
+        # The gate's slot holds each instance's per-request TPOT (instance_0: 20 and 21 ms), not a step quantity.
+        self.assertAlmostEqual(by["instance_0"]["tpot_p99_ms"], 20 + 0.99)
+        self.assertEqual(by["instance_0"]["itl_p99_ms"], by["instance_0"]["tpot_p99_ms"])
+
+    def test_grace_requests_inside_the_window_count_and_requests_past_it_do_not(self):
         doc = json.loads(RESULT_DOC)
-        doc["reports"]["engine"]["instances"] = {
-            "instance_1": {"instance_id": "instance_1", "tokens_per_sec": 2.0, "itl_p99_ms": 40.0},
-            "instance_0": {"instance_id": "instance_0", "tokens_per_sec": 1.0, "itl_p99_ms": 30.0}}
-        s = json.dumps(doc)
-        self.assertEqual([o["instance_id"] for o in run_blis.parse_all_instances(s)],
-                         ["instance_0", "instance_1"])
-        # The worst instance is over the aggregate's 294.031? No -- so the aggregate still wins,
-        # which is the point of including it rather than trusting the per-instance rows.
-        rec = {"metrics": run_blis.parse_metrics(s),
-               "metrics_all_instances": run_blis.parse_all_instances(s)}
-        self.assertEqual(run_blis.worst_itl_p99(rec), (294.031, False))
+        doc["request_rows"] = [
+            _row(0, "instance_0", 100, 1000, 20),
+            dict(_row(1, "instance_0", 900, 1500, 21), phase="grace", arrival_us=0),
+            dict(_row(2, "instance_0", 9000, 9999, 30), phase="grace", arrival_us=4_000_000),   # ends at 14 s, past 4.9 s
+            _row(3, "instance_0", 7000, 9500, 41, phase="warmup")]
+        for r in doc["request_rows"][:1]:
+            r["arrival_us"] = 0
+        by = {o["instance_id"]: o for o in run_blis.measured_instances(doc)}
+        self.assertEqual(2, by["instance_0"]["requests"])
+        self.assertAlmostEqual(892.0, by["instance_0"]["ttft_p99_ms"])      # 100 and 900 ms, linear p99
+
+    def test_the_worst_instance_ttft_is_judged_on_the_window(self):
+        rec = {"metrics": run_blis.parse_metrics(RESULT_DOC),
+               "metrics_all_instances": run_blis.parse_all_instances(RESULT_DOC)}
+        worst, missing = run_blis.worst_metric(rec, "ttft_p99_ms")
+        self.assertFalse(missing)
+        self.assertAlmostEqual(worst, 894.0)      # instance_1, profile phase; not 8000 (whole run)
+
+    def test_the_percentile_is_the_results_own_method(self):
+        # numpy's `linear`: 112-sample p99 of a real run matched Result.metrics to every digit.
+        xs = list(range(1, 101))
+        self.assertAlmostEqual(run_blis._percentile(xs, 99), 99.01)
+        self.assertEqual(run_blis._percentile([5.0], 99), 5.0)
+        self.assertEqual(run_blis._percentile([1.0, 3.0], 50), 2.0)
+
+    def test_an_itl_slo_can_be_judged_at_all(self):
+        rec = {"metrics": run_blis.parse_metrics(RESULT_DOC), "metrics_all_instances": []}
+        worst, missing = run_blis.worst_itl_p99(rec)
+        self.assertFalse(missing, "a single-instance run must still measure ITL")
+        self.assertEqual(worst, 18.0)       # TPOT p99, not the step interval's 33.9
 
     def test_a_pre_v0150_flat_output_still_parses(self):
-        # The fallback must stay: a contributor testing an older binary, and every committed
-        # report's recorded stdout, are the flat MetricsOutput shape.
+        # A contributor testing an older binary: the flat MetricsOutput shape is read as written.
         s = '{"instance_id":"cluster","tokens_per_sec":11.0,"itl_p99_ms":5.47}'
         m = run_blis.parse_metrics(s)
         self.assertEqual((m["tokens_per_sec"], m["itl_p99_ms"]), (11.0, 5.47))
 
-    def test_itl_never_falls_back_to_the_clusters_measured_window_copy(self):
-        """`cluster`'s own step_interval_* is the measured window (see
-        run_blis._ITL_FROM_STEP_INTERVAL), so a document without whole_run yields nothing."""
-        doc = {"kind": "Result", "engine": {"cluster": {
-            "tokens_per_sec": 11.0,
-            # the measured-window copy, one level up from whole_run -- must not be read
-            "step_interval_p99_ms": 294.03,
-        }}}
-        m = run_blis.parse_metrics(json.dumps(doc))
-        self.assertNotIn("itl_p99_ms", m)
-        # {} is what makes run_one report "no cluster metrics parsed" rather than a later symptom
-        self.assertEqual({}, m)
+
+class RecordFields(unittest.TestCase):
+    """What a run record keeps of the Result (CFG-4, DEV-8): the measured window verbatim, the basis,
+    the whole run as raw data, and a configuration key that leaves the load out."""
+
+    def test_measured_metrics_are_copied_verbatim_with_the_result_names(self):
+        doc = json.loads(RESULT_DOC)
+        got = run_blis.measured_record(doc)
+        self.assertEqual(got["metrics"], doc["metrics"])
+        for name in ("interactivity_mean", "interactivity_p50", "ttft_p50_ms"):
+            self.assertIn(name, got["metrics"])
+        self.assertEqual(got["window"], doc["window"])
+        self.assertEqual([o["instance_id"] for o in got["instances"]], ["instance_0", "instance_1"])
+
+    def test_metric_defs_are_copied_when_the_document_has_them_and_absent_otherwise(self):
+        doc = json.loads(RESULT_DOC)
+        self.assertNotIn("metric_defs", run_blis.measured_record(doc))
+        doc["metric_defs"] = {"ttft_p99_ms": {"formula": "ttft", "statistic": "p99"}}
+        self.assertEqual(run_blis.measured_record(doc)["metric_defs"], doc["metric_defs"])
+
+    def test_a_result_with_no_metrics_block_has_no_measured_field(self):
+        doc = json.loads(RESULT_DOC)
+        del doc["metrics"]
+        self.assertIsNone(run_blis.measured_record(doc))
+        doc["metrics"] = {}
+        self.assertIsNone(run_blis.measured_record(doc))
+
+    def test_config_key_leaves_the_load_out_and_config_hash_keeps_it(self):
+        a = run_blis._record_shell({"tp": 4, "num_instances": 2, "concurrency": 8}, "p")
+        b = run_blis._record_shell({"tp": 4, "num_instances": 2, "concurrency": 64}, "p")
+        c = run_blis._record_shell({"tp": 8, "num_instances": 2, "concurrency": 8}, "p")
+        self.assertEqual(a["config_key"], b["config_key"])
+        self.assertNotEqual(a["config_hash"], b["config_hash"])
+        self.assertNotEqual(a["config_key"], c["config_key"])
+        # config_hash is unchanged by this field: it is still the hash of the whole config.
+        self.assertEqual(a["config_hash"], run_blis._config_hash({"tp": 4, "num_instances": 2, "concurrency": 8}))
+
+    def test_a_ledger_gives_one_key_per_configuration_across_its_loads(self):
+        recs = [run_blis._record_shell({"tp": tp, "num_instances": n, "concurrency": c}, "p")
+                for tp in (4, 8) for n in (1, 2) for c in (4, 8, 16)]
+        self.assertEqual(len({r["config_hash"] for r in recs}), 12)
+        self.assertEqual(len({r["config_key"] for r in recs}), 4)
 
 
 class CompletionIssue(unittest.TestCase):
@@ -932,10 +1048,25 @@ class SpeculativeDecoding(unittest.TestCase):
                                    {"block_size": 128,
                                     "speculative": {"method": "dspark", "num_spec_tokens": 5}},
                                    "n")
-        self.assertIn("      speculative:\n", y)
+        self.assertIn("      speculative_config:\n", y)
         self.assertIn('        method: "dspark"', y)
-        self.assertIn("        num_spec_tokens: 5", y)
+        self.assertIn("        num_speculative_tokens: 5", y)
         self.assertNotIn('{"method"', y)
+
+    def test_the_engine_block_takes_vllms_names_and_the_sweeps_record_keeps_its_own(self):
+        """The pin at inference-sim PR 5 refuses the earlier names ("engine key cudagraph_mode is now
+        compilation_config.cudagraph_mode"); the move happens where the scenario is rendered."""
+        eng = {"cache_dtype": "fp8", "cudagraph_mode": "FULL", "indexer_kv_dtype": "fp8", "block_size": 64,
+               "eplb": {"enable_eplb": True, "window_size": 5}, "speculative": {"method": "mtp", "num_spec_tokens": 2}}
+        y = run_blis.scenario_yaml("m", "b200", "0.32.0", dict(run_blis.PARALLEL_DEFAULTS), eng, "n")
+        for want in ('      kv_cache_dtype: "fp8"', "      compilation_config:\n", '        cudagraph_mode: "FULL"',
+                     "      attention_config:\n", "      enable_eplb: true", "      eplb_config:\n",
+                     "      speculative_config:\n", "        num_speculative_tokens: 2", "      block_size: 64"):
+            self.assertIn(want, y)
+        for old in ("cache_dtype:", "  cudagraph_mode:\n", "num_spec_tokens", "\n      speculative:"):
+            self.assertNotIn(old if old != "cache_dtype:" else "\n      cache_dtype:", y)
+        self.assertEqual(eng["cache_dtype"], "fp8")             # the caller's block is not changed
+        self.assertEqual(run_blis.to_vllm_block({"block_size": 8}), {"block_size": 8})
 
     def test_drafter_is_read_from_the_models_own_graph(self):
         """The right drafter is a property of the MODEL (dspark here, mtp on v4-pro), so it is
@@ -1024,6 +1155,61 @@ class GeneratedScenario(unittest.TestCase):
         self.assertIsNone(run_blis.result_invalid(FIXTURE_BLIS, '{"kind": "Result"}'))
         self.assertIn("refused", run_blis.result_invalid(
             FIXTURE_BLIS, '{"kind": "Result", "name": "INVALID-FOR-TEST"}'))
+
+
+class FigureForms(unittest.TestCase):
+    """Result schema versions and the form of a figure (substrate layer 10: scope, member, aggregate,
+    over). The check is keyed on the document's schema_version, so it lights up with the pin bump to a
+    simulator that writes version 3: nothing before it is refused, and nothing in version 3 is read
+    unchecked. NOT TESTABLE YET against a real binary: no pinned simulator writes version 3."""
+
+    def doc(self, version, **per_figure):
+        d = json.loads(RESULT_DOC)
+        d["schema_version"] = version
+        for name, extra in per_figure.items():
+            d["metrics"][name] = {**d["metrics"][name], **extra}
+        if int(version) >= run_blis.FIGURE_SCOPE_FROM_SCHEMA:
+            for name, m in d["metrics"].items():
+                m.setdefault("scope", "cluster")
+        return d
+
+    def test_the_versions_read_and_the_one_the_scope_check_starts_at(self):
+        self.assertEqual(run_blis.READ_RESULT_SCHEMAS, (1, 2, 3))
+        self.assertEqual(run_blis.FIGURE_SCOPE_FROM_SCHEMA, 3)
+
+    def test_version_2_and_earlier_carry_no_scope_and_are_read_as_cluster_figures(self):
+        for v in ("1", 2):
+            self.assertEqual(run_blis.figure_form_problems(self.doc(v)), [])
+
+    def test_a_version_3_cluster_figure_is_read(self):
+        d = self.doc(3)
+        self.assertEqual(run_blis.figure_form_problems(d), [])
+        self.assertEqual(run_blis.parse_metrics(json.dumps(d))["tokens_per_sec"], 106.83)
+
+    def test_a_version_3_figure_that_is_not_cluster_scope_is_refused_naming_it(self):
+        for extra, text in (({"scope": "pool"}, "scope 'pool'"), ({"scope": "instance"}, "scope 'instance'"),
+                            ({"aggregate": "max"}, "aggregate 'max'"), ({"over": "pool"}, "over 'pool'"),
+                            ({"member": "decode"}, "member 'decode'")):
+            d = self.doc(3, ttft_p99_ms=extra)
+            got = run_blis.figure_form_problems(d)
+            self.assertEqual(len(got), 1, extra)
+            self.assertTrue(got[0].startswith("ttft_p99_ms is not a cluster figure") and text in got[0], got)
+
+    def test_a_figure_with_no_scope_is_refused_from_version_3_and_not_before(self):
+        d = self.doc(3)
+        del d["metrics"]["e2e_p99_ms"]["scope"]
+        self.assertEqual(len(run_blis.figure_form_problems(d)), 1)
+        d["schema_version"] = 2
+        self.assertEqual(run_blis.figure_form_problems(d), [])
+
+    def test_a_version_this_runner_has_not_read_is_refused(self):
+        self.assertEqual(run_blis.figure_form_problems(self.doc(4)),
+                         ["Result schema_version 4 is not one this runner reads (1, 2, 3)"])
+
+    def test_the_feasibility_aggregate_is_stated_as_max_over_instances(self):
+        self.assertEqual(run_blis.FEASIBILITY_AGGREGATE["aggregate"], "max")
+        self.assertEqual(run_blis.FEASIBILITY_AGGREGATE["over"], "instance")
+        self.assertEqual(sorted(run_blis.FEASIBILITY_AGGREGATE["metrics"]), ["e2e_p99_ms", "itl_p99_ms", "ttft_p99_ms"])
 
 
 class FailureLine(unittest.TestCase):

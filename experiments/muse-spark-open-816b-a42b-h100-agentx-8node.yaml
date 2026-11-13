@@ -14,7 +14,7 @@ name: muse-spark-open-816b-a42b-h100-agentx-8node
 scenario:
   model: muse-spark-open-816b-a42b-nvfp4
   hardware: h100
-  workload: agentx-mvp
+  workload_spec: workloads/agentx-run-recipe.yaml   # the full AgentX run recipe
   gpus: 64
   cluster: {fabric: roce-200g, gpus_per_node: 8}            # H100 fleets run on RoCE; cross-node EP/all2all is priced at 25 GB/s, not IB's 50
   engine:
@@ -24,19 +24,24 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-muse-h100-8node
-    grace_period: 87600h   # = never ends within a run (ten years). TEMPORARY: `inf` is refused by the strict Result loader until blis-substrate#28 ships (M2); restore `inf` then (blis-config-search#102)
+    # grace_period: the recipe's 30 s. An infinite grace makes the measured window run to the drain
+    # (output_tok_s falls 100-fold); restoring it waits on the simulator's window semantics (blis-config-search#102).
+
+# Data parallelism above 1 is not swept: vLLM refuses to build Muse-Spark's Hopper MoE path with it
+# ("MuseSpark1x Triton/Marlin currently requires DP1 and PCP1", muse_moe_runner.py:140-146), and the pinned
+# simulator refuses the same shapes. Blackwell is not affected (the GB200 specifications sweep dp).
 
 sweeps:
   - name: topology
     # The control: every sweep below has its default twin here. EP width tp*dp grows 8 -> 64 across the ladder.
-    narrative: Eight single-node TP8 instances should peak highest, since a 64-wide EP group pays cross-node RoCE all-to-all every step for little extra batch.
-    num-instances: [8, 4, 2, 1]
-    parallel: {tp: [8, 4], dp: [1, 2, 4, 8], enable_expert_parallel: [true]}
+    narrative: Eight single-node TP8 instances are the control every other sweep is read against.
+    num-instances: [8]
+    parallel: {tp: [8], dp: [1], enable_expert_parallel: [true]}
 
   - name: ep-off
     narrative: Replicating all 256 experts instead of sharding them should cost KV room and throughput against the EP twins in topology.
-    num-instances: [8, 4]
-    parallel: {tp: [8], dp: [1, 2], enable_expert_parallel: [false]}
+    num-instances: [8]
+    parallel: {tp: [8], dp: [1], enable_expert_parallel: [false]}
 
   - name: pipeline
     narrative: Pipeline stages should trail data-parallel shapes of the same width, since each stage adds a boundary hop per decode step.
@@ -44,47 +49,27 @@ sweeps:
     parallel: {tp: [8, 4], pp: [2, 4], enable_expert_parallel: [true]}
 
   - name: moe-collective
-    # The fabric-sensitive sweep: in-node EP width 8 (8x TP8) vs cross-node EP width 64 (1x TP8 DP8) over RoCE.
-    # deepep_low_latency is left off the DP8 shape: it refused on H200 (131 GiB DeepEP buffers per rank) and cannot
-    # fit 80 GiB H100 at all, so it runs only at in-node width 8 where its buffers are smaller.
-    narrative: DeepEP backends should pay off most at cross-node EP width 64, where dispatch crosses RoCE, and matter little at in-node width 8 on NVLink.
+    # In-node EP width 8 (8x TP8) only: the cross-node DP8 shape is not swept (see the note above sweeps).
+    narrative: At in-node EP width 8 on NVLink the all-to-all backend should matter little.
     num-instances: [8]
     parallel: {tp: [8], enable_expert_parallel: [true]}
     engine:
       all2all_backend: [deepep_high_throughput, deepep_low_latency, deepep_v2, pplx]
 
-  - name: moe-collective-wide
-    # Cross-node EP width 64; deepep_low_latency omitted (will not fit 80 GiB ranks, see moe-collective).
-    narrative: At cross-node EP width 64 the DeepEP throughput backends should beat pplx by the most, since every dispatch crosses RoCE.
-    num-instances: [1]
-    parallel: {tp: [8], dp: [8], enable_expert_parallel: [true]}
-    engine:
-      all2all_backend: [deepep_high_throughput, deepep_v2, pplx]
-
   - name: kv-capacity
     # H100-specific vs the H200 8node spec. EP shards the experts tp*dp ways, so the TIGHT shape is 8x TP8 (8-way:
-    # only 0.65 GiB KV room at gmu 0.95 in the 8gpu report, and it refuses at 0.9), NOT the 64-way DP8 shape, which
-    # holds the fewest weights per rank. gmu 0.95 only here; the DP8 arm with its memory headroom carries the gmu sweep.
-    narrative: fp8 KV should matter most on 8x TP8, whose 80 GiB ranks leave the least KV room (fp8 was +40% there at c=32 in the 8gpu report), and little on the 64-wide DP8 shape.
+    # only 0.65 GiB KV room at gmu 0.95 in the 8gpu report, and it refuses at 0.9). gmu 0.95 only here.
+    narrative: fp8 KV should matter most on 8x TP8, whose 80 GiB ranks leave the least KV room (fp8 was +40% there at c=32 in the 8gpu report).
     num-instances: [8]
     parallel: {tp: [8], enable_expert_parallel: [true]}
     engine:
       cache_dtype: [auto, fp8]
 
-  - name: kv-capacity-wide
-    # The roomy 64-way DP8 shape, where gmu has headroom to vary; its KV room makes fp8 a weaker lever here.
-    narrative: With the most KV room of any shape, the 64-wide DP8 layout should gain little from fp8 KV or a higher gmu.
-    num-instances: [1]
-    parallel: {tp: [8], dp: [8], enable_expert_parallel: [true]}
-    engine:
-      cache_dtype: [auto, fp8]
-      gpu_memory_utilization: [0.9, 0.95]
-
   - name: batch-caps
     # 32768 refuses on 8x TP8 at 262k (needs 3.48 GiB KV, 0.65 available in the 8gpu report); 16384 fit there.
-    narrative: A seq cap of 32 should bind on 8x TP8 at 512 lanes but not on 2x TP8 DP4, whose dp ranks each schedule their own batch.
-    num-instances: [8, 2]
-    parallel: {tp: [8], dp: [1, 4], enable_expert_parallel: [true]}
+    narrative: A seq cap of 32 should bind on 8x TP8 at 512 lanes.
+    num-instances: [8]
+    parallel: {tp: [8], dp: [1], enable_expert_parallel: [true]}
     engine:
       max_num_seqs: [32, 256]
       max_num_batched_tokens: [4096, 16384]
@@ -116,7 +101,7 @@ sweeps:
     prefill: {parallel: {tp: [8], enable_expert_parallel: [true]}}
     decode: {parallel: {tp: [8], enable_expert_parallel: [true]}}
     router:
-      endpoint_picker_config: [pd-prefix.yaml]
+      endpoint_picker_config: [pd-prefix-based.yaml]
       plugins:
         prefix-based-pd-decider: {parameters: {nonCachedTokens: [256, 1024, 4096, 16384]}}
 
@@ -137,7 +122,7 @@ sweeps:
     prefill: {parallel: {tp: [8], enable_expert_parallel: [true]}}
     decode: {parallel: {tp: [16], enable_expert_parallel: [true]}}
     router:
-      endpoint_picker_config: [pd-prefix.yaml]
+      endpoint_picker_config: [pd-prefix-based.yaml]
       plugins:
         prefix-based-pd-decider: {parameters: {nonCachedTokens: [256, 4096]}}
 
@@ -154,7 +139,7 @@ sweeps:
     decode:
       parallel: {tp: [8], enable_expert_parallel: [true]}
       engine: {long_prefill_token_threshold: [0, 2048]}
-    router: {endpoint_picker_config: [pd-prefix.yaml]}
+    router: {endpoint_picker_config: [pd-prefix-based.yaml]}
 
   - name: pd-decode-cudagraph
     # Per-step host cost on the decode pool; does not interact with topology, so one layout.
@@ -165,7 +150,7 @@ sweeps:
     decode:
       parallel: {tp: [8], enable_expert_parallel: [true]}
       engine: {cudagraph_mode: [FULL, FULL_DECODE_ONLY]}
-    router: {endpoint_picker_config: [pd-prefix.yaml]}
+    router: {endpoint_picker_config: [pd-prefix-based.yaml]}
 
   - name: cudagraph
     # Per-step host cost; measured not to interact with topology, so one shape.

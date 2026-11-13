@@ -7,7 +7,11 @@ Hermetic: no BLIS, no network. Everything here is a pure function of a spec, whi
 the property that lets CI run the sweeper unattended -- so these tests are the guard on it.
 """
 import copy
+import yaml
 import glob
+import hashlib
+import subprocess
+from unittest import mock
 import json
 import os
 import sys
@@ -28,6 +32,8 @@ import run_blis                     # noqa: E402
 import blis_cli                     # noqa: E402
 import settings                     # noqa: E402
 import fetch_corpus as FC           # noqa: E402
+import router_configs as RC         # noqa: E402
+import pareto as PA                 # noqa: E402
 
 # TEMPORARY: the inference-sim commands, from scripts/testdata/blis-m1 (inference-sim#2077).
 BLIS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata", "blis-m1", "blis")
@@ -35,6 +41,195 @@ BLIS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata", "bli
 EXPERIMENTS = os.path.join(ROOT, "experiments")
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata")
 ROUTING = os.path.join(ROOT, "routing")
+
+
+def _knob(kind, plugin, parameter=None, profile=None, **more):
+    k = {"id": f"{kind}.{plugin}.{parameter}", "kind": kind, "plugin": plugin, "in_file": False,
+         "hosted_effect": True}
+    if parameter:
+        k["parameter"] = parameter
+    if profile:
+        k["profile"] = profile
+    k.update(more)
+    return k
+
+
+_PD_PREFIX_BASED = """apiVersion: llm-d.ai/v1
+kind: EndpointPickerConfig
+plugins:
+- type: approx-prefix-cache-producer
+  parameters:
+    maxPrefixTokensToMatch: 16384
+    lruCapacityPerServer: 31250
+- type: prefix-cache-scorer
+- type: queue-scorer
+- type: prefill-filter
+- type: decode-filter
+- type: max-score-picker
+- type: disagg-profile-handler
+  parameters:
+    deciders:
+      prefill: prefix-based-pd-decider
+- type: prefix-based-pd-decider
+  parameters:
+    nonCachedTokens: 16
+schedulingProfiles:
+- name: prefill
+  plugins:
+  - pluginRef: prefill-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+  - pluginRef: queue-scorer
+    weight: 1
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+  - pluginRef: queue-scorer
+    weight: 1
+"""
+_ROUND_ROBIN_PD = """apiVersion: llm-d.ai/v1
+kind: EndpointPickerConfig
+plugins:
+- type: prefill-filter
+- type: decode-filter
+- type: max-score-picker
+- type: always-disagg-pd-decider
+- type: disagg-profile-handler
+  parameters:
+    deciders:
+      prefill: always-disagg-pd-decider
+schedulingProfiles:
+- name: prefill
+  plugins:
+  - pluginRef: prefill-filter
+  - pluginRef: max-score-picker
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: max-score-picker
+"""
+_ROUND_ROBIN = """apiVersion: llm-d.ai/v1
+kind: EndpointPickerConfig
+plugins:
+- type: max-score-picker
+schedulingProfiles:
+- name: default
+  plugins:
+  - pluginRef: max-score-picker
+"""
+_PICKER_REASON = "the hosted boundary keeps element 0 of the picker's list"
+_PD_DECIDER = {"in_file": "always-disagg-pd-decider", "complete_variant": "pd-prefix-based",
+               "not_a_knob": "Swapping the decider is not one edit."}
+
+
+def make_router_fixture(root):
+    """A stand-in for the router repository's reference-configs/ (files and index), shaped as the
+    router publishes them, for tests that must not need the pinned checkout. The real files are
+    exercised by RealRouterConfigs when that checkout is present."""
+    d = os.path.join(root, "reference-configs")
+    os.makedirs(d)
+    files = {"pd-prefix-based.yaml": _PD_PREFIX_BASED, "round-robin-pd.yaml": _ROUND_ROBIN_PD,
+             "round-robin.yaml": _ROUND_ROBIN}
+    for name, text in files.items():
+        with open(os.path.join(d, name), "w", encoding="utf-8") as f:
+            f.write(text)
+    pick = dict(_knob("plugin_parameter", "max-score-picker", "maxNumOfEndpoints"),
+                hosted_effect=False, reason=_PICKER_REASON)
+    index = {"schema": 1, "policies": [
+        {"name": "pd-prefix-based", "files": {"colocated": None, "pd": "pd-prefix-based.yaml"}, "knobs": [
+            _knob("scorer_weight", "prefix-cache-scorer", profile="prefill", in_file=True),
+            _knob("scorer_weight", "prefix-cache-scorer", profile="decode", in_file=True),
+            _knob("scorer_weight", "queue-scorer", profile="prefill", in_file=True),
+            _knob("scorer_weight", "queue-scorer", profile="decode", in_file=True),
+            _knob("plugin_parameter", "prefix-based-pd-decider", "nonCachedTokens", in_file=True),
+            _knob("plugin_parameter", "prefix-based-pd-decider", "promptTokens"),
+            _knob("plugin_parameter", "approx-prefix-cache-producer", "autoTune"),
+            _knob("plugin_parameter", "approx-prefix-cache-producer", "blockSizeTokens"),
+            _knob("plugin_parameter", "approx-prefix-cache-producer", "maxPrefixTokensToMatch",
+                  in_file=True, file_value=16384, router_default=131072),
+            # conditional: read only while maxPrefixTokensToMatch is 0 (the router's index states it as data)
+            _knob("plugin_parameter", "approx-prefix-cache-producer", "maxPrefixBlocksToMatch",
+                  router_default=2048,
+                  requires=[{"id": "plugin_parameter.approx-prefix-cache-producer.maxPrefixTokensToMatch",
+                             "value": 0}],
+                  effective_when="read only while maxPrefixTokensToMatch is 0"),
+            _knob("plugin_parameter", "prefix-cache-scorer", "matchLengthWeight")],
+         "ineffective_parameters": [pick]},
+        {"name": "round-robin", "files": {"colocated": "round-robin.yaml", "pd": "round-robin-pd.yaml"},
+         "knobs": [_knob("plugin_parameter", "approx-prefix-cache-producer", "autoTune")],
+         "pd_decider": _PD_DECIDER, "ineffective_parameters": [pick]}]}
+    with open(os.path.join(d, "policies.json"), "w", encoding="utf-8") as f:
+        json.dump(index, f)
+    return root
+
+
+def make_fake_blis(path, fixture_root, tamper=None, drop=None, fail=False, extra=None):
+    """A stand-in `blis` that answers only `router-configs [--json] [--file NAME]`, printing the
+    documented JSON: {"router_module","version","index","files":{name:{"sha256","content"}}} built
+    from the fixture directory. `tamper` names a file whose content is changed after its sha256 is
+    taken; `drop` names a file left out; `fail` makes the command exit 2; `extra` maps added names
+    (the real command names the guides' files `guides/NAME.yaml`) to their content."""
+    d = os.path.join(fixture_root, "reference-configs")
+    with open(os.path.join(d, "policies.json"), encoding="utf-8") as f:
+        index = json.load(f)
+    files = {}
+    listed = {os.path.relpath(os.path.join(top, n), d).replace(os.sep, "/")
+              for top, _dirs, names in os.walk(d) for n in names}
+    for name in sorted(listed - {"policies.json", drop}):
+        with open(d + "/" + name, "rb") as f:
+            raw = f.read()
+        files[name] = {"sha256": hashlib.sha256(raw).hexdigest(), "content": raw.decode("utf-8")}
+    for name, text in (extra or {}).items():
+        files[name] = {"sha256": hashlib.sha256(text.encode()).hexdigest(), "content": text}
+    if tamper:
+        files[tamper]["content"] += "# edited after hashing\n"
+    payload = {"router_module": "github.com/inference-sim/llm-d-router", "version": "v1.0.0-blis.fake",
+               "index": index, "files": files}
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("#!/usr/bin/env python3\nimport json, sys\n"
+                f"PAYLOAD = json.loads({json.dumps(json.dumps(payload))})\n"
+                f"FAIL = {fail!r}\n"
+                "if FAIL:\n    sys.stderr.write('unknown command \"router-configs\"\\n'); sys.exit(2)\n"
+                "a = sys.argv[1:]\n"
+                "if a[:1] != ['router-configs']:\n    sys.exit(3)\n"
+                "if '--file' in a:\n"
+                "    sys.stdout.write(PAYLOAD['files'][a[a.index('--file') + 1]]['content'])\n"
+                "else:\n    json.dump(PAYLOAD, sys.stdout)\n")
+    os.chmod(path, 0o755)
+    return path
+
+
+def _router_checkout():
+    """A developer's real router checkout when $ROUTER_CONFIGS_DIR names one, else the fixture."""
+    given = os.environ.get("ROUTER_CONFIGS_DIR")
+    if given and os.path.isfile(os.path.join(given, "reference-configs", "policies.json")):
+        return os.path.abspath(given), True
+    fixture = tempfile.mkdtemp(prefix="router-fixture-")
+    import atexit
+    import shutil
+    atexit.register(shutil.rmtree, fixture, True)
+    return make_router_fixture(fixture), False
+
+
+ROUTER_ROOT, ROUTER_IS_REAL = _router_checkout()
+os.environ["ROUTER_CONFIGS_DIR"] = ROUTER_ROOT
+
+
+def _real_blis_has_router_configs():
+    """True when $BLIS names a simulator that prints its router configs (not the case until the
+    pinned simulator carries `blis router-configs`)."""
+    blis = os.environ.get("BLIS")
+    if not blis or not os.path.isfile(blis):
+        return False
+    try:
+        return subprocess.run([blis, "router-configs", "--json"], capture_output=True,
+                              timeout=60).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def spec(**over):
@@ -523,7 +718,10 @@ class GridExpansion(unittest.TestCase):
 
 class RouterOverrides(unittest.TestCase):
     def base(self, name="queue-kv.yaml"):
-        with open(os.path.join(ROUTING, name), encoding="utf-8") as f:
+        path = os.path.join(ROUTING, name)
+        if not os.path.exists(path):
+            path = os.path.join(ROUTER_ROOT, "reference-configs", name)
+        with open(path, encoding="utf-8") as f:
             return yaml.safe_load(f)
 
     def test_override_combos_are_a_product(self):
@@ -544,7 +742,7 @@ class RouterOverrides(unittest.TestCase):
 
     def test_plugin_parameter_is_applied(self):
         doc = E.apply_overrides(
-            self.base("pd-prefix.yaml"),
+            self.base("pd-prefix-based.yaml"),
             {("plugins", "prefix-based-pd-decider", "parameters", "nonCachedTokens"): 4096})
         entry = next(p for p in doc["plugins"] if p.get("type") == "prefix-based-pd-decider")
         self.assertEqual(4096, entry["parameters"]["nonCachedTokens"])
@@ -569,12 +767,12 @@ class RouterOverrides(unittest.TestCase):
         """An override may only CHANGE a field the base already sets (#21's stated limitation)."""
         with self.assertRaises(KeyError):
             E.apply_overrides(
-                self.base("load-aware.yaml"),
+                RouterOverrides().base("load-aware.yaml"),
                 {("plugins", "load-aware-scorer", "parameters", "threshold"): 1})
 
     def test_materialize_writes_one_file_per_combo_named_by_content(self):
         sweep = {"name": "s", "num-instances": [2], "parallel": {"tp": [8]},
-                 "router": {"endpoint_picker_config": ["pd-prefix.yaml"],
+                 "router": {"endpoint_picker_config": ["pd-prefix-based.yaml"],
                             "plugins": {"prefix-based-pd-decider":
                                         {"parameters": {"nonCachedTokens": [16, 4096]}}}}}
         kept, _ = E.expand_sweep(sweep, 16)
@@ -912,6 +1110,217 @@ class NarrativeLength(unittest.TestCase):
                     f"move the rationale into a # comment")
 
 
+class WorkloadByFile(unittest.TestCase):
+    """A spec names its workload by catalog name or by a file, never both (CFG-1, CFG-2)."""
+
+    GOOD = {"scenario": "inferencex-agentx-mvp",
+            "corpus": {"loader": "semianalysis_cc_traces_weka_062126",
+                       "source": {"huggingface": "org/ds", "revision": "a" * 40, "file": "t.jsonl"},
+                       "sha256": "b" * 64},
+            "benchmark_duration_s": 900, "grace_period_s": 30, "max_context_length": "max_model_len",
+            "trace_idle_gap_cap_s": 300, "warmup": {"mode": "cache_pressure", "requests_per_lane": 10},
+            "trajectory_start": {"min_ratio": 0.25, "max_ratio": 0.75},
+            "category": "coding", "thinking": "on"}
+
+    def write(self, doc, name="wl.yaml"):
+        d = tempfile.mkdtemp(dir=E.ROOT)
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        with open(os.path.join(d, name), "w") as f:
+            yaml.safe_dump(doc, f)
+        return os.path.relpath(os.path.join(d, name), E.ROOT)
+
+    def with_file(self, path, **sc):
+        doc = spec()
+        del doc["scenario"]["workload"]
+        doc["scenario"]["workload_spec"] = path
+        doc["scenario"].update(sc)
+        return doc
+
+    def test_a_workload_file_validates(self):
+        self.assertEqual([], V.validate(self.with_file(self.write(self.GOOD)), BLIS, ROUTING))
+
+    def test_both_a_name_and_a_file_is_refused(self):
+        doc = self.with_file(self.write(self.GOOD), workload="chatbot")
+        errs = V.validate(doc, BLIS, ROUTING)
+        self.assertTrue(any("never both" in e for e in errs), errs)
+
+    def test_neither_is_refused(self):
+        doc = spec()
+        del doc["scenario"]["workload"]
+        errs = V.validate(doc, BLIS, ROUTING)
+        self.assertTrue(any("scenario.workload: required" in e for e in errs), errs)
+
+    def test_a_file_with_no_sha256_is_refused(self):
+        bad = copy.deepcopy(self.GOOD)
+        del bad["corpus"]["sha256"]
+        errs = V.validate(self.with_file(self.write(bad)), BLIS, ROUTING)
+        self.assertTrue(any("corpus.sha256 is required" in e for e in errs), errs)
+        bad["corpus"]["sha256"] = "B" * 64            # not lowercase hex
+        errs = V.validate(self.with_file(self.write(bad)), BLIS, ROUTING)
+        self.assertTrue(any("corpus.sha256 is required" in e for e in errs), errs)
+
+    def test_a_file_with_no_source_or_an_unpinned_dataset_is_refused(self):
+        bad = copy.deepcopy(self.GOOD)
+        del bad["corpus"]["source"]
+        self.assertTrue(any("corpus.source is required" in e
+                            for e in V.validate(self.with_file(self.write(bad)), BLIS, ROUTING)))
+        bad = copy.deepcopy(self.GOOD)
+        del bad["corpus"]["source"]["revision"]
+        self.assertTrue(any("source.revision is required" in e
+                            for e in V.validate(self.with_file(self.write(bad)), BLIS, ROUTING)))
+        bad["corpus"]["source"] = {"url": "https://example.org/t.jsonl"}
+        self.assertEqual([], V.validate(self.with_file(self.write(bad)), BLIS, ROUTING))
+
+    def test_a_missing_or_absolute_path_is_refused(self):
+        errs = V.validate(self.with_file("workloads/none.yaml"), BLIS, ROUTING)
+        self.assertTrue(any("no such file" in e for e in errs), errs)
+        errs = V.validate(self.with_file("/etc/hosts"), BLIS, ROUTING)
+        self.assertTrue(any("absolute path" in e for e in errs), errs)
+
+    def test_the_schema_requires_exactly_one(self):
+        import jsonschema
+        with open(os.path.join(E.ROOT, "experiments", "schema.json"), encoding="utf-8") as f:
+            schema = json.load(f)
+        v = jsonschema.Draft202012Validator(schema)
+        ok = self.with_file("workloads/x.yaml")
+        self.assertTrue(v.is_valid(ok))
+        both = self.with_file("workloads/x.yaml", workload="chatbot")
+        self.assertFalse(v.is_valid(both))
+        none = spec()
+        del none["scenario"]["workload"]
+        self.assertFalse(v.is_valid(none))
+
+    def test_the_replay_comes_from_the_file_and_records_its_sha256_and_document(self):
+        path = self.write(self.GOOD)
+        r = E.resolve_workload_spec(path, E.load_workload_spec(path),
+                                    {"corpus": "/c/t.jsonl", "grace_period": "inf"}, dry_run=True)
+        self.assertEqual("b" * 64, r["corpus_sha256"])
+        self.assertEqual("900s", r["benchmark_duration"])
+        self.assertEqual("inf", r["grace_period"])            # the spec's one deliberate override
+        self.assertEqual("max_model_len", r["max_context_length"])
+        self.assertEqual(self.GOOD, r["workload_document"])
+        self.assertEqual(E.workload_spec_sha256(path), r["workload_spec_sha256"])
+        self.assertEqual(64, len(r["workload_spec_sha256"]))
+
+    def test_the_command_passes_the_file_and_the_catalog_is_not_read(self):
+        path = self.write(self.GOOD)
+        r = E.resolve_workload_spec(path, E.load_workload_spec(path), {"corpus": "/c/t.jsonl"})
+        replay = {k: v for k, v in r.items() if k not in E.RECORD_ONLY_REPLAY}
+        cmd = run_blis.build_replay_cmd("/b", None, None, "/sc", "s.yaml", 42, None, {}, replay)
+        self.assertEqual(r["workload_spec"], cmd[cmd.index("--workload-spec") + 1])
+        self.assertEqual("b" * 64, cmd[cmd.index("--corpus-sha256") + 1])
+        self.assertNotIn("workload_document", " ".join(cmd))
+        plain = run_blis.build_replay_cmd("/b", None, None, "/sc", "s.yaml", 42, None, {},
+                                          {"scenario": "x", "corpus": "/c", "corpus_sha256": "a"})
+        self.assertNotIn("--workload-spec", plain)
+
+    def test_the_report_labels_the_workload_not_in_the_catalog(self):
+        path = self.write(self.GOOD)
+        doc = self.with_file(path, replay={"corpus": ".corpus/t.jsonl"})
+        rep = E.run_experiment(doc, BLIS, None, None, "/nonexistent", dry_run=True, verbose=False)
+        wl = rep["scenario"]["workload_spec"]
+        self.assertEqual((wl["catalog"], wl["label"]), (False, "custom (not in the catalog)"))
+        self.assertEqual(E.workload_spec_sha256(path), wl["sha256"])
+        self.assertEqual(self.GOOD, wl["document"])
+        self.assertTrue(rep["scenario"]["workload"].startswith("custom (not in the catalog)"))
+        self.assertNotIn("workload_document", rep["scenario"]["replay"])
+        sc = E._scenario_json(doc, rep)
+        self.assertEqual(wl, sc["workload"]["workload_spec"])
+        meta = E._report_json(rep)
+        self.assertIn("custom (not in the catalog)", meta["hero"][0]["html"] + meta["standfirst"])
+
+    def test_a_catalog_workload_has_no_workload_spec_block(self):
+        rep = E.run_experiment(spec(), BLIS, None, None, "/nonexistent", dry_run=True, verbose=False)
+        self.assertIsNone(rep["scenario"]["workload_spec"])
+
+
+class AgentxRunRecipe(unittest.TestCase):
+    """Every AgentX sweep descriptor states the whole run recipe: the 300 s
+    per-trajectory idle-gap cap, 10 warm-up requests per lane, the trajectory window 0.25 to 0.75, the
+    3600 s window and the uncapped corpus. A descriptor missing a field is refused; one that states a
+    different value is labelled in the report."""
+
+    FILE = "workloads/agentx-run-recipe.yaml"
+
+    @classmethod
+    def recipe_doc(cls):
+        with open(os.path.join(E.ROOT, cls.FILE), encoding="utf-8") as f:
+            return yaml.safe_load(f)
+
+    def doc(self):
+        with open(os.path.join(E.ROOT, self.FILE), encoding="utf-8") as f:
+            return yaml.safe_load(f)
+
+    def write(self, doc):
+        d = tempfile.mkdtemp(dir=E.ROOT)
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        with open(os.path.join(d, "wl.yaml"), "w") as f:
+            yaml.safe_dump(doc, f)
+        return os.path.relpath(os.path.join(d, "wl.yaml"), E.ROOT)
+
+    def sweep(self, path):
+        d = spec()
+        del d["scenario"]["workload"]
+        d["scenario"]["workload_spec"] = path
+        return d
+
+    def test_the_recipe_file_states_the_runs_values_and_validates(self):
+        d = self.doc()
+        self.assertEqual({k: V._dig(d, k) for k in V.AGENTX_RECIPE}, V.AGENTX_RECIPE)
+        self.assertEqual(V.AGENTX_UNCAPPED_LOADER, d["corpus"]["loader"])
+        self.assertEqual({}, V.recipe_differences(d))
+        self.assertEqual([], V.validate(self.sweep(self.FILE), BLIS, ROUTING))
+
+    def test_a_descriptor_missing_any_recipe_field_is_refused_naming_it(self):
+        for field in V.AGENTX_RECIPE:
+            d = copy.deepcopy(self.doc())
+            node = d
+            *parents, leaf = field.split(".")
+            for k in parents:
+                node = node[k]
+            del node[leaf]
+            errs = V.validate(self.sweep(self.write(d)), BLIS, ROUTING)
+            self.assertTrue(any("must state the whole run recipe" in e and field in e for e in errs), (field, errs))
+
+    def test_the_catalogs_agentx_descriptor_is_refused_because_it_states_no_cap_or_warmup(self):
+        d = spec()
+        d["scenario"]["workload"] = "agentx-mvp"
+        errs = V.validate(d, BLIS, ROUTING)
+        self.assertTrue(any("states no per-trajectory idle-gap cap" in e for e in errs), errs)
+
+    def test_a_different_value_or_the_capped_corpus_is_labelled_not_refused(self):
+        d = self.doc()
+        d["benchmark_duration_s"] = 900
+        d["corpus"]["loader"] = "semianalysis_cc_traces_weka_062126_256k"
+        self.assertEqual([], V.validate(self.sweep(self.write(d)), BLIS, ROUTING))
+        rec = E.recipe_record(d)
+        self.assertEqual({"benchmark_duration_s": [900, 3600],
+                          "corpus.loader": ["semianalysis_cc_traces_weka_062126_256k", V.AGENTX_UNCAPPED_LOADER]},
+                         rec["differs_from_run"])
+        self.assertIn("differs from the run's in", rec["label"])
+
+    def test_the_sweep_output_names_the_recipe(self):
+        doc = spec()
+        del doc["scenario"]["workload"]
+        doc["scenario"]["workload_spec"] = self.FILE
+        doc["scenario"]["replay"] = {"corpus": ".corpus/t.jsonl"}
+        rep = E.run_experiment(doc, BLIS, None, None, "/nonexistent", dry_run=True, verbose=False)
+        rec = rep["scenario"]["workload_spec"]["recipe"]
+        self.assertEqual(300, rec["fields"]["trace_idle_gap_cap_s"])
+        self.assertEqual(10, rec["fields"]["warmup.requests_per_lane"])
+        self.assertEqual({}, rec["differs_from_run"])
+        self.assertIn("300 s idle-gap cap, 10 warm-up requests per lane", rec["label"])
+        meta = E._report_json(rep)
+        self.assertIn("300 s idle-gap cap, 10 warm-up requests per lane", meta["hero"][0]["html"] + meta["standfirst"])
+
+    def test_every_committed_agentic_sweep_states_the_recipe(self):
+        names = sorted(n for n in os.listdir(os.path.join(E.ROOT, "experiments")) if "agentx" in n and n.endswith(".yaml"))
+        self.assertEqual(9, len(names))
+        for n in names:
+            with open(os.path.join(E.ROOT, "experiments", n), encoding="utf-8") as f:
+                self.assertEqual(self.FILE, yaml.safe_load(f)["scenario"].get("workload_spec"), n)
+
+
 class ReplayComesFromTheCatalog(unittest.TestCase):
     """A replay workload is fully described by blis-catalog/workloads/<name>.yaml.
 
@@ -987,6 +1396,16 @@ class ReplayComesFromTheCatalog(unittest.TestCase):
             doc, err = V.load(path)
             self.assertIsNone(err, f"{path}: {err}")
             sc = doc.get("scenario") or {}
+            if sc.get("workload_spec"):
+                checked += 1
+                try:
+                    out = E.resolve_workload_spec(sc["workload_spec"], E.load_workload_spec(sc["workload_spec"]),
+                                                  sc.get("replay"))
+                except SystemExit as exc:
+                    self.fail(f"{os.path.basename(path)} is a replay spec that cannot run: {exc}")
+                self.assertTrue(out.get("corpus"), f"{os.path.basename(path)}: no corpus path")
+                self.assertFalse(os.path.isabs(out["corpus"]))
+                continue
             if E.replay_descriptor(sc.get("workload"), self.CATALOG) is None:
                 continue
             checked += 1
@@ -1073,6 +1492,33 @@ class CorpusProvisioning(unittest.TestCase):
         self.assertIn(source["revision"], url, "the pinned revision must appear in the URL")
         self.assertNotIn("/main/", url, "a branch name would not be reproducible")
         self.assertEqual(64, len(desc["corpus"]["sha256"]))
+
+    def test_a_spec_that_names_a_workload_file_is_fetched_from_that_files_corpus(self):
+        """The CI fetch step runs on every replay spec, including one with no catalog workload."""
+        import contextlib
+        import io
+        root = tempfile.mkdtemp(dir=E.ROOT)
+        self.addCleanup(__import__("shutil").rmtree, root, True)
+        rel = os.path.relpath(root, E.ROOT)
+        with open(os.path.join(root, "wl.yaml"), "w") as f:
+            yaml.safe_dump(WorkloadByFile.GOOD, f)
+        with open(os.path.join(root, "s.yaml"), "w") as f:
+            yaml.safe_dump({"scenario": {"workload_spec": os.path.join(rel, "wl.yaml"),
+                                         "replay": {"corpus": os.path.join(root, "c.jsonl")}}}, f)
+        seen = []
+        orig, argv = FC.fetch, sys.argv
+        FC.fetch = lambda dest, url, sha, token=None: seen.append((dest, url, sha))
+        sys.argv = ["fetch_corpus.py", os.path.join(root, "s.yaml")]
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(0, FC.main())
+        finally:
+            FC.fetch, sys.argv = orig, argv
+        g = WorkloadByFile.GOOD["corpus"]
+        self.assertEqual(1, len(seen))
+        self.assertEqual("b" * 64, seen[0][2])
+        self.assertIn(g["source"]["revision"], seen[0][1])      # the pinned revision, not a branch
+        self.assertIn(g["source"]["huggingface"], seen[0][1])
 
     def test_a_digest_mismatch_is_refused_and_leaves_nothing_behind(self):
         """A truncated transfer must never be renamed into place as the corpus."""
@@ -1386,6 +1832,24 @@ class SloHandling(unittest.TestCase):
     def test_slo_limits_keeps_the_throughput_floor(self):
         self.assertEqual({"itl_p99": 20.0, "throughput_per_gpu": 500.0},
                          E.slo_limits({"itl_p99": "20ms", "throughput_per_gpu": 500}))
+
+    def test_a_drafting_runs_per_token_tpot_is_compared_with_the_cap_as_it_is(self):
+        """TPOT is per token and already holds what speculation gains: 30 ms against a 20 ms cap fails
+        whatever the acceptance length, and the sweeper and the report agree (no second division)."""
+        import report
+        dep = {"engine": {"speculative": {"method": "dspark", "num_spec_tokens": 5}},
+               "acceptance": {"acceptance_length": 3.0, "source": "test"}}
+        rec = self.rec(deployment=dep, metrics={"tokens_per_sec": 100.0, "itl_p99_ms": 30.0, "tpot_p99_ms": 30.0,
+                                                "ttft_p99_ms": 500.0},
+                       metrics_all_instances=[])
+        ok, why = E.servable(rec, {"itl_p99": 20.0})
+        self.assertFalse(ok)
+        self.assertIn("30.0 ms > 20 ms", why)
+        self.assertAlmostEqual(run_blis.per_user_rate(rec)[0], 1000 / 30.0, places=1)
+        self.assertFalse(report._feasible(rec, {"tok_per_s_per_user": 50.0}, {"itl_p99": 20.0})[0])
+        under = self.rec(deployment=dep, metrics={"tokens_per_sec": 100.0, "itl_p99_ms": 18.0, "tpot_p99_ms": 18.0,
+                                                  "ttft_p99_ms": 500.0}, metrics_all_instances=[])
+        self.assertTrue(E.servable(under, {"itl_p99": 20.0})[0])
 
     def test_throughput_floor_is_judged_per_gpu(self):
         # 100 tok/s across 2 GPUs is 50 per GPU.
@@ -1834,7 +2298,7 @@ class DryRunPlan(unittest.TestCase):
         """The narrative seam must carry the spec's PRE-RUN hypothesis beside the outcome; this
         path has no LLM, so it must quote rather than invent."""
         report = {
-            "name": "x", "description": "",
+            "name": "x", "description": "", "basis": "measured_window", "scope": "cluster",
             "scenario": {"model": "m", "hardware": "h100", "workload": "chatbot", "gpus": 8,
                          "concurrency": [4], "seed": 42, "replay": None},
             "totals": {"configs": 1, "runs": 1, "servable": 1},
@@ -1857,6 +2321,7 @@ class DryRunPlan(unittest.TestCase):
     def test_report_json_states_when_nothing_was_servable(self):
         report = {
             "name": "x", "description": "", "totals": {"configs": 1, "runs": 1, "servable": 0},
+            "basis": "measured_window", "scope": "cluster",
             "scenario": {"model": "m", "hardware": "h100", "workload": "chatbot", "gpus": 8,
                          "concurrency": [4], "seed": 42, "replay": None},
             "sweeps": [{"name": "s", "narrative": "", "configs": 1, "runs": 1, "dropped": [],
@@ -2122,14 +2587,104 @@ class ProvenanceSplit(unittest.TestCase):
         self.assertIn("distinct resolved stacks", report.provenance_split(stacks))
 
 
-class PerUserRateUnderDrafting(unittest.TestCase):
-    """Under speculative decoding BLIS logs ITL per VERIFICATION STEP, and a step emits AL tokens,
-    so the naive 1000/ITL is a step rate. report._per_user_rate must return the AL-scaled per-token
-    rate, withhold it when AL is unknown, and give the direct rate without drafting -- the one
-    definition _feasible also judges on. (Ported from the retired test_report.py, issue #69, and
-    rewritten to call the kept helper directly rather than the removed build_records.)"""
+    def test_a_ledger_that_mixes_bases_is_flagged_and_a_uniform_one_is_not(self):
+        import report
+        m = {"tokens_per_sec": 1.0}
+        old = {"cmd": ["blis", "run", "--seed", "42"], "metrics": m}          # written before the basis was recorded
+        new = {"cmd": ["blis", "run", "--seed", "42"], "basis": "measured_window", "metrics": m}
+        self.assertEqual("", report.provenance_split([old, old]))
+        self.assertEqual("", report.provenance_split([new, new]))
+        self.assertIn("mix bases", report.provenance_split([old, new]))
+        # An error row never produced metrics, so it has no basis to disagree about.
+        err = {"cmd": None, "error": "unsupported config: x", "metrics": {}}
+        ok = dict(new, metrics={"tokens_per_sec": 1.0})
+        self.assertEqual("", report.provenance_split([ok, err, ok]))
+        self.assertIn("mix bases", report.provenance_split([ok, dict(old, metrics={"tokens_per_sec": 1.0})]))
+        self.assertIn("unrecorded", report.provenance_split([old, new]))
 
-    ITL = 32.995
+
+class BoundedGrace(unittest.TestCase):
+    """An agentic replay's grace is the recipe's finite 30 s. An infinite grace makes the measured window
+    run to the drain (a 3600 s recipe measured over 358,132 s, 552 tok/s read as 5.6), so no spec states
+    it until the simulator separates the window from the drain; none states a ten-year stand-in either."""
+
+    def specs(self):
+        import glob
+        for path in sorted(glob.glob(os.path.join(E.ROOT, "experiments", "*.yaml"))):
+            with open(path, encoding="utf-8") as f:
+                yield os.path.basename(path), yaml.safe_load(f)
+
+    def test_no_replay_spec_overrides_the_recipes_grace_with_inf_or_a_stand_in(self):
+        replays = [(n, d["scenario"]["replay"]) for n, d in self.specs() if d["scenario"].get("replay")]
+        self.assertEqual(9, len(replays))
+        for name, rep in replays:
+            self.assertNotIn("grace_period", rep, name)
+
+    def test_the_recipe_the_specs_name_has_a_30_second_grace(self):
+        with open(os.path.join(E.ROOT, "workloads", "agentx-run-recipe.yaml"), encoding="utf-8") as f:
+            self.assertEqual(30, yaml.safe_load(f)["grace_period_s"])
+
+    def test_no_spec_carries_a_ten_year_comment_or_a_temporary_note(self):
+        import glob
+        for path in sorted(glob.glob(os.path.join(E.ROOT, "experiments", "*.yaml"))):
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            self.assertNotIn("87600h", text, path)
+            self.assertNotIn("TEMPORARY", text, path)
+
+    def test_an_override_of_a_recipe_field_is_named_in_the_record_and_the_headline(self):
+        doc = AgentxRunRecipe.recipe_doc()
+        self.assertEqual({}, E.recipe_record(doc, {"benchmark_duration": "3600s", "grace_period": "30s"})["overrides"])
+        rec = E.recipe_record(doc, {"benchmark_duration": "900s", "grace_period": "inf"})
+        self.assertEqual({"benchmark_duration_s": [3600, 900], "grace_period_s": [30, "inf"]}, rec["overrides"])
+        self.assertEqual({"benchmark_duration_s": [900, 3600], "grace_period_s": ["inf", 30]}, rec["differs_from_run"])
+        self.assertEqual("inf", rec["fields"]["grace_period_s"])
+        self.assertIn("the spec overrides benchmark_duration_s (3600 to 900), grace_period_s (30 to inf)", rec["label"])
+
+    def test_the_sweep_output_names_a_grace_override_of_the_spec(self):
+        doc = spec()
+        del doc["scenario"]["workload"]
+        doc["scenario"]["workload_spec"] = AgentxRunRecipe.FILE
+        doc["scenario"]["replay"] = {"corpus": ".corpus/t.jsonl", "grace_period": "inf"}
+        rep = E.run_experiment(doc, BLIS, None, None, "/nonexistent", dry_run=True, verbose=False)
+        rec = rep["scenario"]["workload_spec"]["recipe"]
+        self.assertEqual("inf", rec["fields"]["grace_period_s"])
+        self.assertEqual({"grace_period_s": ["inf", 30]}, rec["differs_from_run"])
+        meta = E._report_json(rep)
+        self.assertIn("grace_period_s (30 to inf)", meta["hero"][0]["html"] + meta["standfirst"])
+
+    def test_the_runner_asks_for_yaml_when_the_grace_is_infinite(self):
+        # The Result echoes the grace, and the stdout JSON of the pinned release has no infinity.
+        cmd = run_blis.build_replay_cmd("/b", None, None, "/sc", "s.yaml", 42, None, {},
+                                        {"scenario": "x", "corpus": "/c", "corpus_sha256": "a",
+                                         "grace_period": "inf"})
+        self.assertEqual("yaml", cmd[cmd.index("--format") + 1])
+
+
+class BasisAndScope(unittest.TestCase):
+    """A report states the basis and scope of every ranked figure (CFG-4, DEV-8)."""
+
+    def test_the_narrative_and_the_scenario_state_both(self):
+        report = {"name": "x", "description": "", "totals": {"configs": 1, "runs": 1, "servable": 0},
+                  "scenario": {"model": "m", "hardware": "h", "workload": "w", "gpus": 8, "seed": 42,
+                               "concurrency": [4], "replay": None},
+                  "sweeps": [], "best_overall": None, "basis": "measured_window",
+                  "scope": "cluster; worst instance for TTFT and end-to-end gates",
+                  "interactivity_floor": {}, "objective": "o", "pinned_stack": {}}
+        meta = E._report_json(report)["meta"]
+        self.assertIn("basis: measured window", meta)
+        self.assertTrue(any(m.startswith("scope: cluster") for m in meta))
+        sc = E._scenario_json({}, report)
+        self.assertEqual((sc["basis"], sc["scope"]), (report["basis"], report["scope"]))
+
+
+class PerUserRateUnderDrafting(unittest.TestCase):
+    """The per-user rate is 1000 over the worst p99 time per output token, drafting or not. TPOT is
+    per request and per TOKEN, so it already holds what speculation gains: the AL factor the engine's
+    per-STEP interval needed is gone, and an unknown acceptance withholds nothing. (Rewritten for the
+    registry's per-request TPOT gate; the acceptance-scaled rate belonged to the step interval.)"""
+
+    TPOT = 10.0
 
     def _run(self, *, k=0, al=None):
         dep = {"parallel": {"tp": 4}, "num_instances": 1, "gpus": 4,
@@ -2139,35 +2694,27 @@ class PerUserRateUnderDrafting(unittest.TestCase):
             if al:
                 dep["acceptance"] = {"acceptance_length": al, "source": "test (b200)"}
         return {"concurrency": 8, "config": {"tp": 4}, "deployment": dep, "returncode": 0,
-                "metrics": {"tokens_per_sec": 1041.5, "itl_p99_ms": self.ITL,
+                "metrics": {"tokens_per_sec": 1041.5, "itl_p99_ms": self.TPOT, "tpot_p99_ms": self.TPOT,
                             "injected_requests": 40, "completed_requests": 40}}
 
     def test_no_drafting_uses_the_direct_rate(self):
         import report
         pu, basis = report._per_user_rate(self._run())
-        self.assertAlmostEqual(pu, 1000 / self.ITL, places=1)
+        self.assertAlmostEqual(pu, 1000 / self.TPOT, places=1)
         self.assertEqual(basis, "")
 
-    def test_drafting_with_acceptance_scales_by_al(self):
+    def test_drafting_is_not_scaled_by_the_acceptance_length(self):
         import report
-        pu, basis = report._per_user_rate(self._run(k=5, al=3.51))
-        self.assertAlmostEqual(pu, 3.51 * 1000 / self.ITL, places=1)
-        self.assertEqual(basis, "derived-from-acceptance")
+        for al in (3.51, None):
+            pu, basis = report._per_user_rate(self._run(k=5, al=al))
+            self.assertAlmostEqual(pu, 1000 / self.TPOT, places=1)
+            self.assertEqual(basis, "")
 
-    def test_the_derived_rate_is_above_the_naive_one(self):
-        """The whole point: the naive axis would reject this config against a 50 tok/s/user floor
-        while the correct one clears it comfortably."""
-        import report
-        pu, _ = report._per_user_rate(self._run(k=5, al=3.51))
-        self.assertLess(1000 / self.ITL, 50)      # naive: looks like a violation
-        self.assertGreater(pu, 50)                # derived: clears the floor
-
-    def test_drafting_without_acceptance_withholds_the_rate(self):
-        """An unknown acceptance factor means an unknown multiple -- publish nothing."""
+    def test_an_unknown_acceptance_withholds_nothing(self):
         import report
         pu, basis = report._per_user_rate(self._run(k=5, al=None))
-        self.assertIsNone(pu)
-        self.assertEqual(basis, "step-estimate-withheld")
+        self.assertIsNotNone(pu)
+        self.assertEqual(basis, "")
 
 
 class ReportSchemaDoc(unittest.TestCase):
@@ -2181,6 +2728,789 @@ class ReportSchemaDoc(unittest.TestCase):
         self.assertNotIn("mean inter-token latency", text, "schema.md still says mean ITL for pu")
         self.assertNotIn("1000 / mean itl", text, "schema.md still says 1000/mean ITL for pu")
         self.assertNotIn("1000/mean-itl", text, "schema.md still says 1000/mean-ITL for pu")
+
+
+# --- refusals, the Pareto front, router knobs, simulator switches ------------------------------
+
+FATAL = ('time="2026-11-11T20:50:44-05:00" level=fatal msg="instance instance_0: scenario '
+         '\\"{scn}\\": engine vllm 0.32.0: a KV connector beside KV cache group 0 is not modelled '
+         '(https://github.com/inference-sim/blis-vllm/issues/7)"')
+
+
+def _ran(tps, tpot_ms, itl_p99=1.0, **extra):
+    # a Result that states the registry's interactivity of the mean TPOT (1000 / mean TPOT)
+    m = {"tokens_per_sec": tps, "itl_p99_ms": itl_p99, "tpot_mean_ms": tpot_ms,
+         "interactivity_of_mean_tpot": 1000.0 / tpot_ms}
+    m.update(extra)
+    return {"returncode": 0, "error": None, "metrics": m, "metrics_all_instances": [], "cmd": None}
+
+
+def _refused(scn="a1b2.yaml"):
+    return {"returncode": 1, "error": FATAL.format(scn=scn), "metrics": {},
+            "metrics_all_instances": [], "cmd": None, "stderr_tail": ""}
+
+
+def _pd_and_agg_spec(**obj):
+    sc = spec()["scenario"]
+    sc["concurrency"] = [1, 2]
+    out = {"name": "pd", "scenario": sc, "sweeps": [
+        {"name": "pd", "prefill-instances": [1], "decode-instances": [1],
+         "prefill": {"parallel": {"tp": [8]}}, "decode": {"parallel": {"tp": [8]}}},
+        {"name": "agg", "num-instances": [2], "parallel": {"tp": [8]}}]}
+    if obj:
+        out["objective"] = obj
+    return out
+
+
+def _sweep_with(doc, fake):
+    def fake_run_one(*a, **kw):
+        cfg = kw.get("config") or a[11]
+        rec = fake(cfg)
+        rec.setdefault("config", dict(cfg))
+        return rec
+    real = E.run_blis.run_one
+    E.run_blis.run_one = fake_run_one
+    try:
+        with tempfile.TemporaryDirectory() as out:
+            return E.run_experiment(doc, BLIS, "/c", "/r", out, verbose=False)
+    finally:
+        E.run_blis.run_one = real
+
+
+class Refusals(unittest.TestCase):
+    def test_a_refused_candidate_is_counted_by_reason_and_is_not_an_slo_miss(self):
+        def fake(cfg):
+            # the P/D arm is refused by the engine; the aggregated arm runs and misses the 20 ms cap
+            return _refused() if cfg.get("prefill_instances") else _ran(100.0, 50.0, itl_p99=50.0)
+        rep = _sweep_with(_pd_and_agg_spec(), fake)
+        self.assertEqual(2, rep["totals"]["refused"], "one candidate at two loads")
+        self.assertEqual(1, rep["totals"]["configs_refused"])
+        self.assertEqual({"refused": 2, "slo_miss": 2}, rep["outcomes"])
+        [group] = rep["refusals"]
+        self.assertEqual(2, group["runs"])
+        self.assertEqual(1, group["configs"])
+        self.assertIn("is not modelled", group["reason"])
+        self.assertEqual("https://github.com/inference-sim/blis-vllm/issues/7", group["issue"])
+        self.assertNotIn("a1b2.yaml", group["reason"], "the per-candidate file name is not the reason")
+        pd_rows = [r for r in rep["sweeps"][0]["rows"]]
+        self.assertTrue(all(r["outcome"] == "refused" and not r["servable"] for r in pd_rows))
+        self.assertEqual(1, len(rep["sweeps"][0]["refusals"]))
+        self.assertEqual([], rep["sweeps"][1]["refusals"], "the aggregated sweep ran")
+        out = E._pareto_json(rep)
+        self.assertEqual(rep["refusals"], out["refusals"])
+        self.assertEqual({"refused": 2}, out["sweep_outcomes"][0]["outcomes"])
+
+    def test_a_sweep_of_only_refused_candidates_is_not_called_an_slo_miss(self):
+        rep = _sweep_with(_pd_and_agg_spec(), lambda cfg: _refused())
+        text = " ".join(h["html"] for h in E._report_json(rep)["hero"])
+        self.assertNotIn("No configuration held", text)
+        self.assertIn("refused every configuration", text)
+        self.assertIn("is not modelled", text)
+        self.assertEqual(rep["totals"]["runs"], rep["totals"]["refused"])
+
+    def test_a_mixed_sweep_says_the_misses_are_only_those_that_ran(self):
+        rep = _sweep_with(_pd_and_agg_spec(), lambda cfg: _refused() if cfg.get("prefill_instances")
+                          else _ran(100.0, 50.0, itl_p99=50.0))
+        found = E._report_json(rep)["hero"][1]["html"]
+        self.assertIn("that was run", found)
+        self.assertIn("not evidence of a miss", found)
+
+    def test_unrefused_sweeps_keep_the_old_wording(self):
+        rep = _sweep_with(_pd_and_agg_spec(), lambda cfg: _ran(100.0, 50.0, itl_p99=50.0))
+        self.assertEqual(0, rep["totals"]["refused"])
+        self.assertIn("No configuration held", E._report_json(rep)["hero"][1]["html"])
+
+    def test_outcomes_tell_a_refusal_from_a_timeout_a_crash_and_an_overload(self):
+        base = {"stderr_tail": ""}
+        self.assertEqual("refused", run_blis.outcome_of({**base, **_refused()})[0])
+        self.assertEqual("timeout", run_blis.outcome_of(
+            {"returncode": -1, "error": "timeout", "stderr_tail": "timeout"})[0])
+        self.assertEqual("crash", run_blis.outcome_of(
+            {**base, "returncode": 2, "error": "panic: runtime error"})[0])
+        self.assertEqual("crash", run_blis.outcome_of({**base, "returncode": 1, "error": "rc=1"})[0])
+        self.assertEqual("overloaded", run_blis.outcome_of(
+            {**base, "returncode": 0, "error": "incomplete: injected=5 != completed=4"})[0])
+        self.assertEqual("refused", run_blis.outcome_of(
+            {**base, "returncode": None, "error": "unsupported config: tp 3 does not divide"})[0])
+        self.assertEqual("ran", run_blis.outcome_of({**base, "returncode": 0, "error": None})[0])
+
+    def test_the_reason_ignores_the_instance_and_the_scenario_file(self):
+        a = run_blis.refusal_reason(FATAL.format(scn="aaaa.yaml"))[0]
+        b = run_blis.refusal_reason(FATAL.format(scn="bbbb.yaml").replace("instance_0", "instance_7"))[0]
+        self.assertEqual(a, b)
+
+    def test_the_validator_rejects_a_sweep_whose_every_arm_the_runner_refuses(self):
+        doc = spec(sweeps=[{"name": "s", "prefill-instances": [1], "decode-instances": [1],
+                            "prefill": {"parallel": {"tp": [8]}, "engine": {"block_size": [16]}},
+                            "decode": {"parallel": {"tp": [8]}, "engine": {"block_size": [32]}}}])
+        errs = V.validate(doc, BLIS, ROUTING)
+        self.assertTrue(any("refuses every arm" in e and "block_size" in e for e in errs), errs)
+
+    def test_the_validator_only_notes_a_partly_refused_sweep(self):
+        doc = spec(sweeps=[{"name": "s", "prefill-instances": [1], "decode-instances": [1],
+                            "prefill": {"parallel": {"tp": [8]}, "engine": {"block_size": [16, 32]}},
+                            "decode": {"parallel": {"tp": [8]}, "engine": {"block_size": [32]}}}])
+        self.assertEqual([], [e for e in V.validate(doc, BLIS, ROUTING) if "refuses" in e])
+        notes = V.refusal_notes(doc, BLIS)
+        self.assertTrue(any("1 of 2" in n and "block_size" in n for n in notes), notes)
+
+
+class InteractivityAndFigures(unittest.TestCase):
+    def test_a_result_that_states_the_figure_is_used_as_stated(self):
+        self.assertEqual((130.0, "result"), PA.interactivity_of(
+            {"interactivity_of_mean_tpot": 130.0, "tpot_mean_ms": 8.0}))
+
+    def test_a_result_without_the_figure_is_unrated_not_rebuilt_from_tpot(self):
+        # DEV-8: a definition is read from the registry, never recomputed from another field
+        self.assertEqual((None, ""), PA.interactivity_of({"tpot_mean_ms": 8.0}))
+        self.assertEqual((None, ""), PA.interactivity_of({}))
+        self.assertEqual((None, ""), PA.interactivity_of({"interactivity_of_mean_tpot": 0}))
+
+    def test_a_row_of_a_result_without_the_figure_is_counted_unrated(self):
+        rep = _sweep_with(_pd_and_agg_spec(ranking="pareto"), lambda cfg: {
+            "returncode": 0, "error": None, "cmd": None, "metrics_all_instances": [],
+            "metrics": {"tokens_per_sec": 100.0, "itl_p99_ms": 1.0, "tpot_mean_ms": 8.0,
+                        "total_tokens_per_sec_per_gpu": 480.0}})
+        self.assertIsNone(rep["best_overall"])
+        self.assertEqual(rep["totals"]["servable"], rep["pareto"]["overall"]["total"]["unrated"])
+
+    def test_the_flattened_result_keeps_the_registry_figures(self):
+        doc = {"metrics": {"output_tok_s": {"value": 1.0}, "total_tokens_per_second_per_gpu": {"value": 480.5},
+                           "output_tokens_per_second_per_decode_gpu": {"value": 8.7},
+                           "interactivity_of_mean_tpot": {"value": 114.0}}}
+        m = run_blis._flatten_result(doc)
+        self.assertEqual((480.5, 8.7, 114.0), (m["total_tokens_per_sec_per_gpu"],
+                                                m["output_tokens_per_sec_per_decode_gpu"],
+                                                m["interactivity_of_mean_tpot"]))
+
+    def test_ledger_rows_carry_the_axes(self):
+        rep = _sweep_with(_pd_and_agg_spec(), lambda cfg: _ran(
+            100.0, 8.0, total_tokens_per_sec_per_gpu=480.0, output_tokens_per_sec_per_decode_gpu=9.0))
+        row = rep["sweeps"][1]["rows"][0]
+        self.assertEqual(125.0, row["interactivity"])
+        self.assertEqual(480.0, row["total_tokens_per_sec_per_gpu"])
+        self.assertFalse(row["disaggregated"])
+        self.assertTrue(rep["sweeps"][0]["rows"][0]["disaggregated"])
+
+
+def _row(label, x, y, pd=False, servable=True, c=1, sweep="s", decode_y=None):
+    return {"label": label, "variant": "", "sweep": sweep, "concurrency": c, "servable": servable,
+            "interactivity": x, "total_tokens_per_sec_per_gpu": y,
+            "output_tokens_per_sec_per_decode_gpu": (decode_y if decode_y is not None
+                                                     else (y / 10 if y is not None else None)),
+            "disaggregated": pd, "config": {}}
+
+
+class ParetoFront(unittest.TestCase):
+    def labels(self, f):
+        return [(m["label"], m["status"]) for m in f["members"]]
+
+    def test_a_dominated_point_is_not_on_the_front(self):
+        rows = [_row("fast", 100, 500), _row("dense", 60, 900), _row("both-worse", 50, 400),
+                _row("equal-x-worse-y", 100, 450)]
+        f = PA.front(rows)
+        self.assertEqual([("dense", "front"), ("fast", "front")], self.labels(f))
+
+    def test_a_run_that_missed_the_slo_is_not_a_point(self):
+        f = PA.front([_row("a", 100, 500), _row("b", 200, 900, servable=False)])
+        self.assertEqual([("a", "front")], self.labels(f))
+
+    def test_a_servable_row_without_the_figures_is_counted_not_placed(self):
+        f = PA.front([_row("a", 100, 500), _row("old", None, None)])
+        self.assertEqual((1, 1), (f["points"], f["unrated"]))
+
+    def test_a_pd_point_that_ties_within_one_percent_does_not_displace_the_aggregated_point(self):
+        # no tolerance: one run per arm gives no interval (DEV-11), so 1% below is below
+        agg, pd = _row("agg", 100, 1000), _row("pd", 99, 990, pd=True)
+        self.assertEqual([("agg", "front")], self.labels(PA.front([agg, pd])))
+
+    def test_the_review_counterexample_a_dominated_pd_point_is_never_a_member(self):
+        # A and B are the exact front; P/D point P is dominated by B. The old tie rule let P
+        # displace A (P within 1.6% of A on both axes) and then reported B and P.
+        a, b = _row("A", 100, 100), _row("B", 99, 105)
+        p = _row("P", 99, 99, pd=True)
+        f = PA.front([a, b, p])
+        self.assertEqual([("A", "front"), ("B", "front")], sorted(self.labels(f)))
+        pts = [(m["interactivity"], m["throughput_per_gpu"]) for m in f["members"]]
+        for x, y in pts:
+            self.assertFalse(any(x2 >= x and y2 >= y and (x2 > x or y2 > y) for x2, y2 in pts))
+
+    def test_no_member_is_dominated_by_any_point_in_a_mixed_set(self):
+        rows = [_row("A", 100, 100), _row("B", 99, 105), _row("P", 99, 99, pd=True),
+                _row("Q", 98, 104, pd=True), _row("R", 100, 100, pd=True), _row("S", 50, 200)]
+        f = PA.front(rows)
+        pts = [(r["interactivity"], r["total_tokens_per_sec_per_gpu"]) for r in rows]
+        for m in f["members"]:
+            x, y = m["interactivity"], m["throughput_per_gpu"]
+            self.assertFalse(any(x2 >= x and y2 >= y and (x2 > x or y2 > y) for x2, y2 in pts), m)
+        self.assertEqual({"A", "R", "B", "S"}, {m["label"] for m in f["members"]})
+
+    def test_a_pd_point_that_beats_aggregated_is_just_on_the_front(self):
+        f = PA.front([_row("agg", 100, 1000), _row("pd", 120, 1200, pd=True)])
+        self.assertEqual([("pd", "front")], self.labels(f))
+
+    def test_two_aggregated_points_are_compared_exactly(self):
+        f = PA.front([_row("a", 100, 1000), _row("b", 99.9, 999.9)])
+        self.assertEqual([("a", "front")], self.labels(f))
+
+    def test_the_decode_form_uses_its_own_axis(self):
+        rows = [_row("a", 100, 500, decode_y=9.0), _row("b", 100, 900, decode_y=5.0)]
+        self.assertEqual("b", PA.front(rows, "total")["members"][0]["label"])
+        self.assertEqual("a", PA.front(rows, "decode")["members"][0]["label"])
+
+    def test_a_spec_that_sets_a_tie_tolerance_is_refused_with_the_reason(self):
+        errs = [e for e in V.validate(spec(objective={"ranking": "pareto", "tie_tolerance": 0.016}),
+                                      BLIS, ROUTING) if e.startswith("objective")]
+        self.assertTrue(errs and "DEV-11" in errs[0], errs)
+
+    def test_the_spec_rejects_a_bad_objective(self):
+        def errs(obj):
+            return [e for e in V.validate(spec(objective=obj), BLIS, ROUTING) if e.startswith("objective")]
+        self.assertEqual([], errs({"ranking": "pareto", "throughput": "decode"}))
+        self.assertTrue(errs({"ranking": "best"}))
+        self.assertTrue(errs({"colour": "red"}))
+
+    def test_the_report_emits_the_front_and_labels_the_ranking_used(self):
+        def fake(cfg):
+            pd = bool(cfg.get("prefill_instances"))
+            return _ran(100.0, 10.0 if pd else 9.9, total_tokens_per_sec_per_gpu=500.0 if pd else 505.0,
+                        output_tokens_per_sec_per_decode_gpu=9.0)
+        for ranking in ("scalar", "pareto"):
+            rep = _sweep_with(_pd_and_agg_spec(ranking=ranking), fake)
+            out = E._pareto_json(rep)
+            self.assertEqual(ranking, out["ranking"]["used"])
+            overall = out["front"]["overall"]["total"]["members"]
+            self.assertTrue(overall and not any(m["disaggregated"] for m in overall),
+                            "aggregated is slightly better on both axes, and no tolerance displaces it")
+            self.assertEqual("pd", out["front"]["sweeps"][0]["name"])
+            self.assertIn("front" if ranking == "pareto" else "output tok/s", out["ranking"]["description"])
+        self.assertTrue(all(f["front_status"] for f in out["finalists"]), "pareto finalists are front members")
+
+    def test_a_simulator_that_states_no_figure_is_said_not_read_as_no_servable_config(self):
+        rep = _sweep_with(_pd_and_agg_spec(ranking="pareto"),
+                          lambda cfg: {"returncode": 0, "error": None, "cmd": None, "metrics_all_instances": [],
+                                       "metrics": {"tokens_per_sec": 100.0, "itl_p99_ms": 1.0}})
+        self.assertIsNone(rep["best_overall"])
+        self.assertGreater(rep["totals"]["servable"], 0)
+        text = " ".join(h["html"] for h in E._report_json(rep)["hero"])
+        self.assertNotIn("No configuration held", text)
+        self.assertIn("none can be placed", text)
+        self.assertEqual(rep["totals"]["servable"], rep["pareto"]["overall"]["total"]["unrated"])
+
+    def test_the_scalar_ranking_is_unchanged_and_one_finalist_per_sweep(self):
+        rep = _sweep_with(_pd_and_agg_spec(), lambda cfg: _ran(100.0, 10.0))
+        self.assertEqual("scalar", rep["ranking"]["used"])
+        self.assertEqual(2, len(E._pareto_json(rep)["finalists"]))
+
+
+class GalleryOfTheRunsOutcome(unittest.TestCase):
+    """The report the SPA reads, end to end: run, write the run directory, build the site data."""
+
+    def site_row(self, fake, **obj):
+        import build_gallery as BG
+        doc = _pd_and_agg_spec(**obj)
+        doc["scenario"]["run_id"] = "gallery-case-0001"
+        rep = _sweep_with(doc, fake)
+        with tempfile.TemporaryDirectory() as tmp:
+            run = os.path.join(tmp, "reports", "gallery-case-0001")
+            E._write_run_dir(run, doc, rep, [])
+            out = os.path.join(tmp, "site")
+            rows = BG.build(os.path.join(tmp, "reports"), out)
+            with open(os.path.join(out, "scenarios.json"), encoding="utf-8") as f:
+                self.assertEqual(rows, json.load(f), "what is returned is what is published")
+            self.assertTrue(os.path.isfile(os.path.join(out, rows[0]["run_id"], "pareto.json")))
+        [row] = rows
+        return row
+
+    def test_a_run_the_simulator_refused_everywhere_publishes_as_a_no_winner_card(self):
+        row = self.site_row(lambda cfg: _refused(), ranking="pareto")
+        self.assertIsNone(row["winner"])
+        self.assertEqual([], row["finalists"])
+        self.assertEqual("all_refused", row["state"])
+        self.assertEqual({"refused": 4}, row["outcomes"])
+        self.assertEqual(4, sum(g["runs"] for g in row["refusals"]))
+        self.assertEqual(0, row["front"]["points"])
+
+    def test_a_run_that_ran_but_held_no_slo_publishes_as_no_winner_not_refused(self):
+        row = self.site_row(lambda cfg: _ran(100.0, 50.0, itl_p99=50.0))
+        self.assertIsNone(row["winner"])
+        self.assertEqual("no_winner", row["state"])
+        self.assertEqual({"slo_miss": 4}, row["outcomes"])
+
+    def test_a_run_with_a_winner_publishes_the_exact_front_and_the_ranking_used(self):
+        row = self.site_row(lambda cfg: _ran(100.0, 10.0, total_tokens_per_sec_per_gpu=500.0),
+                            ranking="pareto")
+        self.assertEqual("winner", row["state"])
+        self.assertEqual("pareto", row["ranking"]["used"])
+        self.assertTrue(row["front"]["members"])
+        self.assertTrue(all(f["tps_per_gpu"] is not None for f in row["finalists"]))
+
+
+class RouterKnobs(unittest.TestCase):
+    PD = "pd-prefix-based.yaml"
+
+    def setUp(self):
+        # always the fixture: these tests are about the mechanism, not the pinned files' contents
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = make_router_fixture(self._tmp.name)
+        self.router = RC.open_checkout(self.root, verify=False)
+
+    def base(self, name):
+        with open(os.path.join(self.root, "reference-configs", name), encoding="utf-8") as f:
+            return yaml.safe_load(f)
+
+    def mat(self, cand, out):
+        return E.materialize_router(cand, ROUTING, out, self.router)
+
+    def test_the_base_is_the_routers_file_byte_for_byte(self):
+        with tempfile.TemporaryDirectory() as out:
+            resolved, desc = self.mat({"router_config": self.PD}, out)
+            with open(resolved["router_config"], "rb") as got, \
+                    open(os.path.join(self.root, "reference-configs", self.PD), "rb") as want:
+                self.assertEqual(want.read(), got.read())
+            self.assertTrue(resolved["router_config"].startswith(out), "staged into the report")
+            rec = E.router_file_record({"router_config": self.PD}, resolved["router_config"],
+                                       ROUTING, out, self.router)
+            self.assertEqual(rec["base_sha256"], rec["sha256"])
+            self.assertEqual("router", rec["source"])
+            self.assertEqual({}, rec["overrides"])
+
+    def test_no_local_copy_of_a_router_file_remains(self):
+        self.assertFalse(os.path.exists(os.path.join(ROUTING, self.PD)))
+        self.assertFalse(os.path.exists(os.path.join(ROUTING, "pd-prefix.yaml")))
+
+    def test_a_knob_the_file_lacks_is_reachable_and_the_file_is_written_and_recorded(self):
+        cand = {"router_config": self.PD, "router_overrides": {
+            ("plugins", "prefix-based-pd-decider", "parameters", "promptTokens"): 2048,
+            ("plugins", "approx-prefix-cache-producer", "parameters", "autoTune"): False,
+            ("plugins", "prefix-cache-scorer", "parameters", "matchLengthWeight"): 0.5,
+            ("schedulingProfiles", "decode", "prefix-cache-scorer", "weight"): 5}}
+        with tempfile.TemporaryDirectory() as out:
+            resolved, _ = self.mat(cand, out)
+            with open(resolved["router_config"], encoding="utf-8") as f:
+                doc = yaml.safe_load(f)
+            plugin = {p["type"]: p.get("parameters", {}) for p in doc["plugins"]}
+            self.assertEqual(2048, plugin["prefix-based-pd-decider"]["promptTokens"])
+            self.assertEqual(16, plugin["prefix-based-pd-decider"]["nonCachedTokens"], "untouched")
+            self.assertIs(False, plugin["approx-prefix-cache-producer"]["autoTune"])
+            self.assertEqual(0.5, plugin["prefix-cache-scorer"]["matchLengthWeight"])
+            decode = next(p for p in doc["schedulingProfiles"] if p["name"] == "decode")
+            self.assertEqual(5, next(r for r in decode["plugins"]
+                                     if r["pluginRef"] == "prefix-cache-scorer")["weight"])
+            rec = E.router_file_record(cand, resolved["router_config"], ROUTING, out, self.router)
+            self.assertNotEqual(rec["base_sha256"], rec["sha256"])
+            self.assertEqual(2048, rec["overrides"]["plugins.prefix-based-pd-decider.parameters.promptTokens"])
+            self.assertTrue(os.path.isfile(os.path.join(out, rec["file"])))
+
+    def test_a_plugin_and_a_parameter_the_file_lacks_are_added(self):
+        doc = RC.apply_overrides(
+            self.base("round-robin.yaml"),
+            {("plugins", "approx-prefix-cache-producer", "parameters", "autoTune"): False},
+            self.router.knobs("round-robin.yaml"))
+        plugin = {p["type"]: p.get("parameters") for p in doc["plugins"]}
+        self.assertEqual({"autoTune": False}, plugin["approx-prefix-cache-producer"])
+
+    def test_a_knob_the_index_does_not_list_is_refused(self):
+        knobs = self.router.knobs(self.PD)
+        for path in (("plugins", "prefix-based-pd-decider", "parameters", "nonCachedTokenz"),
+                     ("plugins", "kv-thing", "parameters", "x"),
+                     ("schedulingProfiles", "decode", "prefix-cache-scorer", "pluginRef")):
+            with self.assertRaises(KeyError, msg=str(path)):
+                RC.apply_overrides(self.base(self.PD), {path: 1}, knobs)
+
+    def test_an_ineffective_parameter_is_refused_by_name_with_the_reason(self):
+        for name in (self.PD, "round-robin.yaml", "round-robin-pd.yaml"):
+            with self.assertRaises(KeyError, msg=name) as cm:
+                RC.apply_overrides(self.base(name),
+                                   {("plugins", "max-score-picker", "parameters", "maxNumOfEndpoints"): 2},
+                                   self.router.knobs(name))
+            text = str(cm.exception)
+            self.assertIn("max-score-picker.maxNumOfEndpoints", text)
+            self.assertIn("accepted by the router, no effect in the hosted boundary", text)
+            self.assertIn(_PICKER_REASON, text)
+
+    def test_an_ineffective_parameter_never_reaches_the_sweep_grid_unvalidated(self):
+        errs = V.validate(spec(sweeps=[{"name": "s", "prefill-instances": [1], "decode-instances": [1],
+                                        "prefill": {"parallel": {"tp": [8]}},
+                                        "decode": {"parallel": {"tp": [8]}},
+                                        "router": {"endpoint_picker_config": [self.PD],
+                                                   "plugins": {"max-score-picker":
+                                                               {"parameters": {"maxNumOfEndpoints": [1, 2]}}}}}]),
+                          BLIS, ROUTING, router_cfg=self.router)
+        self.assertTrue(any("no effect in the hosted boundary" in e and "maxNumOfEndpoints" in e
+                            for e in errs), errs)
+
+    BLOCKS = ("plugins", "approx-prefix-cache-producer", "parameters", "maxPrefixBlocksToMatch")
+    TOKENS = ("plugins", "approx-prefix-cache-producer", "parameters", "maxPrefixTokensToMatch")
+
+    def test_a_conditional_knob_applies_when_the_other_override_meets_its_condition(self):
+        doc = RC.apply_overrides(self.base(self.PD), {self.BLOCKS: 512, self.TOKENS: 0},
+                                 self.router.knobs(self.PD))
+        params = next(p for p in doc["plugins"] if p["type"] == "approx-prefix-cache-producer")["parameters"]
+        self.assertEqual((512, 0), (params["maxPrefixBlocksToMatch"], params["maxPrefixTokensToMatch"]))
+
+    def test_a_conditional_knob_is_refused_while_the_condition_fails(self):
+        knobs = self.router.knobs(self.PD)
+        for overrides, why in (({self.BLOCKS: 512}, "the file sets 16384"),
+                               ({self.BLOCKS: 512, self.TOKENS: 8192}, "the override sets 8192")):
+            with self.assertRaises(KeyError, msg=why) as cm:
+                RC.apply_overrides(self.base(self.PD), overrides, knobs)
+            self.assertIn("maxPrefixTokensToMatch must be 0", str(cm.exception))
+
+    def test_a_conditional_knob_reads_the_router_default_when_the_file_is_silent(self):
+        # round-robin.yaml has no producer, so the requirement sees the required knob's router_default
+        index = os.path.join(self.root, "reference-configs", "policies.json")
+        with open(index, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        doc["policies"][1]["knobs"] = doc["policies"][0]["knobs"]
+        with open(index, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+        router = RC.open_checkout(self.root, verify=False)
+        with self.assertRaises(KeyError):
+            RC.apply_overrides(self.base("round-robin.yaml"), {self.BLOCKS: 512}, router.knobs("round-robin.yaml"))
+        RC.apply_overrides(self.base("round-robin.yaml"), {self.BLOCKS: 512, self.TOKENS: 0},
+                           router.knobs("round-robin.yaml"))
+
+    def test_the_validator_refuses_a_sweep_that_would_run_the_condition_unmet(self):
+        def errs(tokens):
+            params = {"maxPrefixBlocksToMatch": [512]}
+            if tokens is not None:
+                params["maxPrefixTokensToMatch"] = tokens
+            return V.validate(spec(sweeps=[{"name": "s", "prefill-instances": [1], "decode-instances": [1],
+                                            "prefill": {"parallel": {"tp": [8]}},
+                                            "decode": {"parallel": {"tp": [8]}},
+                                            "router": {"endpoint_picker_config": [self.PD],
+                                                       "plugins": {"approx-prefix-cache-producer":
+                                                                   {"parameters": params}}}}]),
+                              BLIS, ROUTING, router_cfg=self.router)
+        self.assertTrue(any("maxPrefixTokensToMatch must be 0" in e for e in errs(None)), errs(None))
+        self.assertTrue(any("maxPrefixTokensToMatch must be 0" in e for e in errs([0, 8192])))
+        self.assertEqual([], [e for e in errs([0]) if "maxPrefix" in e])
+
+    def test_the_sweep_exposes_only_the_hosted_knobs(self):
+        f = self.router.files[self.PD]
+        self.assertTrue(all(k["hosted_effect"] for k in f["knobs"]))
+        self.assertEqual(["maxNumOfEndpoints"], [k["parameter"] for k in f["ineffective"]])
+        # an index entry that says hosted_effect false is not a knob even if listed among `knobs`
+        index = os.path.join(self.root, "reference-configs", "policies.json")
+        with open(index, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        doc["policies"][0]["knobs"].append(dict(doc["policies"][0]["knobs"][0], hosted_effect=False,
+                                                parameter="bogus", plugin="prefix-based-pd-decider"))
+        with open(index, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh)
+        again = RC.open_checkout(self.root, verify=False)
+        self.assertNotIn("bogus", [k.get("parameter") for k in again.files[self.PD]["knobs"]])
+
+    def test_the_decider_is_not_an_override_key(self):
+        errs = V.validate(spec(sweeps=[{"name": "s", "prefill-instances": [1], "decode-instances": [1],
+                                        "prefill": {"parallel": {"tp": [8]}},
+                                        "decode": {"parallel": {"tp": [8]}},
+                                        "router": {"endpoint_picker_config": ["round-robin-pd.yaml"],
+                                                   "decider": ["prefix-based-pd-decider"]}}]),
+                          BLIS, ROUTING, router_cfg=self.router)
+        self.assertTrue(any("not a knob" in e and "pd-prefix-based.yaml" in e for e in errs), errs)
+
+    def test_a_decider_change_is_choosing_the_policy_variant_file(self):
+        self.assertEqual("pd-prefix-based.yaml", self.router.variant_of("round-robin-pd.yaml"))
+        self.assertIsNone(self.router.variant_of(self.PD))
+        doc = spec(sweeps=[{"name": "s", "prefill-instances": [1], "decode-instances": [1],
+                            "prefill": {"parallel": {"tp": [8]}}, "decode": {"parallel": {"tp": [8]}},
+                            "router": {"endpoint_picker_config": ["round-robin-pd.yaml", self.PD]}}])
+        self.assertEqual([], V.validate(doc, BLIS, ROUTING, router_cfg=self.router))
+        kept, _ = E.expand_sweep(doc["sweeps"][0], 16)
+        with tempfile.TemporaryDirectory() as out:
+            files = [open(self.mat(c, out)[0]["router_config"], "rb").read() for c in kept]
+        self.assertEqual(2, len(kept))
+        self.assertNotEqual(files[0], files[1], "the variant is a different complete file, run unedited")
+        with open(os.path.join(self.root, "reference-configs", self.PD), "rb") as want:
+            self.assertEqual(want.read(), files[1])
+
+    def test_a_local_file_may_not_shadow_a_router_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, self.PD), "w") as f:
+                f.write("plugins: []\n")
+            with self.assertRaises(RC.RouterConfigsError):
+                RC.resolve(self.PD, d, self.router)
+
+    def test_a_local_file_keeps_the_old_rule(self):
+        with self.assertRaises(KeyError):
+            RC.apply_overrides(RouterOverrides().base("load-aware.yaml"),
+                               {("plugins", "load-aware-scorer", "parameters", "threshold"): 1}, None)
+
+    def test_the_validator_applies_the_overrides_before_any_run(self):
+        def errs(router):
+            return V.validate(spec(sweeps=[{"name": "s", "prefill-instances": [1], "decode-instances": [1],
+                                            "prefill": {"parallel": {"tp": [8]}},
+                                            "decode": {"parallel": {"tp": [8]}}, "router": router}]),
+                              BLIS, ROUTING, router_cfg=self.router)
+        ok = {"endpoint_picker_config": ["round-robin-pd.yaml"],
+              "plugins": {"approx-prefix-cache-producer": {"parameters": {"autoTune": [False]}}}}
+        self.assertEqual([], errs(ok))
+        bad = errs({"endpoint_picker_config": [self.PD],
+                    "plugins": {"prefix-based-pd-decider": {"parameters": {"nonCachedTokenz": [1]}}}})
+        self.assertTrue(any("nonCachedTokenz" in e or "not list" in e or "no parameter" in e for e in bad), bad)
+        self.assertTrue(errs({"endpoint_picker_config": ["round-robin-pd.yaml"],
+                              "decider": ["prefix-based-pd-decider"]}))
+
+    def test_the_source_of_the_router_files_is_recorded_in_the_stack(self):
+        st = E._pinned_stack(None, None, None, "0.32.0", False, self.router)
+        self.assertEqual(self.router.commit, st["router_configs"]["resolved"])
+        self.assertNotIn("pinned", st["router_configs"])
+
+
+class RouterConfigsFromTheSimulator(unittest.TestCase):
+    """The reference files and index come from `blis router-configs --json`, not a router checkout."""
+    PD = "pd-prefix-based.yaml"
+    TOKENS = ("plugins", "approx-prefix-cache-producer", "parameters", "maxPrefixTokensToMatch")
+    BLOCKS = ("plugins", "approx-prefix-cache-producer", "parameters", "maxPrefixBlocksToMatch")
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.fixture = make_router_fixture(os.path.join(self._tmp.name, "fx"))
+        self.blis = os.path.join(self._tmp.name, "blis")
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("ROUTER_CONFIGS_DIR", None)       # the developer override is not in play
+
+    def load(self, **kw):
+        return RC.open_checkout(blis=make_fake_blis(self.blis, self.fixture, **kw))
+
+    def test_files_and_index_are_read_from_the_command_with_no_checkout(self):
+        r = self.load()
+        self.assertEqual({"pd-prefix-based.yaml", "round-robin-pd.yaml", "round-robin.yaml"}, set(r.files))
+        with open(r.path(self.PD), encoding="utf-8") as f, \
+                open(os.path.join(self.fixture, "reference-configs", self.PD), encoding="utf-8") as want:
+            self.assertEqual(want.read(), f.read())
+        self.assertIn("v1.0.0-blis.fake", r.commit)
+
+    def test_a_conditional_knob_decision_follows_the_commands_index(self):
+        r = self.load()
+        with open(r.path(self.PD), encoding="utf-8") as f:
+            base = yaml.safe_load(f)
+        with self.assertRaises(KeyError) as cm:
+            RC.apply_overrides(base, {self.BLOCKS: 512}, r.knobs(self.PD))
+        self.assertIn("maxPrefixTokensToMatch must be 0", str(cm.exception))
+        doc = RC.apply_overrides(base, {self.BLOCKS: 512, self.TOKENS: 0}, r.knobs(self.PD))
+        got = next(p for p in doc["plugins"] if p["type"] == "approx-prefix-cache-producer")
+        self.assertEqual(512, got["parameters"]["maxPrefixBlocksToMatch"])
+
+    def test_a_file_in_a_subdirectory_of_reference_configs_is_materialised(self):
+        # The real command names the llm-d guides' files "guides/NAME.yaml" in the index and in `files`.
+        guide = os.path.join(self.fixture, "reference-configs", "guides")
+        os.makedirs(guide)
+        with open(os.path.join(self.fixture, "reference-configs", self.PD), encoding="utf-8") as f:
+            text = f.read()
+        with open(os.path.join(guide, "wide.yaml"), "w", encoding="utf-8") as f:
+            f.write(text)
+        ipath = os.path.join(self.fixture, "reference-configs", "policies.json")
+        with open(ipath, encoding="utf-8") as f:
+            index = json.load(f)
+        index["policies"].append({"name": "llm-d-wide", "knobs": [],
+                                  "files": {"colocated": None, "pd": "guides/wide.yaml"}})
+        with open(ipath, "w", encoding="utf-8") as f:
+            json.dump(index, f)
+        r = self.load()
+        self.assertIn("guides/wide.yaml", r.files)
+        with open(r.path("guides/wide.yaml"), encoding="utf-8") as f:
+            self.assertEqual(text, f.read())
+
+    def test_a_file_name_that_leaves_the_directory_is_refused(self):
+        for bad in ("../escape.yaml", "/abs.yaml", "guides/../../x.yaml", ".hidden.yaml", "a//b.yaml"):
+            with self.assertRaises(RC.RouterConfigsError, msg=bad):
+                self.load(extra={bad: "x: 1\n"})
+
+    def test_a_file_whose_sha256_does_not_match_is_refused(self):
+        with self.assertRaises(RC.RouterConfigsError) as cm:
+            self.load(tamper=self.PD)
+        self.assertIn(self.PD, str(cm.exception))
+        self.assertIn("sha256", str(cm.exception))
+
+    def test_a_file_the_index_names_but_the_command_omits_is_refused(self):
+        with self.assertRaises(RC.RouterConfigsError) as cm:
+            self.load(drop="round-robin.yaml")
+        self.assertIn("round-robin.yaml", str(cm.exception))
+
+    def test_a_simulator_without_the_command_is_reported_not_papered_over(self):
+        with self.assertRaises(RC.RouterConfigsError) as cm:
+            self.load(fail=True)
+        self.assertIn("router-configs", str(cm.exception))
+
+    def test_the_validator_reports_it_as_an_error_not_a_crash(self):
+        make_fake_blis(self.blis, self.fixture, fail=True)
+        errs = V.validate(spec(), self.blis, ROUTING)
+        self.assertTrue(any(e.startswith("router configs:") for e in errs), errs)
+
+    def test_a_name_the_command_does_not_list_is_refused_by_the_validator_path(self):
+        r = self.load()
+        with self.assertRaises(RC.RouterConfigsError):
+            RC.resolve("no-such.yaml", None, r)
+
+    def test_the_developer_override_wins_over_the_command(self):
+        os.environ["ROUTER_CONFIGS_DIR"] = self.fixture
+        r = RC.open_checkout(blis=make_fake_blis(self.blis, self.fixture, fail=True))
+        self.assertEqual(os.path.join(self.fixture, "reference-configs"), r.dir)
+
+    def test_no_source_at_all_yields_none(self):
+        self.assertIsNone(RC.open_checkout())
+
+    def test_a_pin_for_the_router_is_gone(self):
+        self.assertFalse(hasattr(RC, "pins"))
+        with open(os.path.join(ROOT, "pins.env"), encoding="utf-8") as f:
+            self.assertNotIn("ROUTER_CONFIGS", f.read())
+
+
+@unittest.skipUnless(_real_blis_has_router_configs(),
+                     "needs $BLIS to be a simulator that has `blis router-configs` (the pinned one, after the repin)")
+class RealRouterConfigsCommand(unittest.TestCase):
+    def test_the_real_command_loads_and_every_file_the_index_names_is_there(self):
+        saved = os.environ.pop("ROUTER_CONFIGS_DIR")
+        self.addCleanup(os.environ.__setitem__, "ROUTER_CONFIGS_DIR", saved)
+        r = RC.open_checkout(blis=os.environ["BLIS"])
+        self.assertTrue(r.files)
+        for name in r.files:
+            self.assertTrue(os.path.isfile(r.path(name)), name)
+
+
+@unittest.skipUnless(ROUTER_IS_REAL, "needs the router checkout at the pinned commit (ROUTER_CONFIGS_DIR)")
+class RealRouterConfigs(unittest.TestCase):
+    """Against the router's own published files and index at the pinned commit."""
+
+    def setUp(self):
+        self.router = RC.open_checkout(ROUTER_ROOT)
+
+    def test_every_knob_the_index_lists_is_reachable_through_the_overrides(self):
+        n = 0
+        for name, info in sorted(self.router.files.items()):
+            with open(self.router.path(name), encoding="utf-8") as f:
+                base = yaml.safe_load(f)
+            for knob in info["knobs"]:
+                self.assertTrue(knob["hosted_effect"], (name, knob["id"]))
+                if knob["kind"] == "scorer_weight":
+                    profiles = [p["name"] for p in base["schedulingProfiles"]
+                                if any(r.get("pluginRef") == knob["plugin"] for r in p["plugins"])]
+                    wanted = [knob["profile"]] if knob.get("profile") else profiles
+                    self.assertTrue(set(wanted) <= set(profiles), (name, knob["id"]))
+                    paths = [("schedulingProfiles", pr, knob["plugin"], "weight") for pr in wanted]
+                    doc = RC.apply_overrides(base, {p: 7 for p in paths}, self.router.knobs(name))
+                    for pr in wanted:
+                        prof = next(p for p in doc["schedulingProfiles"] if p["name"] == pr)
+                        ref = next(r for r in prof["plugins"] if r["pluginRef"] == knob["plugin"])
+                        self.assertEqual(7, ref["weight"], (name, knob["id"]))
+                elif knob["kind"] == "plugin_parameter":
+                    path = ("plugins", knob["plugin"], "parameters", knob["parameter"])
+                    ov = {path: 12345}
+                    for req in knob.get("requires") or []:
+                        need = next(k for k in info["knobs"] if k["id"] == req["id"])
+                        ov[("plugins", need["plugin"], "parameters", need["parameter"])] = req["value"]
+                    doc = RC.apply_overrides(base, ov, self.router.knobs(name))
+                    got = next(p for p in doc["plugins"] if p["type"] == knob["plugin"])
+                    self.assertEqual(12345, got["parameters"][knob["parameter"]], (name, knob["id"]))
+                else:
+                    self.fail(f"{name}: knob {knob['id']} has a kind this runner does not know: {knob['kind']}")
+                n += 1
+        self.assertGreaterEqual(n, 20, "the index lists at least this many hosted knobs")
+
+    def test_every_ineffective_parameter_is_refused_by_name(self):
+        n = 0
+        for name, info in sorted(self.router.files.items()):
+            with open(self.router.path(name), encoding="utf-8") as f:
+                base = yaml.safe_load(f)
+            for p in info["ineffective"]:
+                self.assertFalse(p["hosted_effect"], (name, p["id"]))
+                with self.assertRaises(KeyError, msg=(name, p["id"])) as cm:
+                    RC.apply_overrides(base, {("plugins", p["plugin"], "parameters", p["parameter"]): 2},
+                                       self.router.knobs(name))
+                self.assertIn(f"{p['plugin']}.{p['parameter']}", str(cm.exception))
+                self.assertIn("accepted by the router, no effect in the hosted boundary", str(cm.exception))
+                n += 1
+        self.assertGreaterEqual(n, 4)
+
+    def test_a_decider_variant_the_index_names_is_a_file_of_the_index(self):
+        for name in self.router.files:
+            v = self.router.variant_of(name)
+            if v:
+                self.assertIn(v, self.router.files, name)
+
+    def test_the_base_threshold_is_the_routers_not_a_local_value(self):
+        with open(self.router.path("pd-prefix-based.yaml"), encoding="utf-8") as f:
+            base = yaml.safe_load(f)
+        got = next(p for p in base["plugins"] if p["type"] == "prefix-based-pd-decider")
+        self.assertEqual(16, got["parameters"]["nonCachedTokens"])
+
+    def test_every_generated_file_still_parses_as_an_endpoint_picker_config(self):
+        pd = "pd-prefix-based.yaml"
+        with open(self.router.path(pd), encoding="utf-8") as f:
+            base = yaml.safe_load(f)
+        doc = RC.apply_overrides(base, {("plugins", "prefix-based-pd-decider", "parameters", "promptTokens"): 1},
+                                 self.router.knobs(pd))
+        again = yaml.safe_load(yaml.safe_dump(doc))
+        self.assertEqual("EndpointPickerConfig", again["kind"])
+
+    def test_the_committed_specs_name_files_that_exist(self):
+        for path in sorted(glob.glob(os.path.join(EXPERIMENTS, "*.yaml"))):
+            with open(path, encoding="utf-8") as f:
+                doc = yaml.safe_load(f)
+            for sw in doc["sweeps"]:
+                for name in ((sw.get("router") or {}).get("endpoint_picker_config") or []):
+                    RC.resolve(name, ROUTING, self.router)
+
+
+class SimulatorSwitches(unittest.TestCase):
+    def pd(self, **extra):
+        return {"name": "s", "prefill-instances": [1], "decode-instances": [1],
+                "prefill": {"parallel": {"tp": [8]}}, "decode": {"parallel": {"tp": [8]}}, **extra}
+
+    def test_contention_is_swept_as_two_arms_with_distinct_labels(self):
+        kept, _ = E.expand_sweep(self.pd(simulator={"pd_transfer_contention": [False, True]}), 16)
+        self.assertEqual([False, True], [c["pd_transfer_contention"] for c in kept])
+        base = E.sweep_baseline(kept)
+        self.assertNotEqual(E.variant_of(kept[0], "", base), E.variant_of(kept[1], "", base))
+
+    def test_no_simulator_block_changes_nothing(self):
+        kept, _ = E.expand_sweep(self.pd(), 16)
+        self.assertEqual(1, len(kept))
+        self.assertNotIn("pd_transfer_contention", kept[0])
+
+    def test_the_flag_is_bare_when_true_and_absent_when_false(self):
+        for value, expect in ((True, True), (False, False)):
+            *_, cli, _ = run_blis.classify_config(
+                {"prefill_instances": 1, "decode_instances": 1, "prefill_tp": 8, "decode_tp": 8,
+                 "pd_transfer_contention": value}, settings.vocabulary(BLIS), 8)
+            cmd = run_blis._cli_args(cli)
+            self.assertEqual(expect, "--pd-transfer-contention" in cmd)
+            self.assertNotIn(str(value), cmd, "a switch takes no value")
+
+    def test_contention_on_a_colocated_run_is_refused(self):
+        with self.assertRaises(run_blis.ConfigError):
+            run_blis.classify_config({"tp": 8, "num_instances": 2, "pd_transfer_contention": True},
+                                     settings.vocabulary(BLIS), 8)
+        with self.assertRaises(run_blis.ConfigError):
+            run_blis.classify_config({"tp": 8, "num_instances": 2, "pd_transfer_contention": "yes"},
+                                     settings.vocabulary(BLIS), 8)
+
+    def test_the_validator_knows_the_option(self):
+        ok = spec(sweeps=[self.pd(simulator={"pd_transfer_contention": [False, True]})])
+        self.assertEqual([], V.validate(ok, BLIS, ROUTING))
+        colocated = spec(sweeps=[{"name": "s", "num-instances": [2], "parallel": {"tp": [8]},
+                                  "simulator": {"pd_transfer_contention": [True]}}])
+        self.assertTrue(any("disaggregated" in e for e in V.validate(colocated, BLIS, ROUTING)))
+        bad = spec(sweeps=[self.pd(simulator={"kv_event_delay": [1]})])
+        self.assertTrue(any("unknown simulator option" in e for e in V.validate(bad, BLIS, ROUTING)))
+
+
+class OmittedEngineKnobs(unittest.TestCase):
+    def test_an_omitted_knob_is_left_to_the_engine_but_the_window_it_requires(self):
+        _par, eng, _cli, _router = run_blis.classify_config({"tp": 8}, settings.vocabulary(BLIS), 8)
+        self.assertEqual({"max_model_len": 32768}, eng)
+
+    def test_a_stated_knob_still_reaches_the_engine(self):
+        _par, eng, _cli, _router = run_blis.classify_config(
+            {"tp": 8, "max_num_seqs": 64, "max_model_len": 4096}, settings.vocabulary(BLIS), 8)
+        self.assertEqual({"max_model_len": 4096, "max_num_seqs": 64}, eng)
 
 
 def main():

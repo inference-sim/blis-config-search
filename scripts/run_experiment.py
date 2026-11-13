@@ -36,6 +36,7 @@ import hashlib
 import itertools
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -52,6 +53,8 @@ import run_blis            # noqa: E402
 import topologies          # noqa: E402
 import blis_cli            # noqa: E402
 import build_catalog       # noqa: E402
+import pareto              # noqa: E402
+import router_configs      # noqa: E402
 import validate_experiment as validator   # noqa: E402
 
 # Setting names in a spec are the engine block's names; run_blis's candidate keys are flat. These are the only two that differ, and they differ because run_blis folds
@@ -114,6 +117,7 @@ def expand_sweep(sweep, gpus):
     """
     router_variants = _router_variants(sweep.get("router") or {})
     engine_combos = _engine_candidates(sweep.get("engine"))
+    sim_combos = grid(sweep.get("simulator") or {})   # simulator switches: [{}] when none
     kept, dropped = [], []
     if _is_disaggregated(sweep):
         pf_par = ((sweep.get("prefill") or {}).get("parallel")) or {}
@@ -136,22 +140,24 @@ def expand_sweep(sweep, gpus):
                                 cfg.update({_flag("decode", k): v for k, v in dce.items()})
                                 for eng in engine_combos:
                                     for router in router_variants:
-                                        cand = {**cfg, **eng, **router}
-                                        if total == gpus:
-                                            kept.append(cand)
-                                        else:
-                                            dropped.append((cand, total))
+                                        for sim in sim_combos:
+                                            cand = {**cfg, **eng, **router, **sim}
+                                            if total == gpus:
+                                                kept.append(cand)
+                                            else:
+                                                dropped.append((cand, total))
     else:
         for par in grid(sweep.get("parallel") or {}):
             for ni in sweep.get("num-instances") or [1]:
                 total = _footprint(par) * ni
                 for eng in engine_combos:
                     for router in router_variants:
-                        cand = {**par, "num_instances": ni, **eng, **router}
-                        if total == gpus:
-                            kept.append(cand)
-                        else:
-                            dropped.append((cand, total))
+                        for sim in sim_combos:
+                            cand = {**par, "num_instances": ni, **eng, **router, **sim}
+                            if total == gpus:
+                                kept.append(cand)
+                            else:
+                                dropped.append((cand, total))
     return kept, dropped
 
 
@@ -192,113 +198,84 @@ def _router_variants(router):
 
 
 def _override_combos(router):
-    """Every combination of the router override trees, flattened to dotted paths.
-
-    `schedulingProfiles.default.queue-scorer.weight: [1,2,4]` becomes the path
-    ("schedulingProfiles", "default", "queue-scorer", "weight") with values 1, 2 and 4, so the
-    product over all such paths is the arm set. Returns [{}] when there are no overrides.
-    """
-    paths = {}
-    for profile, refs in (router.get("schedulingProfiles") or {}).items():
-        for ref, fields in (refs or {}).items():
-            for field, values in (fields or {}).items():
-                paths[("schedulingProfiles", profile, ref, field)] = list(values)
-    for plugin, block in (router.get("plugins") or {}).items():
-        for field, values in ((block or {}).get("parameters") or {}).items():
-            paths[("plugins", plugin, "parameters", field)] = list(values)
-    if not paths:
-        return [{}]
-    keys = sorted(paths)
-    return [dict(zip(keys, combo)) for combo in itertools.product(*[paths[k] for k in keys])]
+    """Every combination of the router override trees; see router_configs.override_combos."""
+    return router_configs.override_combos(router)
 
 
-def apply_overrides(base_doc, overrides):
-    """A copy of `base_doc` with each dotted override applied. Raises KeyError on a field the
-    base file does not already have.
-
-    Overrides only CHANGE existing fields (RFC #21's stated limitation): adding or removing a
-    plugin takes a separate base file. Enforcing that here means a typo'd plugin name fails
-    before the run instead of silently producing the base config unchanged -- which would show
-    up as a sweep of identical results and be read as "this knob does nothing".
-    """
-    import copy
-    doc = copy.deepcopy(base_doc)
-    for path, value in sorted(overrides.items()):
-        section = path[0]
-        if section == "schedulingProfiles":
-            _, profile, ref, field = path
-            profiles = doc.get("schedulingProfiles") or []
-            target = next((p for p in profiles if p.get("name") == profile), None)
-            if target is None:
-                raise KeyError(f"schedulingProfiles has no profile named {profile!r} "
-                               f"(has: {[p.get('name') for p in profiles]})")
-            entry = next((p for p in (target.get("plugins") or [])
-                          if p.get("pluginRef") == ref), None)
-            if entry is None:
-                raise KeyError(f"profile {profile!r} does not reference plugin {ref!r} "
-                               f"(references: "
-                               f"{[p.get('pluginRef') for p in target.get('plugins') or []]})")
-            entry[field] = value
-        else:
-            _, plugin, _params, field = path
-            entry = next((p for p in (doc.get("plugins") or []) if p.get("type") == plugin), None)
-            if entry is None:
-                raise KeyError(f"the base config declares no plugin of type {plugin!r} "
-                               f"(declares: {[p.get('type') for p in doc.get('plugins') or []]})")
-            params = entry.setdefault("parameters", {})
-            if field not in params:
-                raise KeyError(f"plugin {plugin!r} has no parameter {field!r} in the base config "
-                               f"(has: {sorted(params)}); an override may only change a field the "
-                               f"base file already sets")
-            params[field] = value
-    return doc
+def apply_overrides(base_doc, overrides, knobs=None):
+    """router_configs.apply_overrides: overrides edit the PARSED file; `knobs` is the index's list
+    for a router reference file, None for a local one."""
+    return router_configs.apply_overrides(base_doc, overrides, knobs)
 
 
-def override_phrase(overrides):
-    """A readable description of one override combination, for a config's variant label."""
-    parts = []
-    for path, value in sorted(overrides.items()):
-        if path[0] == "schedulingProfiles":
-            parts.append(f"{path[2]} {path[3]} {value}")
-        else:
-            parts.append(f"{path[1]} {path[3]} {value}")
-    return ", ".join(parts)
+override_phrase = router_configs.override_phrase
 
 
-def materialize_router(cand, routing_dir, out_dir):
+def materialize_router(cand, routing_dir, out_dir, router=None):
     """Resolve a candidate's `router_config` to a real file path, writing an override file if any.
 
-    Returns (config_without_overrides, description). A generated file is named by the HASH of its
-    contents, so the same override combination always lands on the same path and a re-run
-    rewrites identical bytes -- the files are part of the reproducible output, not scratch.
+    Returns (config_without_overrides, description). A base from the router's reference configs
+    is staged into `out_dir` byte for byte, so the report holds the exact file each arm ran. A
+    generated file is named by the HASH of its contents, so the same override combination always
+    lands on the same path and a re-run rewrites identical bytes -- the files are part of the
+    reproducible output, not scratch.
     """
     cand = dict(cand)
     overrides = cand.pop("router_overrides", None)
     rel = cand.get("router_config")
     if not rel:
         return cand, ""
-    base_path = rel if os.path.isabs(rel) else os.path.join(routing_dir, rel)
+    router = router or router_configs.open_checkout()
+    source, base_path, knobs = router_configs.resolve(rel, routing_dir, router) \
+        if not os.path.isabs(rel) else ("local", rel, None)
     if not overrides:
+        if source == "router":
+            os.makedirs(out_dir, exist_ok=True)
+            staged = os.path.join(out_dir, os.path.basename(rel))
+            shutil.copyfile(base_path, staged)
+            base_path = staged
         cand["router_config"] = base_path
         return cand, topologies.routing_arm_name(rel)
     with open(base_path, encoding="utf-8") as f:
         base_doc = yaml.safe_load(f) or {}
-    doc = apply_overrides(base_doc, overrides)
+    doc = apply_overrides(base_doc, overrides, knobs)
     body = yaml.safe_dump(doc, sort_keys=False, default_flow_style=False)
     digest = hashlib.sha1(body.encode()).hexdigest()[:10]
     stem = topologies.routing_arm_name(rel)
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"{stem}-{digest}.yaml")
     if not os.path.exists(path):
-        header = (f"# GENERATED by scripts/run_experiment.py from routing/{rel}.\n"
+        origin = (f"the router's reference-configs/{rel} from {router.commit}"
+                  if source == "router" else f"routing/{rel}")
+        header = (f"# GENERATED by scripts/run_experiment.py from {origin}.\n"
                   f"# Overrides: {override_phrase(overrides)}\n"
-                  f"# Named by a hash of the BYTES below, so the same base file and the same\n"
-                  f"# overrides always produce this same file. It is not a semantic hash:\n"
+                  f"# The base was parsed, edited and written back, so its comments and key order are\n"
+                  f"# not kept. Named by a hash of the BYTES below. It is not a semantic hash:\n"
                   f"# reordering keys in the base file renames the generated arm (and only that).\n")
         with open(path, "w", encoding="utf-8") as f:
             f.write(header + body)
     cand["router_config"] = path
     return cand, f"{stem} ({override_phrase(overrides)})"
+
+
+def router_file_record(cand, resolved_path, routing_dir, out_dir, router):
+    """What a row records of its router file: the base (name, source, commit, sha256), the overrides
+    applied, and the file the run read (path relative to the run directory, sha256). None when the
+    candidate names no router file."""
+    rel = cand.get("router_config")
+    if not rel or not resolved_path:
+        return None
+    router = router or router_configs.open_checkout()
+    source, base_path, _knobs = router_configs.resolve(rel, routing_dir, router) \
+        if not os.path.isabs(rel) else ("local", rel, None)
+    inside = os.path.abspath(resolved_path).startswith(os.path.abspath(out_dir) + os.sep)
+    rec = {"base": rel, "source": source, "base_sha256": router_configs.sha256_of(base_path),
+           "file": os.path.relpath(resolved_path, out_dir if inside else ROOT),
+           "sha256": router_configs.sha256_of(resolved_path),
+           "overrides": router_configs.override_record(cand.get("router_overrides") or {})}
+    if source == "router":
+        rec["router_commit"] = router.commit
+    return rec
 
 
 # --- labelling ---------------------------------------------------------------------------------
@@ -336,6 +313,8 @@ def label_of(cand):
 # list is checked against run_blis.SCENARIO_ENGINE by test_experiment.py so it cannot fall behind
 # the runner again.
 VARIANT_KEYS = ("num_speculative_tokens", "speculative_method", "router_config",
+                # simulator switches
+                "pd_transfer_contention",
                 # batching / admission
                 "max_num_seqs", "max_num_batched_tokens", "long_prefill_token_threshold",
                 "scheduling_policy", "async_scheduling",
@@ -449,7 +428,7 @@ def floor_rate_from(slo_ms):
 def servable(rec, slo_ms, gpus=None):
     """(ok, why_not) for one run against the spec's SLOs.
 
-    Uses run_blis.per_user_rate / worst_itl_p99 -- the acceptance-aware, worst-instance basis the
+    Uses run_blis.per_user_rate / worst_itl_p99 -- the worst-instance per-token basis the
     report displays -- so a config the sweeper rejects is never one the report shows as passing.
     A declared SLO whose metric is missing counts as a FAILURE, not a silent pass.
     """
@@ -472,11 +451,11 @@ def servable(rec, slo_ms, gpus=None):
         worst, missing = run_blis.worst_itl_p99(rec)
         if missing or worst is None:
             return False, "itl_p99 SLO declared but not measured"
-        al = run_blis.run_acceptance(rec) or 1.0
-        # Per-TOKEN latency: under drafting BLIS logs ITL per verification step, and a step emits
-        # AL tokens, so the step interval must be divided by AL to compare against a per-token cap.
-        if (worst / al) > itl_cap:
-            return False, f"itl_p99 {worst / al:.1f} ms > {itl_cap:g} ms"
+        # The worst p99 is the per-request time per output token, already per TOKEN: what speculation
+        # gains is in it, so it is compared with the cap as it is (no acceptance-length division; that
+        # belonged to the engine's per-step interval, which is no longer the gate).
+        if worst > itl_cap:
+            return False, f"itl_p99 {worst:.1f} ms > {itl_cap:g} ms"
     for key, field in (("ttft_p99", "ttft_p99_ms"), ("e2e_p99", "e2e_p99_ms")):
         cap = (slo_ms or {}).get(key)
         if not cap:
@@ -502,6 +481,7 @@ def run_row(rec, cand, label, variant, sweep_name, concurrency, gpus):
     # Recorded on the basis `servable` JUDGES on, with the aggregate kept beside it as for ITL: a
     # row showing a passing aggregate next to an infeasible verdict is unreadable.
     worst_ttft, ttft_missing = run_blis.worst_metric(rec, "ttft_p99_ms")
+    inter, inter_basis = pareto.interactivity_of(m)
     return {
         "sweep": sweep_name, "label": label, "variant": variant,
         "concurrency": concurrency, "gpus": gpus,
@@ -513,7 +493,17 @@ def run_row(rec, cand, label, variant, sweep_name, concurrency, gpus):
         "ttft_p99_ms": None if ttft_missing else (round(worst_ttft, 1) if worst_ttft is not None else None),
         "ttft_p99_ms_aggregate": m.get("ttft_p99_ms"),
         "preemption_count": m.get("preemption_count", 0),
+        # The Pareto axes (pareto.py): the registry's figures from the Result's measured window.
+        "interactivity": round(inter, 3) if inter is not None else None,
+        "interactivity_basis": inter_basis,
+        "total_tokens_per_sec_per_gpu": _round(m.get("total_tokens_per_sec_per_gpu"), 3),
+        "output_tokens_per_sec_per_decode_gpu": _round(m.get("output_tokens_per_sec_per_decode_gpu"), 3),
+        "disaggregated": cand.get("prefill_instances") is not None,
     }
+
+
+def _round(v, n):
+    return round(v, n) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
 def best_of(rows):
@@ -534,8 +524,69 @@ def best_of(rows):
                                  r.get("label") or "", r.get("variant") or ""))[0]
 
 
+def outcome_counts(rows):
+    """{outcome: runs} over ledger rows that have one (a dry run has none), sorted by name."""
+    return dict(sorted(collections.Counter(r["outcome"] for r in rows if r.get("outcome")).items()))
+
+
+def _config_key(row):
+    """A candidate without its load level: the same deployment at every concurrency."""
+    cfg = {k: v for k, v in (row.get("config") or {}).items() if k != "concurrency"}
+    return json.dumps([row.get("sweep"), cfg], sort_keys=True)
+
+
+def refusal_groups(rows):
+    """Refused runs grouped by the reason given, most runs first: [{reason, source, issue, runs,
+    configs, examples}]. `configs` counts distinct candidates (a candidate refused at every load
+    counts once); `examples` are up to three labels so a reader can find them."""
+    groups = {}
+    for r in rows:
+        ref = r.get("refusal")
+        if r.get("outcome") != "refused" or not ref:
+            continue
+        g = groups.setdefault((ref["source"], ref["reason"]), {
+            "reason": ref["reason"], "source": ref["source"], "issue": ref.get("issue"),
+            "runs": 0, "_configs": set(), "examples": []})
+        g["runs"] += 1
+        g["_configs"].add(_config_key(r))
+        name = f"{r['label']} ({r['variant']})" if r.get("variant") else r["label"]
+        if name not in g["examples"] and len(g["examples"]) < 3:
+            g["examples"].append(name)
+    out = []
+    for g in groups.values():
+        g["configs"] = len(g.pop("_configs"))
+        out.append(g)
+    return sorted(out, key=lambda g: (-g["runs"], g["reason"]))
+
+
+def refused_configs(rows):
+    """Distinct candidates refused at one or more load levels."""
+    return len({_config_key(r) for r in rows if r.get("outcome") == "refused"})
+
+
+def ranked_best(rows, objective):
+    """The row the report headlines: the scalar rule (best_of) or the head of the Pareto front,
+    as the spec's `objective.ranking` says."""
+    if objective["ranking"] == "pareto":
+        return pareto.best_on_front(rows, objective["throughput"])
+    return best_of(rows)
+
+
+def pareto_report(sweep_results, all_rows, objective):
+    """The non-dominated front of every sweep and of all sweeps together, for both throughput
+    forms. Always computed, whichever ranking headlines the report."""
+    def both(rows):
+        return {form: pareto.front(rows, form) for form in pareto.THROUGHPUT_FORMS}
+    return {"x": pareto.X_METRIC,
+            "y": {form: pareto.THROUGHPUT_FORMS[form][1] for form in pareto.THROUGHPUT_FORMS},
+            "interval": None, "throughput": objective["throughput"],
+            "overall": both(all_rows),
+            "sweeps": [{"name": s["name"], **both(s["rows"])} for s in sweep_results]}
+
+
 def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dry_run=False,
-                   run_timeout=600, max_parallel=1, verbose=True, fields=None, data_override=False):
+                   run_timeout=600, max_parallel=1, verbose=True, fields=None, data_override=False,
+                   router_cfg=None):
     """Expand, filter, run and rank one spec. Returns the assembled report dict.
 
     `catalog` and `registry` are where the scripts read files from (a blis-substrate checkout at
@@ -552,7 +603,8 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     gpus = int(sc["gpus"])
     seed = int(sc.get("seed", 42))
     model, hardware = sc["model"], sc["hardware"]
-    workload = sc["workload"]
+    workload_spec = sc.get("workload_spec")
+    workload = sc.get("workload") or workload_spec_label(workload_spec)
     concurrency = list(sc["concurrency"])
     slo_ms = slo_limits(sc.get("slo"))
     shared_engine = dict(sc.get("engine") or {})
@@ -586,12 +638,21 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
             print(f"WARNING: {warn}\n         Every number in this report is priced by that "
                   f"binary, and scenario.json records its digest.", file=sys.stderr, flush=True)
 
+    if router_cfg is None:
+        router_cfg = router_configs.open_checkout(blis=blis)
+    if router_cfg is not None and router_cfg.problem and not dry_run:
+        print(f"WARNING: router configs: {router_cfg.problem}", file=sys.stderr, flush=True)
+
     entry = _model_entry(model, catalog) if catalog else None
     # A REPLAY workload is fully described by its catalog descriptor -- the harness scenario, the
     # corpus digest, the sending window, the grace period and the context filter are all stated
     # in blis-catalog/workloads/<name>.yaml. So a spec states NONE of them: naming the workload
     # is naming all of it. See resolve_replay.
-    replay = resolve_replay(workload, catalog, replay, dry_run=dry_run)
+    if workload_spec:
+        workload_doc = load_workload_spec(workload_spec)
+        replay = resolve_workload_spec(workload_spec, workload_doc, replay, dry_run=dry_run)
+    else:
+        replay = resolve_replay(workload, catalog, replay, dry_run=dry_run)
 
     # DRAFTING ON A REPLAY needs the acceptance selectors, and they are the WORKLOAD's, not a
     # knob: BLIS resolves acceptance from the registry by (model, method, K, thinking, category)
@@ -601,7 +662,12 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     # the report showed an EMPTY drafting sweep rather than an error. The values are read from
     # the catalog's workload entry (agentx-mvp: category coding, thinking on), never invented.
     accept_sel = {}
-    if catalog:
+    if workload_spec:
+        # The file is the workload; it states the selectors itself (category, thinking).
+        for key, sel in (("category", "speculative_category"), ("thinking", "speculative_thinking")):
+            if workload_doc.get(key) is not None:
+                accept_sel[sel] = str(workload_doc[key])
+    elif catalog:
         wl = _workload_entry(workload, catalog)
         if wl:
             if wl.get("category"):
@@ -609,6 +675,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
             if wl.get("thinking"):
                 accept_sel["speculative_thinking"] = str(wl["thinking"])
 
+    objective = pareto.objective_of(spec.get("objective"))
     runs, sweep_results, all_rows = [], [], []
     corpus_warm = False
     for sweep in spec["sweeps"]:
@@ -627,15 +694,18 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
         # Expand this sweep into a flat work list FIRST, then execute it. The two phases are
         # separate so the output order is the expansion order -- never the order runs happened
         # to finish -- which is what keeps a report reproducible under --max-parallel > 1.
-        work = []                               # (idx, cfg, label, variant, c)
+        work = []                               # (idx, cfg, label, variant, c, router_rec)
         for cand in kept:
             try:
-                resolved, router_desc = materialize_router(cand, routing_dir, generated_routing) \
+                resolved, router_desc = materialize_router(cand, routing_dir, generated_routing,
+                                                           router_cfg) \
                     if not dry_run else (dict(cand), "")
+                router_rec = (router_file_record(cand, resolved.get("router_config"), routing_dir,
+                                                 out_dir, router_cfg) if not dry_run else None)
 
                 if dry_run:
                     resolved.pop("router_overrides", None)
-            except (KeyError, OSError, yaml.YAMLError) as e:
+            except (KeyError, OSError, yaml.YAMLError, router_configs.RouterConfigsError) as e:
                 sweep_dropped.append({"config": _jsonable(cand),
                                       "reason": f"router override failed: {e}"})
                 continue
@@ -652,25 +722,28 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                                  "concurrency": c, "gpus": gpus, "config": _jsonable(cfg),
                                  "servable": None})
                     continue
-                work.append((len(work), cfg, label, variant, c))
+                work.append((len(work), cfg, label, variant, c, router_rec))
 
         def _execute(item):
             """One BLIS run. Pure w.r.t. shared state: run_blis.write_scenario publishes its
             scenario atomically under a content-hashed name (temp + os.replace), so workers
             racing on the same deployment cannot read a half-written file, and the caller owns
             all runs.jsonl I/O."""
-            idx, cfg, label, variant, c = item
+            idx, cfg, label, variant, c, router_rec = item
             nreq = None if replay else max(80, c * 4)
-            # `_overrides` is provenance for the report (which catalog settings the spec
-            # replaced), not a replay field -- keep it out of the command.
+            # `_overrides` and `workload_document` are provenance for the report (which catalog
+            # settings the spec replaced; the workload file as read), not replay fields -- keep
+            # them out of the command and out of every run record.
             rec = run_blis.run_one(blis, catalog, registry, scenarios_dir, model, hardware,
                                    engine_version, workload, nreq, seed,
                                    None, cfg, phase=sname, timeout=run_timeout,
                                    replay={k: v for k, v in replay.items()
-                                           if k != "_overrides"} if replay else None,
+                                           if k not in RECORD_ONLY_REPLAY} if replay else None,
                                    fabric=fabric, gpus_per_node=gpus_per_node, fields=fields,
                                    data_override=data_override)
             rec["sweep"] = sname
+            if router_rec:
+                rec["router_file"] = router_rec
             _relativize_cmd(rec, out_dir)
             ok, why = servable(rec, slo_ms, gpus)
             row = run_row(rec, cfg, label, variant, sname, c, gpus)
@@ -679,8 +752,14 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
             # card, and showed "tp 0, 0 instances" without it.
             row["config"] = _jsonable(cfg)
             row["servable"] = ok
+            if router_rec:
+                row["router"] = router_rec
             if why:
                 row["not_servable_because"] = why
+            outcome, refusal = run_blis.outcome_of(rec)
+            row["outcome"] = ("served" if ok else "slo_miss") if outcome == "ran" else outcome
+            if refusal:
+                row["refusal"] = refusal
             return idx, rec, row
 
         if work:
@@ -717,7 +796,9 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
             "configs": len(kept),
             "runs": len(kept) * len(concurrency),
             "dropped": sweep_dropped,
-            "best": best_of(rows),
+            "best": ranked_best(rows, objective),
+            "outcomes": outcome_counts(rows),
+            "refusals": refusal_groups(rows),
             "rows": rows,
         })
 
@@ -725,24 +806,48 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
         "name": name,
         "description": (spec.get("description") or "").strip(),
         "scenario": {"model": model, "hardware": hardware, "workload": workload, "gpus": gpus,
+                     # A workload named by a file: the file, its own sha256 and the document as read
+                     # (null for a catalog workload), so the report can state it is not in the catalog.
+                     "workload_spec": ({"path": workload_spec,
+                                        "sha256": replay["workload_spec_sha256"],
+                                        "catalog": False, "label": WORKLOAD_SPEC_LABEL,
+                                        "document": replay["workload_document"],
+                                        "recipe": recipe_record(replay["workload_document"], replay)}
+                                       if workload_spec else None),
                      "concurrency": concurrency, "slo": sc.get("slo") or {}, "seed": seed,
                      "engine": shared_engine or None, "engine_version": engine_version,
                      # The cluster fabric the sweep assumed, so a report states its interconnect
                      # without reopening the spec. Omitted (null) means the ib-400g default.
-                     "cluster": (sc.get("cluster") or None), "replay": replay},
+                     "cluster": (sc.get("cluster") or None),
+                     "replay": ({k: v for k, v in replay.items() if k != "workload_document"}
+                                if replay else None)},
         "slo_ms": slo_ms,
+        # What every ranked figure is (CFG-4, DEV-8): the metric basis and the scope it ranges over.
+        # The cluster figures are the Result's measured window. The worst-instance TTFT, end-to-end
+        # and TPOT gates are rebuilt from its profiling-phase rows; the ITL gate is the cluster's,
+        # because the decode-step interval is not per request (inference-sim #2087 gives the rest).
+        "basis": run_blis.BASIS,
+        "scope": "cluster; worst instance for TTFT and end-to-end gates",
         "interactivity_floor": {"tok_per_s_per_user": floor_rate_from(slo_ms)},
-        "objective": "max output tok/s per accelerator subject to the scenario's SLOs",
+        "objective": pareto.describe(objective),
+        # Which ranking picked best/best_overall/finalists, and the figures it used.
+        "ranking": {"used": objective["ranking"], "throughput": objective["throughput"]},
         "sweeps": sweep_results,
-        "best_overall": best_of(all_rows),
+        "best_overall": ranked_best(all_rows, objective),
+        "pareto": pareto_report(sweep_results, all_rows, objective),
+        "outcomes": outcome_counts(all_rows),
+        "refusals": refusal_groups(all_rows),
         "pinned_stack": _pinned_stack(blis, catalog, registry, engine_version,
-                                      _priced_with_other_data(runs, data_override)),
+                                      _priced_with_other_data(runs, data_override), router_cfg),
         "experimental": _priced_with_other_data(runs, data_override),
         "model_arch": (entry or {}).get("arch"),
         "totals": {"configs": sum(s["configs"] for s in sweep_results),
                    "runs": len(runs) if not dry_run else
                            sum(s["runs"] for s in sweep_results),
-                   "servable": sum(1 for r in all_rows if r.get("servable"))},
+                   "servable": sum(1 for r in all_rows if r.get("servable")),
+                   # Runs the simulator or runner declined, apart from runs that ran and missed an SLO.
+                   "refused": sum(1 for r in all_rows if r.get("outcome") == "refused"),
+                   "configs_refused": refused_configs(all_rows)},
     }
     if not dry_run:
         # The refusal above covers a requested override. This one covers what the Results say: a
@@ -933,6 +1038,143 @@ def resolve_replay(workload, catalog, stated, dry_run=False):
     return out
 
 
+# Replay keys the report records once and no run passes to the simulator.
+RECORD_ONLY_REPLAY = ("_overrides", "workload_document")
+
+WORKLOAD_SPEC_LABEL = "custom (not in the catalog)"
+
+
+def workload_spec_label(path):
+    """How a report names a workload that came from a file."""
+    return f"{WORKLOAD_SPEC_LABEL}: {os.path.basename(str(path))}"
+
+
+def _seconds(v):
+    """A duration the runner passes as text ("3600s", "30s", "inf") in seconds; inf stays "inf"."""
+    if v is None:
+        return None
+    t = str(v).strip().lower()
+    if t in ("inf", ".inf"):
+        return "inf"
+    m = re.fullmatch(r"([0-9.]+)(ms|s|m|h)?", t)
+    if not m:
+        return t
+    x = float(m.group(1)) * {"ms": 1e-3, "s": 1, "m": 60, "h": 3600, None: 1}[m.group(2)]
+    return int(x) if x == int(x) else x
+
+
+# The recipe fields a spec's replay block can override, and the replay key that does: what BLIS is
+# actually run with is the EFFECTIVE replay, not only the workload file.
+EFFECTIVE_FIELDS = {"benchmark_duration_s": "benchmark_duration", "grace_period_s": "grace_period"}
+
+
+def recipe_record(doc, effective=None):
+    """The AgentX run recipe a replay is run with, for the report: each recipe field as run, the fields
+    that differ from the run's (the file's own values and any override of them by the spec), and one line
+    a reader sees. `effective` is the resolved replay (resolve_workload_spec): a spec's replay block may
+    override the window or the grace, so the record is derived from it as well as from the document, and
+    an override is named. None for a workload that is not an AgentX replay."""
+    import validate_experiment as ve
+    if not ve.is_agentx(doc):
+        return None
+    fields = {k: ve._dig(doc, k) for k in ve.AGENTX_RECIPE}
+    fields["corpus.loader"] = ve._dig(doc, "corpus.loader")
+    overrides = {}
+    for field, key in EFFECTIVE_FIELDS.items():
+        if effective and effective.get(key) is not None:
+            have = _seconds(effective[key])
+            if have != fields.get(field):
+                overrides[field] = [fields.get(field), have]
+                fields[field] = have
+    diff = {k: [fields[k], v] for k, v in ve.AGENTX_RECIPE.items() if fields.get(k) is not None and fields[k] != v}
+    loader = fields["corpus.loader"]
+    if loader is not None and loader != ve.AGENTX_UNCAPPED_LOADER:
+        diff["corpus.loader"] = [loader, ve.AGENTX_UNCAPPED_LOADER]
+    line = (f"AgentX run recipe: {fields['trace_idle_gap_cap_s']} s idle-gap cap, "
+            f"{fields['warmup.requests_per_lane']} warm-up requests per lane, trajectory start "
+            f"{fields['trajectory_start.min_ratio']} to {fields['trajectory_start.max_ratio']}, "
+            f"{fields['benchmark_duration_s']} s window, {fields['grace_period_s']} s grace, "
+            f"corpus {fields['corpus.loader']}")
+    if overrides:
+        line += "; the spec overrides " + ", ".join(f"{k} ({v[0]} to {v[1]})" for k, v in sorted(overrides.items()))
+    if diff:
+        line += "; differs from the run's in " + ", ".join(f"{k} ({v[0]} not {v[1]})" for k, v in sorted(diff.items()))
+    return {"fields": fields, "overrides": overrides, "differs_from_run": diff, "label": line}
+
+
+def _spec_path(path):
+    """A workload_spec path is relative to the repository, so a spec means the same file anywhere.
+    It must stay inside the repository once symlinks and `..` are resolved."""
+    full = os.path.realpath(os.path.join(ROOT, path))
+    if os.path.isabs(path) or not full.startswith(os.path.realpath(ROOT) + os.sep):
+        raise SystemExit(f"scenario.workload_spec: {path!r} is outside the repository")
+    return full
+
+
+def load_workload_spec(path):
+    """The replay document in the workload file, as a mapping.
+
+    The file is a blis-schemas Replay document: the replay block itself, as the catalog's
+    `replay:` carries it. The simulator reads and checks it (`blis replay --workload-spec`).
+    """
+    full = _spec_path(path)
+    try:
+        with open(full, encoding="utf-8") as f:
+            doc = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError) as e:
+        raise SystemExit(f"scenario.workload_spec: {path}: {e}")
+    if not isinstance(doc, dict):
+        raise SystemExit(f"scenario.workload_spec: {path} is not a mapping")
+    return doc
+
+
+def workload_spec_sha256(path):
+    h = hashlib.sha256()
+    with open(_spec_path(path), "rb") as f:
+        h.update(f.read())
+    return h.hexdigest()
+
+
+def resolve_workload_spec(path, doc, stated, dry_run=False):
+    """The replay descriptor for a workload named by file.
+
+    The corpus digest, the window, the grace period and the context filter come from the file, as
+    they come from the catalog entry for a named workload. The report records the whole document
+    and the file's own sha256, and `_overrides` is empty: the file is the workload.
+    """
+    stated = dict(stated or {})
+    corpus = doc.get("corpus") if isinstance(doc.get("corpus"), dict) else {}
+    if not doc.get("scenario"):
+        raise SystemExit(f"workload_spec {path!r} states no `scenario` (the harness scenario id)")
+    out = {"scenario": doc["scenario"],
+           "workload_spec": _spec_path(path),
+           "workload_spec_relative": path,
+           "workload_spec_sha256": workload_spec_sha256(path),
+           "workload_document": doc}
+    if corpus.get("sha256"):
+        out["corpus_sha256"] = corpus["sha256"]
+    if doc.get("benchmark_duration_s"):
+        out["benchmark_duration"] = f"{doc['benchmark_duration_s']}s"
+    if doc.get("max_context_length"):
+        out["max_context_length"] = str(doc["max_context_length"])
+    if doc.get("grace_period_s") is not None:
+        g = doc["grace_period_s"]
+        out["grace_period"] = g if isinstance(g, str) else f"{g}s"
+    for key in ("category", "thinking"):
+        if doc.get(key) is not None:
+            out[key] = doc[key]
+    for key in ("corpus", "corpus_cache"):
+        if stated.get(key):
+            out[key] = stated[key]
+    if "grace_period" in stated:
+        out["grace_period"] = stated["grace_period"]
+    if not dry_run and not out.get("corpus"):
+        raise SystemExit(
+            f"workload_spec {path!r} is a trace REPLAY, so it needs a local corpus file:\n"
+            f"  scenario:\n    replay:\n      corpus: .corpus/traces.jsonl")
+    return out
+
+
 def _workload_entry(workload, catalog):
     """The catalog's workload row, which carries the acceptance selectors a drafting replay needs."""
     try:
@@ -1025,7 +1267,7 @@ def _other_data_reason(runs):
     return "a Result names a build that is not a tagged release"
 
 
-def _pinned_stack(blis, catalog, registry, engine_version, data_override=False):
+def _pinned_stack(blis, catalog, registry, engine_version, data_override=False, router_cfg=None):
     """What priced these runs: the pins.env refs, the engine release the simulator ran, and the
     commits and binary digest that ran. The catalog and registry are the simulator's embedded data
     (the substrate release in pins.env) unless the run overrode them."""
@@ -1036,6 +1278,9 @@ def _pinned_stack(blis, catalog, registry, engine_version, data_override=False):
            "substrate": pins.get("SUBSTRATE_REF", "unpinned"),
            "engine_version": engine_version,
            "data": "override" if data_override else "embedded"}
+    # The router's reference configs a spec may use: where they were read from.
+    if router_cfg is not None:
+        out["router_configs"] = {"resolved": router_cfg.commit}
     resolved = {}
     if data_override:
         for name, path in (("catalog", catalog), ("registry", registry)):
@@ -1106,6 +1351,31 @@ def _write_run_dir(out_dir, spec, report, runs):
     _dump(os.path.join(out_dir, "report.json"), _report_json(report))
 
 
+SCALAR_OBJECTIVE = pareto.describe(pareto.DEFAULT_OBJECTIVE)
+
+
+def refusal_sentence(groups, limit=3):
+    """The refusal groups as one readable sentence fragment, naming each reason."""
+    parts = []
+    for g in groups[:limit]:
+        n = g["configs"]
+        parts.append(f"{n} configuration{'s' if n != 1 else ''} ({g['runs']} run"
+                     f"{'s' if g['runs'] != 1 else ''}): {g['reason']}")
+    if len(groups) > limit:
+        parts.append(f"{len(groups) - limit} more reason{'s' if len(groups) - limit != 1 else ''}")
+    return "; ".join(parts)
+
+
+def unplaceable_sentence(report):
+    """Why a pareto ranking has no best although runs held the SLOs: their Results lack a figure."""
+    rk = report.get("ranking") or {}
+    form = rk.get("throughput", "total")
+    metric = pareto.THROUGHPUT_FORMS[form][1]
+    return (f"{report['totals']['servable']} runs held the scenario's SLOs, but none can be placed on the "
+            f"Pareto front: their Results state no {metric} (or no TPOT), which the simulator build that "
+            f"ran them does not emit. Re-run with a build that does, or rank with `objective.ranking: scalar`.")
+
+
 def _report_json(report):
     """The narrative seam report.py renders, assembled MECHANICALLY from the spec + the results.
 
@@ -1122,6 +1392,10 @@ def _report_json(report):
     sc = report["scenario"]
     winner = report.get("best_overall")
     workload = (sc.get("replay") or {}).get("scenario") or sc["workload"]
+    if sc.get("workload_spec"):
+        workload = sc["workload_spec"]["label"]
+        if (sc["workload_spec"].get("recipe") or {}).get("label"):
+            workload += f" ({sc['workload_spec']['recipe']['label']})"
     tested = (f"{report['totals']['configs']} configurations over "
               f"{len(report['sweeps'])} sweep{'s' if len(report['sweeps']) != 1 else ''} "
               f"({', '.join(s['name'] for s in report['sweeps'])}), each at "
@@ -1135,13 +1409,35 @@ def _report_json(report):
                  f"{winner['tokens_per_sec_per_gpu']:g} tok/s/accelerator "
                  f"({winner['tokens_per_sec']:g} tok/s across the fleet) at concurrency "
                  f"{winner['concurrency']} while holding the scenario's SLOs.")
+        if report["totals"].get("refused"):
+            found += (f" {report['totals']['refused']} runs were refused and are not counted as misses: "
+                      + refusal_sentence(report.get("refusals") or []) + ".")
+        found += f" Ranking: {report.get('objective', SCALAR_OBJECTIVE)}."
         run_html = (f"{name} at concurrency {winner['concurrency']}. "
                     f"{report['totals']['servable']} of {report['totals']['runs']} runs held "
                     f"the SLOs.")
+    elif report["totals"].get("servable"):
+        # Runs held the SLOs but the ranking could not place any: say so, never "no configuration held".
+        found = unplaceable_sentence(report)
+        run_html = "Runs held the SLOs but the Pareto ranking could not place them."
     else:
-        found = ("No configuration held the scenario's SLOs at any tested load, so this "
-                 "experiment bounds the deployment from below rather than recommending one.")
-        run_html = "Nothing in this grid is servable under the stated SLOs."
+        refused = report["totals"].get("refused", 0)
+        ran = report["totals"]["runs"] - refused
+        if refused and not ran:
+            found = ("The simulator refused every configuration, so nothing was run and this experiment "
+                     "says nothing about the SLOs or about these deployments' speed. Refused: "
+                     + refusal_sentence(report.get("refusals") or []) + ".")
+            run_html = "Nothing in this grid ran: every configuration was refused."
+        elif refused:
+            found = (f"No configuration that was run held the scenario's SLOs at any tested load, so the "
+                     f"{ran} runs that were made bound the deployment from below rather than recommending one. "
+                     f"{refused} further runs were refused and are not evidence of a miss. Refused: "
+                     + refusal_sentence(report.get("refusals") or []) + ".")
+            run_html = "Nothing that ran in this grid is servable under the stated SLOs."
+        else:
+            found = ("No configuration held the scenario's SLOs at any tested load, so this "
+                     "experiment bounds the deployment from below rather than recommending one.")
+            run_html = "Nothing in this grid is servable under the stated SLOs."
     sections, num = [], 2
     for s in report["sweeps"]:
         best = s.get("best")
@@ -1150,6 +1446,12 @@ def _report_json(report):
                        + (f" ({best['variant']})" if best.get("variant") else "")
                        + f"</strong> at {best['tokens_per_sec_per_gpu']:g} tok/s/accelerator "
                        f"(concurrency {best['concurrency']}).")
+        elif s.get("refusals") and (s.get("outcomes") or {}).get("refused", 0) == s["runs"]:
+            outcome = ("Measured: nothing ran; the simulator refused every configuration in this sweep. "
+                       "Refused: " + refusal_sentence(s["refusals"]) + ".")
+        elif s.get("refusals"):
+            outcome = ("Measured: no configuration that ran in this sweep held the SLOs at any tested "
+                       "load. Refused: " + refusal_sentence(s["refusals"]) + ".")
         else:
             outcome = ("Measured: no configuration in this sweep held the SLOs at any "
                        "tested load.")
@@ -1165,7 +1467,9 @@ def _report_json(report):
                           f"comparing {len(report['sweeps'])} designs on one GPU budget."),
         "meta": ["BLIS discrete-event simulation", "Experiment Spec (RFC #21)",
                  "deterministic sweep — no LLM in the measurement path",
-                 f"seed {sc['seed']}"],
+                 f"seed {sc['seed']}",
+                 f"basis: {report['basis'].replace('_', ' ')}",
+                 f"scope: {report['scope']}"],
         "hero": [{"h": "What was tested", "html": tested},
                  {"h": "What was found", "html": found},
                  {"h": "What to run", "html": run_html, "run": True}],
@@ -1178,8 +1482,8 @@ def _report_json(report):
         "sections": sections,
         "recommendation_num": num,
         "recommendation_prose": [
-            ("The table below ranks the measured operating points by output tok/s per accelerator, the "
-             "objective this experiment selects on, among runs that held the scenario's SLOs."),
+            (f"The table below lists the measured operating points. Headline ranking: {report.get('objective', SCALAR_OBJECTIVE)}. "
+             f"The Pareto front of every sweep is in pareto.json."),
         ],
     }
 
@@ -1202,9 +1506,11 @@ def _scenario_json(spec, report):
     return {
         "run_id": report["name"],
         "model": sc["model"], "hardware": sc["hardware"], "gpu_budget": sc["gpus"],
-        "workload": ({"replay": sc["replay"]} if sc.get("replay")
-                     else {"preset": sc["workload"]}),
-        "objective": report["objective"],
+        "workload": ({"replay": sc["replay"],
+                      **({"workload_spec": sc["workload_spec"]} if sc.get("workload_spec") else {})}
+                     if sc.get("replay") else {"preset": sc["workload"]}),
+        "objective": report.get("objective", SCALAR_OBJECTIVE),
+        "basis": report["basis"], "scope": report["scope"],
         "interactivity_floor": ({"tok_per_s_per_user": floor["tok_per_s_per_user"]}
                                 if floor.get("tok_per_s_per_user") else {}),
         "slos": sc.get("slo") or {},
@@ -1217,49 +1523,81 @@ def _scenario_json(spec, report):
     }
 
 
+def _finalist(report, row, sweep):
+    """One finalist in the existing pareto.json shape, built from a ledger row."""
+    return {
+        "label": row["label"], "variant": row.get("variant", ""),
+        "sweep": sweep,
+        # `config` and `gpus` are what build_gallery reads for the winner/alternative cards
+        # (tp, num_instances, GPU count); omitting them rendered "tp 0, 0 instances".
+        "config": row.get("config") or {},
+        "gpus": row.get("gpus"),
+        "c_star": row["concurrency"], "c_use": row["concurrency"],
+        "at_c_use": {"tokens_per_sec": row.get("tokens_per_sec"),
+                     "tokens_per_sec_per_gpu": row.get("tokens_per_sec_per_gpu"),
+                     "total_tokens_per_sec_per_gpu": row.get("total_tokens_per_sec_per_gpu"),
+                     "interactivity": row.get("interactivity"),
+                     "tok_per_s_per_user": row.get("tok_per_s_per_user"),
+                     "itl_p99_ms": row.get("itl_p99_ms")},
+        "curve": [{"concurrency": r["concurrency"],
+                   "tokens_per_sec": r.get("tokens_per_sec"),
+                   "tok_per_s_per_user": r.get("tok_per_s_per_user"),
+                   "itl_p99_ms": r.get("itl_p99_ms"),
+                   "ttft_p99_ms": r.get("ttft_p99_ms"),
+                   "preemption_count": r.get("preemption_count", 0)}
+                  for s in report["sweeps"] if s["name"] == sweep
+                  for r in s["rows"]
+                  if r["label"] == row["label"]
+                  and r.get("variant", "") == row.get("variant", "")],
+    }
+
+
 def _pareto_json(report):
-    """Finalists + winner in the existing pareto.json shape, one finalist per sweep best."""
+    """pareto.json: finalists and winner (the headline ranking's), the Pareto front of every sweep,
+    and how many runs were refused, grouped by reason.
+
+    `ranking` says which rule chose the finalists: `scalar` is one finalist per sweep (the most
+    output tok/s per accelerator); `pareto` is the members of the all-sweeps front."""
+    ranking = report.get("ranking") or {"used": "scalar"}
     finalists = []
-    for s in report["sweeps"]:
-        best = s.get("best")
-        if not best:
-            continue
-        finalists.append({
-            "label": best["label"], "variant": best.get("variant", ""),
-            "sweep": s["name"],
-            # `config` and `gpus` are what build_gallery reads for the winner/alternative cards
-            # (tp, num_instances, GPU count); omitting them rendered "tp 0, 0 instances".
-            "config": best.get("config") or {},
-            "gpus": best.get("gpus"),
-            "c_star": best["concurrency"], "c_use": best["concurrency"],
-            "at_c_use": {"tokens_per_sec": best.get("tokens_per_sec"),
-                         "tokens_per_sec_per_gpu": best.get("tokens_per_sec_per_gpu"),
-                         "tok_per_s_per_user": best.get("tok_per_s_per_user"),
-                         "itl_p99_ms": best.get("itl_p99_ms")},
-            "curve": [{"concurrency": r["concurrency"],
-                       "tokens_per_sec": r.get("tokens_per_sec"),
-                       "tok_per_s_per_user": r.get("tok_per_s_per_user"),
-                       "itl_p99_ms": r.get("itl_p99_ms"),
-                       "ttft_p99_ms": r.get("ttft_p99_ms"),
-                       "preemption_count": r.get("preemption_count", 0)}
-                      for r in s["rows"]
-                      if r["label"] == best["label"]
-                      and r.get("variant", "") == best.get("variant", "")],
-        })
+    if ranking["used"] == "pareto":
+        form = ranking["throughput"]
+        rows = {(r["sweep"], r["label"], r.get("variant", ""), r["concurrency"]): r
+                for s in report["sweeps"] for r in s["rows"]}
+        for m in (report.get("pareto") or {}).get("overall", {}).get(form, {}).get("members", []):
+            row = rows.get((m["sweep"], m["label"], m["variant"], m["concurrency"]))
+            if row:
+                finalists.append({**_finalist(report, row, m["sweep"]), "front_status": m["status"]})
+    else:
+        for s in report["sweeps"]:
+            best = s.get("best")
+            if best:
+                finalists.append(_finalist(report, best, s["name"]))
     winner = report.get("best_overall")
     dropped = [d for s in report["sweeps"] for d in s["dropped"]]
-    out = {"run_id": report["name"], "finalists": finalists, "dropped": dropped}
+    out = {"run_id": report["name"], "finalists": finalists, "dropped": dropped,
+           "ranking": {**ranking, "description": report.get("objective", SCALAR_OBJECTIVE)},
+           "front": report.get("pareto"),
+           "outcomes": report.get("outcomes") or {},
+           "refusals": report.get("refusals") or [],
+           "sweep_outcomes": [{"name": s["name"], "outcomes": s.get("outcomes") or {},
+                               "refusals": s.get("refusals") or []} for s in report["sweeps"]]}
     if winner:
         name = (f"{winner['label']} ({winner['variant']})" if winner.get("variant")
                 else winner["label"])
-        out["winner"] = {
-            "chosen": name, "label": winner["label"], "variant": winner.get("variant", ""),
-            "sweep": winner["sweep"],
-            "reason": (f"{name} in sweep '{winner['sweep']}' gives the most tok/s/accelerator "
-                       f"({winner['tokens_per_sec_per_gpu']:g} tok/s/accelerator, "
-                       f"{winner['tokens_per_sec']:g} tok/s fleet) while holding the "
-                       f"scenario's SLOs, at concurrency {winner['concurrency']}."),
-        }
+        if ranking["used"] == "pareto":
+            reason = (f"{name} in sweep '{winner['sweep']}' is the front member with the most "
+                      f"tok/s/accelerator ({winner.get('total_tokens_per_sec_per_gpu') if ranking['throughput'] == 'total' else winner.get('output_tokens_per_sec_per_decode_gpu')} "
+                      f"{ranking['throughput']} form) at concurrency {winner['concurrency']}; "
+                      f"the front, not this point, is the result.")
+        else:
+            reason = (f"{name} in sweep '{winner['sweep']}' gives the most tok/s/accelerator "
+                      f"({winner['tokens_per_sec_per_gpu']:g} tok/s/accelerator, "
+                      f"{winner['tokens_per_sec']:g} tok/s fleet) while holding the "
+                      f"scenario's SLOs, at concurrency {winner['concurrency']}.")
+        out["winner"] = {"chosen": name, "label": winner["label"],
+                         "variant": winner.get("variant", ""), "sweep": winner["sweep"],
+                         "reason": reason}
     return out
 
 
@@ -1274,6 +1612,10 @@ def main(argv=None):
     ap.add_argument("--fields", help="the engine's field list: the pinned blis-vllm release's fields.json, "
                                      "until the binary has `blis fields` (default: ask the binary)")
     ap.add_argument("--routing", default=os.path.join(ROOT, "routing"))
+    ap.add_argument("--router-configs", dest="router_configs", default=None,
+                    help="developer override: a router checkout whose reference-configs/ replace the "
+                         "ones the simulator embeds (default: $ROUTER_CONFIGS_DIR, else "
+                         "`blis router-configs --json`)")
     ap.add_argument("--dry-run", action="store_true", dest="dry_run",
                     help="expand and filter the grids and print the run plan; run no BLIS")
     ap.add_argument("--timeout", type=int, default=600, help="per-run BLIS timeout (seconds)")
@@ -1296,7 +1638,12 @@ def main(argv=None):
         raise SystemExit("--registry is required for a real run "
                          "(use --dry-run to expand the grids only)")
     try:
-        errs = validator.validate(spec, args.blis, args.routing, args.catalog, args.fields)
+        router_cfg = router_configs.open_checkout(args.router_configs, blis=args.blis)
+    except router_configs.RouterConfigsError as e:
+        raise SystemExit(f"{args.spec}: {e}")
+    try:
+        errs = validator.validate(spec, args.blis, args.routing, args.catalog, args.fields,
+                                  router_cfg)
     except blis_cli.BlisCommandError as e:
         raise SystemExit(f"{args.spec}: {e}")
     if errs:
@@ -1306,7 +1653,7 @@ def main(argv=None):
     report = run_experiment(spec, args.blis, args.catalog, args.registry, args.out,
                             routing_dir=args.routing, dry_run=args.dry_run,
                             run_timeout=args.timeout, max_parallel=args.max_parallel, fields=args.fields,
-                            data_override=args.data_override)
+                            data_override=args.data_override, router_cfg=router_cfg)
     if args.as_json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
@@ -1320,7 +1667,16 @@ def main(argv=None):
                   + f" in '{winner['sweep']}' -- "
                   f"{winner['tokens_per_sec_per_gpu']:g} tok/s/accelerator at c={winner['concurrency']}")
         elif not args.dry_run:
-            print("best: none -- no run met the scenario's SLOs")
+            if t["servable"]:
+                print("best: none -- " + unplaceable_sentence(report))
+            elif t["refused"] and t["refused"] == t["runs"]:
+                print("best: none -- the simulator refused every run; nothing was measured")
+            else:
+                print("best: none -- no run met the scenario's SLOs")
+        if not args.dry_run and t["refused"]:
+            print(f"refused: {t['refused']} of {t['runs']} runs ({t['configs_refused']} configurations)")
+            for g in report["refusals"]:
+                print(f"  {g['runs']} runs, {g['configs']} configurations: {g['reason']}")
         if not args.dry_run:
             print(f"wrote {os.path.join(args.out, report['name'])}/ in {time.time() - t0:.1f}s")
     return 0

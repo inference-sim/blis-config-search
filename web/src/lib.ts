@@ -20,6 +20,7 @@ export const TAB_LABELS: [Tab, string][] = [
   ['coverage', 'Coverage'],
   ['submit', 'Submit'],
 ]
+export const REPO = 'https://github.com/inference-sim/blis-config-search'
 export const SPEC_DOC = 'https://github.com/inference-sim/blis-config-search/blob/main/experiments/README.md'
 
 /** blis-catalog's docs for the version we pin; the site is published per minor ("0.5.0" → /0.5/). */
@@ -129,7 +130,8 @@ export interface CoverageRow {
 function pickBest(scenarios: Scenario[]): Scenario | null {
   let best: Scenario | null = null
   for (const s of scenarios) {
-    if (best === null || s.winner.tps_per_gpu > best.winner.tps_per_gpu) best = s
+    if (s.winner === null) continue
+    if (best === null || best.winner === null || s.winner.tps_per_gpu > best.winner.tps_per_gpu) best = s
   }
   return best
 }

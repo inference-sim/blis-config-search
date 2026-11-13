@@ -1,4 +1,5 @@
 {
+  "basis": "measured_window",
   "experiment": {
     "description": "",
     "name": "deepseek-v4-1-flash-b200-agentx-4node",
@@ -46,48 +47,101 @@
   "model": "deepseek-v4.1-flash",
   "objective": "max output tok/s per accelerator subject to the scenario's SLOs",
   "pinned_stack": {
-    "blis": "v0.15.0",
-    "catalog": "0.5.0",
+    "blis": "v0.17.0",
+    "data": "override",
     "engine_version": "0.32.0",
-    "kernel": "v0.5.0",
-    "registry": "v0.3.0",
+    "kernel": "unpinned",
     "resolved": {
       "blis": {
-        "sha256": "46bf00c739eafba4cdb347d4bfdd30bd63e815acaff1525c291b5b8ea947b197"
+        "sha256": "81252e86283ddc2dc3bca7d2fd41853321956d431711ff12dc2f95edff7b6d10"
       },
       "catalog": {
-        "commit": "b5550f750cb51571498577fbdc1c68f78cda67db",
-        "describe": "0.5.0"
+        "commit": "965b05834c47882bc0f9f1a960c90327a756ef3d",
+        "describe": "v0.14.0"
       },
       "registry": {
-        "commit": "96bead697172ab7f2cf8346e04e65b837014d867",
-        "describe": "v0.3.0"
+        "commit": "965b05834c47882bc0f9f1a960c90327a756ef3d",
+        "describe": "v0.14.0"
       }
     },
-    "router": "v1.0.0-blis.2"
+    "router": "v1.0.0-blis.4",
+    "router_configs": {
+      "resolved": "github.com/llm-d/llm-d-router@v1.0.0-blis.4"
+    },
+    "substrate": "v0.14.0"
   },
   "run_id": "deepseek-v4-1-flash-b200-agentx-4node",
+  "scope": "cluster; worst instance for TTFT and end-to-end gates",
   "seed": 42,
   "slos": {
     "itl_p99": "20ms"
   },
   "workload": {
     "replay": {
-      "_overrides": {
-        "grace_period": {
-          "catalog": "30s",
-          "spec": "inf"
-        }
-      },
-      "benchmark_duration": "900s",
+      "benchmark_duration": "3600s",
       "category": "coding",
       "corpus": ".corpus/traces.jsonl",
       "corpus_cache": "/tmp/agx-cache-b200",
-      "corpus_sha256": "e39cd2ff3eba21d4a3664be51da743ac3d2149a1933898cafc7bfeac8147eeef",
-      "grace_period": "inf",
+      "corpus_sha256": "29b6a19e751ff5230771519aab755f80a0f43a4ba9cf96b72d3a6a437ec99276",
+      "grace_period": "30s",
       "max_context_length": "max_model_len",
       "scenario": "inferencex-agentx-mvp",
-      "thinking": "on"
+      "thinking": "on",
+      "workload_spec": "/home/runner/_work/blis-config-search/blis-config-search/workloads/agentx-run-recipe.yaml",
+      "workload_spec_relative": "workloads/agentx-run-recipe.yaml",
+      "workload_spec_sha256": "f9ee0a3428b556fbae00a7215c3b7bf76dd6a15cac0b60c63c1f86766b6c991a"
+    },
+    "workload_spec": {
+      "catalog": false,
+      "document": {
+        "benchmark_duration_s": 3600,
+        "category": "coding",
+        "corpus": {
+          "encoding": "jsonl",
+          "format": "weka-trace-v7",
+          "loader": "semianalysis_cc_traces_weka_062126",
+          "sha256": "29b6a19e751ff5230771519aab755f80a0f43a4ba9cf96b72d3a6a437ec99276",
+          "source": {
+            "file": "traces.jsonl",
+            "huggingface": "semianalysisai/cc-traces-weka-062126",
+            "revision": "23f152f6f0f9399a85901b89a6458def0ef16729",
+            "split": "train"
+          }
+        },
+        "grace_period_s": 30,
+        "harness_version": "0.12.0",
+        "max_context_length": "max_model_len",
+        "random_seed": 42,
+        "scenario": "inferencex-agentx-mvp",
+        "system_idle_gap_cap_s": 10,
+        "thinking": "on",
+        "trace_idle_gap_cap_s": 300,
+        "trajectory_start": {
+          "max_ratio": 0.75,
+          "min_ratio": 0.25
+        },
+        "warmup": {
+          "mode": "cache_pressure",
+          "requests_per_lane": 10
+        }
+      },
+      "label": "custom (not in the catalog)",
+      "path": "workloads/agentx-run-recipe.yaml",
+      "recipe": {
+        "differs_from_run": {},
+        "fields": {
+          "benchmark_duration_s": 3600,
+          "corpus.loader": "semianalysis_cc_traces_weka_062126",
+          "grace_period_s": 30,
+          "trace_idle_gap_cap_s": 300,
+          "trajectory_start.max_ratio": 0.75,
+          "trajectory_start.min_ratio": 0.25,
+          "warmup.requests_per_lane": 10
+        },
+        "label": "AgentX run recipe: 300 s idle-gap cap, 10 warm-up requests per lane, trajectory start 0.25 to 0.75, 3600 s window, 30 s grace, corpus semianalysis_cc_traces_weka_062126",
+        "overrides": {}
+      },
+      "sha256": "f9ee0a3428b556fbae00a7215c3b7bf76dd6a15cac0b60c63c1f86766b6c991a"
     }
   }
 }

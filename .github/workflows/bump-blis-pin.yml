@@ -1,12 +1,17 @@
 name: bump-blis-pin
 
 # Step one of the pin-bump loop. When inference-sim publishes a release newer than the one
-# pins.env names, open a DRAFT PR that moves the pin. That PR is also where any code changes the
-# release needs are made: pin-compat.yml gates it, and fixes are pushed onto the same branch
-# until the gate is green. Merging it is what triggers regen-reports.yml.
+# pins.env names, open a DRAFT PR that moves the pin. That one PR carries everything the release
+# needs: code fixes (pushed by a person onto the branch until pin-compat is green) and the
+# regenerated reports (committed onto it by regen-reports.yml). A person reviews and merges it.
 #
-#   upstream release --this-->  draft pin PR  <--fix commits--  pin-compat.yml (required check)
-#     --ready + merge-->  regen-reports.yml  -->  report PRs (batched)
+#   upstream release --this--> draft pin PR --dispatch--> its checks (scripts/dispatch_pr_checks.sh)
+#     pin-compat.yml --> pin-ready.yml waits for every check on the head, then
+#       red                        -> fails; push fixes to the branch (the checks re-run)
+#       green, reports stale       -> regen-reports.yml base=<branch>: one commit per batch onto
+#                                     the branch, then the checks again, then pin-ready again
+#       green, reports current     -> gh pr ready: the PR asks for review
+#     --approve + merge--> main: regen-reports.yml plans only stale reports, finds none, opens nothing
 #
 # Three ways in, all landing on the same steps:
 #   * schedule           -- a daily poll of upstream's latest release; the safety net.
@@ -24,9 +29,9 @@ name: bump-blis-pin
 # The catalog and registry need no pin: the release embeds them (CFG-1), and the substrate pin is
 # derived from go.mod with the rest.
 #
-# Token: a PR opened with the default GITHUB_TOKEN triggers no workflows, so after opening it this
-# job dispatches checks.yml and pin-compat.yml on its branch. An optional PIN_BOT_TOKEN secret
-# (contents + pull-requests write) opens the PR as that user instead, and CI then runs on its own.
+# Token: GITHUB_TOKEN only, no App or personal token. What it pushes or opens starts no workflow, so
+# every step that pushes dispatches the checks on the new head; a dispatched run reports on that
+# commit (satisfying the required checks) and is never held for approval.
 
 on:
   schedule:
@@ -53,16 +58,14 @@ jobs:
       contents: write          # push the bump branch
       pull-requests: write     # open the PR
       issues: write            # create the labels (labels live in the issues API)
-      actions: write           # dispatch CI on the PR when there is no PIN_BOT_TOKEN
+      actions: write           # dispatch the PR's checks
     env:
-      GH_TOKEN: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
-      HAS_BOT_TOKEN: ${{ secrets.PIN_BOT_TOKEN != '' }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       # A pushed branch must carry main's workflow files, or GITHUB_TOKEN's push is refused.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.repository.default_branch }}
-          token: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with: { python-version: "3.12" }
       - run: pip install --require-hashes -r requirements.txt
@@ -163,21 +166,22 @@ jobs:
           mods = open("/tmp/modules.txt").read().split()
           print("\nThe release builds against " + ", ".join(
               f"`{m}` {v}" for m, v in zip(mods[::2], mods[1::2])) + ".\n")
-          print("**This is a draft on purpose.** A release can need code changes in this repo "
-                "(v0.14.0 needed 14 files, #25), and they belong on THIS branch: merging it is what "
-                "starts the regeneration of every report, so the code has to fit the new stack "
-                "first. `pin-compat` re-runs on every push and comments what is still broken.\n")
-          print("**Before marking ready:**\n"
+          print("**This is a draft until it is done.** A release can need code changes in this "
+                "repo (v0.14.0 needed 14 files, #25); push them onto THIS branch. Once every check "
+                "is green, `pin-ready` regenerates the reports below onto this branch (one commit "
+                "per batch), re-runs the checks, and marks the PR ready for review. Merging it "
+                "then needs no further PR: main's `regen-reports` finds every report current.\n")
+          print("**Reviewer:**\n"
                 "- [ ] `pin-compat` is green: every spec validates against the new binary, the "
                 "suite passes, and each report's own rows re-run on the new binary (`smoke`) "
                 "with no LOUD (now fails) or SILENT (knob now inert) findings.\n"
+                "- [ ] The regenerated reports' movement (each batch commit carries a before/after "
+                "table) is the simulator change showing through, and the preview shows them.\n"
                 "- [ ] Release notes read for behaviour the runner should learn even where "
                 "no committed report exercises it (`run_blis.py`, "
-                "`.claude/skills/blis-experiment/references/knobs.md`).\n"
-                "- [ ] Any spec that must change to keep running (a field the new stack "
-                "refuses) is changed here, with the reason in its # comment.\n")
-          print(f"**On merge**, `regen-reports.yml` regenerates all {len(plan['reports'])} committed "
-                f"report(s) against the new stack and opens one PR per batch:\n")
+                "`.claude/skills/blis-experiment/references/knobs.md`).\n")
+          print(f"**Regenerated on this branch**, {len(plan['reports'])} committed report(s), "
+                f"one commit per batch:\n")
           for b in plan["batches"]:
               print(f"- `{b['name']}`: " + ", ".join(f"`{i}`" for i in b["ids"]))
           if plan["orphans"]:
@@ -213,12 +217,10 @@ jobs:
           gh pr create --draft --title "Bump the pinned inference-sim to $tag" \
             --body-file /tmp/body.md --base main --head "$branch" \
             --label auto-update --label blis-pin
-          # A PR opened with GITHUB_TOKEN starts no workflows, but a dispatch does: start its CI here.
-          if [ "$HAS_BOT_TOKEN" != true ]; then
-            pr="$(gh pr view "$branch" --json number --jq .number)"
-            gh workflow run checks.yml --ref "$branch"
-            gh workflow run pin-compat.yml --ref "$branch" -f base=main -f pr="$pr"
-          fi
+          # A PR opened with GITHUB_TOKEN starts no workflows, but a dispatch does: start its checks.
+          # pin-compat then hands over to pin-ready.yml, which regenerates the reports onto the branch.
+          pr="$(gh pr view "$branch" --json number --jq .number)"
+          sh scripts/dispatch_pr_checks.sh "$branch" "$pr" "${{ github.event.repository.default_branch }}"
           # An older bump PR the bot opened is now superseded; say so on it rather than closing a
           # PR a human may have pushed CATALOG/REGISTRY moves onto.
           new_url="$(gh pr view "$branch" --json url --jq .url)"

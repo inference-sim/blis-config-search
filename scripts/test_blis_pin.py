@@ -456,11 +456,11 @@ def test_workflow_wiring():
     check("scripts/blis_pin.py changed" in regen,
           "a comment-only pins.env edit must not queue a campaign")
     check("fail-fast: false" in regen, "one failed report must not cancel the others")
-    check("blis_pin.py same-stack" in regen and '"$GITHUB_SHA..HEAD" -- "reports/$id"' in regen,
+    check("blis_pin.py same-stack" in regen and '"$SWEPT..HEAD" -- "reports/$id"' in regen,
           "a report re-swept on main during the campaign keeps main's copy")
     check('[ ! -d "reports/$id" ]' in regen and 'stale="$stale $id"' in regen,
           "a report removed, or re-swept on the old stack, on main mid-campaign is not swapped in")
-    check('git show "$GITHUB_SHA:pins.env"' in regen and "steps.stack.outputs.current == 'true'" in regen,
+    check('git show "$SWEPT:pins.env"' in regen and "steps.stack.outputs.current == 'true'" in regen,
           "a campaign whose pins moved on main mid-sweep opens no PR")
     check("always()" in regen, "batch PRs open even when some report jobs failed")
     check("scripts/test_blis_pin.py" in open(os.path.join(wf, "checks.yml")).read(),
@@ -513,10 +513,127 @@ def test_workflow_wiring():
     check("inputs.base" in compat and "inputs.pr" in compat,
           "a dispatched pin-compat still compares against the base and comments on the PR")
     for name, text in (("bump-blis-pin.yml", bump), ("regen-reports.yml", regen)):
-        check("actions: write" in text and "gh workflow run checks.yml" in text
-              and "gh workflow run pin-compat.yml" in text
-              and ("-f base=main" in text or '-f base="$BASE_BRANCH"' in text),
-              f"{name} dispatches CI on its own PR, so the required gate reports without a PAT")
+        check("actions: write" in text and "sh scripts/dispatch_pr_checks.sh" in text
+              and "PIN_BOT_TOKEN" not in text,
+              f"{name} dispatches the checks on what it pushed, with GITHUB_TOKEN alone")
+    disp = open(os.path.join(ROOT, "scripts", "dispatch_pr_checks.sh")).read()
+    for w in ("checks.yml", "pin-compat.yml", "blis.yml", "private-names.yml", "pages.yml"):
+        check(f"gh workflow run {w}" in disp, f"dispatch_pr_checks.sh starts {w}")
+        text = open(os.path.join(wf, w)).read()
+        check("workflow_dispatch:" in text, f"{w} can be dispatched")
+    check("--stale-only" in regen, "a pin move reaching main regenerates only the stale reports")
+    check(regen.count('ref: "${{ needs.plan.outputs.sha }}"') == 2
+          and "github.event.inputs.base || github.ref" in regen,
+          "every regen job sweeps the base's pins, not the dispatch ref's")
+
+
+PINS_NEW = {"BLIS_REF": "v2.0.0", "BLIS_SHA": "b" * 40, "ROUTER_REF": "r2", "SUBSTRATE_REF": "s2"}
+
+
+def _write_stack(root, rid, blis, router, substrate, commit=None):
+    path = os.path.join(root, "reports", rid, "scenario.json")
+    with open(path) as f:
+        scen = json.load(f)
+    scen["pinned_stack"] = {"blis": blis, "router": router, "substrate": substrate,
+                            "engine_version": "0.32.0", "data": "embedded"}
+    if commit:
+        scen["pinned_stack"]["resolved"] = {"blis": {"commit": commit, "sha256": "aa"}}
+    with open(path, "w") as f:
+        json.dump(scen, f)
+
+
+def test_stale_reports_and_the_post_merge_plan():
+    """A pin move regenerates what the new pins did not price, and nothing once all are current.
+
+    This is the post-merge guarantee: a pin PR regenerates its reports on its own branch, so the
+    push of that merge to main plans no report and regen-reports opens no PR."""
+    print("test_stale_reports_and_the_post_merge_plan")
+    root = _fake_repo()
+    try:
+        with open(os.path.join(root, "pins.env"), "w") as f:
+            f.write("# pins\n" + "".join(f"{k}={v}\n" for k, v in PINS_NEW.items()))
+        every = B.report_ids(root)
+        check(B.stale_ids(root) == every, "before regeneration every report carries the old stack")
+        check(sorted(r["id"] for r in B.plan(root, stale_only=True)["reports"])
+              == sorted(r["id"] for r in B.plan(root)["reports"]),
+              "a fresh pin move plans every runnable report")
+
+        # Regenerate two reports onto the new stack: only the rest stay stale.
+        _write_stack(root, "exp-a", "v2.0.0", "r2", "s2", commit="b" * 40)
+        _write_stack(root, "exp-b", "v2.0.0", "r2", "s2")
+        check("exp-a" not in B.stale_ids(root) and "exp-b" not in B.stale_ids(root),
+              "a report on the pinned labels (and commit, where recorded) is current")
+        planned = [r["id"] for r in B.plan(root, stale_only=True)["reports"]]
+        check("exp-a" not in planned and "exp-c" in planned,
+              f"the stale-only plan skips the current reports and keeps the rest: {planned}")
+
+        # Each label, and a recorded commit, is part of the stack.
+        for rid, args, why in (
+                ("exp-c", ("v2.0.0", "r1", "s2"), "an old router ref"),
+                ("many-0", ("v2.0.0", "r2", "s1"), "an old substrate ref"),
+                ("many-1", ("v1.0.0", "r2", "s2"), "an old blis ref")):
+            _write_stack(root, rid, *args)
+            check(rid in B.stale_ids(root), f"{why} is stale")
+        _write_stack(root, "many-2", "v2.0.0", "r2", "s2", commit="c" * 40)
+        check("many-2" in B.stale_ids(root), "a binary built from another commit is stale, whatever its tag")
+
+        # The whole gallery regenerated: the merge's push plans nothing.
+        for rid in every:
+            _write_stack(root, rid, "v2.0.0", "r2", "s2", commit="b" * 40)
+        check(B.stale_ids(root) == [], "after regeneration no report is stale")
+        check(B.plan(root, stale_only=True)["reports"] == [] and B.plan(root, stale_only=True)["batches"] == [],
+              "after the pin PR merges, main's regen-reports plans no report and opens no PR")
+        check(len(B.plan(root)["reports"]) > 0, "a forced (rehearsal) plan still covers every report")
+        rc = B.main(["stale", "--root", root])
+        check(rc == 0, "`blis_pin.py stale` exits 0 when every report is current")
+        _write_stack(root, "exp-a", "v1.0.0", "r2", "s2")
+        check(B.main(["stale", "--root", root]) == 1, "`blis_pin.py stale` exits 1 while one is stale")
+    finally:
+        shutil.rmtree(root)
+
+
+def _run(name, status="COMPLETED", conclusion="SUCCESS", wf="checks", at="2026-11-16T10:00:00Z"):
+    return {"__typename": "CheckRun", "name": name, "workflowName": wf, "status": status,
+            "conclusion": conclusion if status == "COMPLETED" else "", "startedAt": at}
+
+
+def test_readiness():
+    print("test_readiness")
+    green = [_run("python"), _run("experiments"), _run("web"), _run("gate", wf="pin-compat"),
+             _run("blis checks", wf="blis"), _run("scan", wf="private-names"),
+             _run("nightly", conclusion="SKIPPED", wf="blis"), _run("preview", wf="pages")]
+    check(B.readiness(green)["state"] == "green", "every check passed: green")
+    check(B.readiness(green + [_run("ready", status="IN_PROGRESS", wf="pin-ready")])["state"] == "green",
+          "the waiter's own run does not hold the PR pending")
+    r = B.readiness(green[1:])
+    check(r["state"] == "pending" and r["missing"] == ["python"],
+          f"a required check that has not reported yet keeps it pending: {r}")
+    r = B.readiness(green + [_run("smoke x", status="IN_PROGRESS", wf="pin-compat")])
+    check(r["state"] == "pending", "a running check keeps it pending")
+    r = B.readiness(green + [_run("web", conclusion="FAILURE", at="2026-11-16T11:00:00Z")])
+    check(r["state"] == "red" and r["failed"] == ["checks / web"], f"a newer failed run is red: {r}")
+    r = B.readiness([_run("web", conclusion="CANCELLED", at="2026-11-16T09:00:00Z")] + green)
+    check(r["state"] == "green", "an older cancelled run is harmless when a later one passed")
+    r = B.readiness(green + [_run("web", conclusion="CANCELLED", at="2026-11-16T11:00:00Z")])
+    check(r["state"] == "red", "a newer cancelled run blocks, as branch protection reads it")
+    r = B.readiness([c for c in green if c["name"] != "blis checks"]
+                    + [_run("pr / blis checks", wf="blis")])
+    check(r["state"] == "green", "the pull_request form of the description check counts too")
+    r = B.readiness([c if c["name"] != "gate" else _run("gate", conclusion="SKIPPED", wf="pin-compat")
+                     for c in green])
+    check(r["state"] == "red", "a required check that only skipped did not pass")
+    r = B.readiness(green + [{"__typename": "StatusContext", "context": "ext", "state": "FAILURE"}])
+    check(r["state"] == "red", "a failed commit status is red")
+    with tempfile.TemporaryDirectory() as t:
+        f = os.path.join(t, "pr.json")
+        with open(f, "w") as fh:
+            json.dump({"headRefOid": "x", "statusCheckRollup": green}, fh)
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            B.main(["ready", f])
+        check(json.loads(out.getvalue())["state"] == "green", "`blis_pin.py ready` reads gh pr view JSON")
 
 
 if __name__ == "__main__":
@@ -537,5 +654,7 @@ if __name__ == "__main__":
     test_smoke_pairs()
     test_smoke_verdicts()
     test_workflow_wiring()
+    test_stale_reports_and_the_post_merge_plan()
+    test_readiness()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

@@ -923,8 +923,12 @@ def figure_form_problems(doc):
 
 # The aggregate behind the feasibility test of a latency SLO: the max, over the cluster figure and every
 # instance's, of each p99 (worst_metric). Stated on the report so the figure that gates a row is named
-# in the registry's terms: aggregate max, over instances.
-FEASIBILITY_AGGREGATE = {"aggregate": "max", "over": "instance", "metrics": ["ttft_p99_ms", "e2e_p99_ms", "itl_p99_ms"]}
+# in the registry's terms: aggregate max, over instances. The `itl_p99` cap gates on tpot_p99_ms (the
+# record's legacy itl_p99_ms slot holds it, _MEASURED_KEYS): the per-request (E2E - TTFT) / (tokens - 1),
+# which is aiperf's ITL (inter_token_latency) and vllm bench serve's TPOT. The registry's itl_p99_ms is
+# another figure, a gap per token that is zero inside a chunk and reads 0 under speculative decoding, and
+# icl_p99_ms is vllm bench serve's ITL, a gap per chunk (inference-sim#2128); neither gates a row.
+FEASIBILITY_AGGREGATE = {"aggregate": "max", "over": "instance", "metrics": ["ttft_p99_ms", "e2e_p99_ms", "tpot_p99_ms"]}
 
 # The legacy flat key the rest of the module reads -> the Result's measured-window metric.
 _MEASURED_KEYS = {"tokens_per_sec": "output_tok_s", "responses_per_sec": "request_throughput",

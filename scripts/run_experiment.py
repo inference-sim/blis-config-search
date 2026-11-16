@@ -59,7 +59,8 @@ import validate_experiment as validator   # noqa: E402
 
 # Setting names in a spec are the engine block's names; run_blis's candidate keys are flat. These are the only two that differ, and they differ because run_blis folds
 # drafting into a nested `speculative` block itself.
-SPEC_TO_CANDIDATE = {"num_spec_tokens": "num_speculative_tokens", "method": "speculative_method"}
+SPEC_TO_CANDIDATE = {"num_spec_tokens": "num_speculative_tokens", "method": "speculative_method",
+                     "draft_model": "speculative_draft_model"}
 
 
 def _flag(role, knob):
@@ -103,7 +104,14 @@ def _engine_candidates(engine):
         combos = grid(fields)
         out = [{**base, block: combo} for base in out for combo in combos]
     if spec:
-        spec_combos = grid({SPEC_TO_CANDIDATE.get(k, k): v for k, v in spec.items()})
+        spec_combos = []
+        for combo in grid({SPEC_TO_CANDIDATE.get(k, k): v for k, v in spec.items()}):
+            # K=0 is the drafting-off control: one arm, with no drafter named, however many
+            # methods and drafters the grid crosses it with.
+            if combo.get("num_speculative_tokens") == 0:
+                combo = {"num_speculative_tokens": 0}
+            if combo not in spec_combos:
+                spec_combos.append(combo)
         out = [{**b, **s} for b in out for s in spec_combos]
     return out
 
@@ -312,7 +320,8 @@ def label_of(cand):
 # cudagraph_mode sweep spanning 147 to 263 tok/s/GPU first rendered as four identical rows. The
 # list is checked against run_blis.SCENARIO_ENGINE by test_experiment.py so it cannot fall behind
 # the runner again.
-VARIANT_KEYS = ("num_speculative_tokens", "speculative_method", "router_config",
+VARIANT_KEYS = ("num_speculative_tokens", "speculative_method", "speculative_draft_model",
+                "router_config",
                 # simulator switches
                 "pd_transfer_contention",
                 # batching / admission
@@ -482,6 +491,7 @@ def run_row(rec, cand, label, variant, sweep_name, concurrency, gpus):
     # row showing a passing aggregate next to an infeasible verdict is unreadable.
     worst_ttft, ttft_missing = run_blis.worst_metric(rec, "ttft_p99_ms")
     inter, inter_basis = pareto.interactivity_of(m)
+    acc = (rec.get("deployment") or {}).get("acceptance")
     return {
         "sweep": sweep_name, "label": label, "variant": variant,
         "concurrency": concurrency, "gpus": gpus,
@@ -499,6 +509,9 @@ def run_row(rec, cand, label, variant, sweep_name, concurrency, gpus):
         "total_tokens_per_sec_per_gpu": _round(m.get("total_tokens_per_sec_per_gpu"), 3),
         "output_tokens_per_sec_per_decode_gpu": _round(m.get("output_tokens_per_sec_per_decode_gpu"), 3),
         "disaggregated": cand.get("prefill_instances") is not None,
+        # A drafting row's acceptance as its Result records it: value, layer, profile, source and,
+        # once the Result carries it (inference-sim/inference-sim#2079), the lookup's step.
+        **({"acceptance": acc} if acc else {}),
     }
 
 

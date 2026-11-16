@@ -12,6 +12,9 @@ of them is the catalog summary a designer tends to read:
   * the model's graph.yaml       -- the declared speculator and its max depth, the KV
                                     bytes_by_cache_dtype table (which dtypes this model prices
                                     at all), sliding window
+  * the model's model.yaml       -- its drafters: the graph's speculator and each separate
+                                    drafter entry, which names the model in its targets
+  * the registry's acceptance    -- which drafters have a measured profile for this workload
   * the hardware entry           -- ComputeCapability, which gates the per-dtype KV table
 
 The engine's own architecture rules (which cache dtype `auto` resolves to, which draft methods an
@@ -39,6 +42,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 SIBLINGS = os.path.abspath(os.path.join(ROOT, os.pardir))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import build_catalog                      # noqa: E402
+import catalog_drafters                   # noqa: E402
 
 
 def _load(path, default=None):
@@ -147,7 +151,44 @@ def workload_facts(catalog, workload):
     return {"kind": "shape", "shape": shape or None, "prefix_reuse": False}
 
 
-def profile(model, hardware, workload, catalog):
+def drafter_facts(catalog, registry, model, wl):
+    """Each drafter of `model` with whether drafting applies on this workload, and why.
+
+    TEMPORARY (inference-sim/inference-sim#2141): read from the checkout through catalog_drafters,
+    which sees only exact-key profiles. A drafter with none may still borrow one at run time;
+    that is the simulator's lookup, and the run's Result records it.
+    """
+    category, thinking = wl.get("category"), wl.get("thinking")
+    out = []
+    for d in catalog_drafters.drafters(catalog, model):
+        row = {**d, "applies": False, "depths": [], "acceptance": []}
+        if not d["linked"]:
+            row["why"] = f"not a drafter of {model}: {d['why']}"
+            out.append(row)
+            continue
+        found = catalog_drafters.exact_profiles(registry, model, d["draft_model"], d["method"],
+                                                category, thinking)
+        cap = d.get("max_spec_tokens") or 0
+        found = [p for p in found if p["num_spec_tokens"] and (not cap or p["num_spec_tokens"] <= cap)]
+        sel = (f"category {category}, thinking {thinking}" if category or thinking
+               else "any category and thinking mode (this workload states none; a drafting run "
+                    "must state them)")
+        if found:
+            row.update(applies=True, depths=sorted({p["num_spec_tokens"] for p in found}),
+                       acceptance=[{**p, "rung": "exact"} for p in found])
+            sets = sorted({f"{p['set']} ({p.get('source') or 'no source recorded'})" for p in found})
+            row["why"] = (f"{d['method']} drafter; exact acceptance at K {row['depths']} for {sel}, "
+                          f"from {', '.join(sets)}")
+        else:
+            row["why"] = (f"{d['method']} drafter, but no acceptance profile has its exact key at "
+                          f"{sel}; the simulator's lookup may borrow one at run time (D8), which "
+                          f"this script cannot ask until inference-sim/inference-sim#2141, so a "
+                          f"drafting arm for it is unconfirmed here")
+        out.append(row)
+    return out
+
+
+def profile(model, hardware, workload, catalog, registry=None):
     """The per-knob verdict for this combination: applies, legal values here, and why."""
     cat = build_catalog.build(os.path.join(catalog, os.pardir))
     row = next((m for m in cat.get("models", []) if m.get("name") == model), None)
@@ -223,15 +264,24 @@ def profile(model, hardware, workload, catalog):
                               f"(BLIS refuses dp>1 on a dense model)")
 
     # --- drafting --------------------------------------------------------------------------
-    if g.get("speculator"):
-        depths = [k for k in (1, 2, 3, 4, 5, 6, 8) if k <= (g.get("max_spec_tokens") or 0)]
-        why = (f"the graph declares speculator {g['speculator']!r} with num_spec_tokens "
-               f"{g.get('max_spec_tokens')}, so K must not exceed it")
+    # One arm per drafter: the graph's own speculator and each separate drafter entry, applicable
+    # when a measured acceptance profile has its exact key at this workload's selectors (D8).
+    drafts = drafter_facts(catalog, registry, model, wl)
+    usable = [d for d in drafts if d["applies"]]
+    if usable:
         add("speculative", True,
-            [f"method: [{g['speculator']}]", f"num_spec_tokens: {depths or [1]}"], why)
+            [f"method: [{', '.join(sorted({d['method'] for d in usable}))}]",
+             *([f"draft_model: [{', '.join(d['draft_model'] for d in usable if d['draft_model'])}]"]
+               if any(d["draft_model"] for d in usable) else []),
+             f"num_spec_tokens: {sorted({k for d in usable for k in d['depths']})}",
+             "keep num_spec_tokens 0 as the control"],
+            "; ".join(f"{d['name']}: {d['why']}" for d in drafts))
+    elif drafts:
+        add("speculative", False, [], "; ".join(f"{d['name']}: {d['why']}" for d in drafts))
     else:
         add("speculative", False, [],
-            f"{model}'s graph declares NO speculator, so every drafting run is refused")
+            f"{model} has no drafter: its graph declares no speculator and no catalog entry "
+            f"drafts for it, so every drafting run is refused")
 
     # --- sliding window --------------------------------------------------------------------
     if g.get("sliding_window") and g.get("architecture") == "DeepseekV41ForCausalLM":
@@ -270,7 +320,7 @@ def profile(model, hardware, workload, catalog):
 
     return {"model": model, "hardware": hardware, "workload": workload,
             "catalog_row": row, "graph": g, "hardware_facts": hw,
-            "workload_facts": wl, "knobs": knobs}
+            "workload_facts": wl, "drafters": drafts, "knobs": knobs}
 
 
 def main(argv=None):
@@ -280,10 +330,13 @@ def main(argv=None):
     ap.add_argument("--hardware", required=True)
     ap.add_argument("--workload", required=True)
     ap.add_argument("--catalog", default=os.path.join(SIBLINGS, "blis-substrate", "catalog"))
+    ap.add_argument("--registry", default=None,
+                    help="the registry/ next to --catalog (default: the catalog's sibling registry/)")
     ap.add_argument("--json", action="store_true", dest="as_json")
     args = ap.parse_args(argv)
 
-    p = profile(args.model, args.hardware, args.workload, args.catalog)
+    registry = args.registry or os.path.join(args.catalog, os.pardir, "registry")
+    p = profile(args.model, args.hardware, args.workload, args.catalog, registry)
     if args.as_json:
         print(json.dumps(p, indent=2, sort_keys=True))
         return 0
@@ -300,6 +353,12 @@ def main(argv=None):
     print(f"  workload: {wl.get('kind')}"
           + (f" ({wl.get('scenario')}, category={wl.get('category')}, "
              f"thinking={wl.get('thinking')})" if wl.get("kind") == "replay" else ""))
+    for d in p["drafters"]:
+        print(f"  drafter : {d['name']} ({d['kind']}, {d.get('method')}): "
+              f"{'drafting applies' if d['applies'] else 'drafting not confirmed'}")
+        for a in d["acceptance"]:
+            print(f"      K={a['num_spec_tokens']} AL={a['acceptance_length']} rung={a['rung']} "
+                  f"set={a['set']} source={a.get('source') or '-'}")
     print()
     yes = [k for k in p["knobs"] if k["applies"]]
     no = [k for k in p["knobs"] if not k["applies"]]

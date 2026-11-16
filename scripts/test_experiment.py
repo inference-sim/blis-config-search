@@ -1733,6 +1733,159 @@ class SpeculativeBlock(unittest.TestCase):
         self.assertEqual([], self.errs({"speculative": {"method": ["dspark"],
                                                         "num_spec_tokens": [1, 3, 5]}}))
 
+def _drafter_catalog(root, links):
+    """A catalog checkout under `root`: {name: {"drafters"|"targets": [...], "speculator": method}}."""
+    for name, d in links.items():
+        os.makedirs(os.path.join(root, "models", name), exist_ok=True)
+        ident = {"name": name, **{k: v for k, v in d.items() if k in ("drafters", "targets")}}
+        with open(os.path.join(root, "models", name, "model.yaml"), "w") as f:
+            yaml.safe_dump(ident, f)
+        graph = {"kind": "ModelGraph"}
+        if d.get("speculator"):
+            graph["speculator"] = {"method": d["speculator"], "num_spec_tokens": d.get("k", 3)}
+        with open(os.path.join(root, "models", name, "graph.yaml"), "w") as f:
+            yaml.safe_dump(graph, f)
+    return root
+
+
+class DraftModelNamesACatalogDrafter(unittest.TestCase):
+    """`speculative.draft_model` names a separate drafter of the scenario's model: one the catalog
+    resolves, which the model lists and which names the model in its targets (design D8)."""
+
+    LINKS = {"qwen3-14b": {"drafters": ["speculator", "qwen2.5-7b-instruct"], "speculator": "mtp"},
+             "qwen2.5-7b-instruct": {"targets": ["qwen3-14b"], "speculator": "eagle3"},
+             "qwen3-30b-a3b": {"speculator": "eagle3"},
+             "qwen3.6-35b-a3b": {"targets": ["qwen3-14b"], "speculator": "eagle3"}}
+
+    def setUp(self):
+        self.env = os.environ.pop("SUBSTRATE_CATALOG", None)
+        self.dir = tempfile.TemporaryDirectory()
+        self.cat = _drafter_catalog(self.dir.name, self.LINKS)
+
+    def tearDown(self):
+        self.dir.cleanup()
+        if self.env is not None:
+            os.environ["SUBSTRATE_CATALOG"] = self.env
+
+    def errs(self, names, catalog="default"):
+        sw = {"name": "s", "num-instances": [2], "parallel": {"tp": [8]},
+              "engine": {"speculative": {"method": ["eagle3"], "num_spec_tokens": [3],
+                                         "draft_model": names}}}
+        return V.validate(spec(sweeps=[sw]), BLIS, ROUTING,
+                          self.cat if catalog == "default" else catalog)
+
+    def test_a_linked_drafter_is_accepted(self):
+        self.assertEqual([], self.errs(["qwen2.5-7b-instruct"]))
+
+    def test_an_unknown_drafter_is_refused(self):
+        errs = self.errs(["qwen-nope-eagle3"])
+        self.assertTrue(any("draft_model" in e and "qwen-nope-eagle3" in e for e in errs), errs)
+
+    def test_a_catalog_model_that_is_not_its_drafter_is_refused(self):
+        errs = self.errs(["qwen3-30b-a3b"])
+        self.assertTrue(any("is not a drafter of qwen3-14b" in e for e in errs), errs)
+
+    def test_a_one_way_link_is_refused(self):
+        """qwen3.6-35b-a3b names qwen3-14b in its targets, but qwen3-14b does not list it."""
+        errs = self.errs(["qwen3.6-35b-a3b"])
+        self.assertTrue(any("does not list it" in e for e in errs), errs)
+
+    def test_without_a_catalog_checkout_the_link_cannot_be_checked(self):
+        errs = self.errs(["qwen2.5-7b-instruct"], catalog=None)
+        self.assertTrue(any("inference-sim/inference-sim#2141" in e for e in errs), errs)
+
+
+class DrafterProfile(unittest.TestCase):
+    """knob_profile lists each drafter, and drafting applies to one when an acceptance profile
+    with its exact key exists at the workload's selectors."""
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        import knob_profile
+        self.K = knob_profile
+        self.dir = tempfile.TemporaryDirectory()
+        root = self.dir.name
+        self.cat = _drafter_catalog(os.path.join(root, "catalog"), {
+            "t": {"drafters": ["speculator", "t-eagle3"], "speculator": "mtp"},
+            "t-eagle3": {"targets": ["t"], "speculator": "eagle3"},
+            "t-stray": {"targets": ["t"], "speculator": "dspark"}})
+        self.reg = os.path.join(root, "registry")
+        os.makedirs(os.path.join(self.reg, "acceptance"))
+        prof = {"kind": "AcceptanceProfileSet", "name": "golden", "profiles": [
+            {"model": "t", "drafter": "t-eagle3", "speculative_method": "eagle3",
+             "num_spec_tokens": 2, "thinking": "on", "category": "coding",
+             "acceptance_length": 2.4, "provenance": {"source": "https://example.org/a.yaml"}},
+            {"model": "t", "speculative_method": "mtp", "num_spec_tokens": 1, "thinking": "off",
+             "category": "coding", "acceptance_length": 1.8,
+             "provenance": {"source": "https://example.org/b.yaml"}}]}
+        with open(os.path.join(self.reg, "acceptance", "golden.yaml"), "w") as f:
+            yaml.safe_dump(prof, f)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def facts(self, thinking="on"):
+        wl = {"kind": "replay", "category": "coding", "thinking": thinking}
+        return {d["name"]: d for d in self.K.drafter_facts(self.cat, self.reg, "t", wl)}
+
+    def test_every_drafter_is_listed_with_the_link_checked_both_ways(self):
+        d = self.facts()
+        self.assertEqual({"speculator", "t-eagle3", "t-stray"}, set(d))
+        self.assertEqual("in_graph", d["speculator"]["kind"])
+        self.assertTrue(d["t-eagle3"]["linked"])
+        self.assertFalse(d["t-stray"]["linked"], "t-stray names t, but t does not list it")
+        self.assertFalse(d["t-stray"]["applies"])
+
+    def test_drafting_applies_where_an_exact_acceptance_resolves(self):
+        d = self.facts("on")
+        self.assertTrue(d["t-eagle3"]["applies"])
+        self.assertEqual([2], d["t-eagle3"]["depths"])
+        a = d["t-eagle3"]["acceptance"][0]
+        self.assertEqual(("exact", "golden", "https://example.org/a.yaml"),
+                         (a["rung"], a["set"], a["source"]))
+        self.assertFalse(d["speculator"]["applies"], "its only profile is thinking off")
+
+    def test_the_selectors_pick_the_profile(self):
+        d = self.facts("off")
+        self.assertTrue(d["speculator"]["applies"])
+        self.assertFalse(d["t-eagle3"]["applies"])
+
+
+class DraftingControlArm(unittest.TestCase):
+    """A drafting grid keeps a K=0 control: one drafting-off arm, with no drafter named."""
+
+    def test_k0_is_one_control_arm_across_methods_and_drafters(self):
+        cands = E._engine_candidates({"speculative": {"method": ["eagle3"],
+                                                      "draft_model": ["a", "b"],
+                                                      "num_spec_tokens": [0, 3]}})
+        off = [c for c in cands if c["num_speculative_tokens"] == 0]
+        self.assertEqual([{"num_speculative_tokens": 0}], off)
+        on = sorted(c["speculative_draft_model"] for c in cands if c["num_speculative_tokens"] == 3)
+        self.assertEqual(["a", "b"], on)
+
+    def test_the_runner_accepts_every_arm_of_such_a_grid(self):
+        sw = {"name": "s", "num-instances": [2], "parallel": {"tp": [8]},
+              "engine": {"speculative": {"method": ["dspark"], "num_spec_tokens": [0, 3]}}}
+        n, refused = V.runner_refusals(sw, spec()["scenario"], V.knob_vocabulary(BLIS), 8)
+        self.assertEqual((2, {}), (n, refused))
+
+
+class DraftingRowAcceptance(unittest.TestCase):
+    """A drafting row in the report carries the acceptance its Result recorded."""
+
+    def rec(self, acceptance):
+        return {"metrics": {"tokens_per_sec": 100.0}, "deployment": {"acceptance": acceptance}}
+
+    def test_a_drafting_row_carries_its_acceptance(self):
+        acc = {"acceptance_length": 2.9, "source_layer": "registry", "profile_set": "golden",
+               "source": "https://example.org/a.yaml", "step": None}
+        row = E.run_row(self.rec(acc), {}, "l", "", "s", 1, 8)
+        self.assertEqual(acc, row["acceptance"])
+
+    def test_a_row_without_drafting_has_none(self):
+        self.assertNotIn("acceptance", E.run_row(self.rec(None), {}, "l", "", "s", 1, 8))
+
+
 class ScenarioIdentityExists(unittest.TestCase):
     """model and hardware must name catalog entries, by `blis catalog resolve` (design §5)."""
 

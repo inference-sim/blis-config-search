@@ -173,15 +173,17 @@ byte-identical.
 
 ## Drafting
 
-`speculative: {method: [...], num_spec_tokens: [1, 3, 5]}` — **both** fields required; acceptance
-comes from the registry, not a knob. The pinned schema carries *only* these two (v0.32.0 adds
-`draft_model`, `kv_cache_dtype`, `draft_sample_method`, `rejection_sample_method`,
-`enable_adaptive_verification`, none sweepable here).
+`speculative: {method: [...], num_spec_tokens: [0, 1, 3, 5]}` — **both** fields required; acceptance
+comes from the registry, not a knob. `draft_model: [<catalog drafter>]` selects a separate drafter
+checkpoint, which the validator checks is a drafter of the model in both directions. Leave it out
+for the graph's own speculator. K=0 is the drafting-off control, one arm however many drafters the
+grid lists.
 
 Valid methods: `ngram`, `medusa`, `mlp_speculator`, `draft_model`, `suffix`, `eagle`, `eagle3`,
 `dflash`, `ngram_gpu`, `dspark`, plus the 27 MTP names. **But the method is the model's**, read
 from its catalog graph — `dspark` on deepseek-v4.1-flash, `mtp` on deepseek-v4-pro,
-`deepseek_mtp` on glm-5.2. On a model with no declared speculator every run is refused, and
+`deepseek_mtp` on glm-5.2, or the separate drafter's own (`eagle3` for an EAGLE3 checkpoint). On a
+model with no drafter every run is refused, and
 DeepSeek-V4.1 specifically refuses every MTP-family name.
 
 The direction is **not monotonic at small K**: measured K=0 924.5, K=1 692.8 (−25%), K=3 954.7,

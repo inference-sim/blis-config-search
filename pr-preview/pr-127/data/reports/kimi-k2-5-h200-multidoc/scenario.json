@@ -1,0 +1,69 @@
+{
+  "experiment": {
+    "description": "",
+    "name": "kimi-k2-5-h200-multidoc",
+    "sweeps": [
+      {
+        "name": "topology-ep",
+        "narrative": "Expert parallelism should win at every width, and wider tp should beat wider dp on 10k-token prompts."
+      },
+      {
+        "name": "batch-prefill",
+        "narrative": "The per-step token cap should set ITL, and chunking long prefills should trade throughput for ITL below it."
+      },
+      {
+        "name": "kv-capacity",
+        "narrative": "fp8 KV should pay most where many resident 10k-token sequences make KV the binding resource."
+      },
+      {
+        "name": "moe-collective",
+        "narrative": "The all2all gap should widen with EP width and per-step tokens, since 10k prompts push heavy dispatch volume."
+      },
+      {
+        "name": "cudagraph",
+        "narrative": "FULL capture should edge PIECEWISE and NONE should lose heavily, by a similar margin at both fleet ends."
+      },
+      {
+        "name": "routing",
+        "narrative": "Load- and KV-aware routing should beat random by more on 64 instances than on 8, as long prompts land unevenly."
+      }
+    ]
+  },
+  "gpu_budget": 512,
+  "hardware": "h200",
+  "headroom": 1.0,
+  "interactivity_floor": {
+    "tok_per_s_per_user": 50.0
+  },
+  "model": "kimi-k2.5",
+  "objective": "max output tok/s per accelerator subject to the scenario's SLOs",
+  "pinned_stack": {
+    "blis": "v0.15.0",
+    "catalog": "0.5.0",
+    "engine_version": "0.32.0",
+    "kernel": "v0.5.0",
+    "registry": "v0.3.0",
+    "resolved": {
+      "blis": {
+        "sha256": "46bf00c739eafba4cdb347d4bfdd30bd63e815acaff1525c291b5b8ea947b197"
+      },
+      "catalog": {
+        "commit": "b5550f750cb51571498577fbdc1c68f78cda67db",
+        "describe": "0.5.0"
+      },
+      "registry": {
+        "commit": "96bead697172ab7f2cf8346e04e65b837014d867",
+        "describe": "v0.3.0"
+      }
+    },
+    "router": "v1.0.0-blis.2"
+  },
+  "run_id": "kimi-k2-5-h200-multidoc",
+  "seed": 42,
+  "slos": {
+    "itl_p99": "20ms"
+  },
+  "workload": {
+    "preset": "multidoc"
+  }
+}

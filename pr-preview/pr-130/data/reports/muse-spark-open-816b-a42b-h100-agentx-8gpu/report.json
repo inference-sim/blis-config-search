@@ -1,0 +1,98 @@
+{
+  "explore_prose": [
+    "Every run in this experiment is in the explorer below: filter by outcome to see which settings held the SLOs, or by setting to compare one sweep against another.",
+    "Each sweep's hypothesis was written before the runs, and is quoted beside that sweep's measured result below."
+  ],
+  "hero": [
+    {
+      "h": "What was tested",
+      "html": "52 configurations over 7 sweeps (pipeline-topology, batch-caps, kv-capacity, moe-collective, prefix-cache, prefill-chunking, cudagraph), each at 5 load levels, every run on exactly 8 GPUs."
+    },
+    {
+      "h": "What was found",
+      "html": "<strong>1x TP4xPP2 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)</strong>, from the <em>kv-capacity</em> sweep, reached 11.91 tok/s/accelerator (95.3 tok/s across the fleet) at concurrency 16 while holding the scenario's SLOs."
+    },
+    {
+      "h": "What to run",
+      "html": "1x TP4xPP2 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8) at concurrency 16. 240 of 260 runs held the SLOs.",
+      "run": true
+    }
+  ],
+  "meta": [
+    "BLIS discrete-event simulation",
+    "Experiment Spec (RFC #21)",
+    "deterministic sweep \u2014 no LLM in the measurement path",
+    "seed 42"
+  ],
+  "recommendation_num": 9,
+  "recommendation_prose": [
+    "The table below ranks the measured operating points by output tok/s per accelerator, the objective this experiment selects on, among runs that held the scenario's SLOs."
+  ],
+  "sections": [
+    {
+      "caption_note": "6 configurations, 30 runs.",
+      "num": 2,
+      "prose": [
+        "TP8 should peak highest, since each pipeline stage adds a boundary hop to every decode step.",
+        "Measured: best was <strong>1x TP4xPP2 + EP</strong> at 10.49 tok/s/accelerator (concurrency 16)."
+      ],
+      "title": "Sweep: pipeline-topology"
+    },
+    {
+      "caption_note": "16 configurations, 80 runs.",
+      "num": 3,
+      "prose": [
+        "A seq cap of 8 should bind on TP8 at 16+ lanes, while a small token budget trades throughput for tail ITL on both shapes.",
+        "Measured: best was <strong>1x TP4xPP2 + EP (batch tokens 4,096)</strong> at 10.84 tok/s/accelerator (concurrency 16)."
+      ],
+      "title": "Sweep: batch-caps"
+    },
+    {
+      "caption_note": "12 configurations, 60 runs.",
+      "num": 4,
+      "prose": [
+        "fp8 KV should matter most on TP8, where 0.95 leaves almost no KV room, and substitute for memory on the pp shapes.",
+        "Measured: best was <strong>1x TP4xPP2 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)</strong> at 11.91 tok/s/accelerator (concurrency 16)."
+      ],
+      "title": "Sweep: kv-capacity"
+    },
+    {
+      "caption_note": "8 configurations, 40 runs.",
+      "num": 5,
+      "prose": [
+        "DeepEP low-latency should win at small decode batches on both shapes, and matter more at EP width 8 than 4.",
+        "Measured: best was <strong>1x TP4xPP2 + EP</strong> at 10.49 tok/s/accelerator (concurrency 16)."
+      ],
+      "title": "Sweep: moe-collective"
+    },
+    {
+      "caption_note": "3 configurations, 15 runs.",
+      "num": 6,
+      "prose": [
+        "Turning the prefix cache off should collapse throughput on every shape, since AgentX re-sends a growing shared context.",
+        "Measured: best was <strong>1x TP4xPP2 + EP</strong> at 9.31 tok/s/accelerator (concurrency 32)."
+      ],
+      "title": "Sweep: prefix-cache"
+    },
+    {
+      "caption_note": "4 configurations, 20 runs.",
+      "num": 7,
+      "prose": [
+        "Capping long prefills should trade a little peak throughput for a much lower ITL p99 at saturation.",
+        "Measured: best was <strong>1x TP4xPP2 + EP (prefill chunk 8,192)</strong> at 10.49 tok/s/accelerator (concurrency 16)."
+      ],
+      "title": "Sweep: prefill-chunking"
+    },
+    {
+      "caption_note": "3 configurations, 15 runs.",
+      "num": 8,
+      "prose": [
+        "FULL-family capture should beat the PIECEWISE default by a few percent, and NONE should collapse.",
+        "Measured: best was <strong>1x TP8 + EP (graph capture full)</strong> at 9.29 tok/s/accelerator (concurrency 8)."
+      ],
+      "title": "Sweep: cudagraph"
+    }
+  ],
+  "standfirst": "A deterministic sweep over inferencex-agentx-mvp traffic, comparing 7 designs on one GPU budget.",
+  "title": "muse-spark-open-816b-a42b-nvfp4 on 8x h100: muse-spark-open-816b-a42b-h100-agentx-8gpu"
+}

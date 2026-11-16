@@ -335,10 +335,16 @@ class ClassifyConfig(unittest.TestCase):
         _, eng, _, _ = classify({"tp": 8, "quantization": "fp8", "cache_dtype": "fp8"})
         self.assertEqual(eng["quantization"], "fp8")
 
-    def test_policy_knobs_go_to_cli(self):
-        _, _, cli, _ = classify(
-            {"tp": 8, "scheduler": "fcfs", "preemption_policy": "fcfs"})
-        self.assertEqual(cli, {"scheduler": "fcfs", "preemption_policy": "fcfs"})
+    def test_scheduling_policy_is_an_engine_block_key(self):
+        """inference-sim v0.18.0 removed --scheduler and --preemption-policy: the scheduling policy
+        is the engine block's scheduling_policy, and the old keys are refused naming it."""
+        _, eng, cli, _ = classify({"tp": 8, "scheduling_policy": "priority"})
+        self.assertEqual(eng["scheduling_policy"], "priority")
+        self.assertEqual(cli, {})
+        for key in ("scheduler", "preemption_policy"):
+            with self.assertRaises(run_blis.ConfigError) as cm:
+                classify({"tp": 8, key: "fcfs"})
+            self.assertIn("scheduling_policy", str(cm.exception))
 
     def test_rejects_routing_flags_removed_in_v0_12_0(self):
         """v0.12.0 moved routing into the embedded llm-d router, so the old flags are gone.
@@ -637,15 +643,16 @@ class FabricSelection(unittest.TestCase):
 class BuildCmd(unittest.TestCase):
     def test_kernel_flags_and_cli_knobs(self):
         cmd = run_blis.build_cmd("blis", None, None, "scn", "s.yaml", "chatbot", 100, 0, None, None,
-                                 {"num_instances": 2, "concurrency": 64, "scheduler": "fcfs"})
+                                 {"num_instances": 2, "concurrency": 64})
         # v0.10.0 selects the kernel backend from the scenario's `coefficients:` list, NOT a
         # `--latency-model` CLI flag (the flag was removed and is rejected as unknown).
         self.assertNotIn("--latency-model", cmd)
         self.assertNotIn("blis-latency-kernel", cmd)
         for a, b in (("--scenario", "s.yaml"), ("--scenarios", "scn"),
-                     ("--num-instances", "2"), ("--concurrency", "64"), ("--scheduler", "fcfs")):
+                     ("--num-instances", "2"), ("--concurrency", "64")):
             self.assertEqual(cmd[cmd.index(a) + 1], b)
-        for refused in ("--tp", "--model", "--hardware", "--enable-expert-parallel", "--dp"):
+        for refused in ("--tp", "--model", "--hardware", "--enable-expert-parallel", "--dp",
+                        "--scheduler", "--preemption-policy"):
             self.assertNotIn(refused, cmd)
 
 

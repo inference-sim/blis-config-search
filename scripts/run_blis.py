@@ -7,7 +7,8 @@
 # hardware, tp/pp/dp/ep, engine knobs) from a committed SCENARIO and REFUSES
 # --model/--hardware/--tp/--dp/--enable-expert-parallel on the CLI. So a candidate's per-instance
 # topology is written into a generated Scenario+Deployment YAML; only workload, concurrency, instance
-# counts, scheduler/routing/admission policy, and seed stay on the CLI.
+# counts and seed stay on the CLI. The scheduling policy is an engine-block key (scheduling_policy):
+# inference-sim v0.18.0 removed --scheduler and --preemption-policy.
 #
 # Every candidate key is classified to its scenario/CLI slot; UNKNOWN or NOT-YET-SUPPORTED keys are
 # REJECTED (recorded as an error row), never silently dropped -- else two candidates could differ in
@@ -60,8 +61,7 @@ SPECULATIVE_CLI = {"speculative_category": "--speculative-category",
                    "speculative_acceptance_length": "--speculative-acceptance-length",
                    "speculative_acceptance_rate": "--speculative-acceptance-rate",
                    "speculative_fallback_category": "--speculative-fallback-category"}
-CLI_FLAGS = {"num_instances": "--num-instances", "concurrency": "--concurrency",
-             "scheduler": "--scheduler", "preemption_policy": "--preemption-policy"}
+CLI_FLAGS = {"num_instances": "--num-instances", "concurrency": "--concurrency"}
 # Simulator options that are bare switches (`--pd-transfer-contention`): passed when true, left off
 # when false, because the flag takes no value. A sweep states them under `simulator:`.
 CLI_SWITCHES = {"pd_transfer_contention": "--pd-transfer-contention"}
@@ -189,7 +189,14 @@ PD_MUST_MATCH = ("dp", "block_size", "cache_dtype", "mamba_cache_dtype",
                  "mamba_ssm_cache_dtype", "mamba_cache_mode")
 
 # Candidate keys this runner refuses, with the reason (do not silently drop).
+# The scheduler and preemption victim are the engine's scheduling_policy, an engine-block key a sweep
+# states like any other; inference-sim v0.18.0 removed the flags that restated it (#2037).
+SCHEDULING_MOVED = ("the scheduler and preemption policy are the engine's: state the engine-block key "
+                    "scheduling_policy (fcfs or priority, vLLM's), which sets both; inference-sim v0.18.0 "
+                    "removed --scheduler and --preemption-policy")
 UNSUPPORTED = {
+    "scheduler": SCHEDULING_MOVED,
+    "preemption_policy": SCHEDULING_MOVED,
     "routing_policy": ROUTING_MOVED,
     "routing_scorers": ROUTING_MOVED,
     "admission_policy": ROUTING_MOVED,

@@ -1209,7 +1209,11 @@ class FigureForms(unittest.TestCase):
     def test_the_feasibility_aggregate_is_stated_as_max_over_instances(self):
         self.assertEqual(run_blis.FEASIBILITY_AGGREGATE["aggregate"], "max")
         self.assertEqual(run_blis.FEASIBILITY_AGGREGATE["over"], "instance")
-        self.assertEqual(sorted(run_blis.FEASIBILITY_AGGREGATE["metrics"]), ["e2e_p99_ms", "itl_p99_ms", "ttft_p99_ms"])
+        # Each named metric is the Result metric the gate reads: the itl_p99 cap reads tpot_p99_ms
+        # (aiperf's ITL), never the registry's itl_p99_ms, which is 0 under speculative decoding (#2128).
+        read = {run_blis._MEASURED_KEYS[k] for k in ("ttft_p99_ms", "e2e_p99_ms", "itl_p99_ms")}
+        self.assertEqual(set(run_blis.FEASIBILITY_AGGREGATE["metrics"]), read)
+        self.assertNotIn("itl_p99_ms", run_blis.FEASIBILITY_AGGREGATE["metrics"])
 
 
 class FailureLine(unittest.TestCase):

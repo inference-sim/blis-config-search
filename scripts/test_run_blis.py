@@ -336,7 +336,7 @@ class ClassifyConfig(unittest.TestCase):
         self.assertEqual(eng["quantization"], "fp8")
 
     def test_scheduling_policy_is_an_engine_block_key(self):
-        """inference-sim v0.18.0 removed --scheduler and --preemption-policy: the scheduling policy
+        """inference-sim removed --scheduler and --preemption-policy: the scheduling policy
         is the engine block's scheduling_policy, and the old keys are refused naming it."""
         _, eng, cli, _ = classify({"tp": 8, "scheduling_policy": "priority"})
         self.assertEqual(eng["scheduling_policy"], "priority")

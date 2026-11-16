@@ -8,7 +8,7 @@
 # --model/--hardware/--tp/--dp/--enable-expert-parallel on the CLI. So a candidate's per-instance
 # topology is written into a generated Scenario+Deployment YAML; only workload, concurrency, instance
 # counts and seed stay on the CLI. The scheduling policy is an engine-block key (scheduling_policy):
-# inference-sim v0.18.0 removed --scheduler and --preemption-policy.
+# inference-sim removed --scheduler and --preemption-policy.
 #
 # Every candidate key is classified to its scenario/CLI slot; UNKNOWN or NOT-YET-SUPPORTED keys are
 # REJECTED (recorded as an error row), never silently dropped -- else two candidates could differ in
@@ -190,9 +190,9 @@ PD_MUST_MATCH = ("dp", "block_size", "cache_dtype", "mamba_cache_dtype",
 
 # Candidate keys this runner refuses, with the reason (do not silently drop).
 # The scheduler and preemption victim are the engine's scheduling_policy, an engine-block key a sweep
-# states like any other; inference-sim v0.18.0 removed the flags that restated it (#2037).
+# states like any other; inference-sim removed the flags that restated it.
 SCHEDULING_MOVED = ("the scheduler and preemption policy are the engine's: state the engine-block key "
-                    "scheduling_policy (fcfs or priority, vLLM's), which sets both; inference-sim v0.18.0 "
+                    "scheduling_policy (fcfs or priority, vLLM's), which sets both; inference-sim "
                     "removed --scheduler and --preemption-policy")
 UNSUPPORTED = {
     "scheduler": SCHEDULING_MOVED,

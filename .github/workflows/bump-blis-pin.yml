@@ -153,7 +153,13 @@ jobs:
                 + (f" ([release notes]({rel['url']}))" if rel["tag"] == tag else "") + ".\n")
           print("| pin | from | to |\n|---|---|---|")
           for k, (a, b) in moved.items():
-              print(f"| `{k}` | `{a}` | `{b}` |")
+              # X14: a full hash is checked against the release tag named on its line.
+              if k == "BLIS_SHA":
+                  a = f"inference-sim/inference-sim at {current} `{a}`"
+                  b = f"inference-sim/inference-sim at {tag} `{b}`"
+              else:
+                  a, b = f"`{a}`", f"`{b}`"
+              print(f"| `{k}` | {a} | {b} |")
           mods = open("/tmp/modules.txt").read().split()
           print("\nThe release builds against " + ", ".join(
               f"`{m}` {v}" for m, v in zip(mods[::2], mods[1::2])) + ".\n")
@@ -182,9 +188,8 @@ jobs:
           print("\n## Invariants\n\n- CFG-1\n- X10\n- X14\n- X20\n\n"
                 "CFG-1: pins.env is the one pin file, and BLIS_SHA is the commit the tag peels to. "
                 "X10: the substrate and simulator releases this pins are tagged before it.")
-          if rel["tag"] == tag and rel.get("body"):
-              print("\n<details><summary>Upstream release notes</summary>\n\n"
-                    + rel["body"][:20000] + "\n\n</details>")
+          # The upstream notes are linked above, not copied: their commit hashes belong to
+          # upstream pull requests, which this description cannot name (X14).
           print("\n🤖 Generated with [Claude Code](https://claude.com/claude-code)")
           PY
           git config user.name  "blis-config-search-bot"

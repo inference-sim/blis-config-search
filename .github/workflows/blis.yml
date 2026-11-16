@@ -1,10 +1,10 @@
 name: blis
 
 # The shared BLIS checks (design §13.2, §13.4), called from blis-substrate by commit (X21):
-# the pull-request checks (description, review questions, commit policy, workflow lint,
+# the pull-request checks (description, commit policy, workflow lint,
 # version literals, documentation references, cited issues, quarantine, the generated
-# AGENTS.md section and pull-request template, the selected-version lint), the merge check on
-# the merge-queue tree, and the nightly checks (cited issues stay open, X28).
+# AGENTS.md section and pull-request template, the selected-version lint) and the nightly checks
+# (cited issues stay open, X28). v0.14.1 moved the merge-queue check into the pull-request one.
 #
 # The commit is blis-substrate release v0.14.1 (f9f3c93), the release pins.env's SUBSTRATE_REF
 # names; it moves with that pin. v0.14.1's description check accepts a dependency pin written as
@@ -18,7 +18,6 @@ name: blis
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
-  merge_group:
   schedule:
     - cron: "17 5 * * *"
   workflow_dispatch:
@@ -41,17 +40,6 @@ jobs:
     with:
       repo: blis-config-search
       substrate-ref: f9f3c9327794d543a0915c4deb1259ff9985c753
-
-  merge:
-    if: github.event_name == 'merge_group'
-    uses: inference-sim/blis-substrate/.github/workflows/shared-merge-check.yml@f9f3c9327794d543a0915c4deb1259ff9985c753
-    permissions:
-      contents: read
-      pull-requests: read
-      checks: read
-    with:
-      substrate-ref: f9f3c9327794d543a0915c4deb1259ff9985c753
-      required: "python,experiments,web,blis checks / blis checks"
 
   # The pull-request checks for a dispatched run (the shared workflow runs only on pull_request).
   # The steps are shared-pr-checks.yml's, at the same substrate commit.

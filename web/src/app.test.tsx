@@ -754,12 +754,14 @@ describe('footer pinned-stack disclosure', () => {
     stack, ...over,
   })
 
+  // The root pill reads "<name> <version>"; built from the fixture so the version is written once.
+  const ROOT_PILL = `${stack!.root.name} ${stack!.root.version}`
   const pills = () => [...document.querySelectorAll('.footstack .pill')].map((p) => p.textContent?.trim())
   const toggle = () => screen.getByRole('button')
 
   it('shows BLIS alone at rest as a plain pill, with a +N toggle beside it', () => {
     render(<Footer catalog={cat()} />)
-    expect(pills()).toEqual(['inference-sim v0.12.0'])
+    expect(pills()).toEqual([ROOT_PILL])
     // only the count is clickable, not the BLIS pill
     expect(screen.getAllByRole('button')).toHaveLength(1)
     expect(toggle().textContent).toBe('+4 more')
@@ -771,7 +773,7 @@ describe('footer pinned-stack disclosure', () => {
     render(<Footer catalog={cat()} />)
     fireEvent.click(toggle())
     expect(pills()).toEqual([
-      'inference-sim v0.12.0', 'blis-latency-kernel v0.3.0', 'blis-schemas v0.5.0',
+      ROOT_PILL, 'blis-latency-kernel v0.3.0', 'blis-schemas v0.5.0',
       'blis-catalog 0.4.0', 'blis-registry v0.2.0',
     ])
     // every dep carries the same pill class as the root, so they render identically
@@ -779,7 +781,7 @@ describe('footer pinned-stack disclosure', () => {
     expect(toggle().textContent).toBe('show less')
     expect(toggle().getAttribute('aria-expanded')).toBe('true')
     fireEvent.click(toggle())
-    expect(pills()).toEqual(['inference-sim v0.12.0'])
+    expect(pills()).toEqual([ROOT_PILL])
     expect(toggle().textContent).toBe('+4 more')
   })
 
@@ -837,7 +839,7 @@ describe('footer pinned-stack disclosure', () => {
   it('shows no toggle when the stack somehow has none', () => {
     render(<Footer catalog={cat({ stack: { root: stack!.root, deps: [] } })} />)
     expect(screen.queryByRole('button')).toBeNull()
-    expect(pills()).toEqual(['inference-sim v0.12.0'])
+    expect(pills()).toEqual([ROOT_PILL])
   })
 
 })

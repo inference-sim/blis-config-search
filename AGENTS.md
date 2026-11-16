@@ -18,7 +18,7 @@ keeps or introduces; CI refuses an identifier that does not exist (X14).
   - `new`, pull_request: A lower repository refers to accuracy-dashboard only through the harness pin file
   - `new`, pull_request: Every generated file matches its generator's output
   - `new`, pull_request: No hand-copied list of another repository's facts; field lists, knobs and plugin parameters are read from their owner at the pinned version
-- **X8** (new; target ci by M1) Every number records the exact versions and data it came from, and can be regenerated from them.
+- **X8** (new; target ci by M2) Every number records the exact versions and data it came from, and can be regenerated from them.
   - `new`, pull_request: The dashboard and committed config-search reports accept only released-data results; an experimental result is refused
   - `new`, pull_request: Every published number carries its data units
   - `new`, pull_request: Published numbers regenerate: on redistributable fixtures on every pull request, on the full data nightly
@@ -31,24 +31,25 @@ keeps or introduces; CI refuses an identifier that does not exist (X14).
 - **X16** (new; target ci by M1) A skipped test in a required or gate job is a failure, not a pass, unless it is on the quarantine list of X25.
   - `new`, pull_request: Each repository's CI configuration
 - **X17** (partial; target ci by M1) Every repository's protected branch requires its named checks, including formatting and lint.
-  - `new`, settings: The protected branch requires the repository's named checks, including formatting and lint
+  - `new`, practice: The protected branch requires the repository's named checks, including formatting and lint
 - **X19** (new; target ci by M2) Scripts and generators, in every language, never write an engine default.
   - `new`, pull_request: The engine-name lint (X2), run on *.py and *.sh in every repository that has scripts
   - `new`, pull_request: In every scenario generator, a test that a generated scenario contains only stated or recorded values, and workload-dependent values with their citation. The name lint cannot see a bare number under a neutral key, so the second test is the one that catches it
-- **X20** (new; target ci by M4) Every commit written for BLIS is signed.
-  - `new`, pull_request: A commit-policy check, required on every pull request in every repository, over the commits the pull request adds
+- **X20** (new; target ci by after M4) A commit written with an agent's help says so in one Assisted-by: <tool> line, and carries no Co-authored-by line naming the tool.
+  - `new`, pull_request: A commit-policy check, required on every pull request in every repository, over the commits the pull request adds: one Assisted-by line, no Co-authored-by or Signed-off-by naming a tool
+  - `new`, practice: The person who takes responsibility for a commit signs it and signs it off, or instructs an agent to push it in that person's name. Encouraged, never checked before the closing step after M4
 - **X21** (new; target ci by M1) Everything a build or a release runs is pinned and traceable.
   - `new`, pull_request: A workflow lint that refuses an action not pinned by commit
   - `new`, pull_request: Pip install --require-hashes in every Python CI job
   - `new`, pull_request: A check that LICENSE and any required NOTICE exist
-- **X22** (partial; target ci by M4) Every verdict (a CI result, an agent's review, or a person's answer to a review question) names the git tree hash of the exact tree it judged.
-  - `new`, pull_request: The shared merge check in blis-substrate/.github/workflows, called by every repository, which compares verdict tree hashes
+- **X22** (partial; target ci by M4) Every verdict (a CI result or the review agent's review, including its answers to review questions) names the git tree hash of the exact tree it judged.
+  - `new`, pull_request: The shared pull-request check in blis-substrate/.github/workflows, called by every repository, which records each review-agent answer with the head tree
   - `new`, pull_request: A workflow lint that refuses ignored exit codes
   - `new`, pull_request: Each job's item count
 - **X23** (new; target ci by M1) A version is written in one place.
   - `new`, pull_request: A lint in every repository, over every file type, for version literals of BLIS modules or Go that are not generated
 - **X24** (new; target ci by M4) Every review finding ends in one of three outcomes before merge: fixed, filed as a linked issue, or rejected with a reason.
-  - `new`, pull_request: The shared merge check, which refuses a merge while a review thread has no outcome
+  - `new`, pull_request: A pull-request step that lists each review thread that is open or resolved with no outcome, as a notice and in the job summary; it never fails, so no check waits on a thread
 - **X25** (new; target ci by M1) Tests read only their declared inputs, never sibling checkouts, ignored directories or the user's environment.
   - `new`, pull_request: CI in a clean container with no sibling checkouts
   - `new`, pull_request: The quarantine list, which fails CI when an entry expires
@@ -57,7 +58,7 @@ keeps or introduces; CI refuses an identifier that does not exist (X14).
   - `new`, pull_request: A documentation reference check in every repository
 - **X28** (new; target ci by M1) An issue in a BLIS repository that is cited as the reason for a refusal, for a refused or not-modelled item in a field or surface list, or in a code comment that marks a gap or a divergence, stays open.
   - `new`, nightly: A nightly job in every repository that resolves each cited issue and fails on a closed one
-  - `new`, pull_request: A merge check that refuses a change closing an issue still cited elsewhere
+  - `new`, pull_request: A pull-request check that refuses a change closing an issue still cited elsewhere
   - `new`, nightly: The nightly job also reports an issue closed outside a merge
 - **SUB-19** (partial; target ci by M1) Every document that crosses a repository boundary has one definition, in contracts/spec: the scenario, the deployment, the Result, and the per-point record the scoring harness writes.
   - `new`, pull_request: Schema validation in the applications' CI
@@ -68,7 +69,7 @@ keeps or introduces; CI refuses an identifier that does not exist (X14).
 - **CFG-2** (partial; target ci by M3) Everything after the specification is deterministic and produced by a bot.
   - `ci`, pull_request: Scripts/test_experiment.py (`scripts/test_experiment.py`)
   - `new`, pull_request: Reports arrive only through the bot's pull request
-- **CFG-3** (new; target ci by M1) Settings are the named engine's own settings, read from the simulator.
+- **CFG-3** (new; target ci by M2) Settings are the named engine's own settings, read from the simulator.
   - `new`, pull_request: A check that every settings list is read from inference-sim fields at the pinned release, and that the repository holds no copy
 - **CFG-4** (partial; target ci by M3) A specification ranks and checks configurations on any metric of the metric registry, at any scope (§8.7).
   - `ci`, pull_request: Regression tests: worst-instance checks (`scripts/test_experiment.py`)
@@ -76,7 +77,7 @@ keeps or introduces; CI refuses an identifier that does not exist (X14).
 - **CFG-5** (new; target ci by M3) A search varies only settings that the engine's field list marks as modelled at the pinned release.
   - `new`, pull_request: A specification check against inference-sim fields
   - `new`, pull_request: The report schema
-- **DEV-8** (new; target ci by M2) Every reported metric names its definition and scope (§8.7), and a comparison is refused unless both sides have the same definition, scope and aggregate.
+- **DEV-8** (partial; target ci by M2) Every reported metric names its definition and scope (§8.7), and a comparison is refused unless both sides have the same definition, scope and aggregate.
   - `new`, pull_request: A test that they compare only figures with matching definitions, scopes and aggregates
 - **DEV-11** (new; target ci by M3) A figure that compares configurations, or that is published as a property of BLIS, carries an interval from replications or batch means and states which uncertainty that interval covers, or states that the run has no random input and which uncertainty it therefore leaves out.
   - `new`, pull_request: The report schemas of blis-config-search and accuracy-dashboard
@@ -86,18 +87,36 @@ keeps or introduces; CI refuses an identifier that does not exist (X14).
 - **COV-1** (partial; target ci by M1) One scorer produces every number, and it lives only in accuracy-dashboard: no other repository compares a simulation with a measured end-to-end benchmark.
   - `new`, pull_request: A lint that refuses code outside accuracy-dashboard that reads end-to-end benchmark units to compute an error
 - **LIF-1** (new; target ci by M1) A tag names one commit forever.
-  - `new`, settings: Protected tags
+  - `new`, practice: Protected tags
   - `new`, nightly: A nightly check that every tag resolves to its recorded commit
 - **LIF-3** (new; target ci by M1) Only the release bot cuts releases, and only from a commit where every ci invariant passed.
-  - `new`, settings: Repository settings that let only the release bot and release owners create tags
-  - `new`, nightly: A nightly check that every tag made by a person is signed and listed in its release notes
+  - `new`, practice: Repository settings that let only the release bot and people with write access create tags
+  - `new`, nightly: A nightly check that every tag made by a person is annotated and listed in its release notes
+
+### Maintainer practices
+
+No program checks these. A maintainer with write access keeps each one for this
+repository as a whole and confirms it when the repository's settings change (design §4.2).
+
+- [ ] **X17** The protected branch requires the repository's named checks, including formatting and lint
+- [ ] **X20** The person who takes responsibility for a commit signs it and signs it off, or instructs an agent to push it in that person's name. Encouraged, never checked before the closing step after M4
+- [ ] **LIF-1** Protected tags
+- [ ] **LIF-3** Repository settings that let only the release bot and people with write access create tags
+
+### Agent guidance
+
+Follow these on every change you write or review. They are not checked by a program
+(design §4.2).
+
+- **X24** After each fix, reply on the thread with "Outcome: fixed" and the commit, "Outcome: filed" and the issue, or "Outcome: rejected:" and the reason, and resolve the thread. The author agent does this; no check waits for it and no person has to.
 
 ### Review questions
 
-CI adds each question below to a pull request that changes one of its paths, as a
-required checklist item. A reviewer with write access answers it yes or no with a one-line reason; an agent
-may propose an answer but never gives one (design §13.7).
+Each question below is guidance for the review agent (design §13.2). When a pull request
+changes one of its paths, the agent answers it yes or no in a review comment, with the
+files and lines that support the answer. No CI job lists, records or waits on a question,
+and no person has to answer one.
 
-- **X7** Does this change give a second home to a fact another repository owns? Reviewer: expertise in the changed repository. When: a pull request adds a literal list or table, or a constant that cites another repository. Added by a reviewer with the label `review:X7`.
-- **DEV-12** Does this change alter what is modelled? Reviewer: expertise in the changed directory. When: a pull request is declared a verification change but moves a Result outside the byte gate. Added by a reviewer with the label `review:DEV-12`.
+- **X7** Does this change give a second home to a fact another repository owns? Expertise: expertise in the changed repository. Applies when: a pull request adds a literal list or table, or a constant that cites another repository. The review agent decides whether it applies, and may mark it with the label `review:X7`.
+- **DEV-12** Does this change alter what is modelled? Expertise: expertise in the changed directory. Applies when: a pull request is declared a verification change but moves a Result outside the byte gate. The review agent decides whether it applies, and may mark it with the label `review:DEV-12`.
 <!-- END GENERATED: invariants -->

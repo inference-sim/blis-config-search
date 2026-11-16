@@ -103,7 +103,7 @@ DEFAULT_FABRIC = "ib-400g"   # InfiniBand NDR 400 Gb/s; the standard H100 multi-
 # default). quantization and cache_dtype stay unset for the same reason: the checkpoint's format
 # governs. `block_size` depends on the MODEL: see default_block_size(), which fills it in per run.
 #
-# `max_model_len` is the exception because blis-vllm v0.32.0 makes it MANDATORY ("must be stated;
+# `max_model_len` is the exception because blis-vllm's v0.32.0 makes it MANDATORY ("must be stated;
 # an unstated or auto window is the model's or the memory's"). 32768 is this runner's choice, not
 # vLLM's (vLLM's is the model's own window). Do not state it in every spec: a spec that does not
 # care about the window should not pin one.
@@ -126,7 +126,7 @@ V4_BLOCK_SIZE = 256             # DeepSeek-V4, every part
 V41_BLOCK_SIZE_HOPPER = 64      # DeepSeek-V4.1 on SM90
 V41_BLOCK_SIZE_NEWER = 128      # DeepSeek-V4.1 on Blackwell and later
 HOPPER_CC_MAJOR = 9             # compute capability 9.x == Hopper (SM90)
-# inference-sim v0.12.0 ("Merge llm-d-r into main: all routing through the embedded llm-d router",
+# inference-sim's v0.12.0 ("Merge llm-d-r into main: all routing through the embedded llm-d router",
 # #2000) REMOVED every routing/admission CLI flag this runner used to emit. Routing is now a real
 # llm-d EndpointPickerConfig named by the scenario's deployment-level `router:` block, so the knob
 # is `router_config` (a path to an EPP YAML) rather than a policy name. The authoritative mapping
@@ -136,7 +136,7 @@ HOPPER_CC_MAJOR = 9             # compute capability 9.x == Hopper (SM90)
 # campaigns measured, has no exact equivalent; the nearest are a `queue-scorer` or
 # `load-aware-scorer` profile with `max-score-picker`, or `random-picker`.
 ROUTING_MOVED = (
-    "removed in inference-sim v0.12.0: routing is now an llm-d EndpointPickerConfig named by the "
+    "removed in inference-sim's v0.12.0: routing is now an llm-d EndpointPickerConfig named by the "
     "scenario's `router:` block -- pass `router_config` (a path to an EPP YAML) instead. See "
     "docs/guide/routing.md 'From BLIS's former routing features' for the per-flag mapping; "
     "round-robin/least-loaded/always-busiest are dropped upstream (nearest: a queue-scorer or "
@@ -181,7 +181,7 @@ DEFAULT_PD_CONNECTOR = "NixlConnector"
 # is NOT here: it is one configuration per run rather than a per-pool knob, so a per-role
 # drafting key is refused outright (PD_SPECULATIVE) and the folded `speculative` block is
 # compared separately.
-# Transcribed from blis-vllm v0.32.0 compat/build/pools.go, not guessed: block_size (:172) and
+# Transcribed from blis-vllm's v0.32.0 compat/build/pools.go, not guessed: block_size (:172) and
 # dp (:188) are each checked on their own, and requireSameKVCacheFormat (:329) compares exactly
 # four cache-format fields. `quantization` was listed here and is NOT compared by any of them --
 # it is the weights' format, which a handoff never moves -- so a P/D sweep over it is legitimate.

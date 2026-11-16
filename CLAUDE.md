@@ -35,7 +35,7 @@ cd web && npm ci && npm run dev | build | test | typecheck
 ```
 
 `npm run dev/build` first runs `stage:data`, which calls `build_gallery.py` and copies `site/`
-into `web/public/data/`. `REUSE_SITE=1` skips the rebuild.
+into `public/data/` under web/ (built, not committed). `REUSE_SITE=1` skips the rebuild.
 
 ## Architecture
 

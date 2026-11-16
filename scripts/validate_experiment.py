@@ -47,6 +47,7 @@ import blis_cli  # noqa: E402
 import settings  # noqa: E402
 import pareto  # noqa: E402
 import router_configs  # noqa: E402
+import catalog_drafters  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 ROUTING_DIR = os.path.join(ROOT, "routing")
@@ -964,6 +965,8 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
         _check_knob_names(sw.get("parallel") or {}, f"{where}.parallel", par_vocab, "parallel",
                           errs, source)
         _check_engine(sw.get("engine") or {}, f"{where}.engine", vocab, errs)
+        errs.extend(draft_model_errors(sw.get("engine") or {}, f"{where}.engine", sc.get("model"),
+                                       blis, catalog))
         for role in ("prefill", "decode"):
             block = sw.get(role)
             if not isinstance(block, dict):
@@ -1050,6 +1053,56 @@ def _check_engine(engine, where, vocab, errs):
             if key not in spec:
                 errs.append(f"{where}.speculative: needs both method and num_spec_tokens "
                             f"(missing {key})")
+
+
+def draft_model_errors(engine, where, model, blis, catalog=None):
+    """Each `speculative.draft_model` value that is not a catalog drafter of `model`.
+
+    The name must resolve in the catalog (`blis catalog resolve`), and the link must hold both
+    ways: `model` lists it under drafters and it names `model` in its targets. TEMPORARY
+    (inference-sim/inference-sim#2141): the link is read from a catalog checkout (`catalog`, else
+    $SUBSTRATE_CATALOG) because `blis catalog resolve` does not list drafters yet.
+    """
+    spec = (engine or {}).get("speculative")
+    names = spec.get("draft_model") if isinstance(spec, dict) else None
+    if not isinstance(names, list) or not model:
+        return []
+    at = f"{where}.speculative.draft_model"
+    checkout = catalog or os.environ.get("SUBSTRATE_CATALOG")
+    linked = None
+    errs = []
+    for name in names:
+        if not isinstance(name, str) or not name:
+            errs.append(f"{at}: {name!r} is not a catalog model name")
+            continue
+        if name == catalog_drafters.IN_GRAPH:
+            errs.append(f"{at}: {name!r} is the model's own speculator; leave draft_model out to "
+                        f"draft with it")
+            continue
+        identity, reason = blis_cli.resolve(blis, model=name, catalog=catalog)
+        if identity is None:
+            errs.append(f"{at}: {name!r}: {reason}")
+            continue
+        if identity != name:
+            errs.append(f"{at}: {name!r} is not a catalog name; the catalog calls it {identity!r}")
+            continue
+        if not checkout or not os.path.isdir(os.path.join(checkout, "models")):
+            errs.append(f"{at}: {name!r}: whether it drafts for {model} is read from a catalog "
+                        f"checkout until `blis catalog resolve` lists drafters "
+                        f"(inference-sim/inference-sim#2141); pass --catalog or set "
+                        f"SUBSTRATE_CATALOG")
+            continue
+        if linked is None:
+            linked = {d["draft_model"]: d for d in catalog_drafters.drafters(checkout, model)
+                      if d["kind"] == "separate"}
+        d = linked.get(name)
+        if d is None:
+            known = sorted(n for n, x in linked.items() if x["linked"])
+            errs.append(f"{at}: {name!r} is not a drafter of {model} (its separate drafters: "
+                        f"{', '.join(known) or 'none'})")
+        elif not d["linked"]:
+            errs.append(f"{at}: {name!r} is not a drafter of {model}: {d['why']}")
+    return errs
 
 
 def load(path):

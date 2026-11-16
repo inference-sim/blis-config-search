@@ -33,11 +33,13 @@ ENGINE_UNSET = {
     "engram_config": {"cpu_offload": True},
     "num_speculative_tokens": 0,
     "speculative_method": "off",
+    "speculative_draft_model": "the graph's own speculator",
 }
 TOPOLOGY_KEY = re.compile(r"^((prefill|decode)_)?(tp|dp|pp|enable_expert_parallel|instances|num_instances)$|^router_config$")
 # Knobs the scenario stores under another name.
 NESTED = {"speculative_method": ("speculative", "method"),
-          "num_speculative_tokens": ("speculative", "num_spec_tokens")}
+          "num_speculative_tokens": ("speculative", "num_spec_tokens"),
+          "speculative_draft_model": ("speculative", "draft_model")}
 # One summary per base routing file; a generated arm says which parameter it overrides.
 ROUTER_SUMMARY = {
     "random": "Spreads requests at random; the baseline every scorer has to beat.",

@@ -335,10 +335,16 @@ class ClassifyConfig(unittest.TestCase):
         _, eng, _, _ = classify({"tp": 8, "quantization": "fp8", "cache_dtype": "fp8"})
         self.assertEqual(eng["quantization"], "fp8")
 
-    def test_policy_knobs_go_to_cli(self):
-        _, _, cli, _ = classify(
-            {"tp": 8, "scheduler": "fcfs", "preemption_policy": "fcfs"})
-        self.assertEqual(cli, {"scheduler": "fcfs", "preemption_policy": "fcfs"})
+    def test_scheduling_policy_is_an_engine_block_key(self):
+        """inference-sim removed --scheduler and --preemption-policy: the scheduling policy
+        is the engine block's scheduling_policy, and the old keys are refused naming it."""
+        _, eng, cli, _ = classify({"tp": 8, "scheduling_policy": "priority"})
+        self.assertEqual(eng["scheduling_policy"], "priority")
+        self.assertEqual(cli, {})
+        for key in ("scheduler", "preemption_policy"):
+            with self.assertRaises(run_blis.ConfigError) as cm:
+                classify({"tp": 8, key: "fcfs"})
+            self.assertIn("scheduling_policy", str(cm.exception))
 
     def test_rejects_routing_flags_removed_in_v0_12_0(self):
         """v0.12.0 moved routing into the embedded llm-d router, so the old flags are gone.
@@ -637,15 +643,16 @@ class FabricSelection(unittest.TestCase):
 class BuildCmd(unittest.TestCase):
     def test_kernel_flags_and_cli_knobs(self):
         cmd = run_blis.build_cmd("blis", None, None, "scn", "s.yaml", "chatbot", 100, 0, None, None,
-                                 {"num_instances": 2, "concurrency": 64, "scheduler": "fcfs"})
+                                 {"num_instances": 2, "concurrency": 64})
         # v0.10.0 selects the kernel backend from the scenario's `coefficients:` list, NOT a
         # `--latency-model` CLI flag (the flag was removed and is rejected as unknown).
         self.assertNotIn("--latency-model", cmd)
         self.assertNotIn("blis-latency-kernel", cmd)
         for a, b in (("--scenario", "s.yaml"), ("--scenarios", "scn"),
-                     ("--num-instances", "2"), ("--concurrency", "64"), ("--scheduler", "fcfs")):
+                     ("--num-instances", "2"), ("--concurrency", "64")):
             self.assertEqual(cmd[cmd.index(a) + 1], b)
-        for refused in ("--tp", "--model", "--hardware", "--enable-expert-parallel", "--dp"):
+        for refused in ("--tp", "--model", "--hardware", "--enable-expert-parallel", "--dp",
+                        "--scheduler", "--preemption-policy"):
             self.assertNotIn(refused, cmd)
 
 
@@ -1090,43 +1097,92 @@ class SpeculativeDecoding(unittest.TestCase):
             self.assertEqual(run_blis.graph_speculator(d, "m"), "")
 
 
-class AcceptanceLength(unittest.TestCase):
-    """The acceptance length is what makes the per-user axis correct under drafting, and BLIS
-    never echoes it, so the runner resolves and records it."""
+class SeparateDrafter(unittest.TestCase):
+    """A drafting arm may name a separate drafter checkpoint (speculative.draft_model, design D8)."""
 
-    PROFILES = ("kind: AcceptanceProfileSet\nname: test-al\nprofiles:\n"
-                "- model: deepseek-v4.1-flash\n  speculative_method: dspark\n"
-                "  num_spec_tokens: 5\n  thinking: 'on'\n  category: coding\n"
-                "  acceptance_length: 3.51\n  provenance:\n    hardware: b200\n")
+    def test_draft_model_reaches_the_engine_block_and_the_scenario(self):
+        _, eng, _, _ = classify({"tp": 4, "num_speculative_tokens": 3, "speculative_method": "eagle3",
+                                 "speculative_draft_model": "m-eagle3"})
+        self.assertEqual(eng["speculative"],
+                         {"method": "eagle3", "num_spec_tokens": 3, "draft_model": "m-eagle3"})
+        y = run_blis.scenario_yaml("m", "b200", "0.32.0", dict(run_blis.PARALLEL_DEFAULTS),
+                                   {"block_size": 128, **eng}, "n")
+        self.assertIn('        model: "m-eagle3"', y)
 
-    def _reg(self, d):
-        os.makedirs(os.path.join(d, "acceptance"), exist_ok=True)
-        with open(os.path.join(d, "acceptance", "p.yaml"), "w") as f:
-            f.write(self.PROFILES)
-        run_blis._AL_CACHE.clear()
+    def test_a_drafter_with_no_depth_is_refused(self):
+        with self.assertRaises(run_blis.ConfigError) as e:
+            classify({"tp": 4, "num_speculative_tokens": 0, "speculative_draft_model": "m-eagle3"})
+        self.assertIn("speculative_draft_model", str(e.exception))
 
-    def test_resolves_the_measured_value_with_provenance(self):
+    def test_the_method_is_the_drafters_own(self):
+        """With no method stated, the separate drafter's graph speculator names it, not the
+        target's: a target with no speculator of its own still drafts through its drafter."""
+        seen = []
+        real = run_blis.subprocess.run
+
+        class Done:
+            returncode, stdout, stderr = 0, "", ""
+
+        def fake(cmd, **k):
+            if cmd[1:2] == ["run"]:
+                seen.append(cmd)
+                return Done()
+            return real(cmd, **k)
         with tempfile.TemporaryDirectory() as d:
-            self._reg(d)
-            al, src = run_blis.acceptance_length(
-                d, "deepseek-v4.1-flash", "dspark", 5, "on", "coding")
-        self.assertEqual(al, 3.51)
-        self.assertIn("b200", src)
+            cat = os.path.join(d, "catalog")
+            os.makedirs(os.path.join(cat, "workloads"))
+            os.makedirs(os.path.join(cat, "models", "m-eagle3"))
+            with open(os.path.join(cat, "models", "m-eagle3", "graph.yaml"), "w") as f:
+                f.write("kind: ModelGraph\nspeculator:\n  method: eagle3\n  num_spec_tokens: 1\n")
+            with open(os.path.join(cat, "workloads", "chatbot.yaml"), "w") as f:
+                f.write("prompt:\n  tokens: 100\n  tokens_stdev: 10\n  tokens_min: 1\n  tokens_max: 200\n"
+                        "output:\n  tokens: 50\n  tokens_stdev: 5\n  tokens_min: 1\n  tokens_max: 100\n")
+            run_blis._SPEC_CACHE.clear()
+            run_blis.subprocess.run = fake
+            try:
+                rec = run_blis.run_one(FIXTURE_BLIS, cat, "/reg", d, "m", "h100", "0.32.0", "chatbot",
+                                       10, 0, None, {"tp": 8, "concurrency": 4,
+                                                     "num_speculative_tokens": 1,
+                                                     "speculative_draft_model": "m-eagle3"},
+                                       gpus_per_node=8)
+            finally:
+                run_blis.subprocess.run = real
+        self.assertTrue(seen, rec.get("error"))
+        self.assertEqual({"method": "eagle3", "num_spec_tokens": 1, "draft_model": "m-eagle3"},
+                         rec["deployment"]["engine"]["speculative"])
 
-    def test_unmatched_key_resolves_to_none(self):
-        """An unknown acceptance factor must yield None, so the report withholds `pu` rather than
-        publishing a rate wrong by an unknown multiple."""
-        with tempfile.TemporaryDirectory() as d:
-            self._reg(d)
-            al, _ = run_blis.acceptance_length(
-                d, "deepseek-v4.1-flash", "dspark", 4, "on", "coding")   # K=4 absent
-        self.assertIsNone(al)
 
-    def test_registry_without_acceptance_dir_is_not_an_error(self):
-        with tempfile.TemporaryDirectory() as d:
-            run_blis._AL_CACHE.clear()
-            self.assertEqual(run_blis.acceptance_length(d, "m", "dspark", 5, "on", "coding"),
-                             (None, None))
+class AcceptanceFromTheResult(unittest.TestCase):
+    """A drafting row records the acceptance the simulator priced it with, from its Result (D8),
+    not a lookup of the runner's own."""
+
+    ACC = {"length": 2.9, "rate": 0.633, "source_layer": "registry",
+           "entry": {"set": "inferencex-golden-al", "key": "m/dspark/k3/thinking-on/coding",
+                     "method": "measured", "source": "https://example.org/curve.yaml",
+                     "measured_on": "b200", "per_position_rates": [0.8, 0.6, 0.5]}}
+
+    def doc(self, **extra):
+        return {"reports": {"engine": {"cluster": {"acceptance": self.ACC}}}, **extra}
+
+    def test_the_pinned_results_record_gives_value_profile_and_source(self):
+        a = run_blis.acceptance_record(self.doc())
+        self.assertEqual(2.9, a["acceptance_length"])
+        self.assertEqual("registry", a["source_layer"])
+        self.assertEqual("inferencex-golden-al", a["profile_set"])
+        self.assertEqual("m/dspark/k3/thinking-on/coding", a["profile_key"])
+        self.assertEqual("https://example.org/curve.yaml", a["source"])
+        self.assertEqual("b200", a["measured_on"])
+        self.assertIsNone(a["step"], "the pinned Result records no step (inference-sim#2079)")
+
+    def test_a_result_that_records_the_step_shows_it(self):
+        prop = {"name": "speculative_acceptance", "source": "profile", "step": "other_drafter",
+                "differed": ["drafter"], "profile": "inferencex-golden-al m/dspark/k3/thinking-on/coding"}
+        a = run_blis.acceptance_record(self.doc(input={"workload_properties": [prop]}))
+        self.assertEqual("other_drafter", a["step"])
+        self.assertEqual(["drafter"], a["differed"])
+
+    def test_a_run_without_drafting_records_none(self):
+        self.assertIsNone(run_blis.acceptance_record({"reports": {"engine": {"cluster": {}}}}))
 
 
 class GeneratedScenario(unittest.TestCase):
@@ -1209,7 +1265,11 @@ class FigureForms(unittest.TestCase):
     def test_the_feasibility_aggregate_is_stated_as_max_over_instances(self):
         self.assertEqual(run_blis.FEASIBILITY_AGGREGATE["aggregate"], "max")
         self.assertEqual(run_blis.FEASIBILITY_AGGREGATE["over"], "instance")
-        self.assertEqual(sorted(run_blis.FEASIBILITY_AGGREGATE["metrics"]), ["e2e_p99_ms", "itl_p99_ms", "ttft_p99_ms"])
+        # Each named metric is the Result metric the gate reads: the itl_p99 cap reads tpot_p99_ms
+        # (aiperf's ITL), never the registry's itl_p99_ms, which is 0 under speculative decoding (#2128).
+        read = {run_blis._MEASURED_KEYS[k] for k in ("ttft_p99_ms", "e2e_p99_ms", "itl_p99_ms")}
+        self.assertEqual(set(run_blis.FEASIBILITY_AGGREGATE["metrics"]), read)
+        self.assertNotIn("itl_p99_ms", run_blis.FEASIBILITY_AGGREGATE["metrics"])
 
 
 class FailureLine(unittest.TestCase):

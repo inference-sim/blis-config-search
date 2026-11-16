@@ -36,11 +36,12 @@ def label(cand):
 # Readable knob names, spelled out on purpose: "b2k" for max_num_batched_tokens=2048 tells a
 # reader nothing. Mirrors report.KNOB_NAMES, keyed by candidate-config key.
 KNOB_NAMES = {"pd_transfer_contention": "handoff contention", "num_speculative_tokens": "draft tokens", "speculative_method": "drafter",
+              "speculative_draft_model": "drafter checkpoint",
               "router_config": "routing", "routing_policy": "routing",
               "routing_scorers": "scorers",
               "max_num_batched_tokens": "batch tokens", "max_num_seqs": "max seqs",
               "block_size": "block size", "gpu_memory_utilization": "gpu mem util",
-              "scheduler": "scheduler", "admission_policy": "admission",
+              "admission_policy": "admission",
               # The wider engine surface an Experiment Spec can sweep. Each is the name a
               # reader would use for the setting, not the engine's field name: a variant
               # reading "cudagraph_mode FULL_AND_PIECEWISE" is a field dump, where "graph

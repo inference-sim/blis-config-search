@@ -10,11 +10,11 @@
     },
     {
       "h": "What was found",
-      "html": "<strong>8x TP4xDP2 + EP (batch tokens 32,768)</strong>, from the <em>colocated</em> sweep, reached 56.34 tok/s/accelerator (3605.7 tok/s across the fleet) at concurrency 64 while holding the scenario's SLOs."
+      "html": "<strong>8x TP4xDP2 + EP (batch tokens 32,768)</strong>, from the <em>colocated</em> sweep, reached 59 tok/s/accelerator (3776 tok/s across the fleet) at concurrency 64 while holding the scenario's SLOs. Ranking: max output tok/s per accelerator subject to the scenario's SLOs."
     },
     {
       "h": "What to run",
-      "html": "8x TP4xDP2 + EP (batch tokens 32,768) at concurrency 64. 368 of 950 runs held the SLOs.",
+      "html": "8x TP4xDP2 + EP (batch tokens 32,768) at concurrency 64. 476 of 950 runs held the SLOs.",
       "run": true
     }
   ],
@@ -22,11 +22,13 @@
     "BLIS discrete-event simulation",
     "Experiment Spec (RFC #21)",
     "deterministic sweep \u2014 no LLM in the measurement path",
-    "seed 42"
+    "seed 42",
+    "basis: measured window",
+    "scope: cluster; worst instance for TTFT and end-to-end gates"
   ],
   "recommendation_num": 5,
   "recommendation_prose": [
-    "The table below ranks the measured operating points by output tok/s per accelerator, the objective this experiment selects on, among runs that held the scenario's SLOs."
+    "The table below lists the measured operating points. Headline ranking: max output tok/s per accelerator subject to the scenario's SLOs. The Pareto front of every sweep is in pareto.json."
   ],
   "sections": [
     {
@@ -34,7 +36,7 @@
       "num": 2,
       "prose": [
         "The colocated control should hold ITL only with a chunked-prefill cap, and the wide-dp shapes should give the most tokens per GPU.",
-        "Measured: best was <strong>8x TP4xDP2 + EP (batch tokens 32,768)</strong> at 56.34 tok/s/accelerator (concurrency 64)."
+        "Measured: best was <strong>8x TP4xDP2 + EP (batch tokens 32,768)</strong> at 59 tok/s/accelerator (concurrency 64)."
       ],
       "title": "Sweep: colocated"
     },
@@ -43,7 +45,7 @@
       "num": 3,
       "prose": [
         "Prefill-heavy ratios should win on 10k prompts, and a threshold near the median prompt should beat splitting every request.",
-        "Measured: best was <strong>3P/5D TP8 + EP</strong> at 55.81 tok/s/accelerator (concurrency 64)."
+        "Measured: best was <strong>2P/6D TP8 + EP</strong> at 42.57 tok/s/accelerator (concurrency 32)."
       ],
       "title": "Sweep: pd-dp1"
     },
@@ -52,7 +54,7 @@
       "num": 4,
       "prose": [
         "Splitting every request should cost ITL headroom against the threshold arms, because each handoff stalls a decode slot.",
-        "Measured: best was <strong>4P/4D TP8 + EP</strong> at 35.9 tok/s/accelerator (concurrency 32)."
+        "Measured: best was <strong>4P/4D TP8 + EP</strong> at 39.51 tok/s/accelerator (concurrency 32)."
       ],
       "title": "Sweep: pd-always"
     }

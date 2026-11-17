@@ -279,6 +279,31 @@ class CompletionIssue(unittest.TestCase):
         self.assertIn("overloaded", run_blis._completion_issue(
             {"injected_requests": 100, "completed_requests": 100, "timed_out_requests": 3}))
 
+    # A replay that ends a finite grace after its window (the AgentX run recipe's 30 s) leaves
+    # the requests still decoding at the cutoff unfinished, as the measured run does.
+    AT_CUTOFF = {"injected_requests": 439, "completed_requests": 437, "still_running": 2,
+                 "still_queued": 0, "dropped_unservable": 0, "timed_out_requests": 0}
+
+    def test_in_flight_at_a_finite_grace_cutoff_is_not_overload(self):
+        self.assertIsNone(run_blis._completion_issue(self.AT_CUTOFF, cutoff=True))
+
+    def test_without_a_cutoff_the_same_run_is_still_incomplete(self):
+        self.assertIn("incomplete", run_blis._completion_issue(self.AT_CUTOFF))
+
+    def test_queued_dropped_or_timed_out_at_the_cutoff_is_still_overload(self):
+        for f in ("still_queued", "dropped_unservable", "timed_out_requests"):
+            m = dict(self.AT_CUTOFF, **{f: 3}, injected_requests=442)
+            self.assertIn(f"overloaded: {f}=3", run_blis._completion_issue(m, cutoff=True), f)
+
+    def test_requests_unaccounted_for_at_the_cutoff_are_incomplete(self):
+        m = dict(self.AT_CUTOFF, injected_requests=450)
+        self.assertIn("incomplete", run_blis._completion_issue(m, cutoff=True))
+
+    def test_which_replays_end_at_a_finite_grace(self):
+        self.assertTrue(run_blis.finite_grace({"grace_period": "30s"}))
+        for r in (None, {}, {"grace_period": "inf"}, {"grace_period": ".inf"}):
+            self.assertFalse(run_blis.finite_grace(r), r)
+
 
 class ClassifyConfig(unittest.TestCase):
     def test_splits_and_fills_parallel_defaults(self):

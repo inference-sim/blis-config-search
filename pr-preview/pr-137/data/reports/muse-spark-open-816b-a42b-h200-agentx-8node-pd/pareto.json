@@ -1,0 +1,400 @@
+{
+  "dropped": [
+    {
+      "count": 1,
+      "gpus": 4,
+      "reason": "uses 4 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 3,
+      "gpus": 8,
+      "reason": "uses 8 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 5,
+      "gpus": 16,
+      "reason": "uses 16 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 7,
+      "gpus": 32,
+      "reason": "uses 32 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 5,
+      "gpus": 128,
+      "reason": "uses 128 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 3,
+      "gpus": 256,
+      "reason": "uses 256 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 1,
+      "gpus": 512,
+      "reason": "uses 512 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 16,
+      "reason": "uses 16 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 256,
+      "reason": "uses 256 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 40,
+      "reason": "uses 40 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 8,
+      "gpus": 48,
+      "reason": "uses 48 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 12,
+      "gpus": 56,
+      "reason": "uses 56 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 12,
+      "gpus": 72,
+      "reason": "uses 72 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 8,
+      "gpus": 80,
+      "reason": "uses 80 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 88,
+      "reason": "uses 88 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 1,
+      "gpus": 40,
+      "reason": "uses 40 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 2,
+      "gpus": 48,
+      "reason": "uses 48 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 3,
+      "gpus": 56,
+      "reason": "uses 56 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 3,
+      "gpus": 72,
+      "reason": "uses 72 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 2,
+      "gpus": 80,
+      "reason": "uses 80 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 1,
+      "gpus": 88,
+      "reason": "uses 88 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 2,
+      "gpus": 32,
+      "reason": "uses 32 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 48,
+      "reason": "uses 48 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 80,
+      "reason": "uses 80 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 2,
+      "gpus": 96,
+      "reason": "uses 96 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 48,
+      "reason": "uses 48 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 80,
+      "reason": "uses 80 GPUs, not the scenario's 64"
+    }
+  ],
+  "finalists": [],
+  "front": {
+    "interval": null,
+    "overall": {
+      "decode": {
+        "members": [],
+        "points": 0,
+        "unrated": 0
+      },
+      "total": {
+        "members": [],
+        "points": 0,
+        "unrated": 0
+      }
+    },
+    "sweeps": [
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "colocated",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "colocated-tuned",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "pd-ratio",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "pd-always",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "pd-wide-decode",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "pd-pool-engine",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "pd-decode-cudagraph",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      }
+    ],
+    "throughput": "total",
+    "x": "interactivity_of_mean_tpot",
+    "y": {
+      "decode": "output_tokens_per_second_per_decode_gpu",
+      "total": "total_tokens_per_second_per_gpu"
+    }
+  },
+  "outcomes": {
+    "overloaded": 164,
+    "refused": 40
+  },
+  "ranking": {
+    "description": "max output tok/s per accelerator subject to the scenario's SLOs",
+    "throughput": "total",
+    "used": "scalar"
+  },
+  "refusals": [
+    {
+      "configs": 6,
+      "examples": [
+        "2x TP8xDP4 + EP",
+        "4x TP4xDP4 + EP",
+        "2x TP8xDP4 + EP (batch tokens 32,768)"
+      ],
+      "issue": null,
+      "reason": "scenario: colocated pool: Muse-Spark on h200 (compute capability 9.0) requires data parallelism 1 and prefill-context parallelism 1 (got dp 4, pcp 0): its MoE layers take the route-major Marlin path on Hopper, which vLLM refuses to build with more (\"MuseSpark1x Triton/Marlin currently requires DP1 and PCP1\", vllm/models/muse_spark/nvidia/muse_moe_runner.py:140-146@0f6b2619). Blackwell is not affected",
+      "runs": 24,
+      "source": "engine"
+    },
+    {
+      "configs": 2,
+      "examples": [
+        "4x TP8xDP2 + EP",
+        "8x TP4xDP2 + EP"
+      ],
+      "issue": null,
+      "reason": "scenario: colocated pool: Muse-Spark on h200 (compute capability 9.0) requires data parallelism 1 and prefill-context parallelism 1 (got dp 2, pcp 0): its MoE layers take the route-major Marlin path on Hopper, which vLLM refuses to build with more (\"MuseSpark1x Triton/Marlin currently requires DP1 and PCP1\", vllm/models/muse_spark/nvidia/muse_moe_runner.py:140-146@0f6b2619). Blackwell is not affected",
+      "runs": 8,
+      "source": "engine"
+    },
+    {
+      "configs": 2,
+      "examples": [
+        "1x TP8xDP8 + EP",
+        "2x TP4xDP8 + EP"
+      ],
+      "issue": null,
+      "reason": "scenario: colocated pool: Muse-Spark on h200 (compute capability 9.0) requires data parallelism 1 and prefill-context parallelism 1 (got dp 8, pcp 0): its MoE layers take the route-major Marlin path on Hopper, which vLLM refuses to build with more (\"MuseSpark1x Triton/Marlin currently requires DP1 and PCP1\", vllm/models/muse_spark/nvidia/muse_moe_runner.py:140-146@0f6b2619). Blackwell is not affected",
+      "runs": 8,
+      "source": "engine"
+    }
+  ],
+  "run_id": "muse-spark-open-816b-a42b-h200-agentx-8node-pd",
+  "sweep_outcomes": [
+    {
+      "name": "colocated",
+      "outcomes": {
+        "overloaded": 4,
+        "refused": 24
+      },
+      "refusals": [
+        {
+          "configs": 2,
+          "examples": [
+            "4x TP8xDP2 + EP",
+            "8x TP4xDP2 + EP"
+          ],
+          "issue": null,
+          "reason": "scenario: colocated pool: Muse-Spark on h200 (compute capability 9.0) requires data parallelism 1 and prefill-context parallelism 1 (got dp 2, pcp 0): its MoE layers take the route-major Marlin path on Hopper, which vLLM refuses to build with more (\"MuseSpark1x Triton/Marlin currently requires DP1 and PCP1\", vllm/models/muse_spark/nvidia/muse_moe_runner.py:140-146@0f6b2619). Blackwell is not affected",
+          "runs": 8,
+          "source": "engine"
+        },
+        {
+          "configs": 2,
+          "examples": [
+            "2x TP8xDP4 + EP",
+            "4x TP4xDP4 + EP"
+          ],
+          "issue": null,
+          "reason": "scenario: colocated pool: Muse-Spark on h200 (compute capability 9.0) requires data parallelism 1 and prefill-context parallelism 1 (got dp 4, pcp 0): its MoE layers take the route-major Marlin path on Hopper, which vLLM refuses to build with more (\"MuseSpark1x Triton/Marlin currently requires DP1 and PCP1\", vllm/models/muse_spark/nvidia/muse_moe_runner.py:140-146@0f6b2619). Blackwell is not affected",
+          "runs": 8,
+          "source": "engine"
+        },
+        {
+          "configs": 2,
+          "examples": [
+            "1x TP8xDP8 + EP",
+            "2x TP4xDP8 + EP"
+          ],
+          "issue": null,
+          "reason": "scenario: colocated pool: Muse-Spark on h200 (compute capability 9.0) requires data parallelism 1 and prefill-context parallelism 1 (got dp 8, pcp 0): its MoE layers take the route-major Marlin path on Hopper, which vLLM refuses to build with more (\"MuseSpark1x Triton/Marlin currently requires DP1 and PCP1\", vllm/models/muse_spark/nvidia/muse_moe_runner.py:140-146@0f6b2619). Blackwell is not affected",
+          "runs": 8,
+          "source": "engine"
+        }
+      ]
+    },
+    {
+      "name": "colocated-tuned",
+      "outcomes": {
+        "overloaded": 16,
+        "refused": 16
+      },
+      "refusals": [
+        {
+          "configs": 4,
+          "examples": [
+            "2x TP8xDP4 + EP",
+            "2x TP8xDP4 + EP (batch tokens 32,768)",
+            "2x TP8xDP4 + EP (prefill chunk 2,048)"
+          ],
+          "issue": null,
+          "reason": "scenario: colocated pool: Muse-Spark on h200 (compute capability 9.0) requires data parallelism 1 and prefill-context parallelism 1 (got dp 4, pcp 0): its MoE layers take the route-major Marlin path on Hopper, which vLLM refuses to build with more (\"MuseSpark1x Triton/Marlin currently requires DP1 and PCP1\", vllm/models/muse_spark/nvidia/muse_moe_runner.py:140-146@0f6b2619). Blackwell is not affected",
+          "runs": 16,
+          "source": "engine"
+        }
+      ]
+    },
+    {
+      "name": "pd-ratio",
+      "outcomes": {
+        "overloaded": 64
+      },
+      "refusals": []
+    },
+    {
+      "name": "pd-always",
+      "outcomes": {
+        "overloaded": 16
+      },
+      "refusals": []
+    },
+    {
+      "name": "pd-wide-decode",
+      "outcomes": {
+        "overloaded": 24
+      },
+      "refusals": []
+    },
+    {
+      "name": "pd-pool-engine",
+      "outcomes": {
+        "overloaded": 32
+      },
+      "refusals": []
+    },
+    {
+      "name": "pd-decode-cudagraph",
+      "outcomes": {
+        "overloaded": 8
+      },
+      "refusals": []
+    }
+  ]
+}

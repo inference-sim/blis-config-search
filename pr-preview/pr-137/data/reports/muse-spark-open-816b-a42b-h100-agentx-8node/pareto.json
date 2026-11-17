@@ -1,0 +1,503 @@
+{
+  "dropped": [
+    {
+      "count": 1,
+      "gpus": 16,
+      "reason": "uses 16 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 3,
+      "gpus": 32,
+      "reason": "uses 32 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 1,
+      "gpus": 128,
+      "reason": "uses 128 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 40,
+      "reason": "uses 40 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 8,
+      "gpus": 48,
+      "reason": "uses 48 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 12,
+      "gpus": 56,
+      "reason": "uses 56 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 12,
+      "gpus": 72,
+      "reason": "uses 72 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 8,
+      "gpus": 80,
+      "reason": "uses 80 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 88,
+      "reason": "uses 88 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 1,
+      "gpus": 40,
+      "reason": "uses 40 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 2,
+      "gpus": 48,
+      "reason": "uses 48 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 3,
+      "gpus": 56,
+      "reason": "uses 56 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 3,
+      "gpus": 72,
+      "reason": "uses 72 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 2,
+      "gpus": 80,
+      "reason": "uses 80 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 1,
+      "gpus": 88,
+      "reason": "uses 88 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 2,
+      "gpus": 32,
+      "reason": "uses 32 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 48,
+      "reason": "uses 48 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 80,
+      "reason": "uses 80 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 2,
+      "gpus": 96,
+      "reason": "uses 96 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 48,
+      "reason": "uses 48 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 80,
+      "reason": "uses 80 GPUs, not the scenario's 64"
+    }
+  ],
+  "finalists": [],
+  "front": {
+    "interval": null,
+    "overall": {
+      "decode": {
+        "members": [],
+        "points": 0,
+        "unrated": 0
+      },
+      "total": {
+        "members": [],
+        "points": 0,
+        "unrated": 0
+      }
+    },
+    "sweeps": [
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "topology",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "ep-off",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "pipeline",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "moe-collective",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "kv-capacity",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "batch-caps",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "routing-prefix-cache",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "prefill-chunking",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "pd-ratio",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "pd-always",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "pd-wide-decode",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "pd-pool-engine",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "pd-decode-cudagraph",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "cudagraph",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      }
+    ],
+    "throughput": "total",
+    "x": "interactivity_of_mean_tpot",
+    "y": {
+      "decode": "output_tokens_per_second_per_decode_gpu",
+      "total": "total_tokens_per_second_per_gpu"
+    }
+  },
+  "outcomes": {
+    "overloaded": 236,
+    "refused": 4
+  },
+  "ranking": {
+    "description": "max output tok/s per accelerator subject to the scenario's SLOs",
+    "throughput": "total",
+    "used": "scalar"
+  },
+  "refusals": [
+    {
+      "configs": 2,
+      "examples": [
+        "4P/4D TP8 + EP"
+      ],
+      "issue": null,
+      "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[1141].e2e_us: is 127270137, less than ttft_us 131537500\\n  error: result.request_rows[1141].tpot_us: must be a finite number, not negative",
+      "runs": 2,
+      "source": "engine"
+    },
+    {
+      "configs": 1,
+      "examples": [
+        "4P/4D TP8 + EP"
+      ],
+      "issue": null,
+      "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[2486].e2e_us: is 73809840, less than ttft_us 75751987\\n  error: result.request_rows[2486].tpot_us: must be a finite number, not negative",
+      "runs": 1,
+      "source": "engine"
+    },
+    {
+      "configs": 1,
+      "examples": [
+        "4P/4D TP8 + EP"
+      ],
+      "issue": null,
+      "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[7523].e2e_us: is 1140139310, less than ttft_us 1151865527\\n  error: result.request_rows[7523].tpot_us: must be a finite number, not negative",
+      "runs": 1,
+      "source": "engine"
+    }
+  ],
+  "run_id": "muse-spark-open-816b-a42b-h100-agentx-8node",
+  "sweep_outcomes": [
+    {
+      "name": "topology",
+      "outcomes": {
+        "overloaded": 4
+      },
+      "refusals": []
+    },
+    {
+      "name": "ep-off",
+      "outcomes": {
+        "overloaded": 4
+      },
+      "refusals": []
+    },
+    {
+      "name": "pipeline",
+      "outcomes": {
+        "overloaded": 12
+      },
+      "refusals": []
+    },
+    {
+      "name": "moe-collective",
+      "outcomes": {
+        "overloaded": 16
+      },
+      "refusals": []
+    },
+    {
+      "name": "kv-capacity",
+      "outcomes": {
+        "overloaded": 8
+      },
+      "refusals": []
+    },
+    {
+      "name": "batch-caps",
+      "outcomes": {
+        "overloaded": 16
+      },
+      "refusals": []
+    },
+    {
+      "name": "routing-prefix-cache",
+      "outcomes": {
+        "overloaded": 24
+      },
+      "refusals": []
+    },
+    {
+      "name": "prefill-chunking",
+      "outcomes": {
+        "overloaded": 4
+      },
+      "refusals": []
+    },
+    {
+      "name": "pd-ratio",
+      "outcomes": {
+        "overloaded": 63,
+        "refused": 1
+      },
+      "refusals": [
+        {
+          "configs": 1,
+          "examples": [
+            "4P/4D TP8 + EP"
+          ],
+          "issue": null,
+          "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[2486].e2e_us: is 73809840, less than ttft_us 75751987\\n  error: result.request_rows[2486].tpot_us: must be a finite number, not negative",
+          "runs": 1,
+          "source": "engine"
+        }
+      ]
+    },
+    {
+      "name": "pd-always",
+      "outcomes": {
+        "overloaded": 15,
+        "refused": 1
+      },
+      "refusals": [
+        {
+          "configs": 1,
+          "examples": [
+            "4P/4D TP8 + EP"
+          ],
+          "issue": null,
+          "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[1141].e2e_us: is 127270137, less than ttft_us 131537500\\n  error: result.request_rows[1141].tpot_us: must be a finite number, not negative",
+          "runs": 1,
+          "source": "engine"
+        }
+      ]
+    },
+    {
+      "name": "pd-wide-decode",
+      "outcomes": {
+        "overloaded": 24
+      },
+      "refusals": []
+    },
+    {
+      "name": "pd-pool-engine",
+      "outcomes": {
+        "overloaded": 30,
+        "refused": 2
+      },
+      "refusals": [
+        {
+          "configs": 1,
+          "examples": [
+            "4P/4D TP8 + EP"
+          ],
+          "issue": null,
+          "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[1141].e2e_us: is 127270137, less than ttft_us 131537500\\n  error: result.request_rows[1141].tpot_us: must be a finite number, not negative",
+          "runs": 1,
+          "source": "engine"
+        },
+        {
+          "configs": 1,
+          "examples": [
+            "4P/4D TP8 + EP"
+          ],
+          "issue": null,
+          "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[7523].e2e_us: is 1140139310, less than ttft_us 1151865527\\n  error: result.request_rows[7523].tpot_us: must be a finite number, not negative",
+          "runs": 1,
+          "source": "engine"
+        }
+      ]
+    },
+    {
+      "name": "pd-decode-cudagraph",
+      "outcomes": {
+        "overloaded": 8
+      },
+      "refusals": []
+    },
+    {
+      "name": "cudagraph",
+      "outcomes": {
+        "overloaded": 8
+      },
+      "refusals": []
+    }
+  ]
+}

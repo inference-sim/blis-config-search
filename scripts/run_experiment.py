@@ -752,6 +752,8 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
             # card, and showed "tp 0, 0 instances" without it.
             row["config"] = _jsonable(cfg)
             row["servable"] = ok
+            if "in_flight_at_cutoff" in rec:
+                row["in_flight_at_cutoff"] = rec["in_flight_at_cutoff"]
             if router_rec:
                 row["router"] = router_rec
             if why:

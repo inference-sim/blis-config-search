@@ -1143,16 +1143,36 @@ def parse_all_instances(stdout):
     return [o for o in _all_metrics(stdout) if o.get("instance_id") not in (None, "cluster")]
 
 
-def _completion_issue(m):
-    """Why a run is NOT a usable capacity/ranking point (incomplete/overloaded), else None."""
+def _completion_issue(m, cutoff=False):
+    """Why a run is NOT a usable capacity/ranking point (incomplete/overloaded), else None.
+
+    `cutoff`: the run ends a finite grace period after its sending window, as the measured AgentX
+    run does. A request still running then is the window's expected tail, not overload: it is
+    counted (in_flight_at_cutoff) rather than failing the run. A request still QUEUED then, or one
+    dropped or timed out, is overload either way."""
     inj, comp = m.get("injected_requests"), m.get("completed_requests")
-    if inj is not None and comp is not None and inj != comp:
-        return f"incomplete: injected={inj} != completed={comp}"
-    for f in ("still_queued", "still_running", "dropped_unservable", "timed_out_requests"):
+    if not cutoff:
+        if inj is not None and comp is not None and inj != comp:
+            return f"incomplete: injected={inj} != completed={comp}"
+        for f in ("still_queued", "still_running", "dropped_unservable", "timed_out_requests"):
+            v = m.get(f)
+            if v:
+                return f"overloaded: {f}={v}"
+        return None
+    for f in ("still_queued", "dropped_unservable", "timed_out_requests"):
         v = m.get(f)
         if v:
             return f"overloaded: {f}={v}"
+    tail = m.get("still_running") or 0
+    if inj is not None and comp is not None and inj != comp + tail:
+        return f"incomplete: injected={inj} != completed={comp} + in flight at the cutoff={tail}"
     return None
+
+
+def finite_grace(replay):
+    """Whether a replay ends a finite grace period after its window (a stated, non-infinite one)."""
+    g = (replay or {}).get("grace_period")
+    return g not in (None, "") and str(g) not in INF_NEEDS_YAML
 
 
 def pool_nodes(parallel, num_instances=1, node_size=8):
@@ -1753,7 +1773,7 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     elif not metrics:
         error = "rc=0 but no cluster metrics parsed from stdout (output format changed?)"
     else:
-        error = _completion_issue(metrics)
+        error = _completion_issue(metrics, cutoff=finite_grace(replay))
     # The record states the data the Result says priced the run, not the flag that asked for it.
     # A default run whose Result is not the release's embedded data is an error row: it would
     # otherwise be committed as a report priced with data it was not (CFG-1).
@@ -1791,6 +1811,9 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
         "metrics": metrics, "metrics_all_instances": parse_all_instances(stdout) if rc == 0 else [],
         "error": error, "stdout_tail": stdout[-2000:], "stderr_tail": stderr[-2000:],
     })
+    if finite_grace(replay) and metrics:
+        # Requests the grace cutoff ended mid-flight: not in any figure, and not an overload.
+        rec["in_flight_at_cutoff"] = metrics.get("still_running") or 0
     if doc is not None and metrics:
         # The window every figure above is on, the Result's measured-window metrics verbatim, and
         # the whole-run aggregate kept as raw data only: nothing ranks or displays it.

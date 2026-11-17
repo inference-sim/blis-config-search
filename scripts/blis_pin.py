@@ -16,8 +16,10 @@ the pin is what starts hours of regeneration against it.
   python3 -I scripts/blis_pin.py bump v0.15.0                 # rewrite pins.env
   python3 -I scripts/blis_pin.py changed OLD_PINS.env         # which pins a push moved
   python3 -I scripts/blis_pin.py same-stack DIR DIR           # exit 0 if two reports share a stack
+  python3 -I scripts/blis_pin.py same-results DIR DIR         # exit 0 if they differ only in run times
   python3 -I scripts/blis_pin.py plan [--only ID,...] [--stale-only]   # what to regenerate, in batches
   python3 -I scripts/blis_pin.py stale                        # reports the pins did not price; exit 1 if any
+  python3 -I scripts/blis_pin.py ready ROLLUP.json            # green | pending | red for a PR head
   python3 -I scripts/blis_pin.py regen ID --blis B --catalog C --registry R --out DIR   # C, R: the pinned blis-substrate checkout's catalog/ and registry/
   python3 -I scripts/blis_pin.py summary --old DIR --new DIR ID [ID ...]
   python3 -I scripts/blis_pin.py smoke [ID ...] --blis B --catalog C --registry R [--corpus F]
@@ -217,6 +219,54 @@ def stale_ids(root=ROOT, pins=None):
             if not is_current(os.path.join(root, "reports", i), pins)]
 
 
+# What a re-run of the same spec on the same pins changes in runs.jsonl, and is not a result:
+# how long each run took on this machine, and the simulator's log timestamps in the stream tails.
+_RUN_PROVENANCE = ("wall_s",)
+_LOG_TIME = re.compile(r'time="[^"]*"')
+
+
+def _ledger_row(line):
+    row = json.loads(line)
+    for k in _RUN_PROVENANCE:
+        row.pop(k, None)
+    for k in ("stderr_tail", "stdout_tail"):
+        if isinstance(row.get(k), str):
+            row[k] = _LOG_TIME.sub('time=""', row[k])
+    return row
+
+
+def same_results(a_dir, b_dir):
+    """Whether two report dirs hold the same results: every file byte-identical, except that
+    runs.jsonl rows may differ in run provenance (_RUN_PROVENANCE, log timestamps).
+
+    regen-reports keeps the committed copy when this holds, so regenerating a current report
+    changes no committed byte; any other difference is a real one and is swapped in."""
+    def files(d):
+        out = set()
+        for base, _, names in os.walk(d):
+            out |= {os.path.relpath(os.path.join(base, n), d) for n in names}
+        return out
+    fa, fb = files(a_dir), files(b_dir)
+    if not fa or fa != fb:
+        return False
+    for rel in sorted(fa):
+        with open(os.path.join(a_dir, rel), "rb") as f:
+            x = f.read()
+        with open(os.path.join(b_dir, rel), "rb") as f:
+            y = f.read()
+        if x == y:
+            continue
+        if os.path.basename(rel) != "runs.jsonl":
+            return False
+        try:
+            xl, yl = x.decode().splitlines(), y.decode().splitlines()
+            if len(xl) != len(yl) or any(_ledger_row(p) != _ledger_row(q) for p, q in zip(xl, yl)):
+                return False
+        except ValueError:
+            return False
+    return True
+
+
 # ---------------------------------------------------------------------------------- plan
 
 def _load_yaml(path):
@@ -311,6 +361,59 @@ def plan(root=ROOT, only=None, max_batch=MAX_BATCH, stale_only=False):
         e["batch"] = batch_of.get(e["id"])
     return {"reports": runnable, "orphans": [e for e in entries if e["kind"] == "orphan"],
             "batches": batches}
+
+
+# ---------------------------------------------------------------------------------- ready
+
+# The checks a pin PR must pass before the bot marks it ready. The first four are required on main
+# by branch protection; the description check (blis.yml) and the name scan (private-names.yml) are
+# not, but a human should never be handed a pin PR that fails them. Each is named as its check run
+# is: a dispatched blis.yml reports "blis checks", a pull_request one "pr / blis checks".
+READY_CHECKS = ("python", "experiments", "web", "gate", "blis checks", "scan")
+_GREEN = {"SUCCESS", "SKIPPED", "NEUTRAL"}
+
+
+def readiness(rollup, required=READY_CHECKS, ignore=("pin-ready",)):
+    """Decide from a PR head's statusCheckRollup whether every check is green.
+
+    Only the LATEST run of each check counts (an older cancelled run is harmless; a newer
+    cancelled one blocks), as branch protection reads it. Returns
+    {"state": "green" | "pending" | "red", "pending": [...], "failed": [...], "missing": [...]}:
+    red when any latest run failed, pending while one runs or a required check has not reported
+    yet, green otherwise."""
+    latest = {}
+    for c in rollup or []:
+        if c.get("workflowName") in ignore:      # the waiter itself is running while it reads this
+            continue
+        name = c.get("name") or c.get("context") or ""
+        key = (c.get("workflowName") or "", name)
+        when = c.get("startedAt") or c.get("createdAt") or ""
+        if key not in latest or when >= (latest[key].get("startedAt") or latest[key].get("createdAt") or ""):
+            latest[key] = c
+    pending, failed = [], []
+    for (wf, name), c in sorted(latest.items()):
+        label = f"{wf} / {name}" if wf else name
+        if "state" in c and "status" not in c:          # a commit status, not a check run
+            st = c["state"]
+            if st in ("PENDING", "EXPECTED"):
+                pending.append(label)
+            elif st != "SUCCESS":
+                failed.append(label)
+            continue
+        if c.get("status") != "COMPLETED":
+            pending.append(label)
+        elif c.get("conclusion") not in _GREEN:
+            failed.append(label)
+    names = {n for _, n in latest}
+    missing = [r for r in required
+               if not any(n == r or n.endswith(" / " + r) for n in names)]
+    # A required check that reported only SKIPPED did not run its work: that is not a pass.
+    for r in required:
+        runs = [c for (_, n), c in latest.items() if n == r or n.endswith(" / " + r)]
+        if runs and all(c.get("conclusion") == "SKIPPED" for c in runs):
+            failed.append(f"{r} (skipped)")
+    state = "red" if failed else "pending" if (pending or missing) else "green"
+    return {"state": state, "pending": pending, "failed": failed, "missing": missing}
 
 
 # ---------------------------------------------------------------------------------- regen
@@ -693,6 +796,9 @@ def main(argv=None):
     b.add_argument("--release-name")
     c = sub.add_parser("changed", help="print the stack pins that differ from OLD pins.env")
     c.add_argument("old")
+    sr = sub.add_parser("same-results", help="exit 0 if two report dirs differ only in run provenance")
+    sr.add_argument("a")
+    sr.add_argument("b")
     ss = sub.add_parser("same-stack", help="exit 0 if two report dirs were priced by the same stack")
     ss.add_argument("a")
     ss.add_argument("b")
@@ -703,6 +809,8 @@ def main(argv=None):
                    help="only the reports the pinned stack did not price")
     st = sub.add_parser("stale", help="list the reports the pinned stack did not price; exit 1 if any")
     st.add_argument("--root", default=ROOT)
+    rd = sub.add_parser("ready", help="read a PR's statusCheckRollup JSON; print green, pending or red")
+    rd.add_argument("rollup", help="file holding `gh pr view N --json statusCheckRollup` output")
     r = sub.add_parser("regen", help="regenerate one report into --out/<id>/")
     r.add_argument("id")
     r.add_argument("--blis", required=True)
@@ -745,6 +853,8 @@ def main(argv=None):
         print(json.dumps({k: list(v) for k, v in moved.items()}))
     elif a.cmd == "changed":
         print(json.dumps({k: list(v) for k, v in changed(read_pins(a.old), read_pins()).items()}))
+    elif a.cmd == "same-results":
+        sys.exit(0 if same_results(a.a, a.b) else 1)
     elif a.cmd == "same-stack":
         sys.exit(0 if same_stack(a.a, a.b) else 1)
     elif a.cmd == "plan":
@@ -756,6 +866,12 @@ def main(argv=None):
             print(i)
         print(f"{len(ids)} report(s) not priced by the pinned stack", file=sys.stderr)
         return 1 if ids else 0
+    elif a.cmd == "ready":
+        with open(a.rollup) as f:
+            data = json.load(f)
+        r = readiness(data.get("statusCheckRollup", data) if isinstance(data, dict) else data)
+        print(json.dumps(r))
+        return 0
     elif a.cmd == "regen":
         regen(a.id, os.path.abspath(a.blis), os.path.abspath(a.catalog),
               os.path.abspath(a.registry), os.path.abspath(a.out), a.timeout, a.max_parallel,

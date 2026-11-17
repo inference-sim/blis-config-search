@@ -9,6 +9,11 @@ name: blis
 # The commit is blis-substrate release v0.14.1 (f9f3c93), the release pins.env's SUBSTRATE_REF
 # names; it moves with that pin. v0.14.1's description check accepts a dependency pin written as
 # a release tag ("owner/repo at vX.Y.Z <hash>"), the form the pin-bump PR body uses.
+#
+# A pull request the pin-bump automation opens or pushes to with GITHUB_TOKEN starts no
+# pull_request workflow, so that automation dispatches this one with the PR's number
+# (scripts/dispatch_pr_checks.sh). The `dispatched` job then runs the same pull-request checks
+# from the same substrate commit, and reports as "blis checks" on the PR's head commit.
 
 on:
   pull_request:
@@ -16,6 +21,10 @@ on:
   schedule:
     - cron: "17 5 * * *"
   workflow_dispatch:
+    inputs:
+      pr:
+        description: "pull request number to run the pull-request checks on (blank = the nightly checks)"
+        required: false
 
 permissions:
   contents: read
@@ -32,8 +41,95 @@ jobs:
       repo: blis-config-search
       substrate-ref: f9f3c9327794d543a0915c4deb1259ff9985c753
 
+  # The pull-request checks for a dispatched run (the shared workflow runs only on pull_request).
+  # The steps are shared-pr-checks.yml's, at the same substrate commit.
+  dispatched:
+    if: github.event_name == 'workflow_dispatch' && inputs.pr != ''
+    name: blis checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      GOTOOLCHAIN: local
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ inputs.pr }}
+      SUBSTRATE_REF: f9f3c9327794d543a0915c4deb1259ff9985c753
+    steps:
+      - name: Read the pull request's base and head
+        id: pr
+        run: |
+          set -euo pipefail
+          [[ "$PR" =~ ^[0-9]+$ ]] || { echo "::error::not a PR number: $PR"; exit 1; }
+          gh api "repos/${{ github.repository }}/pulls/$PR" > "$RUNNER_TEMP/pr.json"
+          jq -r .body "$RUNNER_TEMP/pr.json" > "$RUNNER_TEMP/body.md"
+          echo "base=$(jq -r .base.sha "$RUNNER_TEMP/pr.json")" >> "$GITHUB_OUTPUT"
+          echo "head=$(jq -r .head.sha "$RUNNER_TEMP/pr.json")" >> "$GITHUB_OUTPUT"
+      - name: Check out the pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ steps.pr.outputs.head }}
+          fetch-depth: 0
+          path: repo
+      - name: Check out blis-substrate at the called commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: inference-sim/blis-substrate
+          ref: ${{ env.SUBSTRATE_REF }}
+          path: substrate
+      - uses: ./substrate/.github/actions/go-toolchain
+        with:
+          module-dir: substrate
+      - name: Build the checks
+        working-directory: substrate
+        run: |
+          set -euo pipefail
+          go build -o "$RUNNER_TEMP/bin/" ./tools/prcheck ./tools/invariants ./tools/modlint
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Description (X14)
+        working-directory: repo
+        env: { BASE: "${{ steps.pr.outputs.base }}", HEAD: "${{ steps.pr.outputs.head }}" }
+        run: |
+          set -euo pipefail
+          invariants cited -body "$RUNNER_TEMP/body.md"
+          prcheck description -body "$RUNNER_TEMP/body.md" -repo "${{ github.repository }}" -base "$BASE" -head "$HEAD"
+      - name: Commit policy (X20)
+        if: ${{ !cancelled() }}
+        working-directory: repo
+        env: { BASE: "${{ steps.pr.outputs.base }}", HEAD: "${{ steps.pr.outputs.head }}" }
+        run: prcheck commits -base "$BASE" -head "$HEAD"
+      - name: Workflow lint (X21, X22, X16)
+        if: ${{ !cancelled() }}
+        working-directory: repo
+        run: prcheck workflows
+      - name: Version literals (X23)
+        if: ${{ !cancelled() }}
+        working-directory: repo
+        run: prcheck versions
+      - name: Documentation references (X26)
+        if: ${{ !cancelled() }}
+        working-directory: repo
+        run: prcheck docrefs
+      - name: Cited issues (X28)
+        if: ${{ !cancelled() }}
+        working-directory: repo
+        run: prcheck issues -repo "${{ github.repository }}" -closes "$RUNNER_TEMP/body.md"
+      - name: Licence and notice files (X21)
+        if: ${{ !cancelled() }}
+        working-directory: repo
+        run: prcheck licence-files -repo-name blis-config-search
+      - name: Quarantine list (X25)
+        if: ${{ !cancelled() }}
+        working-directory: repo
+        run: prcheck quarantine
+      - name: Generated copies of the registry (design §13.1)
+        if: ${{ !cancelled() }}
+        working-directory: repo
+        run: invariants check-copy -repo blis-config-search -agents AGENTS.md -template .github/pull_request_template.md
+
   nightly:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.pr == '')
     uses: inference-sim/blis-substrate/.github/workflows/shared-nightly.yml@f9f3c9327794d543a0915c4deb1259ff9985c753
     permissions:
       contents: read

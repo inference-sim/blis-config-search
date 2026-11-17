@@ -2,13 +2,17 @@ name: regen-reports
 
 # Re-runs committed reports from their own specs against the pins of one branch. Two ways in:
 #
-#   dispatch with base=<pin PR branch>
+#   dispatch with base=<pin PR branch>  (bump-blis-pin.yml does this after opening the PR)
 #     every job sweeps that branch's pins, and each batch is COMMITTED onto the branch, so the pin
-#     PR carries its regenerated reports. A push by GITHUB_TOKEN starts no workflow: push to the
-#     branch, or re-run its checks, before review.
-#   push to main moving pins.env
+#     PR carries its regenerated reports and is the one PR to review. GITHUB_TOKEN's pushes start
+#     no workflow, so the run then dispatches every check on the new head
+#     (scripts/dispatch_pr_checks.sh), and pin-ready.yml marks the PR ready when they are green.
+#   push to main moving pins.env  (a pin moved without that, e.g. by hand)
 #     regenerates only the STALE reports (blis_pin.py stale) and opens one PR per batch. After a
-#     pin PR that carried its reports merges, none is stale, so the run plans nothing.
+#     pin PR merges, none is stale, so this run plans nothing and opens nothing.
+#
+# A dispatch with force (the default) regenerates every report even when current: a determinism
+# rehearsal, whose batches must each say "byte-for-byte -- no PR needed".
 #
 #     -> plan     classify every reports/<id>/ (experiment spec | orphan), batch by model
 #     -> build    the pinned simulator, once, shared by every report job; validates every spec
@@ -17,6 +21,7 @@ name: regen-reports
 #                 runner and its own timeout, and one failure costs one report, not the campaign
 #     -> pr       per batch: a commit on the pin branch, or a PR with a before/after table on
 #                 main; a failed report is listed as "not regenerated", never left stale silently
+#     -> checks   on a pin branch that moved: dispatch its checks (pin-compat then runs pin-ready)
 #
 # Like run-experiment.yml it needs no approval gate and no secrets: the sweeper is LLM-free and
 # deterministic at a fixed seed, and nothing publishes until a human merges a batch PR.
@@ -35,7 +40,8 @@ name: regen-reports
 #                          AgentX run peaks at ~26 GiB, and at 8 its runner pod was lost twice.
 #   REGEN_RUN_TIMEOUT      per-BLIS-run timeout in seconds, default 1800.
 #
-# Token: as in bump-blis-pin.yml, each batch PR dispatches its own CI unless PIN_BOT_TOKEN is set.
+# Token: GITHUB_TOKEN only. What it opens or pushes starts no workflow, so this run dispatches the
+# checks itself; a dispatched run is never held for approval.
 
 on:
   push:
@@ -226,7 +232,7 @@ jobs:
       contents: write          # push the batch branches, or the commits onto a pin branch
       pull-requests: write     # open the batch PRs
       issues: write            # create the labels (labels live in the issues API)
-      actions: write           # dispatch CI on the PR when there is no PIN_BOT_TOKEN
+      actions: write           # dispatch CI on each batch PR
     strategy:
       fail-fast: false
       max-parallel: 1          # each batch pushes its own branch, but serialise the gh calls
@@ -234,8 +240,7 @@ jobs:
         batch: ${{ fromJSON(needs.plan.outputs.batches) }}
     name: pr ${{ matrix.batch.name }}
     env:
-      GH_TOKEN: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
-      HAS_BOT_TOKEN: ${{ secrets.PIN_BOT_TOKEN != '' }}
+      GH_TOKEN: ${{ github.token }}
       BASE_BRANCH: ${{ github.event.inputs.base || github.event.repository.default_branch }}
       # On a branch other than the default (a pin PR's), commit onto it; on main, open batch PRs.
       COMMIT_TO_BASE: ${{ (github.event.inputs.base || github.event.repository.default_branch) != github.event.repository.default_branch }}
@@ -280,7 +285,7 @@ jobs:
           set -euo pipefail
           art="$RUNNER_TEMP/regen-artifacts"
           cp -r reports "$RUNNER_TEMP/old-reports"
-          ok=""; failed=""; superseded=""; removed=""; stale=""
+          ok=""; failed=""; superseded=""; removed=""; stale=""; same=""
           for id in $IDS; do
             if [ ! -d "reports/$id" ]; then
               # Deleted or renamed on main during the campaign: do not resurrect it.
@@ -294,6 +299,11 @@ jobs:
                 echo "::warning::reports/$id changed on main on the old stack during the run; re-run it by hand"
                 stale="$stale $id"
               fi
+            elif [ -f "$art/regen-$id/scenario.json" ] \
+               && python3 -I scripts/blis_pin.py same-results "reports/$id" "$art/regen-$id"; then
+              # The same results; only run times and log timestamps moved. Keep the committed bytes.
+              echo "reproduced $id: identical but for wall_s and log timestamps"
+              same="$same $id"
             elif [ -f "$art/regen-$id/scenario.json" ]; then
               # Whole-directory swap: a file the new run no longer writes must not survive.
               rm -rf "reports/$id"
@@ -304,12 +314,17 @@ jobs:
             fi
           done
           ok="$(echo $ok | xargs)"; failed="$(echo $failed | xargs)"; superseded="$(echo $superseded | xargs)"
+          same="$(echo $same | xargs)"
           removed="$(echo $removed | xargs)"; stale="$(echo $stale | xargs)"
-          echo "regenerated: ${ok:-none}; failed: ${failed:-none}; already current on main: ${superseded:-none}"
-          echo "removed on main: ${removed:-none}; changed on main on the old stack: ${stale:-none}"
+          echo "regenerated: ${ok:-none}; reproduced unchanged: ${same:-none}; failed: ${failed:-none}; already current on the base: ${superseded:-none}"
+          echo "removed on the base: ${removed:-none}; changed on the base on the old stack: ${stale:-none}"
           { echo "ok=$ok"; echo "failed=$failed"; echo "superseded=$superseded"
             echo "removed=$removed"; echo "stale=$stale"; } >> "$GITHUB_OUTPUT"
-          [ -n "$ok" ] || [ -z "$failed" ] || { echo "::error::no report in batch ${{ matrix.batch.name }} regenerated"; exit 1; }
+          [ -n "$ok" ] || [ -z "$failed" ] || { echo "::error::no report in batch ${{ matrix.batch.name }} regenerated, and some failed: $failed"; exit 1; }
+          # A reproduced report changes nothing, so the batch needs no commit; say so in the open step.
+          if [ -z "$ok" ] && [ -n "$same" ]; then
+            echo "regeneration reproduced every report in ${{ matrix.batch.name }} byte-for-byte (committed files unchanged; only run times and log timestamps moved) -- no PR needed"
+          fi
       - name: Build the site to validate the regenerated reports
         if: steps.swap.outputs.ok != ''
         run: python3 -I scripts/build_gallery.py --out /tmp/site-check
@@ -397,8 +412,35 @@ jobs:
             --body-file /tmp/body.md --base "${BASE_BRANCH}" --head "$branch" \
             --label auto-update --label report-regen
           # A PR opened with GITHUB_TOKEN starts no workflows, but a dispatch does: start its CI here.
-          if [ "$HAS_BOT_TOKEN" != true ]; then
-            pr="$(gh pr view "$branch" --json number --jq .number)"
-            gh workflow run checks.yml --ref "$branch"
-            gh workflow run pin-compat.yml --ref "$branch" -f base="$BASE_BRANCH" -f pr="$pr"
+          pr="$(gh pr view "$branch" --json number --jq .number)"
+          sh scripts/dispatch_pr_checks.sh "$branch" "$pr" "$BASE_BRANCH"
+
+  # A pin branch the batches committed to has a new head that no workflow ran on (GITHUB_TOKEN's
+  # pushes start none): run every check there, pin-compat then dispatches pin-ready.yml.
+  checks:
+    needs: [plan, pr]
+    if: >-
+      always() && needs.plan.outputs.run == 'true' &&
+      github.event.inputs.base != '' && github.event.inputs.base != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write           # dispatch the checks
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BASE_BRANCH: ${{ github.event.inputs.base }}
+      SWEPT: ${{ needs.plan.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { ref: "${{ github.event.inputs.base }}" }
+      - name: Dispatch the checks on the branch's new head
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if [ "$head" = "$SWEPT" ]; then
+            echo "nothing was committed onto $BASE_BRANCH ($head) -- its checks already ran there"; exit 0
           fi
+          pr="$(gh pr list --head "$BASE_BRANCH" --state open --json number --jq '.[0].number')"
+          [ -n "$pr" ] || { echo "::error::no open PR has head $BASE_BRANCH"; exit 1; }
+          sh scripts/dispatch_pr_checks.sh "$BASE_BRANCH" "$pr" "${{ github.event.repository.default_branch }}"

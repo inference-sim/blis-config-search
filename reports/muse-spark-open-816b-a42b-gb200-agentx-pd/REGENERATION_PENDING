@@ -1,0 +1,1 @@
+Not regenerated on inference-sim v0.17.1 yet: its sharded regeneration (3 shards at sweep_max_parallel 2) runs onto branch regen/gb200-agentx-pd-v0.17.1, run 44102844289, and lands in a follow-up pull request.

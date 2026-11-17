@@ -211,6 +211,21 @@ def is_current(scen_dir, pins=None):
     return not commit or commit == pins.get("BLIS_SHA")
 
 
+# A committed report whose regeneration is under way elsewhere (a follow-up PR) carries this file,
+# stating why and where. A push to main does not plan it, so the run that would repeat a known
+# failure never starts; the follow-up's regenerated directory replaces it whole, file included.
+PENDING = "REGENERATION_PENDING"
+
+
+def pending(run_id, root=ROOT):
+    """The reason a report's regeneration is pending elsewhere, or None."""
+    try:
+        with open(os.path.join(root, "reports", run_id, PENDING)) as f:
+            return f.read().strip() or "pending"
+    except OSError:
+        return None
+
+
 def stale_ids(root=ROOT, pins=None):
     """The committed reports not priced by the pinned stack: what a pin move must regenerate."""
     pins = pins if pins is not None else read_pins(os.path.join(root, "pins.env"))
@@ -292,9 +307,11 @@ def plan(root=ROOT, only=None, max_batch=MAX_BATCH, stale_only=False):
         if unknown:
             raise SystemExit(f"no committed report named {', '.join(unknown)}")
         ids = [i for i in ids if i in set(only)]
+    held = []
     if stale_only:
         stale = set(stale_ids(root))
-        ids = [i for i in ids if i in stale]
+        held = [i for i in ids if i in stale and pending(i, root)]
+        ids = [i for i in ids if i in stale and i not in held]
     entries = [classify(i, root) for i in ids]
     runnable = [e for e in entries if e["kind"] != "orphan"]
     by_model = {}
@@ -311,7 +328,7 @@ def plan(root=ROOT, only=None, max_batch=MAX_BATCH, stale_only=False):
     for e in entries:
         e["batch"] = batch_of.get(e["id"])
     return {"reports": runnable, "orphans": [e for e in entries if e["kind"] == "orphan"],
-            "batches": batches}
+            "batches": batches, "pending": [{"id": i, "why": pending(i, root)} for i in held]}
 
 
 # ---------------------------------------------------------------------------------- regen

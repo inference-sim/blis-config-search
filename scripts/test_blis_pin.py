@@ -604,6 +604,29 @@ def test_shards_fit_a_long_report_into_jobs():
         shutil.rmtree(root)
 
 
+def test_a_pending_regeneration_is_not_planned_on_a_pin_push():
+    """A stale report whose regeneration runs in a follow-up PR is not re-run by main's push."""
+    print("test_a_pending_regeneration_is_not_planned_on_a_pin_push")
+    root = _fake_repo()
+    try:
+        with open(os.path.join(root, "pins.env"), "w") as f:
+            f.write("".join(f"{k}={v}\n" for k, v in PINS_NEW.items()))
+        for rid in B.report_ids(root):
+            _write_stack(root, rid, "v2.0.0", "r2", "s2", commit="b" * 40)
+        _write_stack(root, "exp-a", "v1.0.0", "r2", "s2")
+        _write_stack(root, "exp-c", "v1.0.0", "r2", "s2")
+        with open(os.path.join(root, "reports", "exp-a", B.PENDING), "w") as f:
+            f.write("regenerated in a follow-up PR\n")
+        p = B.plan(root, stale_only=True)
+        check([r["id"] for r in p["reports"]] == ["exp-c"],
+              f"the pending report is held back and the other stale one still planned: {p['reports']}")
+        check([x["id"] for x in p["pending"]] == ["exp-a"], "the plan names the held-back report")
+        check("exp-a" in [r["id"] for r in B.plan(root)["reports"]],
+              "a forced plan still regenerates it (that is what the follow-up runs)")
+    finally:
+        shutil.rmtree(root)
+
+
 if __name__ == "__main__":
     test_version_ordering()
     test_go_mod_versions()
@@ -624,5 +647,6 @@ if __name__ == "__main__":
     test_workflow_wiring()
     test_stale_reports_and_the_post_merge_plan()
     test_shards_fit_a_long_report_into_jobs()
+    test_a_pending_regeneration_is_not_planned_on_a_pin_push()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

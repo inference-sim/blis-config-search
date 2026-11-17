@@ -136,6 +136,8 @@ jobs:
                   print(f"{r['id']}: {r['shards']} shards")
           if not plan["reports"]:
               print("every report is already priced by the pinned stack -- nothing to regenerate")
+          for p in plan.get("pending", []):
+              print(f"::notice::{p['id']} is stale but its regeneration is pending elsewhere: {p['why']}")
           for o in plan["orphans"]:
               print(f"::warning::{o['id']} has no experiment spec to regenerate from; "
                     f"it keeps its old stack label until handled by hand")

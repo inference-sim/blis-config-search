@@ -10,11 +10,11 @@
     },
     {
       "h": "What was found",
-      "html": "<strong>1x TP4xPP2 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)</strong>, from the <em>kv-capacity</em> sweep, reached 13.07 tok/s/accelerator (104.5 tok/s across the fleet) at concurrency 4 while holding the scenario's SLOs. 25 runs were refused and are not counted as misses: 2 configurations (10 runs): scenario: engine vllm 0.32.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (3.55 GiB KV cache is needed, which is larger than the available KV cache memory (0.37 GiB). Based on the available memory, the estimated maximum model length is 12144. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72); 1 configuration (5 runs): scenario: engine vllm 0.32.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (1.21 GiB KV cache is needed, which is larger than the available KV cache memory (0.16 GiB). Based on the available memory, the estimated maximum model length is 10592. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72); 1 configuration (5 runs): scenario: engine vllm 0.32.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.42 GiB KV cache is needed, which is larger than the available KV cache memory (0.16 GiB). Based on the available memory, the estimated maximum model length is 5280. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72); 1 more reason. Ranking: max output tok/s per accelerator subject to the scenario's SLOs."
+      "html": "<strong>1x TP4xPP2 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)</strong>, from the <em>kv-capacity</em> sweep, reached 20.16 tok/s/accelerator (161.3 tok/s across the fleet) at concurrency 8 while holding the scenario's SLOs. 25 runs were refused and are not counted as misses: 2 configurations (10 runs): scenario: engine vllm 0.32.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (3.55 GiB KV cache is needed, which is larger than the available KV cache memory (0.37 GiB). Based on the available memory, the estimated maximum model length is 12144. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72); 1 configuration (5 runs): scenario: engine vllm 0.32.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (1.21 GiB KV cache is needed, which is larger than the available KV cache memory (0.16 GiB). Based on the available memory, the estimated maximum model length is 10592. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72); 1 configuration (5 runs): scenario: engine vllm 0.32.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.42 GiB KV cache is needed, which is larger than the available KV cache memory (0.16 GiB). Based on the available memory, the estimated maximum model length is 5280. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72); 1 more reason. Ranking: max output tok/s per accelerator subject to the scenario's SLOs."
     },
     {
       "h": "What to run",
-      "html": "1x TP4xPP2 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8) at concurrency 4. 9 of 260 runs held the SLOs.",
+      "html": "1x TP4xPP2 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8) at concurrency 8. 68 of 260 runs held the SLOs.",
       "run": true
     }
   ],
@@ -36,7 +36,7 @@
       "num": 2,
       "prose": [
         "TP8 should peak highest, since each pipeline stage adds a boundary hop to every decode step.",
-        "Measured: best was <strong>1x TP4xPP2 + EP</strong> at 12.3 tok/s/accelerator (concurrency 4)."
+        "Measured: best was <strong>1x TP4xPP2 + EP</strong> at 12.64 tok/s/accelerator (concurrency 8)."
       ],
       "title": "Sweep: pipeline-topology"
     },
@@ -45,7 +45,7 @@
       "num": 3,
       "prose": [
         "A seq cap of 8 should bind on TP8 at 16+ lanes, while a small token budget trades throughput for tail ITL on both shapes.",
-        "Measured: no configuration that ran in this sweep held the SLOs at any tested load. Refused: 2 configurations (10 runs): scenario: engine vllm 0.32.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (3.55 GiB KV cache is needed, which is larger than the available KV cache memory (0.37 GiB). Based on the available memory, the estimated maximum model length is 12144. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)."
+        "Measured: best was <strong>1x TP4xPP2 + EP (max seqs 16 \u00b7 batch tokens 4,096)</strong> at 13.35 tok/s/accelerator (concurrency 8)."
       ],
       "title": "Sweep: batch-caps"
     },
@@ -54,7 +54,7 @@
       "num": 4,
       "prose": [
         "fp8 KV should matter most on TP8, where 0.95 leaves almost no KV room, and substitute for memory on the pp shapes.",
-        "Measured: best was <strong>1x TP4xPP2 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)</strong> at 13.07 tok/s/accelerator (concurrency 4)."
+        "Measured: best was <strong>1x TP4xPP2 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)</strong> at 20.16 tok/s/accelerator (concurrency 8)."
       ],
       "title": "Sweep: kv-capacity"
     },
@@ -63,7 +63,7 @@
       "num": 5,
       "prose": [
         "DeepEP low-latency should win at small decode batches on both shapes, and matter more at EP width 8 than 4.",
-        "Measured: best was <strong>1x TP4xPP2 + EP</strong> at 12.3 tok/s/accelerator (concurrency 4)."
+        "Measured: best was <strong>1x TP4xPP2 + EP</strong> at 12.64 tok/s/accelerator (concurrency 8)."
       ],
       "title": "Sweep: moe-collective"
     },
@@ -72,7 +72,7 @@
       "num": 6,
       "prose": [
         "Turning the prefix cache off should collapse throughput on every shape, since AgentX re-sends a growing shared context.",
-        "Measured: no configuration in this sweep held the SLOs at any tested load."
+        "Measured: best was <strong>1x TP4xPP2 + EP</strong> at 11.73 tok/s/accelerator (concurrency 8)."
       ],
       "title": "Sweep: prefix-cache"
     },
@@ -81,7 +81,7 @@
       "num": 7,
       "prose": [
         "Capping long prefills should trade a little peak throughput for a much lower ITL p99 at saturation.",
-        "Measured: best was <strong>1x TP4xPP2 + EP (prefill chunk 8,192)</strong> at 12.3 tok/s/accelerator (concurrency 4)."
+        "Measured: best was <strong>1x TP4xPP2 + EP (prefill chunk 8,192)</strong> at 12.64 tok/s/accelerator (concurrency 8)."
       ],
       "title": "Sweep: prefill-chunking"
     },
@@ -90,7 +90,7 @@
       "num": 8,
       "prose": [
         "FULL-family capture should beat the PIECEWISE default by a few percent, and NONE should collapse.",
-        "Measured: no configuration in this sweep held the SLOs at any tested load."
+        "Measured: best was <strong>1x TP8 + EP (graph capture full)</strong> at 8.92 tok/s/accelerator (concurrency 4)."
       ],
       "title": "Sweep: cudagraph"
     }

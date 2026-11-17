@@ -18,6 +18,7 @@ the pin is what starts hours of regeneration against it.
   python3 -I scripts/blis_pin.py same-stack DIR DIR           # exit 0 if two reports share a stack
   python3 -I scripts/blis_pin.py plan [--only ID,...] [--stale-only]   # what to regenerate, in batches
   python3 -I scripts/blis_pin.py stale                        # reports the pins did not price; exit 1 if any
+  python3 -I scripts/blis_pin.py ready ROLLUP.json            # green | pending | red for a PR head
   python3 -I scripts/blis_pin.py regen ID --blis B --catalog C --registry R --out DIR   # C, R: the pinned blis-substrate checkout's catalog/ and registry/
   python3 -I scripts/blis_pin.py summary --old DIR --new DIR ID [ID ...]
   python3 -I scripts/blis_pin.py smoke [ID ...] --blis B --catalog C --registry R [--corpus F]
@@ -311,6 +312,59 @@ def plan(root=ROOT, only=None, max_batch=MAX_BATCH, stale_only=False):
         e["batch"] = batch_of.get(e["id"])
     return {"reports": runnable, "orphans": [e for e in entries if e["kind"] == "orphan"],
             "batches": batches}
+
+
+# ---------------------------------------------------------------------------------- ready
+
+# The checks a pin PR must pass before the bot marks it ready. The first four are required on main
+# by branch protection; the description check (blis.yml) and the name scan (private-names.yml) are
+# not, but a human should never be handed a pin PR that fails them. Each is named as its check run
+# is: a dispatched blis.yml reports "blis checks", a pull_request one "pr / blis checks".
+READY_CHECKS = ("python", "experiments", "web", "gate", "blis checks", "scan")
+_GREEN = {"SUCCESS", "SKIPPED", "NEUTRAL"}
+
+
+def readiness(rollup, required=READY_CHECKS, ignore=("pin-ready",)):
+    """Decide from a PR head's statusCheckRollup whether every check is green.
+
+    Only the LATEST run of each check counts (an older cancelled run is harmless; a newer
+    cancelled one blocks), as branch protection reads it. Returns
+    {"state": "green" | "pending" | "red", "pending": [...], "failed": [...], "missing": [...]}:
+    red when any latest run failed, pending while one runs or a required check has not reported
+    yet, green otherwise."""
+    latest = {}
+    for c in rollup or []:
+        if c.get("workflowName") in ignore:      # the waiter itself is running while it reads this
+            continue
+        name = c.get("name") or c.get("context") or ""
+        key = (c.get("workflowName") or "", name)
+        when = c.get("startedAt") or c.get("createdAt") or ""
+        if key not in latest or when >= (latest[key].get("startedAt") or latest[key].get("createdAt") or ""):
+            latest[key] = c
+    pending, failed = [], []
+    for (wf, name), c in sorted(latest.items()):
+        label = f"{wf} / {name}" if wf else name
+        if "state" in c and "status" not in c:          # a commit status, not a check run
+            st = c["state"]
+            if st in ("PENDING", "EXPECTED"):
+                pending.append(label)
+            elif st != "SUCCESS":
+                failed.append(label)
+            continue
+        if c.get("status") != "COMPLETED":
+            pending.append(label)
+        elif c.get("conclusion") not in _GREEN:
+            failed.append(label)
+    names = {n for _, n in latest}
+    missing = [r for r in required
+               if not any(n == r or n.endswith(" / " + r) for n in names)]
+    # A required check that reported only SKIPPED did not run its work: that is not a pass.
+    for r in required:
+        runs = [c for (_, n), c in latest.items() if n == r or n.endswith(" / " + r)]
+        if runs and all(c.get("conclusion") == "SKIPPED" for c in runs):
+            failed.append(f"{r} (skipped)")
+    state = "red" if failed else "pending" if (pending or missing) else "green"
+    return {"state": state, "pending": pending, "failed": failed, "missing": missing}
 
 
 # ---------------------------------------------------------------------------------- regen
@@ -703,6 +757,8 @@ def main(argv=None):
                    help="only the reports the pinned stack did not price")
     st = sub.add_parser("stale", help="list the reports the pinned stack did not price; exit 1 if any")
     st.add_argument("--root", default=ROOT)
+    rd = sub.add_parser("ready", help="read a PR's statusCheckRollup JSON; print green, pending or red")
+    rd.add_argument("rollup", help="file holding `gh pr view N --json statusCheckRollup` output")
     r = sub.add_parser("regen", help="regenerate one report into --out/<id>/")
     r.add_argument("id")
     r.add_argument("--blis", required=True)
@@ -756,6 +812,12 @@ def main(argv=None):
             print(i)
         print(f"{len(ids)} report(s) not priced by the pinned stack", file=sys.stderr)
         return 1 if ids else 0
+    elif a.cmd == "ready":
+        with open(a.rollup) as f:
+            data = json.load(f)
+        r = readiness(data.get("statusCheckRollup", data) if isinstance(data, dict) else data)
+        print(json.dumps(r))
+        return 0
     elif a.cmd == "regen":
         regen(a.id, os.path.abspath(a.blis), os.path.abspath(a.catalog),
               os.path.abspath(a.registry), os.path.abspath(a.out), a.timeout, a.max_parallel,

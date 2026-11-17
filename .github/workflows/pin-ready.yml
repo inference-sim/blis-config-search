@@ -1,0 +1,88 @@
+name: pin-ready
+
+# The pin PR's driver once its checks run (pin-compat.yml dispatches it on a pin branch). It waits
+# for every check on the head, then: red -> fail; green with stale reports -> dispatch
+# regen-reports.yml onto this branch; green with current reports -> mark the PR ready for review.
+# A person still approves and merges it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "pin PR number"
+        required: true
+      dry-run:
+        description: "say what it would do, and leave the PR a draft"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pin-ready-${{ inputs.pr }}
+  cancel-in-progress: true     # a newer push dispatches a newer wait
+
+jobs:
+  ready:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      pull-requests: write     # gh pr ready
+      actions: write           # dispatch regen-reports.yml
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ inputs.pr }}
+      DRY_RUN: ${{ inputs.dry-run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with: { python-version: "3.12" }
+      - run: pip install --require-hashes -r requirements.txt
+      - name: Wait for the checks, then mark the PR ready
+        run: |
+          set -euo pipefail
+          [[ "$PR" =~ ^[0-9]+$ ]] || { echo "::error::not a PR number: $PR"; exit 1; }
+          head="$(git rev-parse HEAD)"
+          view() { gh pr view "$PR" --json headRefOid,headRefName,isDraft,state,statusCheckRollup > "$RUNNER_TEMP/pr.json"; }
+          view
+          [ "$(jq -r .headRefName "$RUNNER_TEMP/pr.json")" = "${GITHUB_REF_NAME}" ] || {
+            echo "::error::dispatched on $GITHUB_REF_NAME, which is not PR $PR's branch"; exit 1; }
+          stale=false
+          python3 -I scripts/blis_pin.py stale > "$RUNNER_TEMP/stale" || stale=true
+          # Poll at most every 90 s (GraphQL), and stop if the branch moves: its own dispatch takes over.
+          for _ in $(seq 1 90); do
+            view
+            now="$(jq -r .headRefOid "$RUNNER_TEMP/pr.json")"
+            [ "$now" = "$head" ] || { echo "the branch moved to $now; the dispatch for that head decides"; exit 0; }
+            [ "$(jq -r .state "$RUNNER_TEMP/pr.json")" = OPEN ] || { echo "PR $PR is not open"; exit 0; }
+            verdict="$(python3 -I scripts/blis_pin.py ready "$RUNNER_TEMP/pr.json")"
+            echo "$verdict"
+            case "$(jq -r .state <<<"$verdict")" in
+              green) break ;;
+              red) echo "::error::a check failed on $head: $(jq -c .failed <<<"$verdict")"; exit 1 ;;
+            esac
+            sleep 90
+          done
+          [ "$(jq -r .state <<<"$verdict")" = green ] || { echo "::error::checks still pending after the wait"; exit 1; }
+          # Green but some reports still carry the old stack: regenerate them onto this branch, once.
+          # regen-reports commits them, dispatches the checks, and this workflow runs again.
+          if [ "$stale" = true ]; then
+            echo "reports not priced by the pinned stack:"; cat "$RUNNER_TEMP/stale"
+            if git log -1 --format=%s | grep -q '^Regenerate the .* reports against inference-sim'; then
+              echo "::error::these are still stale after regen-reports committed onto this branch; see that run's failed jobs"; exit 1
+            fi
+            if [ "$DRY_RUN" = true ]; then echo "dry run: would dispatch regen-reports with base=$GITHUB_REF_NAME"; exit 0; fi
+            gh workflow run regen-reports.yml --ref "$GITHUB_REF_NAME" -f base="$GITHUB_REF_NAME" -f force=false
+            echo "dispatched regen-reports for $GITHUB_REF_NAME; the PR stays a draft until its reports are current"
+            exit 0
+          fi
+          if [ "$(jq -r .isDraft "$RUNNER_TEMP/pr.json")" != true ]; then
+            echo "PR $PR is already ready for review"
+          elif [ "$DRY_RUN" = true ]; then
+            echo "dry run: every check is green on $head and every report is current; would run gh pr ready $PR"
+          else
+            gh pr ready "$PR"
+            echo "marked PR $PR ready for review at $head"
+          fi

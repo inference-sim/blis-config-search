@@ -6,15 +6,15 @@
   "hero": [
     {
       "h": "What was tested",
-      "html": "61 configurations over 8 sweeps (topology-ep, batch-tokens, prefill-chunking, kv-capacity, moe-collective, drafting, routing-prefix-cache, cudagraph), each at 3 load levels, every run on exactly 32 GPUs."
+      "html": "59 configurations over 8 sweeps (topology-ep, batch-tokens, prefill-chunking, kv-capacity, moe-collective, drafting, routing-prefix-cache, cudagraph), each at 3 load levels, every run on exactly 32 GPUs."
     },
     {
       "h": "What was found",
-      "html": "<strong>8x TP4 + EP (batch tokens 32,768)</strong>, from the <em>batch-tokens</em> sweep, reached 63.57 tok/s/accelerator (2034.3 tok/s across the fleet) at concurrency 128 while holding the scenario's SLOs."
+      "html": "<strong>4x TP8 + EP (5 draft tokens)</strong>, from the <em>drafting</em> sweep, reached 149.74 tok/s/accelerator (4791.7 tok/s across the fleet) at concurrency 128 while holding the scenario's SLOs. Ranking: max output tok/s per accelerator subject to the scenario's SLOs."
     },
     {
       "h": "What to run",
-      "html": "8x TP4 + EP (batch tokens 32,768) at concurrency 128. 106 of 183 runs held the SLOs.",
+      "html": "4x TP8 + EP (5 draft tokens) at concurrency 128. 52 of 177 runs held the SLOs.",
       "run": true
     }
   ],
@@ -22,11 +22,13 @@
     "BLIS discrete-event simulation",
     "Experiment Spec (RFC #21)",
     "deterministic sweep \u2014 no LLM in the measurement path",
-    "seed 42"
+    "seed 42",
+    "basis: measured window",
+    "scope: cluster; worst instance for TTFT and end-to-end gates"
   ],
   "recommendation_num": 10,
   "recommendation_prose": [
-    "The table below ranks the measured operating points by output tok/s per accelerator, the objective this experiment selects on, among runs that held the scenario's SLOs."
+    "The table below lists the measured operating points. Headline ranking: max output tok/s per accelerator subject to the scenario's SLOs. The Pareto front of every sweep is in pareto.json."
   ],
   "sections": [
     {
@@ -34,16 +36,16 @@
       "num": 2,
       "prose": [
         "Mid-width tp4 instances should win at the SLO, and EP should matter little at dp 1 but cost throughput once dp spreads experts wider.",
-        "Measured: best was <strong>8x TP4 + EP</strong> at 60.25 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>4x TP8 + EP</strong> at 39.25 tok/s/accelerator (concurrency 32)."
       ],
       "title": "Sweep: topology-ep"
     },
     {
-      "caption_note": "6 configurations, 18 runs.",
+      "caption_note": "4 configurations, 12 runs.",
       "num": 3,
       "prose": [
         "The per-step token cap should bind harder on four wide instances than on eight narrow ones, since long agentic prompts concentrate per instance.",
-        "Measured: best was <strong>8x TP4 + EP (batch tokens 32,768)</strong> at 63.57 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>4x TP8 + EP (batch tokens 4,096)</strong> at 39.16 tok/s/accelerator (concurrency 32)."
       ],
       "title": "Sweep: batch-tokens"
     },
@@ -52,7 +54,7 @@
       "num": 4,
       "prose": [
         "Capping prefill chunks should cost throughput at both widths, more where fewer decodes share each instance's token budget.",
-        "Measured: best was <strong>4x TP8 + EP</strong> at 31.06 tok/s/accelerator (concurrency 64)."
+        "Measured: best was <strong>4x TP8 + EP</strong> at 38.96 tok/s/accelerator (concurrency 32)."
       ],
       "title": "Sweep: prefill-chunking"
     },
@@ -61,7 +63,7 @@
       "num": 5,
       "prose": [
         "nvfp4 KV and a higher memory fraction both buy cache, so on a prefix-heavy replay they should substitute rather than add.",
-        "Measured: best was <strong>4x TP8 + EP</strong> at 30.97 tok/s/accelerator (concurrency 64)."
+        "Measured: best was <strong>2x TP16 + EP (KV dtype nvfp4_ds_mla)</strong> at 64.91 tok/s/accelerator (concurrency 64)."
       ],
       "title": "Sweep: kv-capacity"
     },
@@ -70,7 +72,7 @@
       "num": 6,
       "prose": [
         "A DeepEP backend should beat the allgather default at EP 16, and the gap should shrink or flip at EP 4.",
-        "Measured: best was <strong>8x TP4 + EP</strong> at 60.25 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>8x TP4 + EP</strong> at 39.04 tok/s/accelerator (concurrency 32)."
       ],
       "title": "Sweep: moe-collective"
     },
@@ -79,7 +81,7 @@
       "num": 7,
       "prose": [
         "dspark should raise throughput more on narrow instances, while K=5 may push wide shapes past the 20ms ITL floor.",
-        "Measured: best was <strong>8x TP4 + EP (5 draft tokens)</strong> at 31.87 tok/s/accelerator (concurrency 64)."
+        "Measured: best was <strong>4x TP8 + EP (5 draft tokens)</strong> at 149.74 tok/s/accelerator (concurrency 128)."
       ],
       "title": "Sweep: drafting"
     },
@@ -88,7 +90,7 @@
       "num": 8,
       "prose": [
         "Prefix-affinity with caching on should lead and random with caching off trail, and the gap should widen from four instances to eight.",
-        "Measured: best was <strong>8x TP4 + EP (prefix-affinity routing)</strong> at 59.25 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>4x TP8 + EP (queue-kv routing)</strong> at 64.85 tok/s/accelerator (concurrency 64)."
       ],
       "title": "Sweep: routing-prefix-cache"
     },
@@ -97,11 +99,11 @@
       "num": 9,
       "prose": [
         "Full capture should edge out the PIECEWISE default by a few percent.",
-        "Measured: best was <strong>8x TP4 + EP</strong> at 61.45 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>8x TP4 + EP (graph capture full+piecewise)</strong> at 39.04 tok/s/accelerator (concurrency 32)."
       ],
       "title": "Sweep: cudagraph"
     }
   ],
-  "standfirst": "A deterministic sweep over inferencex-agentx-mvp traffic, comparing 8 designs on one GPU budget.",
+  "standfirst": "A deterministic sweep over custom (not in the catalog) (AgentX run recipe: 300 s idle-gap cap, 10 warm-up requests per lane, trajectory start 0.25 to 0.75, 3600 s window, 30 s grace, corpus semianalysis_cc_traces_weka_062126) traffic, comparing 8 designs on one GPU budget.",
   "title": "deepseek-v4.1-flash on 32x b200: deepseek-v4-1-flash-b200-agentx-4node"
 }

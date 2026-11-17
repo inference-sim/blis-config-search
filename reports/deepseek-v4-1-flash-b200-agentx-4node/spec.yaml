@@ -2,7 +2,9 @@ name: deepseek-v4-1-flash-b200-agentx-4node
 scenario:
   model: deepseek-v4.1-flash
   hardware: b200
-  workload: agentx-mvp
+  cluster:
+    gpus_per_node: 8
+  workload_spec: workloads/agentx-run-recipe.yaml
   gpus: 32
   slo:
     itl_p99: 20ms
@@ -16,7 +18,6 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-b200
-    grace_period: inf
 sweeps:
 - name: topology-ep
   narrative: Mid-width tp4 instances should win at the SLO, and EP should matter little
@@ -54,8 +55,7 @@ sweeps:
   engine:
     max_num_batched_tokens:
     - 2048
-    - 16384
-    - 32768
+    - 4096
 - name: prefill-chunking
   narrative: Capping prefill chunks should cost throughput at both widths, more where
     fewer decodes share each instance's token budget.

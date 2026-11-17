@@ -2,7 +2,9 @@ name: deepseek-v4-1-flash-h200-agentx-4node
 scenario:
   model: deepseek-v4.1-flash
   hardware: h200
-  workload: agentx-mvp
+  cluster:
+    gpus_per_node: 8
+  workload_spec: workloads/agentx-run-recipe.yaml
   gpus: 32
   slo:
     itl_p99: 20ms
@@ -16,7 +18,6 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-h200
-    grace_period: inf
 sweeps:
 - name: topology-ep
   narrative: Wide tp8 instances should win at the SLO, and EP should pay more as dp

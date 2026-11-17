@@ -7,7 +7,8 @@
 # hardware, tp/pp/dp/ep, engine knobs) from a committed SCENARIO and REFUSES
 # --model/--hardware/--tp/--dp/--enable-expert-parallel on the CLI. So a candidate's per-instance
 # topology is written into a generated Scenario+Deployment YAML; only workload, concurrency, instance
-# counts, scheduler/routing/admission policy, and seed stay on the CLI.
+# counts and seed stay on the CLI. The scheduling policy is an engine-block key (scheduling_policy):
+# inference-sim removed --scheduler and --preemption-policy.
 #
 # Every candidate key is classified to its scenario/CLI slot; UNKNOWN or NOT-YET-SUPPORTED keys are
 # REJECTED (recorded as an error row), never silently dropped -- else two candidates could differ in
@@ -52,7 +53,7 @@ COEFFICIENTS = ["cost-model-primitives", "cost-model-collectives", "cost-model-h
 # by the workload's category and thinking mode, and REFUSES a drafting scenario whose acceptance
 # does not resolve ("its acceptance does not resolve: ... state one"). So a spec-decode run must
 # also carry the selectors -- see SPECULATIVE_CLI.
-SCENARIO_SPECULATIVE = ("speculative_method", "num_speculative_tokens")
+SCENARIO_SPECULATIVE = ("speculative_method", "num_speculative_tokens", "speculative_draft_model")
 # Acceptance selectors / overrides. These are CLI, not scenario: they describe the WORKLOAD's
 # acceptance behaviour, not the deployment.
 SPECULATIVE_CLI = {"speculative_category": "--speculative-category",
@@ -60,8 +61,7 @@ SPECULATIVE_CLI = {"speculative_category": "--speculative-category",
                    "speculative_acceptance_length": "--speculative-acceptance-length",
                    "speculative_acceptance_rate": "--speculative-acceptance-rate",
                    "speculative_fallback_category": "--speculative-fallback-category"}
-CLI_FLAGS = {"num_instances": "--num-instances", "concurrency": "--concurrency",
-             "scheduler": "--scheduler", "preemption_policy": "--preemption-policy"}
+CLI_FLAGS = {"num_instances": "--num-instances", "concurrency": "--concurrency"}
 # Simulator options that are bare switches (`--pd-transfer-contention`): passed when true, left off
 # when false, because the flag takes no value. A sweep states them under `simulator:`.
 CLI_SWITCHES = {"pd_transfer_contention": "--pd-transfer-contention"}
@@ -103,7 +103,7 @@ DEFAULT_FABRIC = "ib-400g"   # InfiniBand NDR 400 Gb/s; the standard H100 multi-
 # default). quantization and cache_dtype stay unset for the same reason: the checkpoint's format
 # governs. `block_size` depends on the MODEL: see default_block_size(), which fills it in per run.
 #
-# `max_model_len` is the exception because blis-vllm v0.32.0 makes it MANDATORY ("must be stated;
+# `max_model_len` is the exception because blis-vllm's v0.32.0 makes it MANDATORY ("must be stated;
 # an unstated or auto window is the model's or the memory's"). 32768 is this runner's choice, not
 # vLLM's (vLLM's is the model's own window). Do not state it in every spec: a spec that does not
 # care about the window should not pin one.
@@ -126,7 +126,7 @@ V4_BLOCK_SIZE = 256             # DeepSeek-V4, every part
 V41_BLOCK_SIZE_HOPPER = 64      # DeepSeek-V4.1 on SM90
 V41_BLOCK_SIZE_NEWER = 128      # DeepSeek-V4.1 on Blackwell and later
 HOPPER_CC_MAJOR = 9             # compute capability 9.x == Hopper (SM90)
-# inference-sim v0.12.0 ("Merge llm-d-r into main: all routing through the embedded llm-d router",
+# inference-sim's v0.12.0 ("Merge llm-d-r into main: all routing through the embedded llm-d router",
 # #2000) REMOVED every routing/admission CLI flag this runner used to emit. Routing is now a real
 # llm-d EndpointPickerConfig named by the scenario's deployment-level `router:` block, so the knob
 # is `router_config` (a path to an EPP YAML) rather than a policy name. The authoritative mapping
@@ -136,7 +136,7 @@ HOPPER_CC_MAJOR = 9             # compute capability 9.x == Hopper (SM90)
 # campaigns measured, has no exact equivalent; the nearest are a `queue-scorer` or
 # `load-aware-scorer` profile with `max-score-picker`, or `random-picker`.
 ROUTING_MOVED = (
-    "removed in inference-sim v0.12.0: routing is now an llm-d EndpointPickerConfig named by the "
+    "removed in inference-sim's v0.12.0: routing is now an llm-d EndpointPickerConfig named by the "
     "scenario's `router:` block -- pass `router_config` (a path to an EPP YAML) instead. See "
     "docs/guide/routing.md 'From BLIS's former routing features' for the per-flag mapping; "
     "round-robin/least-loaded/always-busiest are dropped upstream (nearest: a queue-scorer or "
@@ -181,7 +181,7 @@ DEFAULT_PD_CONNECTOR = "NixlConnector"
 # is NOT here: it is one configuration per run rather than a per-pool knob, so a per-role
 # drafting key is refused outright (PD_SPECULATIVE) and the folded `speculative` block is
 # compared separately.
-# Transcribed from blis-vllm v0.32.0 compat/build/pools.go, not guessed: block_size (:172) and
+# Transcribed from blis-vllm's v0.32.0 compat/build/pools.go, not guessed: block_size (:172) and
 # dp (:188) are each checked on their own, and requireSameKVCacheFormat (:329) compares exactly
 # four cache-format fields. `quantization` was listed here and is NOT compared by any of them --
 # it is the weights' format, which a handoff never moves -- so a P/D sweep over it is legitimate.
@@ -189,7 +189,14 @@ PD_MUST_MATCH = ("dp", "block_size", "cache_dtype", "mamba_cache_dtype",
                  "mamba_ssm_cache_dtype", "mamba_cache_mode")
 
 # Candidate keys this runner refuses, with the reason (do not silently drop).
+# The scheduler and preemption victim are the engine's scheduling_policy, an engine-block key a sweep
+# states like any other; inference-sim removed the flags that restated it.
+SCHEDULING_MOVED = ("the scheduler and preemption policy are the engine's: state the engine-block key "
+                    "scheduling_policy (fcfs or priority, vLLM's), which sets both; inference-sim "
+                    "removed --scheduler and --preemption-policy")
 UNSUPPORTED = {
+    "scheduler": SCHEDULING_MOVED,
+    "preemption_policy": SCHEDULING_MOVED,
     "routing_policy": ROUTING_MOVED,
     "routing_scorers": ROUTING_MOVED,
     "admission_policy": ROUTING_MOVED,
@@ -265,10 +272,15 @@ def classify_config(config, vocab, node_size=None):
             method = spec.get("speculative_method")
             engine["speculative"] = ({"method": method, "num_spec_tokens": k} if method
                                      else {"num_spec_tokens": k})
-        elif spec.get("speculative_method"):
-            raise ConfigError(
-                "speculative_method with num_speculative_tokens 0 (or unset): drafting 0 tokens is "
-                "speculative decoding OFF, so naming a method would record a drafter that never ran")
+            # A separate drafter checkpoint, by catalog name; absent means the in-graph speculator.
+            if spec.get("speculative_draft_model"):
+                engine["speculative"]["draft_model"] = spec["speculative_draft_model"]
+        else:
+            named = [n for n in ("speculative_method", "speculative_draft_model") if spec.get(n)]
+            if named:
+                raise ConfigError(
+                    f"{named[0]} with num_speculative_tokens 0 (or unset): drafting 0 tokens is "
+                    f"speculative decoding OFF, so naming a drafter would record one that never ran")
     rc = router.get("router_config")
     if rc is not None and not os.path.exists(rc):
         # Fail here rather than let BLIS fail per-run: a typo'd EPP path would otherwise cost a
@@ -550,63 +562,30 @@ def load_workload_shape(catalog, workload):
     return out
 
 
-# The acceptance length a drafting run resolved. BLIS applies it internally but does NOT echo it in the
-# metrics. It used to be the number the per-user axis needed (the engine's step interval is per verification
-# step and one step emits AL tokens); the axis is now the per-request TPOT, which is per token, so the
-# record keeps it as information about the run (the report shows which acceptance priced a drafting arm),
-# not as a factor.
-#
-# The profile key is exactly what the run already states: (model, method, K, thinking, category),
-# so the same lookup BLIS does can be reproduced here and RECORDED on the row.
-_AL_CACHE = {}
+def acceptance_record(doc):
+    """The acceptance a drafting run was priced with, as the pinned simulator's Result records it,
+    or None when the run did not speculate.
 
-
-def acceptance_length(registry, model, method, k, thinking, category):
-    """The measured acceptance length for this (model, method, K, thinking, category), or None.
-
-    Read from the registry's acceptance/ profiles (registry v0.2.0+; v0.1.1 has no acceptance/).
-    None means no profile matched -- the caller must then NOT publish a derived per-user rate,
-    because the acceptance factor is unknown.
-
-    Returns (al, source) where source is the profile set's name plus the hardware it was measured
-    on, so a report can state that an H100 run reuses a B200 measurement rather than implying it
-    was measured there. The profile set itself asks for that: "Acceptance depends mostly on the
-    model, drafter and workload rather than the chip; a resolution on another part records the
-    reuse."
+    Read from `reports.engine.cluster.acceptance` (value, layer and profile). The lookup's step and
+    the key fields that differed are taken from the Result's `input.workload_properties` when it
+    carries them; the pinned release does not yet (inference-sim/inference-sim#2079), and then
+    `step` is None.
     """
-    if not (registry and model and method and k and thinking and category):
-        return None, None
-    key = (registry, model, method, int(k), str(thinking), str(category))
-    if key in _AL_CACHE:
-        return _AL_CACHE[key]
-    found = (None, None)
-    adir = os.path.join(registry, "acceptance")
-    try:
-        names = sorted(n for n in os.listdir(adir) if n.endswith((".yaml", ".yml")))
-    except OSError:
-        _AL_CACHE[key] = found
-        return found
-    for name in names:
-        try:
-            import yaml                      # only needed on the drafting path
-            doc = yaml.safe_load(open(os.path.join(adir, name), encoding="utf-8")) or {}
-        except Exception:
-            continue
-        for prof in doc.get("profiles") or []:
-            if (str(prof.get("model")) == model
-                    and str(prof.get("speculative_method")) == method
-                    and int(prof.get("num_spec_tokens") or 0) == int(k)
-                    and str(prof.get("thinking")) == str(thinking)
-                    and str(prof.get("category")) == str(category)):
-                al = prof.get("acceptance_length")
-                hw = ((prof.get("provenance") or {}).get("hardware") or "unrecorded")
-                if al:
-                    found = (float(al), f"{doc.get('name') or name} ({hw})")
-                break
-        if found[0] is not None:
-            break
-    _AL_CACHE[key] = found
-    return found
+    acc = (_engine_report(doc).get("cluster") or {}).get("acceptance")
+    if not isinstance(acc, dict):
+        return None
+    entry = acc.get("entry") or {}
+    prop = next((p for p in ((doc.get("input") or {}).get("workload_properties") or [])
+                 if isinstance(p, dict) and p.get("name") == "speculative_acceptance"), {})
+    return {"acceptance_length": acc.get("length"), "acceptance_rate": acc.get("rate"),
+            "source_layer": acc.get("source_layer"),
+            "profile_set": entry.get("set") or None, "profile_key": entry.get("key") or None,
+            "source": entry.get("source") or None, "profile_method": entry.get("method") or None,
+            "copied_from": entry.get("copied_from") or None,
+            "measured_on": entry.get("measured_on") or None,
+            "fallback_from": entry.get("fallback_from") or None,
+            "step": prop.get("step") or None, "differed": prop.get("differed") or [],
+            "k_rule": prop.get("k_rule") or None}
 
 
 def draft_depth(run):
@@ -923,8 +902,12 @@ def figure_form_problems(doc):
 
 # The aggregate behind the feasibility test of a latency SLO: the max, over the cluster figure and every
 # instance's, of each p99 (worst_metric). Stated on the report so the figure that gates a row is named
-# in the registry's terms: aggregate max, over instances.
-FEASIBILITY_AGGREGATE = {"aggregate": "max", "over": "instance", "metrics": ["ttft_p99_ms", "e2e_p99_ms", "itl_p99_ms"]}
+# in the registry's terms: aggregate max, over instances. The `itl_p99` cap gates on tpot_p99_ms (the
+# record's legacy itl_p99_ms slot holds it, _MEASURED_KEYS): the per-request (E2E - TTFT) / (tokens - 1),
+# which is aiperf's ITL (inter_token_latency) and vllm bench serve's TPOT. The registry's itl_p99_ms is
+# another figure, a gap per token that is zero inside a chunk and reads 0 under speculative decoding, and
+# icl_p99_ms is vllm bench serve's ITL, a gap per chunk (inference-sim#2128); neither gates a row.
+FEASIBILITY_AGGREGATE = {"aggregate": "max", "over": "instance", "metrics": ["ttft_p99_ms", "e2e_p99_ms", "tpot_p99_ms"]}
 
 # The legacy flat key the rest of the module reads -> the Result's measured-window metric.
 _MEASURED_KEYS = {"tokens_per_sec": "output_tok_s", "responses_per_sec": "request_throughput",
@@ -1143,16 +1126,36 @@ def parse_all_instances(stdout):
     return [o for o in _all_metrics(stdout) if o.get("instance_id") not in (None, "cluster")]
 
 
-def _completion_issue(m):
-    """Why a run is NOT a usable capacity/ranking point (incomplete/overloaded), else None."""
+def _completion_issue(m, cutoff=False):
+    """Why a run is NOT a usable capacity/ranking point (incomplete/overloaded), else None.
+
+    `cutoff`: the run ends a finite grace period after its sending window, as the measured AgentX
+    run does. A request still running then is the window's expected tail, not overload: it is
+    counted (in_flight_at_cutoff) rather than failing the run. A request still QUEUED then, or one
+    dropped or timed out, is overload either way."""
     inj, comp = m.get("injected_requests"), m.get("completed_requests")
-    if inj is not None and comp is not None and inj != comp:
-        return f"incomplete: injected={inj} != completed={comp}"
-    for f in ("still_queued", "still_running", "dropped_unservable", "timed_out_requests"):
+    if not cutoff:
+        if inj is not None and comp is not None and inj != comp:
+            return f"incomplete: injected={inj} != completed={comp}"
+        for f in ("still_queued", "still_running", "dropped_unservable", "timed_out_requests"):
+            v = m.get(f)
+            if v:
+                return f"overloaded: {f}={v}"
+        return None
+    for f in ("still_queued", "dropped_unservable", "timed_out_requests"):
         v = m.get(f)
         if v:
             return f"overloaded: {f}={v}"
+    tail = m.get("still_running") or 0
+    if inj is not None and comp is not None and inj != comp + tail:
+        return f"incomplete: injected={inj} != completed={comp} + in flight at the cutoff={tail}"
     return None
+
+
+def finite_grace(replay):
+    """Whether a replay ends a finite grace period after its window (a stated, non-infinite one)."""
+    g = (replay or {}).get("grace_period")
+    return g not in (None, "") and str(g) not in INF_NEEDS_YAML
 
 
 def pool_nodes(parallel, num_instances=1, node_size=8):
@@ -1682,37 +1685,21 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
         # filled into both rather than each pool defaulting independently.
         for role in PD_ROLES:
             pd[role]["engine"].setdefault("block_size", engine["block_size"])
-    # Fill the drafter from the MODEL's graph when a candidate asked for drafting without naming
-    # one (the engine requires a method; see graph_speculator). A model with no speculator is
-    # refused here rather than by BLIS, so the error names the model instead of an empty string.
+    # Fill the method from the DRAFTER's graph when a candidate asked for drafting without naming
+    # one (the engine requires a method; see graph_speculator): the named drafter checkpoint's, else
+    # the model's own. One with no speculator is refused here, naming it, not by BLIS.
     spec = engine.get("speculative")
     if spec and not spec.get("method"):
-        method = graph_speculator(catalog, model)
+        drafter = spec.get("draft_model") or model
+        method = graph_speculator(catalog, drafter)
         if not method:
             rec.update({"deployment": None, "cmd": None, "returncode": None, "wall_s": 0.0,
                         "metrics": {}, "metrics_all_instances": [],
                         "error": (f"unsupported config: speculative decoding requested but "
-                                  f"{model!r} declares no speculator in its catalog graph"),
+                                  f"{drafter!r} declares no speculator in its catalog graph"),
                         "stdout_tail": "", "stderr_tail": ""})
             return rec
         spec["method"] = method
-    # Resolve and RECORD the acceptance length a drafting run will be priced with. BLIS applies it
-    # but never echoes it, and the per-user axis is wrong without it (see acceptance_length).
-    acceptance = None
-    if spec:
-        al, al_src = acceptance_length(registry, model, spec.get("method"),
-                                       spec.get("num_spec_tokens"),
-                                       cli.get("speculative_thinking"),
-                                       cli.get("speculative_category"))
-        if al:
-            acceptance = {"acceptance_length": al, "source": al_src,
-                          "num_spec_tokens": spec.get("num_spec_tokens"),
-                          "method": spec.get("method"),
-                          # True when the profile was measured on another part. The profile set
-                          # says acceptance is mostly model/drafter/workload rather than chip and
-                          # asks that reuse be recorded, so a report can state it.
-                          "reused_from_other_hardware": bool(
-                              al_src and hardware and f"({hardware})" not in al_src)}
     # Fabric only reaches a multi-node YAML, so normalize it to the default on a single node:
     # the scenario hash then matches what the explorer reconstructs from the recorded fabric.
     multinode = bool(pd) or pool_nodes(parallel, num_instances, node_size) > 1
@@ -1753,7 +1740,7 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     elif not metrics:
         error = "rc=0 but no cluster metrics parsed from stdout (output format changed?)"
     else:
-        error = _completion_issue(metrics)
+        error = _completion_issue(metrics, cutoff=finite_grace(replay))
     # The record states the data the Result says priced the run, not the flag that asked for it.
     # A default run whose Result is not the release's embedded data is an error row: it would
     # otherwise be committed as a report priced with data it was not (CFG-1).
@@ -1782,15 +1769,18 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                        # rebuilds the same scenario text and file name (#96).
                        "gpus_per_node": node_size, "states_gpus_per_node": states_node_size,
                        "scenario": scenario_name, "router": router or None,
-                       # The acceptance the drafting run was priced with, so the report can
-                       # derive a correct per-token rate instead of a per-STEP one.
-                       "acceptance": acceptance,
+                       # The acceptance the drafting run was priced with, as its Result
+                       # records it (D8); None when drafting is off or the run failed.
+                       "acceptance": acceptance_record(doc) if doc is not None else None,
                        "workload": ({"kind": "replay", **replay} if replay
                                     else {"kind": "shape", "preset": workload})},
         "cmd": cmd, "returncode": rc, "wall_s": round(time.time() - t0, 3),
         "metrics": metrics, "metrics_all_instances": parse_all_instances(stdout) if rc == 0 else [],
         "error": error, "stdout_tail": stdout[-2000:], "stderr_tail": stderr[-2000:],
     })
+    if finite_grace(replay) and metrics:
+        # Requests the grace cutoff ended mid-flight: not in any figure, and not an overload.
+        rec["in_flight_at_cutoff"] = metrics.get("still_running") or 0
     if doc is not None and metrics:
         # The window every figure above is on, the Result's measured-window metrics verbatim, and
         # the whole-run aggregate kept as raw data only: nothing ranks or displays it.

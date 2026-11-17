@@ -2,10 +2,11 @@ name: muse-spark-open-816b-a42b-h100-agentx-8node
 scenario:
   model: muse-spark-open-816b-a42b-nvfp4
   hardware: h100
-  workload: agentx-mvp
+  workload_spec: workloads/agentx-run-recipe.yaml
   gpus: 64
   cluster:
     fabric: roce-200g
+    gpus_per_node: 8
   engine:
     max_model_len: 262144
     gpu_memory_utilization: 0.95
@@ -17,25 +18,17 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-muse-h100-8node
-    grace_period: inf
 sweeps:
 - name: topology
-  narrative: Eight single-node TP8 instances should peak highest, since a 64-wide
-    EP group pays cross-node RoCE all-to-all every step for little extra batch.
+  narrative: Eight single-node TP8 instances are the control every other sweep is
+    read against.
   num-instances:
   - 8
-  - 4
-  - 2
-  - 1
   parallel:
     tp:
     - 8
-    - 4
     dp:
     - 1
-    - 2
-    - 4
-    - 8
     enable_expert_parallel:
     - true
 - name: ep-off
@@ -43,13 +36,11 @@ sweeps:
     and throughput against the EP twins in topology.
   num-instances:
   - 8
-  - 4
   parallel:
     tp:
     - 8
     dp:
     - 1
-    - 2
     enable_expert_parallel:
     - false
 - name: pipeline
@@ -68,8 +59,8 @@ sweeps:
     enable_expert_parallel:
     - true
 - name: moe-collective
-  narrative: DeepEP backends should pay off most at cross-node EP width 64, where
-    dispatch crosses RoCE, and matter little at in-node width 8 on NVLink.
+  narrative: At in-node EP width 8 on NVLink the all-to-all backend should matter
+    little.
   num-instances:
   - 8
   parallel:
@@ -83,27 +74,9 @@ sweeps:
     - deepep_low_latency
     - deepep_v2
     - pplx
-- name: moe-collective-wide
-  narrative: At cross-node EP width 64 the DeepEP throughput backends should beat
-    pplx by the most, since every dispatch crosses RoCE.
-  num-instances:
-  - 1
-  parallel:
-    tp:
-    - 8
-    dp:
-    - 8
-    enable_expert_parallel:
-    - true
-  engine:
-    all2all_backend:
-    - deepep_high_throughput
-    - deepep_v2
-    - pplx
 - name: kv-capacity
   narrative: fp8 KV should matter most on 8x TP8, whose 80 GiB ranks leave the least
-    KV room (fp8 was +40% there at c=32 in the 8gpu report), and little on the 64-wide
-    DP8 shape.
+    KV room (fp8 was +40% there at c=32 in the 8gpu report).
   num-instances:
   - 8
   parallel:
@@ -115,37 +88,15 @@ sweeps:
     cache_dtype:
     - auto
     - fp8
-- name: kv-capacity-wide
-  narrative: With the most KV room of any shape, the 64-wide DP8 layout should gain
-    little from fp8 KV or a higher gmu.
-  num-instances:
-  - 1
-  parallel:
-    tp:
-    - 8
-    dp:
-    - 8
-    enable_expert_parallel:
-    - true
-  engine:
-    cache_dtype:
-    - auto
-    - fp8
-    gpu_memory_utilization:
-    - 0.9
-    - 0.95
 - name: batch-caps
-  narrative: A seq cap of 32 should bind on 8x TP8 at 512 lanes but not on 2x TP8
-    DP4, whose dp ranks each schedule their own batch.
+  narrative: A seq cap of 32 should bind on 8x TP8 at 512 lanes.
   num-instances:
   - 8
-  - 2
   parallel:
     tp:
     - 8
     dp:
     - 1
-    - 4
     enable_expert_parallel:
     - true
   engine:
@@ -215,7 +166,7 @@ sweeps:
       - true
   router:
     endpoint_picker_config:
-    - pd-prefix.yaml
+    - pd-prefix-based.yaml
     plugins:
       prefix-based-pd-decider:
         parameters:
@@ -277,7 +228,7 @@ sweeps:
       - true
   router:
     endpoint_picker_config:
-    - pd-prefix.yaml
+    - pd-prefix-based.yaml
     plugins:
       prefix-based-pd-decider:
         parameters:
@@ -315,7 +266,7 @@ sweeps:
       - 2048
   router:
     endpoint_picker_config:
-    - pd-prefix.yaml
+    - pd-prefix-based.yaml
 - name: pd-decode-cudagraph
   narrative: Full graph capture on the decode pool should lower ITL by a few percent,
     with FULL_DECODE_ONLY matching FULL there.
@@ -341,7 +292,7 @@ sweeps:
       - FULL_DECODE_ONLY
   router:
     endpoint_picker_config:
-    - pd-prefix.yaml
+    - pd-prefix-based.yaml
 - name: cudagraph
   narrative: FULL capture should beat the PIECEWISE default by a few percent, and
     NONE should collapse.

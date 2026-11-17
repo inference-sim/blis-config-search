@@ -41,6 +41,6 @@ bot PR adds `reports/<name>/`. To run a sweep yourself, see [`SETUP.md`](SETUP.m
 cd web && npm ci && npm run dev   # or: build | test | typecheck
 ```
 
-`npm run dev/build` first runs `build_gallery.py` and copies `site/` into `web/public/data/`
+`npm run dev/build` first runs `build_gallery.py` and copies `site/` into `public/data/` under web/ (built, not committed)
 (`REUSE_SITE=1` skips the rebuild). Vite's `base: './'` keeps every request relative, so
-`web/dist/` serves from any static host with no server.
+the built `dist/` under web/ serves from any static host with no server.

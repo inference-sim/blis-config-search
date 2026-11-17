@@ -2,7 +2,7 @@ name: muse-spark-open-816b-a42b-gb200-agentx-rack
 scenario:
   model: muse-spark-open-816b-a42b-nvfp4
   hardware: gb200-nvl72
-  workload: agentx-mvp
+  workload_spec: workloads/agentx-run-recipe.yaml
   gpus: 64
   engine:
     max_model_len: 262144
@@ -14,7 +14,6 @@ scenario:
   replay:
     corpus: .corpus/traces.jsonl
     corpus_cache: /tmp/agx-cache-muse-gb200
-    grace_period: inf
 sweeps:
 - name: topology
   narrative: Eight TP8 instances should peak highest, since a 64-wide EP group pays

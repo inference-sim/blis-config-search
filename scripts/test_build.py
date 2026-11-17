@@ -676,7 +676,7 @@ def test_catalog():
             # 223/200, the MEASURED pair the catalog states, with its provenance in the file:
             # ShareGPT_V3_unfiltered_cleaned_split.json under Qwen/Qwen2.5-14B, vLLM's three-rule
             # filter (min_len 4, max_prompt_len 1024 on the prompt ALONE, max_total_len 2048), over
-            # the 82,744 qualifying pairs. The old 208/185 here predates blis-catalog#44 landing
+            # the 82,744 qualifying pairs. The old 208/185 here predates https://github.com/inference-sim/blis-catalog/issues/44 landing
             # the measurement; reading the 1024 as a COMBINED cap is the specific error that review
             # caught, and its signature is osl_max ~979 instead of the correct 1917.
             check(sg["kind"] == "shape" and sg["isl_mean"] == 223 and sg["osl_mean"] == 200,
@@ -751,12 +751,15 @@ def test_workflows_sane():
                 continue
             co = next((st for st in steps if st.get("uses", "").startswith("actions/checkout@")), {})
             ref = (co.get("with") or {}).get("ref")
-            # The default branch, or (regen-reports.yml only) the dispatch's `base`, which that job
-            # refuses unless its workflow files equal the default branch's.
+            # The default branch, or (regen-reports.yml only) the dispatch's `base`: that job cuts a
+            # new branch only from the default branch, and onto any other base it pushes its
+            # reports/-only commits to the existing branch itself (`HEAD:$BASE_BRANCH`).
+            text = open(os.path.join(wfdir, fn)).read()
             ok = ref == "${{ github.event.repository.default_branch }}" or (
                 fn == "regen-reports.yml"
                 and ref == "${{ github.event.inputs.base || github.event.repository.default_branch }}"
-                and "Refuse a base whose workflow files differ" in open(os.path.join(wfdir, fn)).read())
+                and 'git push origin "HEAD:$BASE_BRANCH"' in text
+                and "COMMIT_TO_BASE: ${{ (github.event.inputs.base || github.event.repository.default_branch) != github.event.repository.default_branch }}" in text)
             check(ok, f"{fn} job {jname} pushes a branch, so it must branch from the default branch")
 
     ck = os.path.join(ROOT, ".github", "workflows", "checks.yml")
@@ -925,7 +928,13 @@ def test_explore_data():
                        if "endpoint_picker_config" in l}
             check(routers and all(os.path.isfile(os.path.normpath(os.path.join(ROOT, "scenarios", r))) for r in routers),
                   "every shown router path, per-report or stock routing/, resolves from scenarios/")
-            check(explore_data.build(real)["defaults"].get("max_num_batched_tokens") == 8192,
+        # Hermetic: the committed reports' knob sets move with each regeneration.
+        with tempfile.TemporaryDirectory() as led:
+            with open(os.path.join(led, "runs.jsonl"), "w") as f:
+                for c in (4, 8):
+                    f.write(json.dumps({"config": {"concurrency": c},
+                                        "deployment": {"engine": {"max_num_batched_tokens": 8192}}}) + "\n")
+            check(explore_data.defaults(led, ["max_num_batched_tokens"]) == {"max_num_batched_tokens": 8192},
                   "an unset knob's default is read from the deployments it ran")
         ps = {"blis": "v9.0.0", "catalog": "1.0.0", "registry": "v2.0.0",
               "resolved": {"blis": {"commit": "a" * 40}, "catalog": {"commit": "b" * 40}}}

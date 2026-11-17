@@ -518,8 +518,11 @@ def test_workflow_wiring():
               and ("-f base=main" in text or '-f base="$BASE_BRANCH"' in text),
               f"{name} dispatches CI on its own PR, so the required gate reports without a PAT")
     check("--stale-only" in regen, "a pin move reaching main regenerates only the stale reports")
-    check(regen.count('ref: "${{ needs.plan.outputs.sha }}"') == 2
-          and "github.event.inputs.base || github.ref" in regen,
+    import yaml
+    jobs = yaml.safe_load(regen)["jobs"]
+    swept = [j for j, d in jobs.items() if any(
+        (st.get("with") or {}).get("ref") == "${{ needs.plan.outputs.sha }}" for st in d.get("steps") or [])]
+    check(sorted(swept) == ["build", "merge", "regen"] and "github.event.inputs.base || github.ref" in regen,
           "every regen job sweeps the base's pins, not the dispatch ref's")
 
 
@@ -587,6 +590,20 @@ def test_stale_reports_and_the_post_merge_plan():
     finally:
         shutil.rmtree(root)
 
+def test_shards_fit_a_long_report_into_jobs():
+    print("test_shards_fit_a_long_report_into_jobs")
+    root = _fake_repo()
+    try:
+        with open(os.path.join(root, "reports", "exp-a", "runs.jsonl"), "w") as f:
+            f.write("".join(json.dumps({"wall_s": 3600}) + "\n" for _ in range(10)))   # 10 h serial
+        check(B.shards_for("exp-a", 4, 6 * 3600, growth=1.0, root=root) == 1, "10 h at 4 fits one 6 h job")
+        check(B.shards_for("exp-a", 1, 6 * 3600, growth=1.0, root=root) == 2, "10 h at 1 needs two 6 h jobs")
+        check(B.shards_for("exp-a", 2, 6 * 3600, growth=3.0, root=root) == 3, "the growth margin adds jobs")
+        check(B.shards_for("orphan", 1, 6 * 3600, root=root) == 1, "a report with no ledger gets one job")
+    finally:
+        shutil.rmtree(root)
+
+
 if __name__ == "__main__":
     test_version_ordering()
     test_go_mod_versions()
@@ -606,5 +623,6 @@ if __name__ == "__main__":
     test_smoke_verdicts()
     test_workflow_wiring()
     test_stale_reports_and_the_post_merge_plan()
+    test_shards_fit_a_long_report_into_jobs()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

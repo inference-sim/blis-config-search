@@ -2095,6 +2095,49 @@ class DryRunPlan(unittest.TestCase):
         self.assertEqual({pinned}, set(seen))
         self.assertEqual(pinned, report["scenario"]["engine_version"])
 
+    def test_shards_split_a_report_and_their_ledgers_rebuild_it_without_blis(self):
+        """A report too long for one job runs as N shards; merging their ledgers gives the same report."""
+        calls = []
+
+        def fake_run_one(*a, **kw):
+            cfg = dict(kw.get("config") or a[11])
+            calls.append(cfg["concurrency"])
+            return {"metrics": {"tokens_per_sec": 10.0 * cfg["concurrency"], "itl_p99_ms": 1.0},
+                    "cmd": None, "returncode": 0, "config": cfg, "concurrency": cfg["concurrency"],
+                    "config_hash": run_blis._config_hash(cfg)}
+
+        def no_blis(*a, **kw):
+            raise AssertionError("a recorded run must not run BLIS again")
+
+        doc = spec(scenario={**spec()["scenario"], "concurrency": [1, 2, 4, 8, 16]})
+        real = E.run_blis.run_one
+        try:
+            with tempfile.TemporaryDirectory() as t:
+                def run(name, **kw):
+                    out = os.path.join(t, name)
+                    E.run_experiment(doc, BLIS, "/c", "/r", out, verbose=False, **kw)
+                    d = os.path.join(out, doc["name"])
+                    return d, {f: open(os.path.join(d, f)).read() for f in ("runs.jsonl", "experiment.json")}
+                E.run_blis.run_one = fake_run_one
+                _, whole = run("whole")
+                every, calls[:] = sorted(calls), []
+                parts = []
+                for i in range(2):
+                    d, _ = run(f"shard{i}", shard=(i, 2))
+                    parts.append(os.path.join(d, "runs.jsonl"))
+                self.assertEqual(every, sorted(calls), "the shards run every run exactly once between them")
+                self.assertEqual(3, len(open(parts[0]).read().splitlines()), "shard 0 of 2 runs runs 0, 2, 4")
+                E.run_blis.run_one = no_blis
+                _, merged = run("whole", recorded=E.load_recorded(parts))
+                with self.assertRaises(SystemExit):
+                    E.load_recorded([parts[0], parts[0]])
+        finally:
+            E.run_blis.run_one = real
+        self.assertEqual(whole, merged, "the merged report is the unsharded one, byte for byte")
+        self.assertEqual((1, 3), E.parse_shard("1/3"))
+        with self.assertRaises(SystemExit):
+            E.parse_shard("3/3")
+
     def test_dry_run_of_every_committed_fixture(self):
         for path in V.spec_paths(EXPERIMENTS):
             doc, _ = V.load(path)

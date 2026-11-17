@@ -38,6 +38,7 @@ regeneration run unattended and still be reviewed as a plain diff of numbers.
 """
 import argparse
 import json
+import math
 import os
 import re
 import shutil
@@ -320,8 +321,27 @@ def _run(cmd):
     subprocess.run(cmd, check=True, cwd=ROOT)
 
 
-def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1, fields=None):
+def shards_for(run_id, max_parallel, budget_s, growth=3.0, root=ROOT):
+    """How many jobs one report's regeneration needs to fit `budget_s` each at `max_parallel`.
+
+    Estimated from the committed ledger's serial BLIS time (`wall_s` summed) times `growth`, the
+    margin for a release or a spec that makes runs longer (the AgentX recipe's 3600 s window took
+    2 to 3 times the 900 s one). A report with no recorded time gets one job."""
+    path = os.path.join(root, "reports", run_id, "runs.jsonl")
+    try:
+        with open(path) as f:
+            serial = sum(json.loads(l).get("wall_s") or 0 for l in f if l.strip())
+    except OSError:
+        return 1
+    return max(1, math.ceil(serial * growth / (max(1, max_parallel) * budget_s)))
+
+
+def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1, fields=None,
+          shard=None, runs_from=()):
     """Regenerate ONE report into <out>/<run_id>/ from its source, at the pins on disk.
+
+    `shard` "I/N" runs only that share of its runs (run_experiment --shard); `runs_from` lists
+    the shards' ledgers, so the report is assembled from them without running BLIS.
 
     Writes into a fresh `out` rather than over reports/: the caller swaps the directory in whole,
     so a file the new run no longer writes cannot survive from the old one."""
@@ -337,7 +357,9 @@ def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1, fi
         _run([py, "-I", "scripts/fetch_corpus.py", spec, "--catalog", catalog])
     _run([py, "-I", "scripts/run_experiment.py", spec, "--blis", blis, "--catalog", catalog,
           "--registry", registry, "--out", out, "--timeout", str(timeout),
-          "--max-parallel", str(max_parallel), *fargs])
+          "--max-parallel", str(max_parallel), *fargs,
+          *(["--shard", shard] if shard else []),
+          *[a for p in runs_from for a in ("--runs-from", os.path.abspath(p))]])
     shutil.rmtree(os.path.join(out, run_id, "scenarios"), ignore_errors=True)
     _check_coherent(os.path.join(out, run_id))
     return os.path.join(out, run_id)
@@ -701,6 +723,8 @@ def main(argv=None):
     p.add_argument("--max-batch", type=int, default=MAX_BATCH)
     p.add_argument("--stale-only", action="store_true",
                    help="only the reports the pinned stack did not price")
+    p.add_argument("--max-parallel", type=int, default=1, help="BLIS runs at once per job, for --budget-s")
+    p.add_argument("--budget-s", type=float, default=0, help="seconds of BLIS per job; >0 shards long reports")
     st = sub.add_parser("stale", help="list the reports the pinned stack did not price; exit 1 if any")
     st.add_argument("--root", default=ROOT)
     r = sub.add_parser("regen", help="regenerate one report into --out/<id>/")
@@ -712,6 +736,9 @@ def main(argv=None):
     r.add_argument("--timeout", type=int, default=1800)
     r.add_argument("--max-parallel", type=int, default=1)
     r.add_argument("--fields", help="the engine's field list (the pinned blis-vllm release's fields.json)")
+    r.add_argument("--shard", help="I/N: run only this share of the report's runs")
+    r.add_argument("--runs-from", action="append", default=[], dest="runs_from",
+                   help="a shard's runs.jsonl to assemble the report from (repeatable)")
     m = sub.add_parser("modules", help="print the blis-* modules a go.mod requires, one per line")
     m.add_argument("go_mod")
     k = sub.add_parser("smoke", help="re-run a few ledger rows per report on a new binary")
@@ -749,7 +776,10 @@ def main(argv=None):
         sys.exit(0 if same_stack(a.a, a.b) else 1)
     elif a.cmd == "plan":
         only = [x for x in (a.only or "").replace(" ", ",").split(",") if x]
-        print(json.dumps(plan(only=only or None, max_batch=a.max_batch, stale_only=a.stale_only)))
+        out = plan(only=only or None, max_batch=a.max_batch, stale_only=a.stale_only)
+        for r in out["reports"]:
+            r["shards"] = shards_for(r["id"], a.max_parallel, a.budget_s) if a.budget_s > 0 else 1
+        print(json.dumps(out))
     elif a.cmd == "stale":
         ids = stale_ids(a.root)
         for i in ids:
@@ -759,7 +789,7 @@ def main(argv=None):
     elif a.cmd == "regen":
         regen(a.id, os.path.abspath(a.blis), os.path.abspath(a.catalog),
               os.path.abspath(a.registry), os.path.abspath(a.out), a.timeout, a.max_parallel,
-              os.path.abspath(a.fields) if a.fields else None)
+              os.path.abspath(a.fields) if a.fields else None, a.shard, a.runs_from)
     elif a.cmd == "modules":
         with open(a.go_mod) as f:
             for mod, ver in sorted(go_mod_versions(f.read()).items()):

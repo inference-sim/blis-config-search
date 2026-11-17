@@ -10,11 +10,11 @@
     },
     {
       "h": "What was found",
-      "html": "<strong>8x TP8 + EP</strong>, from the <em>colocated</em> sweep, reached 15.4 tok/s/accelerator (985.4 tok/s across the fleet) at concurrency 128 while holding the scenario's SLOs."
+      "html": "No configuration that was run held the scenario's SLOs at any tested load, so the 164 runs that were made bound the deployment from below rather than recommending one. 40 further runs were refused and are not evidence of a miss. Refused: 6 configurations (24 runs): scenario: colocated pool: Muse-Spark on h200 (compute capability 9.0) requires data parallelism 1 and prefill-context parallelism 1 (got dp 4, pcp 0): its MoE layers take the route-major Marlin path on Hopper, which vLLM refuses to build with more (\"MuseSpark1x Triton/Marlin currently requires DP1 and PCP1\", vllm/models/muse_spark/nvidia/muse_moe_runner.py:140-146@0f6b2619). Blackwell is not affected; 2 configurations (8 runs): scenario: colocated pool: Muse-Spark on h200 (compute capability 9.0) requires data parallelism 1 and prefill-context parallelism 1 (got dp 2, pcp 0): its MoE layers take the route-major Marlin path on Hopper, which vLLM refuses to build with more (\"MuseSpark1x Triton/Marlin currently requires DP1 and PCP1\", vllm/models/muse_spark/nvidia/muse_moe_runner.py:140-146@0f6b2619). Blackwell is not affected; 2 configurations (8 runs): scenario: colocated pool: Muse-Spark on h200 (compute capability 9.0) requires data parallelism 1 and prefill-context parallelism 1 (got dp 8, pcp 0): its MoE layers take the route-major Marlin path on Hopper, which vLLM refuses to build with more (\"MuseSpark1x Triton/Marlin currently requires DP1 and PCP1\", vllm/models/muse_spark/nvidia/muse_moe_runner.py:140-146@0f6b2619). Blackwell is not affected."
     },
     {
       "h": "What to run",
-      "html": "8x TP8 + EP at concurrency 128. 204 of 204 runs held the SLOs.",
+      "html": "Nothing that ran in this grid is servable under the stated SLOs.",
       "run": true
     }
   ],
@@ -22,11 +22,13 @@
     "BLIS discrete-event simulation",
     "Experiment Spec (RFC #21)",
     "deterministic sweep \u2014 no LLM in the measurement path",
-    "seed 42"
+    "seed 42",
+    "basis: measured window",
+    "scope: cluster; worst instance for TTFT and end-to-end gates"
   ],
   "recommendation_num": 9,
   "recommendation_prose": [
-    "The table below ranks the measured operating points by output tok/s per accelerator, the objective this experiment selects on, among runs that held the scenario's SLOs."
+    "The table below lists the measured operating points. Headline ranking: max output tok/s per accelerator subject to the scenario's SLOs. The Pareto front of every sweep is in pareto.json."
   ],
   "sections": [
     {
@@ -34,7 +36,7 @@
       "num": 2,
       "prose": [
         "Eight single-node TP8 instances should lead, since wider dp groups pay cross-node IB all-to-all for little extra batch.",
-        "Measured: best was <strong>8x TP8 + EP</strong> at 15.4 tok/s/accelerator (concurrency 128)."
+        "Measured: no configuration that ran in this sweep held the SLOs at any tested load. Refused: 2 configurations (8 runs): scenario: colocated pool: Muse-Spark on h200 (compute capability 9.0) requires data parallelism 1 and prefill-context parallelism 1 (got dp 2, pcp 0): its MoE layers take the route-major Marlin path on Hopper, which vLLM refuses to build with more (\"MuseSpark1x Triton/Marlin currently requires DP1 and PCP1\", vllm/models/muse_spark/nvidia/muse_moe_runner.py:140-146@0f6b2619). Blackwell is not affected; 2 configurations (8 runs): scenario: colocated pool: Muse-Spark on h200 (compute capability 9.0) requires data parallelism 1 and prefill-context parallelism 1 (got dp 4, pcp 0): its MoE layers take the route-major Marlin path on Hopper, which vLLM refuses to build with more (\"MuseSpark1x Triton/Marlin currently requires DP1 and PCP1\", vllm/models/muse_spark/nvidia/muse_moe_runner.py:140-146@0f6b2619). Blackwell is not affected; 2 configurations (8 runs): scenario: colocated pool: Muse-Spark on h200 (compute capability 9.0) requires data parallelism 1 and prefill-context parallelism 1 (got dp 8, pcp 0): its MoE layers take the route-major Marlin path on Hopper, which vLLM refuses to build with more (\"MuseSpark1x Triton/Marlin currently requires DP1 and PCP1\", vllm/models/muse_spark/nvidia/muse_moe_runner.py:140-146@0f6b2619). Blackwell is not affected."
       ],
       "title": "Sweep: colocated"
     },
@@ -43,7 +45,7 @@
       "num": 3,
       "prose": [
         "A bigger token budget with a long-prefill cap should hold ITL to higher load, narrowing what P/D can win.",
-        "Measured: best was <strong>8x TP8 + EP</strong> at 15.4 tok/s/accelerator (concurrency 128)."
+        "Measured: no configuration that ran in this sweep held the SLOs at any tested load. Refused: 4 configurations (16 runs): scenario: colocated pool: Muse-Spark on h200 (compute capability 9.0) requires data parallelism 1 and prefill-context parallelism 1 (got dp 4, pcp 0): its MoE layers take the route-major Marlin path on Hopper, which vLLM refuses to build with more (\"MuseSpark1x Triton/Marlin currently requires DP1 and PCP1\", vllm/models/muse_spark/nvidia/muse_moe_runner.py:140-146@0f6b2619). Blackwell is not affected."
       ],
       "title": "Sweep: colocated-tuned"
     },
@@ -52,7 +54,7 @@
       "num": 4,
       "prose": [
         "Decode-heavy ratios should win on AgentX, since cached prefixes leave only a short uncached tail to prefill per turn.",
-        "Measured: best was <strong>4P/4D TP8 + EP</strong> at 11.47 tok/s/accelerator (concurrency 128)."
+        "Measured: no configuration in this sweep held the SLOs at any tested load."
       ],
       "title": "Sweep: pd-ratio"
     },
@@ -61,7 +63,7 @@
       "num": 5,
       "prose": [
         "Splitting every request should trail the threshold arms, because a turn with a cached prefix pays an IB handoff for little prefill.",
-        "Measured: best was <strong>4P/4D TP8 + EP</strong> at 11.13 tok/s/accelerator (concurrency 128)."
+        "Measured: no configuration in this sweep held the SLOs at any tested load."
       ],
       "title": "Sweep: pd-always"
     },
@@ -70,7 +72,7 @@
       "num": 6,
       "prose": [
         "TP16 decode instances should hold ITL at higher load than TP8 ones, trading batch slots for faster steps.",
-        "Measured: best was <strong>4P TP8 + EP / 2D TP16 + EP</strong> at 12.89 tok/s/accelerator (concurrency 128)."
+        "Measured: no configuration in this sweep held the SLOs at any tested load."
       ],
       "title": "Sweep: pd-wide-decode"
     },
@@ -79,7 +81,7 @@
       "num": 7,
       "prose": [
         "A 32k prefill budget should matter on the prefill-light layout and a decode-pool prefill cap on the decode-heavy one.",
-        "Measured: best was <strong>4P/4D TP8 + EP</strong> at 11.76 tok/s/accelerator (concurrency 128)."
+        "Measured: no configuration in this sweep held the SLOs at any tested load."
       ],
       "title": "Sweep: pd-pool-engine"
     },
@@ -88,11 +90,11 @@
       "num": 8,
       "prose": [
         "Full graph capture on the decode pool should lower ITL by a few percent, with FULL_DECODE_ONLY matching FULL there.",
-        "Measured: best was <strong>3P/5D TP8 + EP</strong> at 8.72 tok/s/accelerator (concurrency 128)."
+        "Measured: no configuration in this sweep held the SLOs at any tested load."
       ],
       "title": "Sweep: pd-decode-cudagraph"
     }
   ],
-  "standfirst": "A deterministic sweep over inferencex-agentx-mvp traffic, comparing 7 designs on one GPU budget.",
+  "standfirst": "A deterministic sweep over custom (not in the catalog) (AgentX run recipe: 300 s idle-gap cap, 10 warm-up requests per lane, trajectory start 0.25 to 0.75, 3600 s window, 30 s grace, corpus semianalysis_cc_traces_weka_062126) traffic, comparing 7 designs on one GPU budget.",
   "title": "muse-spark-open-816b-a42b-nvfp4 on 64x h200: muse-spark-open-816b-a42b-h200-agentx-8node-pd"
 }

@@ -6,15 +6,15 @@
   "hero": [
     {
       "h": "What was tested",
-      "html": "78 configurations over 16 sweeps (topology, ep-off, pipeline, moe-collective, moe-collective-wide, kv-capacity, kv-capacity-wide, batch-caps, routing-prefix-cache, prefill-chunking, pd-ratio, pd-always, pd-wide-decode, pd-pool-engine, pd-decode-cudagraph, cudagraph), each at 4 load levels, every run on exactly 64 GPUs."
+      "html": "60 configurations over 14 sweeps (topology, ep-off, pipeline, moe-collective, kv-capacity, batch-caps, routing-prefix-cache, prefill-chunking, pd-ratio, pd-always, pd-wide-decode, pd-pool-engine, pd-decode-cudagraph, cudagraph), each at 4 load levels, every run on exactly 64 GPUs."
     },
     {
       "h": "What was found",
-      "html": "<strong>4x TP8xPP2 + EP</strong>, from the <em>pipeline</em> sweep, reached 12.86 tok/s/accelerator (822.9 tok/s across the fleet) at concurrency 128 while holding the scenario's SLOs."
+      "html": "No configuration that was run held the scenario's SLOs at any tested load, so the 236 runs that were made bound the deployment from below rather than recommending one. 4 further runs were refused and are not evidence of a miss. Refused: 2 configurations (2 runs): the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[1141].e2e_us: is 127270137, less than ttft_us 131537500\\n  error: result.request_rows[1141].tpot_us: must be a finite number, not negative; 1 configuration (1 run): the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[2486].e2e_us: is 73809840, less than ttft_us 75751987\\n  error: result.request_rows[2486].tpot_us: must be a finite number, not negative; 1 configuration (1 run): the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[7523].e2e_us: is 1140139310, less than ttft_us 1151865527\\n  error: result.request_rows[7523].tpot_us: must be a finite number, not negative."
     },
     {
       "h": "What to run",
-      "html": "4x TP8xPP2 + EP at concurrency 128. 308 of 312 runs held the SLOs.",
+      "html": "Nothing that ran in this grid is servable under the stated SLOs.",
       "run": true
     }
   ],
@@ -22,28 +22,30 @@
     "BLIS discrete-event simulation",
     "Experiment Spec (RFC #21)",
     "deterministic sweep \u2014 no LLM in the measurement path",
-    "seed 42"
+    "seed 42",
+    "basis: measured window",
+    "scope: cluster; worst instance for TTFT and end-to-end gates"
   ],
-  "recommendation_num": 18,
+  "recommendation_num": 16,
   "recommendation_prose": [
-    "The table below ranks the measured operating points by output tok/s per accelerator, the objective this experiment selects on, among runs that held the scenario's SLOs."
+    "The table below lists the measured operating points. Headline ranking: max output tok/s per accelerator subject to the scenario's SLOs. The Pareto front of every sweep is in pareto.json."
   ],
   "sections": [
     {
-      "caption_note": "7 configurations, 28 runs.",
+      "caption_note": "1 configurations, 4 runs.",
       "num": 2,
       "prose": [
-        "Eight single-node TP8 instances should peak highest, since a 64-wide EP group pays cross-node RoCE all-to-all every step for little extra batch.",
-        "Measured: best was <strong>4x TP8xDP2 + EP</strong> at 6.87 tok/s/accelerator (concurrency 128)."
+        "Eight single-node TP8 instances are the control every other sweep is read against.",
+        "Measured: no configuration in this sweep held the SLOs at any tested load."
       ],
       "title": "Sweep: topology"
     },
     {
-      "caption_note": "2 configurations, 8 runs.",
+      "caption_note": "1 configurations, 4 runs.",
       "num": 3,
       "prose": [
         "Replicating all 256 experts instead of sharding them should cost KV room and throughput against the EP twins in topology.",
-        "Measured: best was <strong>4x TP8xDP2</strong> at 4.37 tok/s/accelerator (concurrency 64)."
+        "Measured: no configuration in this sweep held the SLOs at any tested load."
       ],
       "title": "Sweep: ep-off"
     },
@@ -52,7 +54,7 @@
       "num": 4,
       "prose": [
         "Pipeline stages should trail data-parallel shapes of the same width, since each stage adds a boundary hop per decode step.",
-        "Measured: best was <strong>4x TP8xPP2 + EP</strong> at 12.86 tok/s/accelerator (concurrency 128)."
+        "Measured: no configuration in this sweep held the SLOs at any tested load."
       ],
       "title": "Sweep: pipeline"
     },
@@ -60,120 +62,102 @@
       "caption_note": "4 configurations, 16 runs.",
       "num": 5,
       "prose": [
-        "DeepEP backends should pay off most at cross-node EP width 64, where dispatch crosses RoCE, and matter little at in-node width 8 on NVLink.",
-        "Measured: best was <strong>8x TP8 + EP</strong> at 5.07 tok/s/accelerator (concurrency 64)."
+        "At in-node EP width 8 on NVLink the all-to-all backend should matter little.",
+        "Measured: no configuration in this sweep held the SLOs at any tested load."
       ],
       "title": "Sweep: moe-collective"
     },
     {
-      "caption_note": "3 configurations, 12 runs.",
+      "caption_note": "2 configurations, 8 runs.",
       "num": 6,
       "prose": [
-        "At cross-node EP width 64 the DeepEP throughput backends should beat pplx by the most, since every dispatch crosses RoCE.",
-        "Measured: best was <strong>1x TP8xDP8 + EP (all-to-all pplx)</strong> at 2.79 tok/s/accelerator (concurrency 512)."
-      ],
-      "title": "Sweep: moe-collective-wide"
-    },
-    {
-      "caption_note": "2 configurations, 8 runs.",
-      "num": 7,
-      "prose": [
-        "fp8 KV should matter most on 8x TP8, whose 80 GiB ranks leave the least KV room (fp8 was +40% there at c=32 in the 8gpu report), and little on the 64-wide DP8 shape.",
-        "Measured: best was <strong>8x TP8 + EP (KV dtype fp8)</strong> at 6.67 tok/s/accelerator (concurrency 64)."
+        "fp8 KV should matter most on 8x TP8, whose 80 GiB ranks leave the least KV room (fp8 was +40% there at c=32 in the 8gpu report).",
+        "Measured: no configuration in this sweep held the SLOs at any tested load."
       ],
       "title": "Sweep: kv-capacity"
     },
     {
       "caption_note": "4 configurations, 16 runs.",
-      "num": 8,
+      "num": 7,
       "prose": [
-        "With the most KV room of any shape, the 64-wide DP8 layout should gain little from fp8 KV or a higher gmu.",
-        "Measured: best was <strong>1x TP8xDP8 + EP (gpu mem util 0.95)</strong> at 2.79 tok/s/accelerator (concurrency 512)."
-      ],
-      "title": "Sweep: kv-capacity-wide"
-    },
-    {
-      "caption_note": "8 configurations, 32 runs.",
-      "num": 9,
-      "prose": [
-        "A seq cap of 32 should bind on 8x TP8 at 512 lanes but not on 2x TP8 DP4, whose dp ranks each schedule their own batch.",
-        "Measured: best was <strong>8x TP8 + EP</strong> at 5.2 tok/s/accelerator (concurrency 64)."
+        "A seq cap of 32 should bind on 8x TP8 at 512 lanes.",
+        "Measured: no configuration in this sweep held the SLOs at any tested load."
       ],
       "title": "Sweep: batch-caps"
     },
     {
       "caption_note": "6 configurations, 24 runs.",
-      "num": 10,
+      "num": 8,
       "prose": [
         "prefix-affinity should only beat queue and random with caching on, and eight instances give it the most room to win.",
-        "Measured: best was <strong>8x TP8 + EP (prefix-affinity routing)</strong> at 4.94 tok/s/accelerator (concurrency 128)."
+        "Measured: no configuration in this sweep held the SLOs at any tested load."
       ],
       "title": "Sweep: routing-prefix-cache"
     },
     {
       "caption_note": "1 configurations, 4 runs.",
-      "num": 11,
+      "num": 9,
       "prose": [
         "Capping long prefills should trade a little peak throughput for a much lower ITL p99 at saturation.",
-        "Measured: best was <strong>8x TP8 + EP</strong> at 5.01 tok/s/accelerator (concurrency 64)."
+        "Measured: no configuration in this sweep held the SLOs at any tested load."
       ],
       "title": "Sweep: prefill-chunking"
     },
     {
       "caption_note": "16 configurations, 64 runs.",
-      "num": 12,
+      "num": 10,
       "prose": [
         "Decode-heavy ratios should win on AgentX, since cached prefixes leave only a short uncached tail to prefill per turn -- and the RoCE handoff taxes the prefill-heavy splits more.",
-        "Measured: best was <strong>4P/4D TP8 + EP</strong> at 4.74 tok/s/accelerator (concurrency 128)."
+        "Measured: no configuration that ran in this sweep held the SLOs at any tested load. Refused: 1 configuration (1 run): the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[2486].e2e_us: is 73809840, less than ttft_us 75751987\\n  error: result.request_rows[2486].tpot_us: must be a finite number, not negative."
       ],
       "title": "Sweep: pd-ratio"
     },
     {
       "caption_note": "4 configurations, 16 runs.",
-      "num": 13,
+      "num": 11,
       "prose": [
         "Splitting every request should trail the threshold arms, because a turn with a cached prefix pays a cross-node RoCE handoff for little prefill.",
-        "Measured: best was <strong>4P/4D TP8 + EP</strong> at 4.13 tok/s/accelerator (concurrency 128)."
+        "Measured: no configuration that ran in this sweep held the SLOs at any tested load. Refused: 1 configuration (1 run): the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[1141].e2e_us: is 127270137, less than ttft_us 131537500\\n  error: result.request_rows[1141].tpot_us: must be a finite number, not negative."
       ],
       "title": "Sweep: pd-always"
     },
     {
       "caption_note": "6 configurations, 24 runs.",
-      "num": 14,
+      "num": 12,
       "prose": [
         "TP16 decode instances should hold ITL at higher load than TP8 ones, trading batch slots for faster steps.",
-        "Measured: best was <strong>6P TP8 + EP / 1D TP16 + EP</strong> at 6.11 tok/s/accelerator (concurrency 128)."
+        "Measured: no configuration in this sweep held the SLOs at any tested load."
       ],
       "title": "Sweep: pd-wide-decode"
     },
     {
       "caption_note": "8 configurations, 32 runs.",
-      "num": 15,
+      "num": 13,
       "prose": [
         "A bigger prefill budget should matter on the prefill-light layout and a decode-pool prefill cap on the decode-heavy one.",
-        "Measured: best was <strong>4P/4D TP8 + EP</strong> at 4.14 tok/s/accelerator (concurrency 128)."
+        "Measured: no configuration that ran in this sweep held the SLOs at any tested load. Refused: 1 configuration (1 run): the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[1141].e2e_us: is 127270137, less than ttft_us 131537500\\n  error: result.request_rows[1141].tpot_us: must be a finite number, not negative; 1 configuration (1 run): the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[7523].e2e_us: is 1140139310, less than ttft_us 1151865527\\n  error: result.request_rows[7523].tpot_us: must be a finite number, not negative."
       ],
       "title": "Sweep: pd-pool-engine"
     },
     {
       "caption_note": "2 configurations, 8 runs.",
-      "num": 16,
+      "num": 14,
       "prose": [
         "Full graph capture on the decode pool should lower ITL by a few percent, with FULL_DECODE_ONLY matching FULL there.",
-        "Measured: best was <strong>3P/5D TP8 + EP</strong> at 3.68 tok/s/accelerator (concurrency 128)."
+        "Measured: no configuration in this sweep held the SLOs at any tested load."
       ],
       "title": "Sweep: pd-decode-cudagraph"
     },
     {
       "caption_note": "2 configurations, 8 runs.",
-      "num": 17,
+      "num": 15,
       "prose": [
         "FULL capture should beat the PIECEWISE default by a few percent, and NONE should collapse.",
-        "Measured: best was <strong>8x TP8 + EP (graph capture full)</strong> at 5.25 tok/s/accelerator (concurrency 64)."
+        "Measured: no configuration in this sweep held the SLOs at any tested load."
       ],
       "title": "Sweep: cudagraph"
     }
   ],
-  "standfirst": "A deterministic sweep over inferencex-agentx-mvp traffic, comparing 16 designs on one GPU budget.",
+  "standfirst": "A deterministic sweep over custom (not in the catalog) (AgentX run recipe: 300 s idle-gap cap, 10 warm-up requests per lane, trajectory start 0.25 to 0.75, 3600 s window, 30 s grace, corpus semianalysis_cc_traces_weka_062126) traffic, comparing 14 designs on one GPU budget.",
   "title": "muse-spark-open-816b-a42b-nvfp4 on 64x h100: muse-spark-open-816b-a42b-h100-agentx-8node"
 }

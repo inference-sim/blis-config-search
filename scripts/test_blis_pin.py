@@ -513,14 +513,10 @@ def test_workflow_wiring():
     check("inputs.base" in compat and "inputs.pr" in compat,
           "a dispatched pin-compat still compares against the base and comments on the PR")
     for name, text in (("bump-blis-pin.yml", bump), ("regen-reports.yml", regen)):
-        check("actions: write" in text and "sh scripts/dispatch_pr_checks.sh" in text
-              and "PIN_BOT_TOKEN" not in text,
-              f"{name} dispatches the checks on what it pushed, with GITHUB_TOKEN alone")
-    disp = open(os.path.join(ROOT, "scripts", "dispatch_pr_checks.sh")).read()
-    for w in ("checks.yml", "pin-compat.yml", "blis.yml", "private-names.yml", "pages.yml"):
-        check(f"\nrun {w}" in disp, f"dispatch_pr_checks.sh starts {w}")
-        text = open(os.path.join(wf, w)).read()
-        check("workflow_dispatch:" in text, f"{w} can be dispatched")
+        check("actions: write" in text and "gh workflow run checks.yml" in text
+              and "gh workflow run pin-compat.yml" in text
+              and ("-f base=main" in text or '-f base="$BASE_BRANCH"' in text),
+              f"{name} dispatches CI on its own PR, so the required gate reports without a PAT")
     check("--stale-only" in regen, "a pin move reaching main regenerates only the stale reports")
     check(regen.count('ref: "${{ needs.plan.outputs.sha }}"') == 2
           and "github.event.inputs.base || github.ref" in regen,
@@ -591,51 +587,6 @@ def test_stale_reports_and_the_post_merge_plan():
     finally:
         shutil.rmtree(root)
 
-
-def _run(name, status="COMPLETED", conclusion="SUCCESS", wf="checks", at="2026-11-16T10:00:00Z"):
-    return {"__typename": "CheckRun", "name": name, "workflowName": wf, "status": status,
-            "conclusion": conclusion if status == "COMPLETED" else "", "startedAt": at}
-
-
-def test_readiness():
-    print("test_readiness")
-    green = [_run("python"), _run("experiments"), _run("web"), _run("gate", wf="pin-compat"),
-             _run("blis checks", wf="blis"), _run("scan", wf="private-names"),
-             _run("nightly", conclusion="SKIPPED", wf="blis"), _run("preview", wf="pages")]
-    check(B.readiness(green)["state"] == "green", "every check passed: green")
-    check(B.readiness(green + [_run("ready", status="IN_PROGRESS", wf="pin-ready")])["state"] == "green",
-          "the waiter's own run does not hold the PR pending")
-    r = B.readiness(green[1:])
-    check(r["state"] == "pending" and r["missing"] == ["python"],
-          f"a required check that has not reported yet keeps it pending: {r}")
-    r = B.readiness(green + [_run("smoke x", status="IN_PROGRESS", wf="pin-compat")])
-    check(r["state"] == "pending", "a running check keeps it pending")
-    r = B.readiness(green + [_run("web", conclusion="FAILURE", at="2026-11-16T11:00:00Z")])
-    check(r["state"] == "red" and r["failed"] == ["checks / web"], f"a newer failed run is red: {r}")
-    r = B.readiness([_run("web", conclusion="CANCELLED", at="2026-11-16T09:00:00Z")] + green)
-    check(r["state"] == "green", "an older cancelled run is harmless when a later one passed")
-    r = B.readiness(green + [_run("web", conclusion="CANCELLED", at="2026-11-16T11:00:00Z")])
-    check(r["state"] == "red", "a newer cancelled run blocks, as branch protection reads it")
-    r = B.readiness([c for c in green if c["name"] != "blis checks"]
-                    + [_run("pr / blis checks", wf="blis")])
-    check(r["state"] == "green", "the pull_request form of the description check counts too")
-    r = B.readiness([c if c["name"] != "gate" else _run("gate", conclusion="SKIPPED", wf="pin-compat")
-                     for c in green])
-    check(r["state"] == "red", "a required check that only skipped did not pass")
-    r = B.readiness(green + [{"__typename": "StatusContext", "context": "ext", "state": "FAILURE"}])
-    check(r["state"] == "red", "a failed commit status is red")
-    with tempfile.TemporaryDirectory() as t:
-        f = os.path.join(t, "pr.json")
-        with open(f, "w") as fh:
-            json.dump({"headRefOid": "x", "statusCheckRollup": green}, fh)
-        import contextlib
-        import io
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            B.main(["ready", f])
-        check(json.loads(out.getvalue())["state"] == "green", "`blis_pin.py ready` reads gh pr view JSON")
-
-
 if __name__ == "__main__":
     test_version_ordering()
     test_go_mod_versions()
@@ -655,6 +606,5 @@ if __name__ == "__main__":
     test_smoke_verdicts()
     test_workflow_wiring()
     test_stale_reports_and_the_post_merge_plan()
-    test_readiness()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

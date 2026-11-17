@@ -195,7 +195,7 @@ jobs:
     permissions:
       pull-requests: write
     env:
-      GH_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ secrets.PIN_BOT_TOKEN || secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
@@ -262,32 +262,3 @@ jobs:
           [ "$SMOKE" = skipped ] && [ "$REPORTS" = "[]" ] && SMOKE=success
           [ "$BUILD" = success ] && [ "$SMOKE" = success ] || {
             echo "the code does not fit the new stack yet -- see the failed jobs above"; exit 1; }
-
-  # On a pin PR's branch, hand over to pin-ready.yml: it waits for the other checks, then
-  # regenerates the reports or marks the PR ready. A newer dispatch cancels an older wait.
-  next:
-    needs: gate
-    if: >-
-      always() && startsWith(github.head_ref || github.ref_name, 'bump/blis-pin-') &&
-      (github.event_name != 'pull_request' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write           # dispatch pin-ready.yml
-      contents: read           # see whether the default branch has it
-    env:
-      GH_TOKEN: ${{ github.token }}
-      BRANCH: ${{ github.head_ref || github.ref_name }}
-      PR: ${{ github.event.pull_request.number || inputs.pr }}
-      DEFAULT: ${{ github.event.repository.default_branch }}
-    steps:
-      - name: Dispatch pin-ready.yml
-        run: |
-          set -euo pipefail
-          [[ "$PR" =~ ^[0-9]+$ ]] || { echo "no PR number to hand to pin-ready"; exit 0; }
-          # GitHub dispatches only a workflow on the default branch: until pin-ready.yml lands,
-          # say so (the PR that adds it is marked ready by hand) rather than fail the PR's checks.
-          if ! gh api "repos/$GITHUB_REPOSITORY/contents/.github/workflows/pin-ready.yml?ref=$DEFAULT" >/dev/null 2>&1; then
-            echo "::warning::pin-ready.yml is not on $DEFAULT yet, so it cannot be dispatched"; exit 0
-          fi
-          gh workflow run pin-ready.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH" -f pr="$PR"

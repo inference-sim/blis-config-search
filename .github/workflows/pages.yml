@@ -32,20 +32,14 @@ on:
       - "scripts/**"
       - "report/**"
       - ".github/workflows/pages.yml"
-  # With `pr`, builds this branch and publishes it as that PR's preview: the pin-bump automation's
-  # pushes (GITHUB_TOKEN) start no pull_request run, so it dispatches this instead.
   workflow_dispatch:
-    inputs:
-      pr:
-        description: "pull request number to publish this branch's build as the preview of (blank = build only)"
-        required: false
 
 permissions:
   contents: read
 
 concurrency:
   # Per PR, not shared: a group keeps one pending run and cancels older ones, which dropped batch previews.
-  group: pages-${{ github.event.pull_request.number || inputs.pr || github.ref }}
+  group: pages-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -138,10 +132,9 @@ jobs:
     # always(): on `closed` the build job is skipped, and a skipped `needs` would skip this too.
     if: >-
       always() &&
-      ((github.event_name == 'pull_request' &&
-        github.event.pull_request.head.repo.full_name == github.repository &&
-        (github.event.action == 'closed' || needs.build.result == 'success')) ||
-       (github.event_name == 'workflow_dispatch' && inputs.pr != '' && needs.build.result == 'success'))
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (github.event.action == 'closed' || needs.build.result == 'success')
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -160,9 +153,7 @@ jobs:
           source-dir: dist
           preview-branch: gh-pages
           umbrella-dir: pr-preview
-          # auto: deploy on open/sync, remove on close. A dispatch is not a PR event, so it says deploy.
-          action: ${{ github.event_name == 'workflow_dispatch' && 'deploy' || 'auto' }}
-          pr-number: ${{ inputs.pr }}
+          action: auto           # deploy on open/sync, remove on close
           qr-code: "false"
           # Its wait fails when a newer gh-pages push supersedes the build, so the steps below wait and comment.
           wait-for-pages-deployment: false
@@ -223,7 +214,6 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@67d0dec7b07ed060a405f9b2a64b8ab319fdd7db  # v2.9.2
         with:
           header: pr-preview
-          number: ${{ inputs.pr }}
           message: |
             [PR Preview Action](https://github.com/rossjrw/pr-preview-action) ${{ steps.pr-preview.outputs.action-version }}
             :---:

@@ -10,17 +10,9 @@ on:
     types: [opened, edited, synchronize, reopened]
   push:
     branches: [main]
-  # The pin-bump automation's pushes (GITHUB_TOKEN) start no pull_request run, so it dispatches
-  # this with the PR's number (scripts/dispatch_pr_checks.sh); the scan then reads that PR.
-  workflow_dispatch:
-    inputs:
-      pr:
-        description: "pull request number whose commits, title and body to scan"
-        required: true
 
 permissions:
   contents: read
-  pull-requests: read
 
 jobs:
   scan:
@@ -29,27 +21,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Read the dispatched pull request
-        if: github.event_name == 'workflow_dispatch'
-        env: { GH_TOKEN: "${{ github.token }}", PR: "${{ inputs.pr }}" }
-        run: |
-          set -euo pipefail
-          [[ "$PR" =~ ^[0-9]+$ ]] || { echo "::error::not a PR number: $PR"; exit 1; }
-          gh api "repos/${{ github.repository }}/pulls/$PR" > "$RUNNER_TEMP/pr.json"
-          jq -r .title "$RUNNER_TEMP/pr.json" > "$RUNNER_TEMP/pr-title"
-          jq -r .body "$RUNNER_TEMP/pr.json" > "$RUNNER_TEMP/pr-body"
-          head="$(jq -r .head.sha "$RUNNER_TEMP/pr.json")"
-          # Scan what the PR holds now: the dispatch ref must be the PR's head.
-          [ "$head" = "$(git rev-parse HEAD)" ] || {
-            echo "::error::dispatched at $(git rev-parse HEAD), but PR $PR's head is $head"; exit 1; }
-          { echo "PR_BASE=$(jq -r .base.sha "$RUNNER_TEMP/pr.json")"; echo "PR_HEAD=$head"; } >> "$GITHUB_ENV"
       - name: Scan
         env:
           PATTERNS: ${{ secrets.INTERNAL_NAME_PATTERNS }}
           TITLE: ${{ github.event.pull_request.title }}
           BODY: ${{ github.event.pull_request.body }}
-          BASE: ${{ github.event.pull_request.base.sha || env.PR_BASE || github.event.before }}
-          HEAD: ${{ github.event.pull_request.head.sha || env.PR_HEAD || github.sha }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
           IS_FORK: ${{ github.event.pull_request.head.repo.fork || 'false' }}
         run: |
           set -uo pipefail
@@ -81,9 +59,6 @@ jobs:
           for c in $(git rev-list $range); do
             git log -1 --format=%B "$c" | match "commit message $c" || fail=1
           done
-          # A dispatched run read the title and body from the PR into files (above).
-          [ -f "$RUNNER_TEMP/pr-title" ] && TITLE="$(cat "$RUNNER_TEMP/pr-title")"
-          [ -f "$RUNNER_TEMP/pr-body" ] && BODY="$(cat "$RUNNER_TEMP/pr-body")"
           printf '%s\n' "${TITLE:-}" | match "pull request title" || fail=1
           printf '%s\n' "${BODY:-}" | match "pull request body" || fail=1
           if [ "$fail" -ne 0 ]; then echo "private names found at the locations above"; exit 1; fi

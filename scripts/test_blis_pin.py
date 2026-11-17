@@ -518,7 +518,7 @@ def test_workflow_wiring():
               f"{name} dispatches the checks on what it pushed, with GITHUB_TOKEN alone")
     disp = open(os.path.join(ROOT, "scripts", "dispatch_pr_checks.sh")).read()
     for w in ("checks.yml", "pin-compat.yml", "blis.yml", "private-names.yml", "pages.yml"):
-        check(f"gh workflow run {w}" in disp, f"dispatch_pr_checks.sh starts {w}")
+        check(f"\nrun {w}" in disp, f"dispatch_pr_checks.sh starts {w}")
         text = open(os.path.join(wf, w)).read()
         check("workflow_dispatch:" in text, f"{w} can be dispatched")
     check("--stale-only" in regen, "a pin move reaching main regenerates only the stale reports")

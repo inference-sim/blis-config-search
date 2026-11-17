@@ -12,13 +12,32 @@
 #   blis.yml          blis checks (description X14, commit policy, workflow lint, ...)
 #   private-names.yml scan
 #   pages.yml         the PR's preview
+# GitHub dispatches only a workflow whose default-branch copy has a workflow_dispatch trigger, so a
+# workflow that is not dispatchable there yet (the PR that adds the trigger) is skipped with a
+# warning; any other failed dispatch fails this script.
 set -eu
 branch="$1"; pr="$2"; base="$3"
 case "$pr" in ''|*[!0-9]*) echo "not a PR number: $pr" >&2; exit 1;; esac
+repo="${GITHUB_REPOSITORY:?}"
 
-gh workflow run checks.yml --ref "$branch" -f base="$base"
-gh workflow run pin-compat.yml --ref "$branch" -f base="$base" -f pr="$pr"
-gh workflow run blis.yml --ref "$branch" -f pr="$pr"
-gh workflow run private-names.yml --ref "$branch" -f pr="$pr"
-gh workflow run pages.yml --ref "$branch" -f pr="$pr"
-echo "dispatched every check of PR $pr on $branch"
+dispatchable() {
+  gh api -H "Accept: application/vnd.github.raw" \
+    "repos/$repo/contents/.github/workflows/$1?ref=$base" 2>/dev/null | grep -q '^  workflow_dispatch:'
+}
+
+failed=""
+run() {
+  wf="$1"; shift
+  if ! dispatchable "$wf"; then
+    echo "::warning::$wf has no workflow_dispatch on $base yet, so it cannot be dispatched; it runs once this lands"
+    return 0
+  fi
+  gh workflow run "$wf" --repo "$repo" --ref "$branch" "$@" || failed="$failed $wf"
+}
+run checks.yml -f base="$base"
+run pin-compat.yml -f base="$base" -f pr="$pr"
+run blis.yml -f pr="$pr"
+run private-names.yml -f pr="$pr"
+run pages.yml -f pr="$pr"
+[ -z "$failed" ] || { echo "::error::could not dispatch:$failed" >&2; exit 1; }
+echo "dispatched the checks of PR $pr on $branch"

@@ -139,6 +139,11 @@ numbers, dispatch `regen-reports.yml` with `base=<branch>` and `force` on. A for
 nothing to change says, for each batch, "reproduced every report … byte-for-byte -- no PR needed"
 and commits nothing, which is also how to check that a regeneration is deterministic.
 
+GitHub dispatches only a workflow whose copy on the default branch has a `workflow_dispatch`
+trigger. So the PR that adds a dispatch trigger, or adds `pin-ready.yml`, cannot be driven this
+way: the script and `pin-compat` skip those workflows with a warning, and that PR is regenerated
+and marked ready by hand. Every later bump runs the whole flow.
+
 A person pushing to the bot's branch starts the usual `pull_request` runs. Because the PR's
 author is `github-actions[bot]`, GitHub may hold those runs for a maintainer's approval. The
 dispatched runs above are never held.

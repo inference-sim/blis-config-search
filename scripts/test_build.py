@@ -928,7 +928,13 @@ def test_explore_data():
                        if "endpoint_picker_config" in l}
             check(routers and all(os.path.isfile(os.path.normpath(os.path.join(ROOT, "scenarios", r))) for r in routers),
                   "every shown router path, per-report or stock routing/, resolves from scenarios/")
-            check(explore_data.build(real)["defaults"].get("max_num_batched_tokens") == 8192,
+        # Hermetic: the committed reports' knob sets move with each regeneration.
+        with tempfile.TemporaryDirectory() as led:
+            with open(os.path.join(led, "runs.jsonl"), "w") as f:
+                for c in (4, 8):
+                    f.write(json.dumps({"config": {"concurrency": c},
+                                        "deployment": {"engine": {"max_num_batched_tokens": 8192}}}) + "\n")
+            check(explore_data.defaults(led, ["max_num_batched_tokens"]) == {"max_num_batched_tokens": 8192},
                   "an unset knob's default is read from the deployments it ran")
         ps = {"blis": "v9.0.0", "catalog": "1.0.0", "registry": "v2.0.0",
               "resolved": {"blis": {"commit": "a" * 40}, "catalog": {"commit": "b" * 40}}}

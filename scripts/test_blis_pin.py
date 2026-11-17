@@ -456,11 +456,11 @@ def test_workflow_wiring():
     check("scripts/blis_pin.py changed" in regen,
           "a comment-only pins.env edit must not queue a campaign")
     check("fail-fast: false" in regen, "one failed report must not cancel the others")
-    check("blis_pin.py same-stack" in regen and '"$GITHUB_SHA..HEAD" -- "reports/$id"' in regen,
+    check("blis_pin.py same-stack" in regen and '"$SWEPT..HEAD" -- "reports/$id"' in regen,
           "a report re-swept on main during the campaign keeps main's copy")
     check('[ ! -d "reports/$id" ]' in regen and 'stale="$stale $id"' in regen,
           "a report removed, or re-swept on the old stack, on main mid-campaign is not swapped in")
-    check('git show "$GITHUB_SHA:pins.env"' in regen and "steps.stack.outputs.current == 'true'" in regen,
+    check('git show "$SWEPT:pins.env"' in regen and "steps.stack.outputs.current == 'true'" in regen,
           "a campaign whose pins moved on main mid-sweep opens no PR")
     check("always()" in regen, "batch PRs open even when some report jobs failed")
     check("scripts/test_blis_pin.py" in open(os.path.join(wf, "checks.yml")).read(),
@@ -517,6 +517,114 @@ def test_workflow_wiring():
               and "gh workflow run pin-compat.yml" in text
               and ("-f base=main" in text or '-f base="$BASE_BRANCH"' in text),
               f"{name} dispatches CI on its own PR, so the required gate reports without a PAT")
+    check("--stale-only" in regen, "a pin move reaching main regenerates only the stale reports")
+    import yaml
+    jobs = yaml.safe_load(regen)["jobs"]
+    swept = [j for j, d in jobs.items() if any(
+        (st.get("with") or {}).get("ref") == "${{ needs.plan.outputs.sha }}" for st in d.get("steps") or [])]
+    check(sorted(swept) == ["build", "merge", "regen"] and "github.event.inputs.base || github.ref" in regen,
+          "every regen job sweeps the base's pins, not the dispatch ref's")
+
+
+PINS_NEW = {"BLIS_REF": "v2.0.0", "BLIS_SHA": "b" * 40, "ROUTER_REF": "r2", "SUBSTRATE_REF": "s2"}
+
+
+def _write_stack(root, rid, blis, router, substrate, commit=None):
+    path = os.path.join(root, "reports", rid, "scenario.json")
+    with open(path) as f:
+        scen = json.load(f)
+    scen["pinned_stack"] = {"blis": blis, "router": router, "substrate": substrate,
+                            "engine_version": "0.32.0", "data": "embedded"}
+    if commit:
+        scen["pinned_stack"]["resolved"] = {"blis": {"commit": commit, "sha256": "aa"}}
+    with open(path, "w") as f:
+        json.dump(scen, f)
+
+
+def test_stale_reports_and_the_post_merge_plan():
+    """A pin move regenerates what the new pins did not price, and nothing once all are current.
+
+    This is the post-merge guarantee: a pin PR regenerates its reports on its own branch, so the
+    push of that merge to main plans no report and regen-reports opens no PR."""
+    print("test_stale_reports_and_the_post_merge_plan")
+    root = _fake_repo()
+    try:
+        with open(os.path.join(root, "pins.env"), "w") as f:
+            f.write("# pins\n" + "".join(f"{k}={v}\n" for k, v in PINS_NEW.items()))
+        every = B.report_ids(root)
+        check(B.stale_ids(root) == every, "before regeneration every report carries the old stack")
+        check(sorted(r["id"] for r in B.plan(root, stale_only=True)["reports"])
+              == sorted(r["id"] for r in B.plan(root)["reports"]),
+              "a fresh pin move plans every runnable report")
+
+        # Regenerate two reports onto the new stack: only the rest stay stale.
+        _write_stack(root, "exp-a", "v2.0.0", "r2", "s2", commit="b" * 40)
+        _write_stack(root, "exp-b", "v2.0.0", "r2", "s2")
+        check("exp-a" not in B.stale_ids(root) and "exp-b" not in B.stale_ids(root),
+              "a report on the pinned labels (and commit, where recorded) is current")
+        planned = [r["id"] for r in B.plan(root, stale_only=True)["reports"]]
+        check("exp-a" not in planned and "exp-c" in planned,
+              f"the stale-only plan skips the current reports and keeps the rest: {planned}")
+
+        # Each label, and a recorded commit, is part of the stack.
+        for rid, args, why in (
+                ("exp-c", ("v2.0.0", "r1", "s2"), "an old router ref"),
+                ("many-0", ("v2.0.0", "r2", "s1"), "an old substrate ref"),
+                ("many-1", ("v1.0.0", "r2", "s2"), "an old blis ref")):
+            _write_stack(root, rid, *args)
+            check(rid in B.stale_ids(root), f"{why} is stale")
+        _write_stack(root, "many-2", "v2.0.0", "r2", "s2", commit="c" * 40)
+        check("many-2" in B.stale_ids(root), "a binary built from another commit is stale, whatever its tag")
+
+        # The whole gallery regenerated: the merge's push plans nothing.
+        for rid in every:
+            _write_stack(root, rid, "v2.0.0", "r2", "s2", commit="b" * 40)
+        check(B.stale_ids(root) == [], "after regeneration no report is stale")
+        check(B.plan(root, stale_only=True)["reports"] == [] and B.plan(root, stale_only=True)["batches"] == [],
+              "after the pin PR merges, main's regen-reports plans no report and opens no PR")
+        check(len(B.plan(root)["reports"]) > 0, "a forced (rehearsal) plan still covers every report")
+        rc = B.main(["stale", "--root", root])
+        check(rc == 0, "`blis_pin.py stale` exits 0 when every report is current")
+        _write_stack(root, "exp-a", "v1.0.0", "r2", "s2")
+        check(B.main(["stale", "--root", root]) == 1, "`blis_pin.py stale` exits 1 while one is stale")
+    finally:
+        shutil.rmtree(root)
+
+def test_shards_fit_a_long_report_into_jobs():
+    print("test_shards_fit_a_long_report_into_jobs")
+    root = _fake_repo()
+    try:
+        with open(os.path.join(root, "reports", "exp-a", "runs.jsonl"), "w") as f:
+            f.write("".join(json.dumps({"wall_s": 3600}) + "\n" for _ in range(10)))   # 10 h serial
+        check(B.shards_for("exp-a", 4, 6 * 3600, growth=1.0, root=root) == 1, "10 h at 4 fits one 6 h job")
+        check(B.shards_for("exp-a", 1, 6 * 3600, growth=1.0, root=root) == 2, "10 h at 1 needs two 6 h jobs")
+        check(B.shards_for("exp-a", 2, 6 * 3600, growth=3.0, root=root) == 3, "the growth margin adds jobs")
+        check(B.shards_for("orphan", 1, 6 * 3600, root=root) == 1, "a report with no ledger gets one job")
+    finally:
+        shutil.rmtree(root)
+
+
+def test_a_pending_regeneration_is_not_planned_on_a_pin_push():
+    """A stale report whose regeneration runs in a follow-up PR is not re-run by main's push."""
+    print("test_a_pending_regeneration_is_not_planned_on_a_pin_push")
+    root = _fake_repo()
+    try:
+        with open(os.path.join(root, "pins.env"), "w") as f:
+            f.write("".join(f"{k}={v}\n" for k, v in PINS_NEW.items()))
+        for rid in B.report_ids(root):
+            _write_stack(root, rid, "v2.0.0", "r2", "s2", commit="b" * 40)
+        _write_stack(root, "exp-a", "v1.0.0", "r2", "s2")
+        _write_stack(root, "exp-c", "v1.0.0", "r2", "s2")
+        with open(os.path.join(root, "reports", "exp-a", B.PENDING), "w") as f:
+            f.write("regenerated in a follow-up PR\n")
+        p = B.plan(root, stale_only=True)
+        check([r["id"] for r in p["reports"]] == ["exp-c"],
+              f"the pending report is held back and the other stale one still planned: {p['reports']}")
+        check([x["id"] for x in p["pending"]] == ["exp-a"], "the plan names the held-back report")
+        check("exp-a" in [r["id"] for r in B.plan(root)["reports"]],
+              "a forced plan still regenerates it (that is what the follow-up runs)")
+    finally:
+        shutil.rmtree(root)
 
 
 if __name__ == "__main__":
@@ -537,5 +645,8 @@ if __name__ == "__main__":
     test_smoke_pairs()
     test_smoke_verdicts()
     test_workflow_wiring()
+    test_stale_reports_and_the_post_merge_plan()
+    test_shards_fit_a_long_report_into_jobs()
+    test_a_pending_regeneration_is_not_planned_on_a_pin_push()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

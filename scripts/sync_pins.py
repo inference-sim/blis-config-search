@@ -5,7 +5,7 @@
     python3 -I scripts/sync_pins.py              # rewrite the derived block in pins.env
 
 WHY THIS EXISTS. pins.env had KERNEL_REF as a hand-typed line, and it drifted: it read v0.3.0
-while inference-sim v0.15.0's go.mod requires blis-latency-kernel v0.5.0. That is a COST MODEL
+while inference-sim's v0.15.0's go.mod requires blis-latency-kernel v0.5.0. That is a COST MODEL
 version, so the stale pin misreported what priced a latency number rather than merely mislabeling
 a pill. The fix is to stop typing what go.mod already knows.
 

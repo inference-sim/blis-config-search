@@ -162,6 +162,14 @@ class RouterConfigs:
         return f"{v}.yaml" if v else None
 
 
+def source_record(source):
+    """Where the router files came from, as a report records it: a Go module source
+    ("<module>@<version>") becomes {module, version}; a checkout path
+    stays {source}. A version stays a field of its own, not a literal in the text (X23)."""
+    mod, at, ver = (source or "").rpartition("@")
+    return {"module": mod, "version": ver} if at and mod and ver else {"source": source}
+
+
 def open_checkout(path=None, verify=True, blis=None):
     """The router's reference configs. Order: `path`, else $ROUTER_CONFIGS_DIR (developer override: a
     router checkout), else the simulator `blis` (`blis router-configs --json`). None when none of

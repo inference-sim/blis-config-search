@@ -16,7 +16,8 @@ the pin is what starts hours of regeneration against it.
   python3 -I scripts/blis_pin.py bump v0.15.0                 # rewrite pins.env
   python3 -I scripts/blis_pin.py changed OLD_PINS.env         # which pins a push moved
   python3 -I scripts/blis_pin.py same-stack DIR DIR           # exit 0 if two reports share a stack
-  python3 -I scripts/blis_pin.py plan [--only ID,...]         # what to regenerate, in batches
+  python3 -I scripts/blis_pin.py plan [--only ID,...] [--stale-only]   # what to regenerate, in batches
+  python3 -I scripts/blis_pin.py stale                        # reports the pins did not price; exit 1 if any
   python3 -I scripts/blis_pin.py regen ID --blis B --catalog C --registry R --out DIR   # C, R: the pinned blis-substrate checkout's catalog/ and registry/
   python3 -I scripts/blis_pin.py summary --old DIR --new DIR ID [ID ...]
   python3 -I scripts/blis_pin.py smoke [ID ...] --blis B --catalog C --registry R [--corpus F]
@@ -37,6 +38,7 @@ regeneration run unattended and still be reviewed as a plain diff of numbers.
 """
 import argparse
 import json
+import math
 import os
 import re
 import shutil
@@ -190,6 +192,47 @@ def same_stack(a_dir, b_dir):
     return not (sha(a) and sha(b)) or sha(a) == sha(b)
 
 
+def is_current(scen_dir, pins=None):
+    """Whether the report in `scen_dir` was priced by the stack pins.env names now.
+
+    A report records the pins that priced it in scenario.json's `pinned_stack` (run_experiment's
+    _pinned_stack): `blis` is BLIS_REF, `router` ROUTER_REF and `substrate` SUBSTRATE_REF, and
+    `resolved.blis.commit`, when the binary's build info carried it, the commit it was built from.
+    All three labels must match, and the commit too when it is recorded. VLLM_REF has no label of
+    its own: BLIS_SHA determines it (pins.env's derived block). A label that is missing is not a
+    match, so a report written before a label existed counts as stale and is regenerated."""
+    pins = pins if pins is not None else read_pins()
+    st = (_load_json(os.path.join(scen_dir, "scenario.json"), {}) or {}).get("pinned_stack") or {}
+    want = {"blis": pins.get("BLIS_REF"), "router": pins.get("ROUTER_REF"),
+            "substrate": pins.get("SUBSTRATE_REF")}
+    if any(not v or st.get(k) != v for k, v in want.items()):
+        return False
+    commit = ((st.get("resolved") or {}).get("blis") or {}).get("commit")
+    return not commit or commit == pins.get("BLIS_SHA")
+
+
+# A committed report whose regeneration is under way elsewhere (a follow-up PR) carries this file,
+# stating why and where. A push to main does not plan it, so the run that would repeat a known
+# failure never starts; the follow-up's regenerated directory replaces it whole, file included.
+PENDING = "REGENERATION_PENDING"
+
+
+def pending(run_id, root=ROOT):
+    """The reason a report's regeneration is pending elsewhere, or None."""
+    try:
+        with open(os.path.join(root, "reports", run_id, PENDING)) as f:
+            return f.read().strip() or "pending"
+    except OSError:
+        return None
+
+
+def stale_ids(root=ROOT, pins=None):
+    """The committed reports not priced by the pinned stack: what a pin move must regenerate."""
+    pins = pins if pins is not None else read_pins(os.path.join(root, "pins.env"))
+    return [i for i in report_ids(root)
+            if not is_current(os.path.join(root, "reports", i), pins)]
+
+
 # ---------------------------------------------------------------------------------- plan
 
 def _load_yaml(path):
@@ -248,8 +291,12 @@ def _slug(s):
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-") or "misc"
 
 
-def plan(root=ROOT, only=None, max_batch=MAX_BATCH):
+def plan(root=ROOT, only=None, max_batch=MAX_BATCH, stale_only=False):
     """Every committed report, classified, and grouped into PR-sized batches.
+
+    With `stale_only`, only the reports the pinned stack did not price (stale_ids). That is what a
+    pin move reaching main regenerates: a bump PR regenerates its reports on its own branch before
+    it merges, so after the merge none is stale and the run opens nothing.
 
     Batches group by MODEL, then split to at most `max_batch` reports. A reviewer compares a
     model's reports against each other (the same model across hardware or budget), so keeping
@@ -260,6 +307,11 @@ def plan(root=ROOT, only=None, max_batch=MAX_BATCH):
         if unknown:
             raise SystemExit(f"no committed report named {', '.join(unknown)}")
         ids = [i for i in ids if i in set(only)]
+    held = []
+    if stale_only:
+        stale = set(stale_ids(root))
+        held = [i for i in ids if i in stale and pending(i, root)]
+        ids = [i for i in ids if i in stale and i not in held]
     entries = [classify(i, root) for i in ids]
     runnable = [e for e in entries if e["kind"] != "orphan"]
     by_model = {}
@@ -276,7 +328,7 @@ def plan(root=ROOT, only=None, max_batch=MAX_BATCH):
     for e in entries:
         e["batch"] = batch_of.get(e["id"])
     return {"reports": runnable, "orphans": [e for e in entries if e["kind"] == "orphan"],
-            "batches": batches}
+            "batches": batches, "pending": [{"id": i, "why": pending(i, root)} for i in held]}
 
 
 # ---------------------------------------------------------------------------------- regen
@@ -286,8 +338,27 @@ def _run(cmd):
     subprocess.run(cmd, check=True, cwd=ROOT)
 
 
-def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1, fields=None):
+def shards_for(run_id, max_parallel, budget_s, growth=3.0, root=ROOT):
+    """How many jobs one report's regeneration needs to fit `budget_s` each at `max_parallel`.
+
+    Estimated from the committed ledger's serial BLIS time (`wall_s` summed) times `growth`, the
+    margin for a release or a spec that makes runs longer (the AgentX recipe's 3600 s window took
+    2 to 3 times the 900 s one). A report with no recorded time gets one job."""
+    path = os.path.join(root, "reports", run_id, "runs.jsonl")
+    try:
+        with open(path) as f:
+            serial = sum(json.loads(l).get("wall_s") or 0 for l in f if l.strip())
+    except OSError:
+        return 1
+    return max(1, math.ceil(serial * growth / (max(1, max_parallel) * budget_s)))
+
+
+def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1, fields=None,
+          shard=None, runs_from=()):
     """Regenerate ONE report into <out>/<run_id>/ from its source, at the pins on disk.
+
+    `shard` "I/N" runs only that share of its runs (run_experiment --shard); `runs_from` lists
+    the shards' ledgers, so the report is assembled from them without running BLIS.
 
     Writes into a fresh `out` rather than over reports/: the caller swaps the directory in whole,
     so a file the new run no longer writes cannot survive from the old one."""
@@ -303,7 +374,9 @@ def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1, fi
         _run([py, "-I", "scripts/fetch_corpus.py", spec, "--catalog", catalog])
     _run([py, "-I", "scripts/run_experiment.py", spec, "--blis", blis, "--catalog", catalog,
           "--registry", registry, "--out", out, "--timeout", str(timeout),
-          "--max-parallel", str(max_parallel), *fargs])
+          "--max-parallel", str(max_parallel), *fargs,
+          *(["--shard", shard] if shard else []),
+          *[a for p in runs_from for a in ("--runs-from", os.path.abspath(p))]])
     shutil.rmtree(os.path.join(out, run_id, "scenarios"), ignore_errors=True)
     _check_coherent(os.path.join(out, run_id))
     return os.path.join(out, run_id)
@@ -665,6 +738,12 @@ def main(argv=None):
     p = sub.add_parser("plan", help="classify every committed report and batch it into PRs")
     p.add_argument("--only", help="comma-separated run ids (default: every committed report)")
     p.add_argument("--max-batch", type=int, default=MAX_BATCH)
+    p.add_argument("--stale-only", action="store_true",
+                   help="only the reports the pinned stack did not price")
+    p.add_argument("--max-parallel", type=int, default=1, help="BLIS runs at once per job, for --budget-s")
+    p.add_argument("--budget-s", type=float, default=0, help="seconds of BLIS per job; >0 shards long reports")
+    st = sub.add_parser("stale", help="list the reports the pinned stack did not price; exit 1 if any")
+    st.add_argument("--root", default=ROOT)
     r = sub.add_parser("regen", help="regenerate one report into --out/<id>/")
     r.add_argument("id")
     r.add_argument("--blis", required=True)
@@ -674,6 +753,9 @@ def main(argv=None):
     r.add_argument("--timeout", type=int, default=1800)
     r.add_argument("--max-parallel", type=int, default=1)
     r.add_argument("--fields", help="the engine's field list (the pinned blis-vllm release's fields.json)")
+    r.add_argument("--shard", help="I/N: run only this share of the report's runs")
+    r.add_argument("--runs-from", action="append", default=[], dest="runs_from",
+                   help="a shard's runs.jsonl to assemble the report from (repeatable)")
     m = sub.add_parser("modules", help="print the blis-* modules a go.mod requires, one per line")
     m.add_argument("go_mod")
     k = sub.add_parser("smoke", help="re-run a few ledger rows per report on a new binary")
@@ -711,11 +793,20 @@ def main(argv=None):
         sys.exit(0 if same_stack(a.a, a.b) else 1)
     elif a.cmd == "plan":
         only = [x for x in (a.only or "").replace(" ", ",").split(",") if x]
-        print(json.dumps(plan(only=only or None, max_batch=a.max_batch)))
+        out = plan(only=only or None, max_batch=a.max_batch, stale_only=a.stale_only)
+        for r in out["reports"]:
+            r["shards"] = shards_for(r["id"], a.max_parallel, a.budget_s) if a.budget_s > 0 else 1
+        print(json.dumps(out))
+    elif a.cmd == "stale":
+        ids = stale_ids(a.root)
+        for i in ids:
+            print(i)
+        print(f"{len(ids)} report(s) not priced by the pinned stack", file=sys.stderr)
+        return 1 if ids else 0
     elif a.cmd == "regen":
         regen(a.id, os.path.abspath(a.blis), os.path.abspath(a.catalog),
               os.path.abspath(a.registry), os.path.abspath(a.out), a.timeout, a.max_parallel,
-              os.path.abspath(a.fields) if a.fields else None)
+              os.path.abspath(a.fields) if a.fields else None, a.shard, a.runs_from)
     elif a.cmd == "modules":
         with open(a.go_mod) as f:
             for mod, ver in sorted(go_mod_versions(f.read()).items()):

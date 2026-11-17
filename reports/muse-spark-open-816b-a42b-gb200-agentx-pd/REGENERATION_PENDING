@@ -1,0 +1,1 @@
+Regenerates against the M3.0 simulator in M3.1. Priced by an older simulator than pins.env names (see scenario.json pinned_stack.blis); its sharded regeneration on the earlier pin (regen/gb200-agentx-pd-v0.17.1) is superseded by that one.

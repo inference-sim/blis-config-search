@@ -81,6 +81,7 @@ It prints, per knob: whether it **applies** to this exact combination, the value
 |---|---|
 | catalog model row | `arch`, `experts`, `top_k`, `attn_kind`, `context`, `quant` |
 | the model's **`graph.yaml`** | the **declared speculator and its max depth** (so whether drafting is legal at all, and the K ceiling), the sliding window, and the `bytes_by_cache_dtype` tables — *which KV dtypes this model is priced for* |
+| the model's **`model.yaml`** and the registry's acceptance profiles | its **drafters** (the graph's speculator, and each separate drafter entry that names the model in its `targets:`), and for each whether an acceptance profile has its exact key at this workload's category and thinking mode, with the profile set and source |
 | the hardware entry | `ComputeCapability` → the capability family that gates the per-dtype KV table, plus memory for the footprint floor |
 
 **The catalog row alone is not enough**, and this is the trap: it carries no speculator, no
@@ -269,6 +270,15 @@ and note in a `#` comment that the grid was bounded. Do not silently drop a cont
 - **Routing is a file**, listed under `router.endpoint_picker_config` (see `routing/`). A new
   policy is a new file. Overrides edit fields the base file already has, against one base.
 - **`speculative` needs both `method` and `num_spec_tokens`.** Acceptance comes from the registry.
+  Draft only with a drafter `knob_profile.py` marks as applying. A separate drafter goes in
+  `draft_model: [<its catalog name>]`; leave `draft_model` out to draft with the graph's own
+  speculator.
+- **Keep the K=0 control in the drafting grid:** `num_spec_tokens: [0, 1, 3]`. K=0 expands to one
+  drafting-off arm, which needs no acceptance.
+- **Say when an acceptance is borrowed.** The profile reports only exact profiles. If you sweep a
+  drafter without one, the simulator may borrow another drafter's or another K's (D8). Write a `#`
+  comment saying the arm's acceptance is borrowed, from which profile, and that it is not
+  measured for this drafter. The run's Result records the profile it used.
 - **A replay workload is already fully described by the catalog.** Naming it names all of it.
 
 ### Replay workloads: state the corpus path, nothing else
@@ -313,8 +323,8 @@ and a short plain-language summary of the experiment's story.
 
 - **Inferring architecture from a name.** Read `arch` from the catalog. A dense model with a `dp`
   grid fails every run.
-- **A drafting sweep on a model with no speculator.** Every run is refused; the ledger then shows
-  "drafter: off" beside "draft tokens: 1". Check the graph first.
+- **A drafting sweep on a model with no drafter.** Every run is refused; the ledger then shows
+  "drafter: off" beside "draft tokens: 1". Check the profile's drafters first.
 - **A grid that expands to nothing** because no combination hits `gpus`. The validator catches it;
   run it.
 - **Restating vLLM defaults** as swept values — it doubles the grid and measures nothing.

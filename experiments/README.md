@@ -105,7 +105,7 @@ sweeps:
 | `engine.block_size`, `enable_prefix_caching`, `gpu_memory_utilization`, `cache_dtype` | `cache_config.*` |
 | `engine.max_model_len`, `quantization` | `model_config.*` |
 | `engine.all2all_backend` | `parallel_config.all2all_backend` |
-| `engine.speculative.{method, num_spec_tokens}` | `speculative_config.{method, num_speculative_tokens}` |
+| `engine.speculative.{method, num_spec_tokens, draft_model}` | `speculative_config.{method, num_speculative_tokens, model}` |
 | `num-instances`, `prefill-instances`, `decode-instances` | `blis run` replica-count flags, not engine keys |
 | `router.*` | llm-d's EndpointPickerConfig, not an engine key |
 
@@ -211,11 +211,14 @@ engine:
 
 `speculative` is also nested and needs **both** `method` and `num_spec_tokens`; acceptance comes
 from the registry, not a knob. It carries seven fields at this pin (it held two before v0.14.0),
-but only `method` and `num_spec_tokens` change a run. The sampling fields
+and `method`, `num_spec_tokens` and `draft_model` change a run. The sampling fields
 (`draft_sample_method`, `rejection_sample_method`, `enable_adaptive_verification`,
-`kv_cache_dtype`) are recorded as the launch gave them and never re-price acceptance, and
-`draft_model` cannot run on any catalog model (the drafter comes from the model's graph), so the
-validator refuses a sweep over any of them.
+`kv_cache_dtype`) are recorded as the launch gave them and never re-price acceptance, so the
+validator refuses a sweep over any of them. `draft_model` names a separate drafter checkpoint by
+its catalog name. The validator refuses one the catalog does not resolve, and one that is not a
+drafter of the scenario's model in both directions: the model lists it under `drafters:` and it
+names the model under `targets:`. Leave it out to draft with the graph's own speculator.
+`num_spec_tokens: 0` is the drafting-off control, one arm whatever drafters the grid lists.
 
 ### Not every accepted knob is a lever
 

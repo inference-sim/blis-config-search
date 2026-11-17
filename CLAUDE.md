@@ -67,7 +67,10 @@ The validator and runner reach the simulator only through its commands (`scripts
 `blis schema`, `blis schema validate` and `blis catalog resolve`, and the field list in the file `--fields` names (`blis fields` replaces the file when it exists). Tests use the
 TEMPORARY stand-in `scripts/testdata/blis-m1/blis` until a pinned build has the commands. The
 site build (`build_catalog.py`), `knob_profile.py` and `fetch_corpus.py` still read a catalog
-checkout; see the M1 pull request for why. `test_build.py` reads `../inference-sim`'s go.mod.
+checkout; see the M1 pull request for why. A model's drafters and their exact-key acceptance
+profiles (`scripts/catalog_drafters.py`, used by `knob_profile.py` and the `draft_model` check) are
+read from a checkout until `blis catalog resolve` lists drafters and `blis acceptance` exists
+(inference-sim/inference-sim#2141). `test_build.py` reads `../inference-sim`'s go.mod.
 
 ### CI (`.github/workflows/`)
 

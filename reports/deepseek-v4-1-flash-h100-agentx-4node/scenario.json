@@ -70,7 +70,10 @@
     },
     "router": "v1.0.0-blis.4",
     "router_configs": {
-      "resolved": "github.com/llm-d/llm-d-router@v1.0.0-blis.4"
+      "resolved": {
+        "module": "github.com/llm-d/llm-d-router",
+        "version": "v1.0.0-blis.4"
+      }
     },
     "substrate": "v0.14.1"
   },

@@ -636,6 +636,51 @@ def test_readiness():
         check(json.loads(out.getvalue())["state"] == "green", "`blis_pin.py ready` reads gh pr view JSON")
 
 
+def test_same_results_ignores_only_run_provenance():
+    """A forced regeneration of a current report must change no committed byte.
+
+    Two sweeps of one spec on one stack differ only in each run's wall time and the simulator's
+    log timestamps; anything else is a real difference and must be swapped in."""
+    print("test_same_results_ignores_only_run_provenance")
+    src = os.path.join(ROOT, "reports", B.report_ids()[0])
+    with tempfile.TemporaryDirectory() as t:
+        a, b = os.path.join(t, "a"), os.path.join(t, "b")
+        shutil.copytree(src, a)
+        shutil.copytree(src, b)
+        check(B.same_results(a, b), "a copy has the same results")
+
+        def edit_ledger(d, fn):
+            p = os.path.join(d, "runs.jsonl")
+            rows = [json.loads(l) for l in open(p)]
+            for r in rows:
+                fn(r)
+            with open(p, "w") as f:
+                f.write("".join(json.dumps(r) + "\n" for r in rows))
+
+        def rerun(r):
+            r["wall_s"] = (r.get("wall_s") or 0) + 3.5
+            r["stderr_tail"] = (r.get("stderr_tail") or "") + 'time="2031-01-01T00:00:00Z" level=warning msg="x"'
+        edit_ledger(b, rerun)
+        c = os.path.join(t, "c")
+        shutil.copytree(a, c)
+        edit_ledger(c, lambda r: r.update(stderr_tail=(r.get("stderr_tail") or "")
+                                          + 'time="2040-05-05T05:05:05Z" level=warning msg="x"'))
+        check(B.same_results(c, b), "wall times and log timestamps alone are not a difference")
+
+        d = os.path.join(t, "d")
+        shutil.copytree(b, d)
+        edit_ledger(d, lambda r: r["metrics"].update(tokens_per_sec=(r["metrics"].get("tokens_per_sec") or 0) + 1)
+                    if isinstance(r.get("metrics"), dict) else None)
+        check(not B.same_results(b, d), "a changed metric is a difference")
+        e = os.path.join(t, "e")
+        shutil.copytree(a, e)
+        with open(os.path.join(e, "report.json"), "a") as f:
+            f.write(" ")
+        check(not B.same_results(a, e), "any byte outside the ledger is a difference")
+        os.remove(os.path.join(e, "report.json"))
+        check(not B.same_results(a, e), "a missing file is a difference")
+
+
 if __name__ == "__main__":
     test_version_ordering()
     test_go_mod_versions()
@@ -656,5 +701,6 @@ if __name__ == "__main__":
     test_workflow_wiring()
     test_stale_reports_and_the_post_merge_plan()
     test_readiness()
+    test_same_results_ignores_only_run_provenance()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

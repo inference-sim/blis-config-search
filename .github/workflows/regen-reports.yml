@@ -285,7 +285,7 @@ jobs:
           set -euo pipefail
           art="$RUNNER_TEMP/regen-artifacts"
           cp -r reports "$RUNNER_TEMP/old-reports"
-          ok=""; failed=""; superseded=""; removed=""; stale=""
+          ok=""; failed=""; superseded=""; removed=""; stale=""; same=""
           for id in $IDS; do
             if [ ! -d "reports/$id" ]; then
               # Deleted or renamed on main during the campaign: do not resurrect it.
@@ -299,6 +299,11 @@ jobs:
                 echo "::warning::reports/$id changed on main on the old stack during the run; re-run it by hand"
                 stale="$stale $id"
               fi
+            elif [ -f "$art/regen-$id/scenario.json" ] \
+               && python3 -I scripts/blis_pin.py same-results "reports/$id" "$art/regen-$id"; then
+              # The same results; only run times and log timestamps moved. Keep the committed bytes.
+              echo "reproduced $id: identical but for wall_s and log timestamps"
+              same="$same $id"
             elif [ -f "$art/regen-$id/scenario.json" ]; then
               # Whole-directory swap: a file the new run no longer writes must not survive.
               rm -rf "reports/$id"
@@ -309,12 +314,17 @@ jobs:
             fi
           done
           ok="$(echo $ok | xargs)"; failed="$(echo $failed | xargs)"; superseded="$(echo $superseded | xargs)"
+          same="$(echo $same | xargs)"
           removed="$(echo $removed | xargs)"; stale="$(echo $stale | xargs)"
-          echo "regenerated: ${ok:-none}; failed: ${failed:-none}; already current on main: ${superseded:-none}"
-          echo "removed on main: ${removed:-none}; changed on main on the old stack: ${stale:-none}"
+          echo "regenerated: ${ok:-none}; reproduced unchanged: ${same:-none}; failed: ${failed:-none}; already current on the base: ${superseded:-none}"
+          echo "removed on the base: ${removed:-none}; changed on the base on the old stack: ${stale:-none}"
           { echo "ok=$ok"; echo "failed=$failed"; echo "superseded=$superseded"
             echo "removed=$removed"; echo "stale=$stale"; } >> "$GITHUB_OUTPUT"
-          [ -n "$ok" ] || [ -z "$failed" ] || { echo "::error::no report in batch ${{ matrix.batch.name }} regenerated"; exit 1; }
+          [ -n "$ok" ] || [ -z "$failed" ] || { echo "::error::no report in batch ${{ matrix.batch.name }} regenerated, and some failed: $failed"; exit 1; }
+          # A reproduced report changes nothing, so the batch needs no commit; say so in the open step.
+          if [ -z "$ok" ] && [ -n "$same" ]; then
+            echo "regeneration reproduced every report in ${{ matrix.batch.name }} byte-for-byte (committed files unchanged; only run times and log timestamps moved) -- no PR needed"
+          fi
       - name: Build the site to validate the regenerated reports
         if: steps.swap.outputs.ok != ''
         run: python3 -I scripts/build_gallery.py --out /tmp/site-check

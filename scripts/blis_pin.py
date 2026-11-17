@@ -16,6 +16,7 @@ the pin is what starts hours of regeneration against it.
   python3 -I scripts/blis_pin.py bump v0.15.0                 # rewrite pins.env
   python3 -I scripts/blis_pin.py changed OLD_PINS.env         # which pins a push moved
   python3 -I scripts/blis_pin.py same-stack DIR DIR           # exit 0 if two reports share a stack
+  python3 -I scripts/blis_pin.py same-results DIR DIR         # exit 0 if they differ only in run times
   python3 -I scripts/blis_pin.py plan [--only ID,...] [--stale-only]   # what to regenerate, in batches
   python3 -I scripts/blis_pin.py stale                        # reports the pins did not price; exit 1 if any
   python3 -I scripts/blis_pin.py ready ROLLUP.json            # green | pending | red for a PR head
@@ -216,6 +217,54 @@ def stale_ids(root=ROOT, pins=None):
     pins = pins if pins is not None else read_pins(os.path.join(root, "pins.env"))
     return [i for i in report_ids(root)
             if not is_current(os.path.join(root, "reports", i), pins)]
+
+
+# What a re-run of the same spec on the same pins changes in runs.jsonl, and is not a result:
+# how long each run took on this machine, and the simulator's log timestamps in the stream tails.
+_RUN_PROVENANCE = ("wall_s",)
+_LOG_TIME = re.compile(r'time="[^"]*"')
+
+
+def _ledger_row(line):
+    row = json.loads(line)
+    for k in _RUN_PROVENANCE:
+        row.pop(k, None)
+    for k in ("stderr_tail", "stdout_tail"):
+        if isinstance(row.get(k), str):
+            row[k] = _LOG_TIME.sub('time=""', row[k])
+    return row
+
+
+def same_results(a_dir, b_dir):
+    """Whether two report dirs hold the same results: every file byte-identical, except that
+    runs.jsonl rows may differ in run provenance (_RUN_PROVENANCE, log timestamps).
+
+    regen-reports keeps the committed copy when this holds, so regenerating a current report
+    changes no committed byte; any other difference is a real one and is swapped in."""
+    def files(d):
+        out = set()
+        for base, _, names in os.walk(d):
+            out |= {os.path.relpath(os.path.join(base, n), d) for n in names}
+        return out
+    fa, fb = files(a_dir), files(b_dir)
+    if not fa or fa != fb:
+        return False
+    for rel in sorted(fa):
+        with open(os.path.join(a_dir, rel), "rb") as f:
+            x = f.read()
+        with open(os.path.join(b_dir, rel), "rb") as f:
+            y = f.read()
+        if x == y:
+            continue
+        if os.path.basename(rel) != "runs.jsonl":
+            return False
+        try:
+            xl, yl = x.decode().splitlines(), y.decode().splitlines()
+            if len(xl) != len(yl) or any(_ledger_row(p) != _ledger_row(q) for p, q in zip(xl, yl)):
+                return False
+        except ValueError:
+            return False
+    return True
 
 
 # ---------------------------------------------------------------------------------- plan
@@ -747,6 +796,9 @@ def main(argv=None):
     b.add_argument("--release-name")
     c = sub.add_parser("changed", help="print the stack pins that differ from OLD pins.env")
     c.add_argument("old")
+    sr = sub.add_parser("same-results", help="exit 0 if two report dirs differ only in run provenance")
+    sr.add_argument("a")
+    sr.add_argument("b")
     ss = sub.add_parser("same-stack", help="exit 0 if two report dirs were priced by the same stack")
     ss.add_argument("a")
     ss.add_argument("b")
@@ -801,6 +853,8 @@ def main(argv=None):
         print(json.dumps({k: list(v) for k, v in moved.items()}))
     elif a.cmd == "changed":
         print(json.dumps({k: list(v) for k, v in changed(read_pins(a.old), read_pins()).items()}))
+    elif a.cmd == "same-results":
+        sys.exit(0 if same_results(a.a, a.b) else 1)
     elif a.cmd == "same-stack":
         sys.exit(0 if same_stack(a.a, a.b) else 1)
     elif a.cmd == "plan":

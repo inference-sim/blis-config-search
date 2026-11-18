@@ -820,6 +820,10 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
             router_cfg = router_configs.open_checkout(blis=blis)
         except router_configs.RouterConfigsError as e:
             return [f"router configs: {e}"]
+    kind = settings.spec_engine_kind(spec)
+    if kind not in settings.ENGINE_KINDS:
+        return [f"scenario.engine_kind: {kind!r} is none of {', '.join(settings.ENGINE_KINDS)}"]
+    settings.use_engine(kind)
     vocab = knob_vocabulary(blis, fields)
     par_vocab, eng_vocab, source = vocab.parallel, vocab.engine_names(), vocab.source
 
@@ -842,7 +846,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
         sc = {}
     else:
         known_sc = {"model", "hardware", "workload", "workload_spec", "gpus", "slo", "concurrency",
-                    "seed", "engine", "replay", "cluster"}
+                    "seed", "engine", "engine_kind", "replay", "cluster"}
         for key in sc:
             if key not in known_sc:
                 errs.append(f"scenario.{key}: unknown key "
@@ -1153,6 +1157,10 @@ def main(argv=None):
     if not paths:
         print(f"no spec files under {args.target}", file=sys.stderr)
         return 1
+    if len(paths) == 1:
+        first, _ = load(paths[0])
+        if isinstance(first, dict) and settings.spec_engine_kind(first) in settings.ENGINE_KINDS:
+            settings.use_engine(settings.spec_engine_kind(first))
     try:
         vocab = knob_vocabulary(args.blis, args.fields)
     except blis_cli.BlisCommandError as e:

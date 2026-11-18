@@ -28,7 +28,8 @@ FIELDS = {"kind": "FieldList", "engine": {"kind": "vllm", "version": "0.33.0"}, 
      "evidence": {"issue": "inference-sim/blis-vllm#9"}},
     {"name": "VLLM_X", "source": "env", "status": "not_modelled"},
 ]}
-SPEC = {"$defs": {"sweep": {"properties": {"parallel": {}, "engine": {}, "num-instances": {}}}}}
+SPEC = {"$defs": {"sweep": {"properties": {"parallel": {}, "engine": {}, "num-instances": {}}},
+                  "scenario": {"properties": {"engine_kind": {}, "model": {}}}}}
 COVERAGE = {"knobs": {
     "scenario:model": {"reason": "one model per experiment"},
     "scenario:cluster.fabric": {"reason": "a scenario constant"},
@@ -92,6 +93,16 @@ def test_a_sweep_key_the_spec_format_lacks_is_an_error():
     cov["knobs"]["deployment:pools[].parallel.tp"] = {"sweep": "sweeps[].parallel.tpx"}
     _, problems = build(coverage=cov)
     assert any("tpx" in p for p in problems), problems
+
+
+def test_a_scenario_key_the_spec_format_lacks_is_an_error():
+    cov = copy.deepcopy(COVERAGE)
+    cov["knobs"]["scenario:model"] = {"sweep": "scenario.engine_kind"}
+    _, problems = build(coverage=cov)
+    assert problems == [], problems
+    cov["knobs"]["scenario:model"] = {"sweep": "scenario.warp"}
+    _, problems = build(coverage=cov)
+    assert any("no scenario key 'warp'" in p for p in problems), problems
 
 
 def test_engine_rows_follow_the_field_list_status():

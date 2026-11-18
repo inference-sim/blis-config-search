@@ -96,6 +96,16 @@ sweeps:
   sweep all belong in a `#` comment, which stays in the spec and never reaches the report. The
   validator prints a style note (not a failure) for anything longer.
 
+## The engine
+
+`scenario.engine_kind` names the engine every run uses: `vllm` (the default) or `sglang`. The
+settings a sweep may vary are that engine's own, read from its field list (`blis fields`), so an
+SGLang spec uses SGLang's names (`chunked_prefill_size`, `mem_fraction_static`, ...) and none of
+vLLM's. The SGLang engine runs one colocated pool; a spec that asks for more is refused by the
+simulator and the row says so. A spec for an engine kind the pinned simulator does not register
+yet lives in `experiments/pending-pin/`, where the checks do not run it; `scripts/check_pending_pin.py`
+fails once the pinned build registers the kind, which is the cue to move the spec to `experiments/`.
+
 ## Knobs are vLLM's own settings
 
 | Spec knob | vLLM setting |

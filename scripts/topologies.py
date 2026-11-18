@@ -35,7 +35,10 @@ def label(cand):
 
 # Readable knob names, spelled out on purpose: "b2k" for max_num_batched_tokens=2048 tells a
 # reader nothing. Mirrors report.KNOB_NAMES, keyed by candidate-config key.
-KNOB_NAMES = {"pd_transfer_contention": "handoff contention", "num_speculative_tokens": "draft tokens", "speculative_method": "drafter",
+KNOB_NAMES = {"chunked_prefill_size": "chunk size", "mem_fraction_static": "static memory share",
+              "max_running_requests": "running-request cap", "disable_radix_cache": "radix cache off",
+              "cuda_graph_max_bs_decode": "decode graph cap", "attention_backend": "attention backend",
+              "pd_transfer_contention": "handoff contention", "num_speculative_tokens": "draft tokens", "speculative_method": "drafter",
               "speculative_draft_model": "drafter checkpoint",
               "router_config": "routing", "routing_policy": "routing",
               "routing_scorers": "scorers",

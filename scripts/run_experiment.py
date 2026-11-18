@@ -50,6 +50,7 @@ except ImportError:
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import run_blis            # noqa: E402
+import settings            # noqa: E402
 import topologies          # noqa: E402
 import blis_cli            # noqa: E402
 import build_catalog       # noqa: E402
@@ -348,7 +349,10 @@ VARIANT_KEYS = ("num_speculative_tokens", "speculative_method", "speculative_dra
                 # 31-field struct did not, so a spec naming one failed every run).
                 # Only the priced ones are here -- the eleven that decode but measure
                 # byte-identical are refused up front, so no sweep can label them.
-                "max_num_active_seqs", "max_num_scheduled_tokens", "frontend")
+                "max_num_active_seqs", "max_num_scheduled_tokens", "frontend",
+                # SGLang's own settings (scenario.engine_kind: sglang)
+                "chunked_prefill_size", "mem_fraction_static", "max_running_requests",
+                "disable_radix_cache", "cuda_graph_max_bs_decode", "attention_backend")
 
 
 def variant_of(cand, router_desc, baseline):
@@ -617,6 +621,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                          f"data, so its report is experimental and never committed: --out {out_root} is the "
                          f"repository's reports/ directory. Choose another --out.")
     routing_dir = routing_dir or os.path.join(ROOT, "routing")
+    settings.use_engine(settings.spec_engine_kind(spec))
     sc = spec["scenario"]
     name = spec["name"]
     gpus = int(sc["gpus"])
@@ -627,7 +632,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     concurrency = list(sc["concurrency"])
     slo_ms = slo_limits(sc.get("slo"))
     shared_engine = dict(sc.get("engine") or {})
-    engine_version = blis_cli.engine_release(blis, run_blis.ENGINE_KIND, fields)
+    engine_version = blis_cli.engine_release(blis, settings.ENGINE_KIND, fields)
     replay = dict(sc.get("replay") or {}) or None
     # The cluster's inter-node fabric, defaulting to IB so a spec that states none is byte-identical.
     # Only a multi-node run prices cross-node traffic; run_blis ignores it on a single node.

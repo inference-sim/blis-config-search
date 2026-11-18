@@ -74,6 +74,7 @@ jobs:
         run: |
           python3 -I scripts/test_experiment.py
           python3 -I scripts/test_knobs.py
+          python3 -I scripts/test_engine_kind.py
       - name: Which jobs a change selects (scripts/ci_scope.py)
         if: steps.scope.outputs.python == 'true'
         run: |
@@ -109,6 +110,9 @@ jobs:
       - name: The knob table matches the pinned simulator (CFG-6)
         if: steps.scope.outputs.experiments == 'true'
         run: python3 -I scripts/knob_table.py --blis upstream/blis --fields vllm="$RUNNER_TEMP/fields.json" --check
+      - name: Specs waiting for the pin still wait (experiments/pending-pin/)
+        if: steps.scope.outputs.experiments == 'true'
+        run: python3 -I scripts/check_pending_pin.py --blis upstream/blis
       - name: Validate experiments/
         if: steps.scope.outputs.experiments == 'true'
         env: { BLIS: upstream/blis }

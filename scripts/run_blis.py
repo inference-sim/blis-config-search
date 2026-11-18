@@ -22,7 +22,6 @@ import argparse, hashlib, json, os, re, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blis_cli  # noqa: E402
 import settings  # noqa: E402
-from settings import ENGINE_KIND  # noqa: E402
 
 # cost-model-fabric is the cross-node/cross-rack interconnect term, and it is a coefficient set of
 # the pinned simulator release's embedded registry. Every one of upstream's 40 Muse scenarios names it, so a scenario this script generates
@@ -108,6 +107,11 @@ DEFAULT_FABRIC = "ib-400g"   # InfiniBand NDR 400 Gb/s; the standard H100 multi-
 # vLLM's (vLLM's is the model's own window). Do not state it in every spec: a spec that does not
 # care about the window should not pin one.
 ENGINE_DEFAULTS = {"max_model_len": 32768}
+
+
+def engine_defaults():
+    """The settings the runner states for the engine kind in use: vLLM's mandatory window; none for SGLang."""
+    return dict(ENGINE_DEFAULTS) if settings.ENGINE_KIND == "vllm" else {}
 # A DSA sparse-MLA model's indexer runs on 64-token kernel blocks, so a stated block_size must be a
 # multiple of 64 or the engine refuses the layout at startup (blis-latency-kernel sparse_mla.go,
 # `dsaBlockSize`). vLLM v0.31.0 picks 64 for these models for the same reason.
@@ -229,7 +233,7 @@ def classify_config(config, vocab, node_size=None):
     dict, holding each role's resolved layout and engine. See the P/D note at the top of this
     module for the constraints BLIS enforces on it.
     """
-    parallel, engine, cli, router = dict(PARALLEL_DEFAULTS), dict(ENGINE_DEFAULTS), {}, {}
+    parallel, engine, cli, router = dict(PARALLEL_DEFAULTS), engine_defaults(), {}, {}
     spec = {}
     pd_parallel = {r: {} for r in PD_ROLES}
     pd_engine = {r: {} for r in PD_ROLES}
@@ -1196,7 +1200,7 @@ def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, 
     return f"""kind: Scenario
 name: {name}
 engine:
-  kind: {ENGINE_KIND}
+  kind: {settings.ENGINE_KIND}
   version: "{engine_version}"
 model: {model}
 coefficients: [{", ".join(COEFFICIENTS)}]
@@ -1248,8 +1252,11 @@ VLLM_BLOCK_MOVES = (
 
 
 def to_vllm_block(eng):
-    """The engine block with its keys in vLLM's names (VLLM_BLOCK_MOVES); a copy."""
+    """The engine block with its keys in vLLM's names (VLLM_BLOCK_MOVES); a copy. Another engine
+    kind's block already carries that engine's own names and is returned as it is."""
     out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in (eng or {}).items()}
+    if settings.ENGINE_KIND != "vllm":
+        return out
     for internal, external in VLLM_BLOCK_MOVES:
         grp, _, leaf = internal.partition(".")
         src = out.get(grp) if leaf else out
@@ -1314,7 +1321,7 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
     return f"""kind: Scenario
 name: {name}
 engine:
-  kind: {ENGINE_KIND}
+  kind: {settings.ENGINE_KIND}
   version: "{engine_version}"
 model: {model}
 coefficients: [{", ".join(COEFFICIENTS)}]
@@ -1679,8 +1686,9 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     fp = footprint_gpus(parallel)
     # Fill block_size per MODEL when the candidate did not pin one (see default_block_size): the
     # adapter requires a value, and DSA models require it to be a multiple of 64.
-    engine.setdefault("block_size", default_block_size(catalog, model, hardware))
-    if pd:
+    if settings.ENGINE_KIND == "vllm":
+        engine.setdefault("block_size", default_block_size(catalog, model, hardware))
+    if pd and settings.ENGINE_KIND == "vllm":
         # Both pools page identically or BLIS refuses the handoff, so ONE resolved value is
         # filled into both rather than each pool defaulting independently.
         for role in PD_ROLES:
@@ -1688,7 +1696,7 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     # Fill the method from the DRAFTER's graph when a candidate asked for drafting without naming
     # one (the engine requires a method; see graph_speculator): the named drafter checkpoint's, else
     # the model's own. One with no speculator is refused here, naming it, not by BLIS.
-    spec = engine.get("speculative")
+    spec = engine.get("speculative") if settings.ENGINE_KIND == "vllm" else None
     if spec and not spec.get("method"):
         drafter = spec.get("draft_model") or model
         method = graph_speculator(catalog, drafter)
@@ -1890,7 +1898,7 @@ def main():
     except ValueError as e:
         sys.exit(str(e))
     rec = run_one(args.blis, args.catalog, args.registry, args.scenarios, args.model, args.hardware,
-                  blis_cli.engine_release(args.blis, ENGINE_KIND, args.fields), args.workload, args.num_requests,
+                  blis_cli.engine_release(args.blis, settings.ENGINE_KIND, args.fields), args.workload, args.num_requests,
                   args.seed, args.horizon,
                   json.loads(args.config), args.phase, args.timeout, args.defaults, replay,
                   fabric=args.fabric, fields=args.fields, data_override=args.data_override)

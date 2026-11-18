@@ -561,7 +561,7 @@ def _run_context(entry, root, blis, catalog, corpus, corpus_cache, fields=None):
     fabric = (sc.get("cluster") or {}).get("fabric") or run_experiment.run_blis.DEFAULT_FABRIC
     gpus_per_node = (sc.get("cluster") or {}).get("gpus_per_node")
     return (sc["model"], sc["hardware"],
-            run_experiment.blis_cli.engine_release(blis, run_experiment.run_blis.ENGINE_KIND, fields),
+            run_experiment.blis_cli.engine_release(blis, run_experiment.run_blis.settings.ENGINE_KIND, fields),
             sc.get("workload") or run_experiment.workload_spec_label(sc["workload_spec"]),
             int(sc.get("seed", 42)), replay,
             (lambda c: None) if replay else (lambda c: max(80, c * 4)), fabric, gpus_per_node)

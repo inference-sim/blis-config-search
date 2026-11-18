@@ -63,6 +63,11 @@
           "type": "string",
           "minLength": 1
         },
+        "engine_kind": {
+          "description": "The engine every run uses: vllm (the default) or sglang. A sweep varies that engine's own settings, read from its field list.",
+          "enum": ["vllm", "sglang"],
+          "default": "vllm"
+        },
         "workload": {
           "description": "A catalog workload: a shape preset (chatbot, multidoc, ...) or a replay scenario (agentx-mvp). One per experiment.",
           "type": "string",

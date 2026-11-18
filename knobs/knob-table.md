@@ -40,7 +40,7 @@ One row for each coverage entry; `knob_table.py --json FILE` writes every proper
 | `scenario:cluster.switch_groups[]` | 1 |  | the switch topology belongs to the cluster the experiment describes, not a search dimension |
 | `scenario:cluster.uplink_oversubscription` | 1 |  | the switch topology belongs to the cluster the experiment describes, not a search dimension |
 | `scenario:coefficients[]` | 1 |  | the coefficient sets belong to the simulator release (CFG-1), not to a search |
-| `scenario:engine.kind` | 1 |  | the spec format names the vLLM engine only (inference-sim/blis-config-search#142) |
+| `scenario:engine.kind` | 1 | `scenario.engine_kind (one engine per experiment)` |  |
 | `scenario:engine.version` | 1 |  | derived from the engine kind's release |
 | `scenario:engine_version` | 1 |  | derived from the engine kind's release |
 | `scenario:kind` | 1 |  | the document's kind |

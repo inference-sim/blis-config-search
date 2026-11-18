@@ -954,7 +954,8 @@ _REQUEST_COUNTS = {"injected_requests": "generated", "completed_requests": "comp
                    "still_queued": "queued_at_horizon", "still_running": "in_flight_at_horizon",
                    "timed_out_requests": "timed_out", "length_capped_requests": "length_capped"}
 
-# Run totals on the cluster aggregate that are counts, not rates: no window changes what they mean.
+# Engine cluster figures as the Result states them: the allocation-failure count and the two hit rates
+# (recorded on the row, never ranked or gated; cache_hit_rate_whole_run is not read).
 _CLUSTER_KEYS = {"kv_allocation_failures": "kv_allocation_failures", "cache_hit_rate": "cache_hit_rate",
                  "cpu_tier_hit_rate": "cpu_tier_hit_rate"}
 

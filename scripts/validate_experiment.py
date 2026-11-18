@@ -848,6 +848,31 @@ def offload_errors(sw, where):
     return errs
 
 
+def offload_policy_errors(spec, blis, fields=None):
+    """Ask the engine whether it models each eviction policy a spec names (`blis fields --scenario` opens it),
+    on a probe scenario of the spec's own model and hardware. The policy names belong to the engine (CFG-3)."""
+    import blis_cli
+    import run_blis
+    sc = spec.get("scenario") or {}
+    errs = []
+    for i, sw in enumerate(spec.get("sweeps") or []):
+        block = sw.get("offload") if isinstance(sw, dict) else None
+        if not isinstance(block, dict) or not _is_list(block.get("eviction_policy")):
+            continue
+        tps = ((sw.get("parallel") or {}).get("tp")) or [1]
+        tp = tps[0] if _is_list(tps) and isinstance(tps[0], int) else 1
+        for policy in dict.fromkeys(p for p in block["eviction_policy"] if isinstance(p, str)):
+            parallel = {"tp": tp, "pp": 1, "dp": 1, "offload": {"cpu_bytes": 2**30, "eviction_policy": policy}}
+            body = run_blis.scenario_yaml(sc.get("model"), sc.get("hardware"),
+                                          blis_cli.engine_release(blis, settings.ENGINE_KIND, fields),
+                                          parallel, run_blis.engine_defaults(), "policy-probe",
+                                          node_size=(sc.get("cluster") or {}).get("gpus_per_node") or 8)
+            line = blis_cli.engine_refusal(blis, body, word="eviction_policy")
+            if line:
+                errs.append(f"sweeps[{i}].offload.eviction_policy: the engine refuses {policy!r}: {line}")
+    return errs
+
+
 def _sweep_is_colocated(sw):
     return not ({"prefill-instances", "decode-instances", "prefill", "decode"} & set(sw))
 
@@ -1086,6 +1111,8 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
             if n and sum(reasons.values()) == n:
                 top = max(reasons, key=reasons.get)
                 errs.append(f"{where}: the runner refuses every arm ({n}): {top}")
+    if not errs:
+        errs.extend(offload_policy_errors(spec, blis, fields))
     return errs
 
 

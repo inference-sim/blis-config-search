@@ -219,6 +219,10 @@ class ConfigError(ValueError):
     pass
 
 
+# The CPU KV tier's candidate keys (a sweep's `offload:` block): a size in bytes, 0 for no tier, and a policy.
+SCENARIO_OFFLOAD = frozenset({"offload_cpu_bytes", "offload_eviction_policy"})
+
+
 def classify_config(config, vocab, node_size=None):
     """Split a candidate into (parallel, engine, cli, router); raise ConfigError on unknown keys.
 
@@ -237,6 +241,7 @@ def classify_config(config, vocab, node_size=None):
     spec = {}
     pd_parallel = {r: {} for r in PD_ROLES}
     pd_engine = {r: {} for r in PD_ROLES}
+    offload = {}
     for k, v in config.items():
         role, _, knob = k.partition("_")
         if k in UNSUPPORTED:
@@ -249,6 +254,8 @@ def classify_config(config, vocab, node_size=None):
             spec[k] = v
         elif k in SPECULATIVE_CLI:
             cli[k] = v
+        elif k in SCENARIO_OFFLOAD:
+            offload[k[len("offload_"):]] = v
         elif k in SCENARIO_ROUTER:
             router[k] = v
         elif k in PD_CLI or k in PD_DEPLOYMENT:
@@ -321,6 +328,11 @@ def classify_config(config, vocab, node_size=None):
             f"multi-node instance must fill whole {node_size}-GPU nodes (use a footprint that "
             f"is a multiple of {node_size}, or scale out with num_instances instead)")
     pd = resolve_pd(cli, pd_parallel, pd_engine, parallel, engine, node_size)
+    if offload.get("cpu_bytes"):
+        if pd:
+            raise ConfigError("offload_cpu_bytes: a disaggregated deployment has no offload key yet "
+                              "(inference-sim/blis-config-search#94)")
+        parallel = {**parallel, "offload": offload}
     if cli.get("pd_transfer_contention") and not pd:
         raise ConfigError("pd_transfer_contention: concurrent handoffs only exist in a disaggregated "
                           "run, and the simulator refuses the flag on any other")
@@ -943,7 +955,8 @@ _REQUEST_COUNTS = {"injected_requests": "generated", "completed_requests": "comp
                    "timed_out_requests": "timed_out", "length_capped_requests": "length_capped"}
 
 # Run totals on the cluster aggregate that are counts, not rates: no window changes what they mean.
-_CLUSTER_KEYS = {"kv_allocation_failures": "kv_allocation_failures"}
+_CLUSTER_KEYS = {"kv_allocation_failures": "kv_allocation_failures", "cache_hit_rate": "cache_hit_rate",
+                 "cpu_tier_hit_rate": "cpu_tier_hit_rate"}
 
 
 def _engine_report(doc):
@@ -1291,8 +1304,8 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
         pad = " " * indent
         out = []
         for k, v in d.items():
-            if k == "pd":
-                continue                  # not a schema field; it SELECTS the pool layout below
+            if k in ("pd", "offload"):
+                continue                  # not schema fields of the pool: they SELECT the layout / the offload block below
             if isinstance(v, dict):
                 out.append(f"{pad}{k}:")
                 out.extend(f"{pad}  {kk}: {json.dumps(vv)}" for kk, vv in v.items())
@@ -1318,13 +1331,21 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
     router_block = ""
     if rc:
         router_block = f"\nrouter:\n  endpoint_picker_config: {json.dumps(os.path.abspath(rc))}"
+    # A CPU KV tier below HBM (a sweep's `offload:`): the deployment's offload block, and the coefficient set
+    # that prices the tier's transfers, which the simulator requires beside it.
+    off = (parallel or {}).get("offload")
+    offload_block, coefficients = "", list(COEFFICIENTS)
+    if off:
+        policy = f"\n  eviction_policy: {json.dumps(off['eviction_policy'])}" if off.get("eviction_policy") else ""
+        offload_block = f"\noffload:{policy}\n  tiers:\n    - {{tier: cpu_dram, bytes: {int(off['cpu_bytes'])}}}"
+        coefficients.append("cost-model-offload-tiers")
     return f"""kind: Scenario
 name: {name}
 engine:
   kind: {settings.ENGINE_KIND}
   version: "{engine_version}"
 model: {model}
-coefficients: [{", ".join(COEFFICIENTS)}]
+coefficients: [{", ".join(coefficients)}]
 cluster:
   hardware: {hardware}{fabric_line}
   nodes: {nodes}{node_size_line}
@@ -1337,7 +1358,7 @@ pools:
     parallel:
 {block(parallel, 6)}
     engine:
-{block(engine, 6)}{router_block}
+{block(engine, 6)}{offload_block}{router_block}
 """
 
 

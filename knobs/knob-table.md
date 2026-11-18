@@ -11,7 +11,10 @@ One row for each coverage entry; `knob_table.py --json FILE` writes every proper
 |---|---|---|---|
 | `deployment:kind` | 1 |  | the document's kind |
 | `deployment:name` | 1 |  | the document's identity, derived from the arm |
-| `deployment:offload.*` | 7 |  | KV tiers and connectors are never swept (inference-sim/blis-config-search#94) |
+| `deployment:offload.*` | 4 |  | the connector, its spec, its options and the prefetch depth take the simulator's defaults; secondary tiers have no key (inference-sim/blis-config-search#94) |
+| `deployment:offload.eviction_policy` | 1 | `sweeps[].offload.eviction_policy` |  |
+| `deployment:offload.tiers[].bytes` | 1 | `sweeps[].offload.cpu_bytes (0 is the control)` |  |
+| `deployment:offload.tiers[].tier` | 1 |  | the spec states the CPU tier only; the fs, obj and p2p tiers have no key yet (inference-sim/blis-config-search#94) |
 | `deployment:pd_transfer.connector` | 1 |  | the P/D connector has no spec key (inference-sim/blis-config-search#144) |
 | `deployment:pools[].engine` | 1 | `sweeps[].engine.<setting> (the engine rows)` |  |
 | `deployment:pools[].labels` | 1 |  | router selectors are derived from the pool's role |
@@ -73,8 +76,8 @@ The other settings, with their status and issue, are in the full table (`knob_ta
 |---|---|---|
 | sglang-engine | the engine kind of an experiment, and the SGLang settings the simulator models Pending the pinned build. | `scenario:engine.kind`, `engine:sglang:config:chunked_prefill_size` |
 | multi-node-pd-handoff | prefill and decode pools of different layout, including a prefill pool whose data-parallel ranks span nodes (Handoff.At) | `deployment:pools[].role`, `deployment:pools[].nodes`, `deployment:pools[].parallel.dp`, `deployment:pools[].parallel.tp` |
-| per-rank-cpu-tier | the CPU KV tier and its size, off as the control | `deployment:offload.*` |
-| offload-with-drafting | the KV tier beside an EAGLE-3 or MTP drafter | `deployment:offload.*`, `engine:vllm:config:speculative_config.method` |
+| per-rank-cpu-tier | the CPU KV tier and its size, off as the control | `deployment:offload.tiers[].bytes` |
+| offload-with-drafting | the KV tier beside an EAGLE-3 or MTP drafter | `deployment:offload.tiers[].bytes`, `engine:vllm:config:speculative_config.method` |
 | dp-balancing-modes | the data-parallel load-balancing mode of a pool | `deployment:pools[].parallel.data_parallel_load_balancing` |
 | all-reduce-lane | custom or NCCL all-reduce (the field list says why it is not swept yet) | `engine:vllm:config:disable_custom_all_reduce` |
 | moe-backend | the MoE kernel backend (the field list says why it is not swept yet) | `engine:vllm:config:moe_backend` |

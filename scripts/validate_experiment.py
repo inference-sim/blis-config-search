@@ -795,6 +795,59 @@ def simulator_errors(sw, where):
     return errs
 
 
+_SIZE_RE = None
+_SIZE_UNITS = {"KiB": 2**10, "MiB": 2**20, "GiB": 2**30, "TiB": 2**40,
+               "KB": 10**3, "MB": 10**6, "GB": 10**9, "TB": 10**12}
+
+
+def parse_size(v):
+    """Bytes of a size: 0, a positive integer of bytes, or a number with a unit ("512GiB"). None if it
+    is none of these (a bare number above zero has no unit and is refused as ambiguous only when it
+    is a string; an integer is bytes)."""
+    import re
+    global _SIZE_RE
+    if _SIZE_RE is None:
+        _SIZE_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(" + "|".join(_SIZE_UNITS) + r")\s*$")
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v if v >= 0 else None
+    m = _SIZE_RE.match(v) if isinstance(v, str) else None
+    return int(float(m.group(1)) * _SIZE_UNITS[m.group(2)]) if m else None
+
+
+def offload_errors(sw, where):
+    """Errors in a sweep's `offload:` block: the CPU KV tier, off as the control (#94).
+
+    cpu_bytes: sizes with units, 0 for no tier; eviction_policy: names the engine validates. The
+    tier sits below HBM of a colocated pool; a disaggregated sweep has no key for it yet.
+    """
+    block = sw.get("offload")
+    if block is None:
+        return []
+    if not isinstance(block, dict) or not block:
+        return [f"{where}.offload: must be a non-empty mapping"]
+    errs = []
+    for key, vals in block.items():
+        if key not in ("cpu_bytes", "eviction_policy"):
+            errs.append(f"{where}.offload.{key}: unknown offload option (allowed: cpu_bytes, eviction_policy)")
+        elif not _is_list(vals) or not vals:
+            errs.append(f"{where}.offload.{key}: must be a non-empty list")
+        elif key == "cpu_bytes":
+            for v in vals:
+                if parse_size(v) is None:
+                    errs.append(f"{where}.offload.cpu_bytes: {v!r} is not a size: use 0 or a number with a unit "
+                                f"such as 512GiB")
+        elif any(not isinstance(v, str) or not v for v in vals):
+            errs.append(f"{where}.offload.eviction_policy: must be a list of policy names")
+    if "eviction_policy" in block and "cpu_bytes" not in block:
+        errs.append(f"{where}.offload.eviction_policy: needs cpu_bytes (a policy of no tier states nothing)")
+    if block and not _sweep_is_colocated(sw):
+        errs.append(f"{where}.offload: a disaggregated sweep has no offload key yet "
+                    f"(inference-sim/blis-config-search#94)")
+    return errs
+
+
 def _sweep_is_colocated(sw):
     return not ({"prefill-instances", "decode-instances", "prefill", "decode"} & set(sw))
 
@@ -933,7 +986,9 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
             seen.add(sname)
 
         known_sw = {"name", "narrative", "num-instances", "parallel", "engine", "router",
-                    "prefill-instances", "decode-instances", "prefill", "decode", "simulator"}
+                    "prefill-instances", "decode-instances", "prefill", "decode", "simulator",
+                    "offload"}
+        errs.extend(offload_errors(sw, where))
         for key in sw:
             if key not in known_sw:
                 errs.append(f"{where}.{key}: unknown sweep key "

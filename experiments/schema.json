@@ -45,6 +45,16 @@
         "pd_transfer_contention": { "type": "array", "minItems": 1, "items": { "type": "boolean" } }
       }
     },
+    "offload": {
+      "description": "The CPU KV tier below HBM, swept per sweep (colocated only). cpu_bytes: sizes with units (512GiB), 0 for no tier, the control. eviction_policy: the policies the engine accepts; needs a non-zero cpu_bytes.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "cpu_bytes": { "type": "array", "minItems": 1, "items": { "type": ["integer", "string"] } },
+        "eviction_policy": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+      }
+    },
     "scenario": {
       "description": "Shared by EVERY sweep: one model, one hardware type, one workload, one GPU budget, one load ladder. Comparing two hardware types or two workloads takes separate experiments.",
       "type": "object",
@@ -173,6 +183,7 @@
         },
         "router": { "$ref": "#/$defs/router" },
         "simulator": { "$ref": "#/$defs/simulator" },
+        "offload": { "$ref": "#/$defs/offload" },
         "prefill-instances": {
           "description": "Prefill replica counts for a DISAGGREGATED sweep. Requires decode-instances; BLIS refuses a prefill pool with no decode pool.",
           "$ref": "#/$defs/intList"

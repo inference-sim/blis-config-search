@@ -71,7 +71,9 @@ jobs:
           python3 -I scripts/test_run_blis.py
       - name: Experiment spec pipeline tests (validator, grids, overrides, ranking)
         if: steps.scope.outputs.python == 'true'
-        run: python3 -I scripts/test_experiment.py
+        run: |
+          python3 -I scripts/test_experiment.py
+          python3 -I scripts/test_knobs.py
       - name: Which jobs a change selects (scripts/ci_scope.py)
         if: steps.scope.outputs.python == 'true'
         run: |
@@ -104,6 +106,9 @@ jobs:
       - name: Fetch the pinned engine field list
         if: steps.scope.outputs.experiments == 'true'
         run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
+      - name: The knob table matches the pinned simulator (CFG-6)
+        if: steps.scope.outputs.experiments == 'true'
+        run: python3 -I scripts/knob_table.py --blis upstream/blis --fields vllm="$RUNNER_TEMP/fields.json" --check
       - name: Validate experiments/
         if: steps.scope.outputs.experiments == 'true'
         env: { BLIS: upstream/blis }

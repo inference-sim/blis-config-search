@@ -1,0 +1,120 @@
+# How a spec reaches each property of the scenario and deployment documents (CFG-6).
+# knob_table.py generates the property list from `blis schema`; this file only classifies it:
+# `sweep` is a spec path, `reason` says why a search cannot vary it. A property missing here, or an
+# entry for a property that no longer exists, fails scripts/test_knobs.py. Engine settings are not
+# listed: the field list decides them.
+knobs:
+  scenario:name:
+    reason: "the document's identity, derived from the experiment name"
+  scenario:kind:
+    reason: "the document's kind"
+  scenario:model:
+    reason: "one model per experiment (experiments/README.md); a second model is a second experiment"
+  scenario:coefficients[]:
+    reason: "the coefficient sets belong to the simulator release (CFG-1), not to a search"
+  scenario:engine_version:
+    reason: "derived from the engine kind's release"
+  scenario:engine.kind:
+    reason: "the spec format names the vLLM engine only"
+    issue: inference-sim/blis-config-search#142
+  scenario:engine.version:
+    reason: "derived from the engine kind's release"
+  scenario:cluster.hardware:
+    reason: "one hardware type per experiment (experiments/README.md); compare chips with two experiments"
+  scenario:cluster.nodes:
+    reason: "derived from scenario.gpus and the layout"
+  scenario:cluster.gpus_per_node:
+    reason: "a scenario constant (scenario.cluster.gpus_per_node), fixed by the hardware"
+  scenario:cluster.gpus_per_rack:
+    reason: "a catalog fact of the hardware, not a search dimension"
+  scenario:cluster.fabric:
+    reason: "a scenario constant (scenario.cluster.fabric); compare fabrics with two experiments"
+  scenario:cluster.pools[].hardware:
+    reason: "node pools of different chips have no spec key"
+    issue: inference-sim/blis-config-search#143
+  scenario:cluster.pools[].name:
+    reason: "node pools of different chips have no spec key"
+    issue: inference-sim/blis-config-search#143
+  scenario:cluster.storage[]:
+    reason: "the storage tiers belong to the catalog hardware entry, not a search dimension"
+  scenario:cluster.switch_groups[]:
+    reason: "the switch topology belongs to the cluster the experiment describes, not a search dimension"
+  scenario:cluster.uplink_oversubscription:
+    reason: "the switch topology belongs to the cluster the experiment describes, not a search dimension"
+  scenario:acceptance.*:
+    reason: "the acceptance of a drafter is read from the catalog's measured profile and recorded with its source on each arm"
+  scenario:routing.*:
+    reason: "the routing profile is read from the catalog's measured profile, not chosen by a search"
+  scenario:workload.*:
+    reason: "one workload per experiment (experiments/README.md); the replay's constants come from scenario.replay and the workload descriptor"
+
+  deployment:kind:
+    reason: "the document's kind"
+  deployment:name:
+    reason: "the document's identity, derived from the arm"
+  deployment:pools[].role:
+    sweep: "sweeps[].prefill-instances, sweeps[].decode-instances"
+  deployment:pools[].nodes:
+    sweep: "sweeps[].num-instances (nodes follow the layout)"
+  deployment:pools[].labels:
+    reason: "router selectors are derived from the pool's role"
+  deployment:pools[].engine:
+    sweep: "sweeps[].engine.<setting> (the engine rows)"
+  deployment:pools[].parallel.tp:
+    sweep: "sweeps[].parallel.tp"
+  deployment:pools[].parallel.dp:
+    sweep: "sweeps[].parallel.dp"
+  deployment:pools[].parallel.pp:
+    sweep: "sweeps[].parallel.pp"
+  deployment:pools[].parallel.pcp:
+    sweep: "sweeps[].parallel.pcp"
+  deployment:pools[].parallel.dcp:
+    sweep: "sweeps[].parallel.dcp"
+  deployment:pools[].parallel.dp_local:
+    sweep: "sweeps[].parallel.dp_local"
+  deployment:pools[].parallel.enable_expert_parallel:
+    sweep: "sweeps[].parallel.enable_expert_parallel"
+  deployment:pools[].parallel.data_parallel_load_balancing:
+    sweep: "sweeps[].parallel.data_parallel_load_balancing"
+  deployment:offload.*:
+    reason: "KV tiers and connectors are never swept"
+    issue: inference-sim/blis-config-search#94
+  deployment:pd_transfer.connector:
+    reason: "the P/D connector has no spec key"
+    issue: inference-sim/blis-config-search#144
+  deployment:router.endpoint_picker_config:
+    sweep: "sweeps[].router.endpoint_picker_config"
+  deployment:router.epp_flags[]:
+    reason: "router flags have no spec key"
+    issue: inference-sim/blis-config-search#144
+  deployment:router.manifests[]:
+    reason: "router manifests have no spec key"
+    issue: inference-sim/blis-config-search#144
+
+# The M3.1 capabilities of inference-sim, each pointing at the knob rows that carry it.
+capabilities:
+  sglang-engine:
+    requires_engine: sglang
+    rows: ["scenario:engine.kind", "engine:sglang:config:chunked_prefill_size"]
+    note: the engine kind of an experiment, and the SGLang settings the simulator models
+  multi-node-pd-handoff:
+    rows: ["deployment:pools[].role", "deployment:pools[].nodes", "deployment:pools[].parallel.dp", "deployment:pools[].parallel.tp"]
+    note: prefill and decode pools of different layout, including a prefill pool whose data-parallel ranks span nodes (Handoff.At)
+  per-rank-cpu-tier:
+    rows: ["deployment:offload.*"]
+    note: the CPU KV tier and its size, off as the control
+  offload-with-drafting:
+    rows: ["deployment:offload.*", "engine:vllm:config:speculative_config.method"]
+    note: the KV tier beside an EAGLE-3 or MTP drafter
+  dp-balancing-modes:
+    rows: ["deployment:pools[].parallel.data_parallel_load_balancing"]
+    note: the data-parallel load-balancing mode of a pool
+  all-reduce-lane:
+    rows: ["engine:vllm:config:disable_custom_all_reduce"]
+    note: custom or NCCL all-reduce (the field list says why it is not swept yet)
+  moe-backend:
+    rows: ["engine:vllm:config:moe_backend"]
+    note: the MoE kernel backend (the field list says why it is not swept yet)
+  block-size:
+    rows: ["engine:vllm:config:block_size"]
+    note: the KV block size

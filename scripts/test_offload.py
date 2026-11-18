@@ -63,14 +63,16 @@ class SizesAndValidation(unittest.TestCase):
         self.assertTrue(any("disaggregated sweep has no offload key" in e for e in errs), errs)
 
 
-def fake_engine(directory, refuses):
-    """A simulator that opens every scenario except one naming a policy in `refuses`."""
+def fake_engine(directory, refuses, min_tp=1):
+    """A simulator that opens every scenario except one naming a policy in `refuses` or one with tp below `min_tp`."""
     import stat
     path = os.path.join(directory, "blis-fake")
     real = BLIS
     with open(path, "w") as f:
         f.write(f"#!/bin/sh\n"
                 f"if [ \"$1\" = fields ] && [ \"$2\" = --scenario ]; then\n"
+                f"  if [ {min_tp} -gt \"$(sed -n 's/^ *tp: *//p' \"$5/$3\" | head -1)\" ]; then\n"
+                f"    echo 'Error: the model does not fit at this tp' >&2; exit 1\n  fi\n"
                 f"  if grep -q 'eviction_policy: \"{refuses}\"' \"$5/$3\"; then\n"
                 f"    echo 'Error: offloading: eviction_policy \"{refuses}\" is not modelled, only lru' >&2; exit 1\n"
                 f"  fi\n  exit 0\nfi\nexec {real} \"$@\"\n")
@@ -89,6 +91,21 @@ class PolicyNames(unittest.TestCase):
             errs = V.validate(copy.deepcopy(bad), fake, ROUTING)
             self.assertTrue(any("refuses 'arc'" in e and "not modelled" in e for e in errs), errs)
             self.assertFalse(any("refuses 'lru'" in e for e in errs), errs)
+
+
+    def test_the_policy_is_probed_at_the_largest_tp_not_the_first(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            fake = fake_engine(d, "arc", min_tp=4)
+            bad = doc({"cpu_bytes": ["512GiB"], "eviction_policy": ["arc"]})
+            bad["sweeps"][0]["parallel"]["tp"] = [1, 4]
+            bad["scenario"]["gpus"] = 8
+            errs = V.validate(copy.deepcopy(bad), fake, ROUTING)
+            self.assertTrue(any("refuses 'arc'" in e for e in errs), errs)
+            good = doc({"cpu_bytes": ["512GiB"], "eviction_policy": ["lru"]})
+            good["sweeps"][0]["parallel"]["tp"] = [1, 4]
+            good["scenario"]["gpus"] = 8
+            self.assertEqual([], V.validate(copy.deepcopy(good), fake, ROUTING))
 
 
 class ArmsDiffer(unittest.TestCase):

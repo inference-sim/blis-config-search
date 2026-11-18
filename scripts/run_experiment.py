@@ -50,6 +50,7 @@ except ImportError:
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import run_blis            # noqa: E402
+import settings            # noqa: E402
 import topologies          # noqa: E402
 import blis_cli            # noqa: E402
 import build_catalog       # noqa: E402
@@ -116,6 +117,29 @@ def _engine_candidates(engine):
     return out
 
 
+def _offload_candidates(block, role=None):
+    """A sweep's `offload:` block as candidate keys: offload_cpu_bytes (bytes, 0 = no tier, the control)
+    and offload_eviction_policy. One candidate per combination; a 0-byte tier takes no policy.
+
+    With a `role`, a disaggregated sweep's block for that pool: the same keys, prefixed
+    (prefill_offload_cpu_bytes), which replace the sweep-level block for that pool alone."""
+    if not block:
+        return [{}]
+    sizes = [validator.parse_size(v) for v in block["cpu_bytes"]]
+    out = []
+    for size in dict.fromkeys(sizes):
+        if size == 0 or "eviction_policy" not in block:
+            combo = [{"offload_cpu_bytes": size}]
+        else:
+            combo = [{"offload_cpu_bytes": size, "offload_eviction_policy": p}
+                     for p in dict.fromkeys(block["eviction_policy"])]
+        for c in combo:
+            c = {_flag(role, k): v for k, v in c.items()} if role else c
+            if c not in out:
+                out.append(c)
+    return out
+
+
 def expand_sweep(sweep, gpus):
     """(kept, dropped) candidate configs for one sweep.
 
@@ -124,7 +148,8 @@ def expand_sweep(sweep, gpus):
     than only what survived (the same reason pareto.json carries `dropped[]`).
     """
     router_variants = _router_variants(sweep.get("router") or {})
-    engine_combos = _engine_candidates(sweep.get("engine"))
+    engine_combos = [{**e, **o} for e in _engine_candidates(sweep.get("engine"))
+                     for o in _offload_candidates(sweep.get("offload"))]
     sim_combos = grid(sweep.get("simulator") or {})   # simulator switches: [{}] when none
     kept, dropped = [], []
     if _is_disaggregated(sweep):
@@ -132,6 +157,8 @@ def expand_sweep(sweep, gpus):
         dc_par = ((sweep.get("decode") or {}).get("parallel")) or {}
         pf_eng = ((sweep.get("prefill") or {}).get("engine")) or {}
         dc_eng = ((sweep.get("decode") or {}).get("engine")) or {}
+        pf_off = _offload_candidates((sweep.get("prefill") or {}).get("offload"), "prefill")
+        dc_off = _offload_candidates((sweep.get("decode") or {}).get("offload"), "decode")
         for pf in grid(pf_par):
             for dc in grid(dc_par):
                 for pi in sweep.get("prefill-instances") or [1]:
@@ -141,19 +168,20 @@ def expand_sweep(sweep, gpus):
                         base.update({_flag("decode", k): v for k, v in dc.items()})
                         base["prefill_instances"] = pi
                         base["decode_instances"] = di
-                        for pfe in grid(pf_eng):
-                            for dce in grid(dc_eng):
-                                cfg = dict(base)
-                                cfg.update({_flag("prefill", k): v for k, v in pfe.items()})
-                                cfg.update({_flag("decode", k): v for k, v in dce.items()})
-                                for eng in engine_combos:
-                                    for router in router_variants:
-                                        for sim in sim_combos:
-                                            cand = {**cfg, **eng, **router, **sim}
-                                            if total == gpus:
-                                                kept.append(cand)
-                                            else:
-                                                dropped.append((cand, total))
+                        for pfe, dce, pfo, dco in itertools.product(grid(pf_eng), grid(dc_eng), pf_off, dc_off):
+                            cfg = dict(base)
+                            cfg.update({_flag("prefill", k): v for k, v in pfe.items()})
+                            cfg.update({_flag("decode", k): v for k, v in dce.items()})
+                            cfg.update(pfo)
+                            cfg.update(dco)
+                            for eng in engine_combos:
+                                for router in router_variants:
+                                    for sim in sim_combos:
+                                        cand = {**cfg, **eng, **router, **sim}
+                                        if total == gpus:
+                                            kept.append(cand)
+                                        else:
+                                            dropped.append((cand, total))
     else:
         for par in grid(sweep.get("parallel") or {}):
             for ni in sweep.get("num-instances") or [1]:
@@ -348,7 +376,14 @@ VARIANT_KEYS = ("num_speculative_tokens", "speculative_method", "speculative_dra
                 # 31-field struct did not, so a spec naming one failed every run).
                 # Only the priced ones are here -- the eleven that decode but measure
                 # byte-identical are refused up front, so no sweep can label them.
-                "max_num_active_seqs", "max_num_scheduled_tokens", "frontend")
+                "max_num_active_seqs", "max_num_scheduled_tokens", "frontend",
+                # the CPU KV tier (a sweep's `offload:` block)
+                "offload_cpu_bytes", "offload_eviction_policy",
+                "prefill_offload_cpu_bytes", "prefill_offload_eviction_policy",
+                "decode_offload_cpu_bytes", "decode_offload_eviction_policy",
+                # SGLang's own settings (scenario.engine_kind: sglang)
+                "chunked_prefill_size", "mem_fraction_static", "max_running_requests",
+                "disable_radix_cache", "cuda_graph_max_bs_decode", "attention_backend")
 
 
 def variant_of(cand, router_desc, baseline):
@@ -509,8 +544,8 @@ def run_row(rec, cand, label, variant, sweep_name, concurrency, gpus):
         "total_tokens_per_sec_per_gpu": _round(m.get("total_tokens_per_sec_per_gpu"), 3),
         "output_tokens_per_sec_per_decode_gpu": _round(m.get("output_tokens_per_sec_per_decode_gpu"), 3),
         "disaggregated": cand.get("prefill_instances") is not None,
-        # A drafting row's acceptance as its Result records it: value, layer, profile, source and,
-        # once the Result carries it (inference-sim/inference-sim#2079), the lookup's step.
+        # A drafting row's acceptance as its Result records it: value, layer, profile, source and
+        # the lookup's step, the key fields that differed and the K rule.
         **({"acceptance": acc} if acc else {}),
     }
 
@@ -617,6 +652,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                          f"data, so its report is experimental and never committed: --out {out_root} is the "
                          f"repository's reports/ directory. Choose another --out.")
     routing_dir = routing_dir or os.path.join(ROOT, "routing")
+    settings.use_engine(settings.spec_engine_kind(spec))
     sc = spec["scenario"]
     name = spec["name"]
     gpus = int(sc["gpus"])
@@ -627,7 +663,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     concurrency = list(sc["concurrency"])
     slo_ms = slo_limits(sc.get("slo"))
     shared_engine = dict(sc.get("engine") or {})
-    engine_version = blis_cli.engine_release(blis, run_blis.ENGINE_KIND, fields)
+    engine_version = blis_cli.engine_release(blis, settings.ENGINE_KIND, fields)
     replay = dict(sc.get("replay") or {}) or None
     # The cluster's inter-node fabric, defaulting to IB so a spec that states none is byte-identical.
     # Only a multi-node run prices cross-node traffic; run_blis ignores it on a single node.

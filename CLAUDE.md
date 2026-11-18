@@ -29,6 +29,9 @@ python3 -I scripts/fetch_fields.py fields.json      # the pinned engine's field 
 python3 -I scripts/validate_experiment.py experiments/<name>.yaml --blis ./blis --fields fields.json   # or experiments/
 python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run --blis ./blis --fields fields.json
 
+# The knob table (CFG-6): what a spec can sweep, generated from the pinned simulator
+python3 -I scripts/knob_table.py --blis ./blis --fields vllm=fields.json --check   # or --write
+
 # Site data + web app
 python3 -I scripts/build_gallery.py                                 # reports/ -> site/
 cd web && npm ci && npm run dev | build | test | typecheck

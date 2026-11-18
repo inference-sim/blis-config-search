@@ -1197,7 +1197,18 @@ class AcceptanceFromTheResult(unittest.TestCase):
         self.assertEqual("m/dspark/k3/thinking-on/coding", a["profile_key"])
         self.assertEqual("https://example.org/curve.yaml", a["source"])
         self.assertEqual("b200", a["measured_on"])
-        self.assertIsNone(a["step"], "the pinned Result records no step (inference-sim#2079)")
+        self.assertIsNone(a["step"])
+        self.assertEqual([], a["differed"])
+
+    def test_the_step_differed_and_k_rule_are_read_from_the_entry(self):
+        """The simulator writes them at acceptance.entry (cmd/speculative_acceptance.go)."""
+        acc = {**self.ACC, "entry": {**self.ACC["entry"], "step": "other_drafter",
+                                     "differed": ["drafter"], "k_rule": "truncate"}}
+        a = run_blis.acceptance_record(
+            {"reports": {"engine": {"cluster": {"acceptance": acc}}}})
+        self.assertEqual("other_drafter", a["step"])
+        self.assertEqual(["drafter"], a["differed"])
+        self.assertEqual("truncate", a["k_rule"])
 
     def test_a_result_that_records_the_step_shows_it(self):
         prop = {"name": "speculative_acceptance", "source": "profile", "step": "other_drafter",

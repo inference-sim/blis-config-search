@@ -22,7 +22,6 @@ import argparse, hashlib, json, os, re, subprocess, sys, tempfile, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blis_cli  # noqa: E402
 import settings  # noqa: E402
-from settings import ENGINE_KIND  # noqa: E402
 
 # cost-model-fabric is the cross-node/cross-rack interconnect term, and it is a coefficient set of
 # the pinned simulator release's embedded registry. Every one of upstream's 40 Muse scenarios names it, so a scenario this script generates
@@ -108,6 +107,11 @@ DEFAULT_FABRIC = "ib-400g"   # InfiniBand NDR 400 Gb/s; the standard H100 multi-
 # vLLM's (vLLM's is the model's own window). Do not state it in every spec: a spec that does not
 # care about the window should not pin one.
 ENGINE_DEFAULTS = {"max_model_len": 32768}
+
+
+def engine_defaults():
+    """The settings the runner states for the engine kind in use: vLLM's mandatory window; none for SGLang."""
+    return dict(ENGINE_DEFAULTS) if settings.ENGINE_KIND == "vllm" else {}
 # A DSA sparse-MLA model's indexer runs on 64-token kernel blocks, so a stated block_size must be a
 # multiple of 64 or the engine refuses the layout at startup (blis-latency-kernel sparse_mla.go,
 # `dsaBlockSize`). vLLM v0.31.0 picks 64 for these models for the same reason.
@@ -215,7 +219,11 @@ class ConfigError(ValueError):
     pass
 
 
-def classify_config(config, vocab, node_size=None):
+# The CPU KV tier's candidate keys (a sweep's `offload:` block): a size in bytes, 0 for no tier, and a policy.
+SCENARIO_OFFLOAD = frozenset({"offload_cpu_bytes", "offload_eviction_policy"})
+
+
+def classify_config(config, vocab, node_size=None, pool_offload=False):
     """Split a candidate into (parallel, engine, cli, router); raise ConfigError on unknown keys.
 
     `vocab` is the settings.Vocabulary of the simulator that will run the candidate: its pool-
@@ -224,15 +232,20 @@ def classify_config(config, vocab, node_size=None):
     The speculative keys are folded into engine["speculative"], the nested block the schema wants,
     and the acceptance selectors go to the CLI.
 
+    `pool_offload` says the simulator's deployment schema lets a pool state its own offload block
+    (blis_cli.supports_pool_offload); a disaggregated candidate's CPU tier is refused without it.
+
     A DISAGGREGATED candidate (one carrying `prefill_instances`/`decode_instances` or any
     `prefill_*`/`decode_*` layout key) additionally gets a `pd` block on the returned parallel
     dict, holding each role's resolved layout and engine. See the P/D note at the top of this
     module for the constraints BLIS enforces on it.
     """
-    parallel, engine, cli, router = dict(PARALLEL_DEFAULTS), dict(ENGINE_DEFAULTS), {}, {}
+    parallel, engine, cli, router = dict(PARALLEL_DEFAULTS), engine_defaults(), {}, {}
     spec = {}
     pd_parallel = {r: {} for r in PD_ROLES}
     pd_engine = {r: {} for r in PD_ROLES}
+    offload = {}
+    pd_offload = {r: {} for r in PD_ROLES}
     for k, v in config.items():
         role, _, knob = k.partition("_")
         if k in UNSUPPORTED:
@@ -245,6 +258,8 @@ def classify_config(config, vocab, node_size=None):
             spec[k] = v
         elif k in SPECULATIVE_CLI:
             cli[k] = v
+        elif k in SCENARIO_OFFLOAD:
+            offload[k[len("offload_"):]] = v
         elif k in SCENARIO_ROUTER:
             router[k] = v
         elif k in PD_CLI or k in PD_DEPLOYMENT:
@@ -255,6 +270,8 @@ def classify_config(config, vocab, node_size=None):
             if not isinstance(v, bool):
                 raise ConfigError(f"{k!r}: {v!r} is not true or false (it is a bare flag)")
             cli[k] = v
+        elif role in PD_ROLES and knob in SCENARIO_OFFLOAD:
+            pd_offload[role][knob[len("offload_"):]] = v
         elif role in PD_ROLES and knob in vocab.parallel:
             pd_parallel[role][knob] = v
         elif role in PD_ROLES and (knob in vocab.engine_names() or k in PD_SPECULATIVE):
@@ -317,6 +334,28 @@ def classify_config(config, vocab, node_size=None):
             f"multi-node instance must fill whole {node_size}-GPU nodes (use a footprint that "
             f"is a multiple of {node_size}, or scale out with num_instances instead)")
     pd = resolve_pd(cli, pd_parallel, pd_engine, parallel, engine, node_size)
+    if pd:
+        # One block for both pools is the default; a pool's own keys replace it for that pool, and a
+        # size of 0 is a pool with no tier. A pool that runs a tier carries NIXL beside it as a
+        # MultiConnector (vLLM refuses a NixlConnector beside an offload tier, and a
+        # MultiConnector over NIXL alone), so the connector follows the pool, not the deployment.
+        for role in PD_ROLES:
+            own = {**offload, **pd_offload[role]}
+            if own.get("cpu_bytes"):
+                pd[role]["offload"] = own
+        if any(pd[r].get("offload") for r in PD_ROLES):
+            if not pool_offload:
+                raise ConfigError("offload_cpu_bytes: this simulator's deployment schema has no per-pool "
+                                  "offload (blis-substrate#307), so a disaggregated deployment cannot "
+                                  "state a CPU tier (inference-sim/blis-config-search#94)")
+            if pd["connector"] not in ("NixlConnector", "MultiConnector"):
+                raise ConfigError(f"pd_connector {pd['connector']!r} with a CPU tier: a pool that runs a tier "
+                                  f"carries NIXL as a MultiConnector, which is modelled over NixlConnector only")
+    elif any(pd_offload.values()):
+        raise ConfigError(f"{sorted(f'{r}_offload_{k}' for r in PD_ROLES for k in pd_offload[r])[0]!r}: a per-pool offload "
+                          f"block needs a disaggregated deployment (prefill/decode pools)")
+    elif offload.get("cpu_bytes"):
+        parallel = {**parallel, "offload": offload}
     if cli.get("pd_transfer_contention") and not pd:
         raise ConfigError("pd_transfer_contention: concurrent handoffs only exist in a disaggregated "
                           "run, and the simulator refuses the flag on any other")
@@ -566,10 +605,12 @@ def acceptance_record(doc):
     """The acceptance a drafting run was priced with, as the pinned simulator's Result records it,
     or None when the run did not speculate.
 
-    Read from `reports.engine.cluster.acceptance` (value, layer and profile). The lookup's step and
-    the key fields that differed are taken from the Result's `input.workload_properties` when it
-    carries them; the pinned release does not yet (inference-sim/inference-sim#2079), and then
-    `step` is None.
+    Read from `reports.engine.cluster.acceptance` (value, layer and profile). The lookup's step,
+    the key fields that differed and the K rule are the simulator's own record of the resolution,
+    at `acceptance.entry.{step,differed,k_rule}`. A Result that carries them only as the
+    substrate's `speculative_acceptance` workload property (input.workload_properties) is read as
+    a fallback, and a field neither states is None (an empty list for `differed`); a field the
+    simulator adds later is simply absent from the record until it is read here.
     """
     acc = (_engine_report(doc).get("cluster") or {}).get("acceptance")
     if not isinstance(acc, dict):
@@ -584,8 +625,9 @@ def acceptance_record(doc):
             "copied_from": entry.get("copied_from") or None,
             "measured_on": entry.get("measured_on") or None,
             "fallback_from": entry.get("fallback_from") or None,
-            "step": prop.get("step") or None, "differed": prop.get("differed") or [],
-            "k_rule": prop.get("k_rule") or None}
+            "step": entry.get("step") or prop.get("step") or None,
+            "differed": entry.get("differed") or prop.get("differed") or [],
+            "k_rule": entry.get("k_rule") or prop.get("k_rule") or None}
 
 
 def draft_depth(run):
@@ -938,8 +980,10 @@ _REQUEST_COUNTS = {"injected_requests": "generated", "completed_requests": "comp
                    "still_queued": "queued_at_horizon", "still_running": "in_flight_at_horizon",
                    "timed_out_requests": "timed_out", "length_capped_requests": "length_capped"}
 
-# Run totals on the cluster aggregate that are counts, not rates: no window changes what they mean.
-_CLUSTER_KEYS = {"kv_allocation_failures": "kv_allocation_failures"}
+# Engine cluster figures as the Result states them: the allocation-failure count and the two hit rates
+# (recorded on the row, never ranked or gated; cache_hit_rate_whole_run is not read).
+_CLUSTER_KEYS = {"kv_allocation_failures": "kv_allocation_failures", "cache_hit_rate": "cache_hit_rate",
+                 "cpu_tier_hit_rate": "cpu_tier_hit_rate"}
 
 
 def _engine_report(doc):
@@ -1170,6 +1214,14 @@ def pool_nodes(parallel, num_instances=1, node_size=8):
     return max(1, -(-total // node_size))           # ceil(total / the node size)
 
 
+def _pool_offload_block(off):
+    """A pool's own `offload:` block (the CPU tier), or "" for a pool with none."""
+    if not off:
+        return ""
+    policy = f"      eviction_policy: {json.dumps(off['eviction_policy'])}\n" if off.get("eviction_policy") else ""
+    return f"    offload:\n{policy}      tiers:\n        - {{tier: cpu_dram, bytes: {int(off['cpu_bytes'])}}}\n"
+
+
 def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router,
                       node_size, states_node_size):
     """Render a DISAGGREGATED Scenario+Deployment: one pool per role plus `pd_transfer`.
@@ -1178,13 +1230,21 @@ def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, 
     not overlap), so each pool is sized in WHOLE nodes and the cluster is their sum -- which is
     also why a P/D cluster always names a fabric: every handoff crosses nodes.
     """
-    pools, total_nodes = [], 0
+    pools, total_nodes, any_offload = [], 0, False
     for role in PD_ROLES:
         spec = pd[role]
         nodes = pool_nodes(spec["parallel"], spec["instances"], node_size)
         total_nodes += nodes
+        off = spec.get("offload")
+        any_offload = any_offload or bool(off)
+        # The pool's own connector, only where it differs from the deployment's: a pool with a tier
+        # runs NIXL beside it (MultiConnector), a pool without one runs NIXL alone.
+        base = pd.get("connector", DEFAULT_PD_CONNECTOR)
+        want = "MultiConnector" if off else ("NixlConnector" if base == "MultiConnector" else base)
+        pool_pd = f"    pd_transfer: {{connector: {want}}}\n" if want != base else ""
         pools.append(
             f"  - role: {role}\n"
+            f"{pool_pd}{_pool_offload_block(off)}"
             f"    nodes: {nodes}\n"
             f"    parallel:\n{block(spec['parallel'], 6)}\n"
             f"    engine:\n{block(spec['engine'], 6)}")
@@ -1196,10 +1256,10 @@ def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, 
     return f"""kind: Scenario
 name: {name}
 engine:
-  kind: {ENGINE_KIND}
+  kind: {settings.ENGINE_KIND}
   version: "{engine_version}"
 model: {model}
-coefficients: [{", ".join(COEFFICIENTS)}]
+coefficients: [{", ".join(COEFFICIENTS + (["cost-model-offload-tiers"] if any_offload else []))}]
 cluster:
   hardware: {hardware}
   fabric: {fabric}
@@ -1248,8 +1308,11 @@ VLLM_BLOCK_MOVES = (
 
 
 def to_vllm_block(eng):
-    """The engine block with its keys in vLLM's names (VLLM_BLOCK_MOVES); a copy."""
+    """The engine block with its keys in vLLM's names (VLLM_BLOCK_MOVES); a copy. Another engine
+    kind's block already carries that engine's own names and is returned as it is."""
     out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in (eng or {}).items()}
+    if settings.ENGINE_KIND != "vllm":
+        return out
     for internal, external in VLLM_BLOCK_MOVES:
         grp, _, leaf = internal.partition(".")
         src = out.get(grp) if leaf else out
@@ -1284,8 +1347,8 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
         pad = " " * indent
         out = []
         for k, v in d.items():
-            if k == "pd":
-                continue                  # not a schema field; it SELECTS the pool layout below
+            if k in ("pd", "offload"):
+                continue                  # not schema fields of the pool: they SELECT the layout / the offload block below
             if isinstance(v, dict):
                 out.append(f"{pad}{k}:")
                 out.extend(f"{pad}  {kk}: {json.dumps(vv)}" for kk, vv in v.items())
@@ -1311,13 +1374,21 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
     router_block = ""
     if rc:
         router_block = f"\nrouter:\n  endpoint_picker_config: {json.dumps(os.path.abspath(rc))}"
+    # A CPU KV tier below HBM (a sweep's `offload:`): the deployment's offload block, and the coefficient set
+    # that prices the tier's transfers, which the simulator requires beside it.
+    off = (parallel or {}).get("offload")
+    offload_block, coefficients = "", list(COEFFICIENTS)
+    if off:
+        policy = f"\n  eviction_policy: {json.dumps(off['eviction_policy'])}" if off.get("eviction_policy") else ""
+        offload_block = f"\noffload:{policy}\n  tiers:\n    - {{tier: cpu_dram, bytes: {int(off['cpu_bytes'])}}}"
+        coefficients.append("cost-model-offload-tiers")
     return f"""kind: Scenario
 name: {name}
 engine:
-  kind: {ENGINE_KIND}
+  kind: {settings.ENGINE_KIND}
   version: "{engine_version}"
 model: {model}
-coefficients: [{", ".join(COEFFICIENTS)}]
+coefficients: [{", ".join(coefficients)}]
 cluster:
   hardware: {hardware}{fabric_line}
   nodes: {nodes}{node_size_line}
@@ -1330,7 +1401,7 @@ pools:
     parallel:
 {block(parallel, 6)}
     engine:
-{block(engine, 6)}{router_block}
+{block(engine, 6)}{offload_block}{router_block}
 """
 
 
@@ -1662,7 +1733,8 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     rec["pinned_stack"] = row_stack(blis, sim_catalog, sim_registry)
     try:
         node_size, states_node_size = cluster_node_size(blis, sim_catalog, hardware, gpus_per_node)
-        parallel, engine, cli, router = classify_config(config, settings.vocabulary(blis, fields), node_size)
+        parallel, engine, cli, router = classify_config(config, settings.vocabulary(blis, fields), node_size,
+                                                            blis_cli.supports_pool_offload(blis))
         # Resolve the preset's token shape so a closed-loop run actually prices the traffic it
         # names (see WORKLOAD_IGNORED). A replay carries its lengths in the corpus, so no shape.
         shape = {} if replay else load_workload_shape(catalog, workload)
@@ -1679,8 +1751,9 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     fp = footprint_gpus(parallel)
     # Fill block_size per MODEL when the candidate did not pin one (see default_block_size): the
     # adapter requires a value, and DSA models require it to be a multiple of 64.
-    engine.setdefault("block_size", default_block_size(catalog, model, hardware))
-    if pd:
+    if settings.ENGINE_KIND == "vllm":
+        engine.setdefault("block_size", default_block_size(catalog, model, hardware))
+    if pd and settings.ENGINE_KIND == "vllm":
         # Both pools page identically or BLIS refuses the handoff, so ONE resolved value is
         # filled into both rather than each pool defaulting independently.
         for role in PD_ROLES:
@@ -1688,7 +1761,7 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     # Fill the method from the DRAFTER's graph when a candidate asked for drafting without naming
     # one (the engine requires a method; see graph_speculator): the named drafter checkpoint's, else
     # the model's own. One with no speculator is refused here, naming it, not by BLIS.
-    spec = engine.get("speculative")
+    spec = engine.get("speculative") if settings.ENGINE_KIND == "vllm" else None
     if spec and not spec.get("method"):
         drafter = spec.get("draft_model") or model
         method = graph_speculator(catalog, drafter)
@@ -1890,7 +1963,7 @@ def main():
     except ValueError as e:
         sys.exit(str(e))
     rec = run_one(args.blis, args.catalog, args.registry, args.scenarios, args.model, args.hardware,
-                  blis_cli.engine_release(args.blis, ENGINE_KIND, args.fields), args.workload, args.num_requests,
+                  blis_cli.engine_release(args.blis, settings.ENGINE_KIND, args.fields), args.workload, args.num_requests,
                   args.seed, args.horizon,
                   json.loads(args.config), args.phase, args.timeout, args.defaults, replay,
                   fabric=args.fabric, fields=args.fields, data_override=args.data_override)

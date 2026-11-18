@@ -42,7 +42,8 @@ JOBS = ("python", "experiments", "web", "pages")
 # Roots whose import closure (plus the root itself) is what a job reads from scripts/.
 # fetch_fields.py and clone_pinned.sh are run as commands, not imported, so they are named.
 CLOSURE_ROOTS = {
-    "experiments": ("validate_experiment.py", "run_experiment.py", "fetch_fields.py", "knob_profile.py"),
+    "experiments": ("validate_experiment.py", "run_experiment.py", "fetch_fields.py", "knob_profile.py",
+                    "knob_table.py", "check_pending_pin.py"),
     "web": ("build_gallery.py",),
     "smoke": ("blis_pin.py", "fetch_fields.py", "clone_pinned.sh"),
 }
@@ -50,7 +51,7 @@ CLOSURE_ROOTS = {
 # Paths no job reads. Everything else must be claimed by a rule below or it selects every job.
 INERT = ("docs/", ".claude/", "LICENSE", "CLAUDE.md", "AGENTS.md", ".gitignore")
 
-PYTHON_DIRS = ("scripts/", "experiments/", "routing/", "workloads/", "reports/", "report/", "examples/",
+PYTHON_DIRS = ("scripts/", "knobs/", "experiments/", "routing/", "workloads/", "reports/", "report/", "examples/",
                "deploy/")
 PYTHON_FILES = ("pins.env", "requirements.in", "requirements.txt", "README.md", "SETUP.md")
 SHARED_CI = (".github/actions/",)
@@ -135,7 +136,7 @@ def scope(files, pins_moved=False, root=ROOT, workflow_file=None):
         known = False
         if f.startswith(PYTHON_DIRS) or f in PYTHON_FILES:
             on["python"], known = True, True
-        if f.startswith(("experiments/", "routing/", "workloads/")) or f == "pins.env" or f in clo["experiments"]:
+        if f.startswith(("experiments/", "knobs/", "routing/", "workloads/")) or f == "pins.env" or f in clo["experiments"]:
             on["experiments"], known = True, True
         if f.startswith(("web/", "reports/", "report/", "experiments/", "routing/", "workloads/")) \
                 or f in ("pins.env", "requirements.txt") or f in clo["web"]:

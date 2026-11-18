@@ -115,6 +115,14 @@ def schema(blis, document):
     return _cached(_key(blis, "schema", document), load)
 
 
+def supports_pool_offload(blis):
+    """True when this build's deployment schema lets a pool state its own `offload` and
+    `pd_transfer` (blis-substrate#307). A build without it takes one offload block for the whole
+    deployment, so a disaggregated deployment cannot give only some pools a CPU tier."""
+    pool = (schema(blis, "deployment").get("$defs") or {}).get("deployment.Pool") or {}
+    return "offload" in (pool.get("properties") or {})
+
+
 def resolve(blis, model=None, chip=None, catalog=None):
     """(identity, reason) for a model or chip name: `blis catalog resolve`.
 
@@ -169,3 +177,58 @@ def validate_document(blis, document, path):
     if pr.returncode == 1:
         raise DocumentInvalid(f"{document} {os.path.basename(path)}: {_stderr(pr)}")
     raise BlisCommandError(f"`blis schema validate {document}` failed: {_stderr(pr)}")
+
+
+_PROBE = """kind: Scenario
+name: kind-probe
+engine:
+  kind: kind-probe
+  version: "0"
+model: kind-probe
+cluster:
+  hardware: kind-probe
+  nodes: 1
+---
+kind: Deployment
+name: kind-probe
+pools:
+  - role: colocated
+    nodes: 1
+"""
+
+
+def registered_kinds(blis):
+    """The engine kinds this build registers, from the refusal it prints for a kind it lacks:
+    `names engine kind "x"; this build runs the kinds a, b`. TEMPORARY until `blis fields` lists them."""
+    import re
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "kind-probe.yaml"), "w", encoding="utf-8") as f:
+            f.write(_PROBE)
+        pr = _run(blis, ["fields", "--scenario", "kind-probe.yaml", "--scenarios", d], 120)
+    # The whole refusal line, not a phrase found anywhere in the output: a line that merely mentions
+    # "this build runs the kinds" (a hint, a log line) must not be read as the list.
+    m = re.search(r'^.*names engine kind "[^"]*"; this build runs the kinds? ([\w-]+(?:, ?[\w-]+)*)\s*$',
+                  (pr.stderr or "") + "\n" + (pr.stdout or ""), re.M)
+    if not m:
+        raise BlisCommandError("`blis fields` did not say which engine kinds the build runs: "
+                               + _stderr(pr))
+    return sorted(k.strip() for k in m.group(1).split(",") if k.strip())
+
+
+def engine_refusal(blis, scenario_text, word=None, timeout=120):
+    """What the engine says when it opens the scenario, as its last stderr line, or None if it opens.
+
+    `blis fields --scenario` builds the engine the scenario names, so a setting the engine cannot model
+    (an eviction policy it does not simulate) is refused here, as it would be by a run. With `word`, a
+    refusal that does not mention it is not this check's and returns None.
+    """
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "probe.yaml"), "w", encoding="utf-8") as f:
+            f.write(scenario_text)
+        pr = _run(blis, ["fields", "--scenario", "probe.yaml", "--scenarios", d], timeout)
+    if pr.returncode == 0:
+        return None
+    line = _stderr(pr)
+    return line if word is None or word in (pr.stderr or "") else None

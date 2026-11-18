@@ -1,0 +1,23 @@
+# GLM-5 on one 8-GPU H200 node under SGLang: how much does the prefill chunk size cost or buy?
+# Pending the pin: the pinned simulator does not register the sglang engine yet (see ./README.md).
+# The first SGLang search; the recipe's mem_fraction_static (0.85) and the model's window are stated.
+
+name: glm-5-h200-sglang-chunked-prefill
+
+scenario:
+  model: glm-5
+  engine_kind: sglang
+  hardware: h200
+  cluster: {gpus_per_node: 8}   # an 8-GPU HGX server; the catalog fixes no node size for this chip
+  workload: multidoc
+  gpus: 8
+  engine: {mem_fraction_static: 0.85, context_length: 202752}
+  concurrency: [8, 16]
+
+sweeps:
+  - name: chunk-size
+    # Chunk size trades prefill throughput against the stall a long prompt puts on running decodes.
+    narrative: Smaller prefill chunks should cost both tail inter-token latency and time-to-first-token, as each prompt then needs more passes.
+    num-instances: [1]
+    parallel: {tp: [8], dp: [1], pp: [1]}
+    engine: {chunked_prefill_size: [512, 2048, 8192]}

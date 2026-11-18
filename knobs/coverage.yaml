@@ -1,0 +1,289 @@
+# How a spec reaches each property of the scenario and deployment documents (CFG-6).
+# knob_table.py generates the property list from `blis schema`; this file only classifies it:
+# `sweep` is a spec path, `reason` says why a search cannot vary it. A property missing here, an
+# entry for a property that no longer exists, or a property under a prefix entry (`a.*`) that the
+# entry's `covers` list does not name, fails `knob_table.py --check` (the checks workflow). A prefix
+# entry therefore classifies only what a person reviewed; list a new property in `covers` after
+# reviewing it, or give it an exact entry. Engine settings are not listed: the field list decides them.
+knobs:
+  scenario:name:
+    reason: "the document's identity, derived from the experiment name"
+  scenario:kind:
+    reason: "the document's kind"
+  scenario:model:
+    reason: "one model per experiment (experiments/README.md); a second model is a second experiment"
+  scenario:coefficients[]:
+    reason: "the coefficient sets belong to the simulator release (CFG-1), not to a search"
+  scenario:engine_version:
+    reason: "derived from the engine kind's release"
+  scenario:engine.kind:
+    sweep: "scenario.engine_kind (one engine per experiment)"
+  scenario:engine.version:
+    reason: "derived from the engine kind's release"
+  scenario:cluster.hardware:
+    reason: "one hardware type per experiment (experiments/README.md); compare chips with two experiments"
+  scenario:cluster.nodes:
+    reason: "derived from scenario.gpus and the layout"
+  scenario:cluster.gpus_per_node:
+    reason: "a scenario constant (scenario.cluster.gpus_per_node), fixed by the hardware"
+  scenario:cluster.gpus_per_rack:
+    reason: "a catalog fact of the hardware, not a search dimension"
+  scenario:cluster.fabric:
+    reason: "a scenario constant (scenario.cluster.fabric); compare fabrics with two experiments"
+  scenario:cluster.pools[].hardware:
+    reason: "node pools of different chips have no spec key"
+    issue: inference-sim/blis-config-search#143
+  scenario:cluster.pools[].name:
+    reason: "node pools of different chips have no spec key"
+    issue: inference-sim/blis-config-search#143
+  scenario:cluster.storage[]:
+    reason: "the storage tiers belong to the catalog hardware entry, not a search dimension"
+  scenario:cluster.switch_groups[]:
+    reason: "the switch topology belongs to the cluster the experiment describes, not a search dimension"
+  scenario:cluster.uplink_oversubscription:
+    reason: "the switch topology belongs to the cluster the experiment describes, not a search dimension"
+  scenario:acceptance.*:
+    reason: "the acceptance of a drafter is read from the catalog's measured profile and recorded with its source on each arm"
+    covers:
+      - scenario:acceptance.exact_only
+      - scenario:acceptance.fallback_category
+      - scenario:acceptance.profiles
+      - scenario:acceptance.value.acceptance_length
+      - scenario:acceptance.value.acceptance_rate
+      - scenario:acceptance.value.num_spec_tokens
+      - scenario:acceptance.value.per_position_rates[]
+      - scenario:acceptance.value.realisation
+      - scenario:acceptance.value.source
+  scenario:routing.*:
+    reason: "the routing profile is read from the catalog's measured profile, not chosen by a search"
+    covers:
+      - scenario:routing.fallback_category
+      - scenario:routing.profiles
+      - scenario:routing.value.expert_imbalance
+      - scenario:routing.value.source
+      - scenario:routing.value.token_imbalance
+  scenario:workload.*:
+    reason: "one workload per experiment (experiments/README.md); the replay's constants come from scenario.replay and the workload descriptor"
+    covers:
+      - scenario:workload.replay.acceptance.acceptance_length
+      - scenario:workload.replay.acceptance.acceptance_rate
+      - scenario:workload.replay.acceptance.num_spec_tokens
+      - scenario:workload.replay.acceptance.per_position_rates[]
+      - scenario:workload.replay.acceptance.realisation
+      - scenario:workload.replay.acceptance.source
+      - scenario:workload.replay.benchmark_duration_s
+      - scenario:workload.replay.cache_bust
+      - scenario:workload.replay.category
+      - scenario:workload.replay.concurrency
+      - scenario:workload.replay.corpus.encoding
+      - scenario:workload.replay.corpus.format
+      - scenario:workload.replay.corpus.loader
+      - scenario:workload.replay.corpus.sha256
+      - scenario:workload.replay.corpus.source.file
+      - scenario:workload.replay.corpus.source.huggingface
+      - scenario:workload.replay.corpus.source.revision
+      - scenario:workload.replay.corpus.source.split
+      - scenario:workload.replay.grace_period_s
+      - scenario:workload.replay.harness_version
+      - scenario:workload.replay.ignore_eos
+      - scenario:workload.replay.ignore_trace_delays
+      - scenario:workload.replay.inter_turn_delay_cap_s
+      - scenario:workload.replay.load.measured_sessions
+      - scenario:workload.replay.load.recycling
+      - scenario:workload.replay.load.trace_idle_gap_cap_s
+      - scenario:workload.replay.load.warmup_duration_s
+      - scenario:workload.replay.max_context_length
+      - scenario:workload.replay.random_seed
+      - scenario:workload.replay.routing.expert_imbalance
+      - scenario:workload.replay.routing.source
+      - scenario:workload.replay.routing.token_imbalance
+      - scenario:workload.replay.scenario
+      - scenario:workload.replay.split_flattened_agents
+      - scenario:workload.replay.streaming
+      - scenario:workload.replay.synthesis_max_isl
+      - scenario:workload.replay.system_idle_gap_cap_s
+      - scenario:workload.replay.thinking
+      - scenario:workload.replay.trace_idle_gap_cap_s
+      - scenario:workload.replay.trajectory_start.max_ratio
+      - scenario:workload.replay.trajectory_start.min_ratio
+      - scenario:workload.replay.warmup.duration_s
+      - scenario:workload.replay.warmup.mode
+      - scenario:workload.replay.warmup.requests_per_lane
+      - scenario:workload.replay.workload
+      - scenario:workload.shape
+      - scenario:workload.trace.acceptance.acceptance_length
+      - scenario:workload.trace.acceptance.acceptance_rate
+      - scenario:workload.trace.acceptance.num_spec_tokens
+      - scenario:workload.trace.acceptance.per_position_rates[]
+      - scenario:workload.trace.acceptance.realisation
+      - scenario:workload.trace.acceptance.source
+      - scenario:workload.trace.category
+      - scenario:workload.trace.data
+      - scenario:workload.trace.header.acceptance.category
+      - scenario:workload.trace.header.acceptance.thinking
+      - scenario:workload.trace.header.acceptance.value.acceptance_length
+      - scenario:workload.trace.header.acceptance.value.acceptance_rate
+      - scenario:workload.trace.header.acceptance.value.num_spec_tokens
+      - scenario:workload.trace.header.acceptance.value.per_position_rates[]
+      - scenario:workload.trace.header.acceptance.value.realisation
+      - scenario:workload.trace.header.acceptance.value.source
+      - scenario:workload.trace.header.goodput_slo_targets
+      - scenario:workload.trace.header.kv_offload.block_size
+      - scenario:workload.trace.header.kv_offload.blocks_per_chunk
+      - scenario:workload.trace.header.kv_offload.cpu_bytes_to_use
+      - scenario:workload.trace.header.kv_offload.eviction_policy
+      - scenario:workload.trace.header.kv_offload.lazy_offload
+      - scenario:workload.trace.header.kv_offload.offload_prompt_only
+      - scenario:workload.trace.header.kv_offload.per_block_bytes
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].base_latency
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].capacity_bytes
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].device_class
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].direct_io
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].enable_kv_events
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].latency_jitter_stddev
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].locality
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].n_read_threads
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].n_write_threads
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].read_bandwidth
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].root_dir
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].saturation_queue_depth
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].single_transfer_fraction
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].type
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].write_bandwidth
+      - scenario:workload.trace.header.kv_offload.self_describing_kv_events
+      - scenario:workload.trace.header.kv_offload.simple_cpu_offload
+      - scenario:workload.trace.header.kv_offload.tokens_per_hash
+      - scenario:workload.trace.header.max_nodes_spanned
+      - scenario:workload.trace.header.mode
+      - scenario:workload.trace.header.phases[].concurrency
+      - scenario:workload.trace.header.phases[].name
+      - scenario:workload.trace.header.phases[].offset_us
+      - scenario:workload.trace.header.phases[].start
+      - scenario:workload.trace.header.router.epp_flags[]
+      - scenario:workload.trace.header.router.gateway_latency_us
+      - scenario:workload.trace.header.router.kv_event_delay_us
+      - scenario:workload.trace.header.router.manifests
+      - scenario:workload.trace.header.router.pod_labels
+      - scenario:workload.trace.header.router.scrape_jitter_us
+      - scenario:workload.trace.header.router.seed
+      - scenario:workload.trace.header.session_context_growth
+      - scenario:workload.trace.header.time_unit
+      - scenario:workload.trace.header.trace_version
+      - scenario:workload.trace.header.workload_seed
+      - scenario:workload.trace.routing.expert_imbalance
+      - scenario:workload.trace.routing.source
+      - scenario:workload.trace.routing.token_imbalance
+      - scenario:workload.trace.rows
+      - scenario:workload.trace.sha256
+      - scenario:workload.trace.thinking
+      - scenario:workload.trace.token_blocks.path
+      - scenario:workload.trace.token_blocks.sha256
+
+  deployment:kind:
+    reason: "the document's kind"
+  deployment:name:
+    reason: "the document's identity, derived from the arm"
+  deployment:pools[].role:
+    sweep: "sweeps[].prefill-instances, sweeps[].decode-instances"
+  deployment:pools[].nodes:
+    sweep: "sweeps[].num-instances (nodes follow the layout)"
+  deployment:pools[].labels:
+    reason: "router selectors are derived from the pool's role"
+  deployment:pools[].engine:
+    sweep: "sweeps[].engine.<setting> (the engine rows)"
+  deployment:pools[].parallel.tp:
+    sweep: "sweeps[].parallel.tp"
+  deployment:pools[].parallel.dp:
+    sweep: "sweeps[].parallel.dp"
+  deployment:pools[].parallel.pp:
+    sweep: "sweeps[].parallel.pp"
+  deployment:pools[].parallel.pcp:
+    sweep: "sweeps[].parallel.pcp"
+  deployment:pools[].parallel.dcp:
+    sweep: "sweeps[].parallel.dcp"
+  deployment:pools[].parallel.dp_local:
+    sweep: "sweeps[].parallel.dp_local"
+  deployment:pools[].parallel.enable_expert_parallel:
+    sweep: "sweeps[].parallel.enable_expert_parallel"
+  deployment:pools[].parallel.data_parallel_load_balancing:
+    sweep: "sweeps[].parallel.data_parallel_load_balancing"
+  deployment:offload.tiers[].bytes:
+    sweep: "sweeps[].offload.cpu_bytes (0 is the control)"
+  deployment:offload.eviction_policy:
+    sweep: sweeps[].offload.eviction_policy
+  deployment:offload.tiers[].tier:
+    reason: "the spec states the CPU tier only; the fs, obj and p2p tiers have no key yet"
+    issue: inference-sim/blis-config-search#94
+  deployment:offload.*:
+    reason: "the connector, its spec, its options and the prefetch depth take the simulator's defaults; secondary tiers have no key"
+    issue: inference-sim/blis-config-search#94
+    covers:
+      - deployment:offload.connector
+      - deployment:offload.connector_options
+      - deployment:offload.prefetch_depth
+      - deployment:offload.spec
+  deployment:pools[].offload.tiers[].bytes:
+    sweep: "sweeps[].offload.cpu_bytes (a disaggregated sweep: the default for both pools), sweeps[].prefill.offload.cpu_bytes, sweeps[].decode.offload.cpu_bytes (0 is a pool with no tier)"
+    optional: true
+  deployment:pools[].offload.eviction_policy:
+    sweep: "sweeps[].offload.eviction_policy, sweeps[].prefill.offload.eviction_policy, sweeps[].decode.offload.eviction_policy"
+    optional: true
+  deployment:pools[].offload.tiers[].tier:
+    reason: "the spec states the CPU tier only; the fs, obj and p2p tiers have no key yet"
+    issue: inference-sim/blis-config-search#94
+    optional: true
+  deployment:pools[].offload.*:
+    reason: "the connector, its spec, its options and the prefetch depth take the simulator's defaults; secondary tiers have no key"
+    issue: inference-sim/blis-config-search#94
+    optional: true
+    covers:
+      - deployment:pools[].offload.connector
+      - deployment:pools[].offload.connector_options
+      - deployment:pools[].offload.prefetch_depth
+      - deployment:pools[].offload.spec
+  deployment:pools[].pd_transfer.connector:
+    reason: "derived from the pool: a pool with a CPU tier runs NIXL as a MultiConnector, any other pool the deployment's connector"
+    optional: true
+  deployment:pd_transfer.connector:
+    reason: "the P/D connector has no spec key"
+    issue: inference-sim/blis-config-search#144
+  deployment:router.endpoint_picker_config:
+    sweep: "sweeps[].router.endpoint_picker_config"
+  deployment:router.epp_flags[]:
+    reason: "router flags have no spec key"
+    issue: inference-sim/blis-config-search#144
+  deployment:router.manifests[]:
+    reason: "router manifests have no spec key"
+    issue: inference-sim/blis-config-search#144
+
+# The M3.1 capabilities of inference-sim, each pointing at the knob rows that carry it.
+capabilities:
+  sglang-engine:
+    requires_engine: sglang
+    rows: ["scenario:engine.kind", "engine:sglang:config:chunked_prefill_size"]
+    note: the engine kind of an experiment, and the SGLang settings the simulator models
+  multi-node-pd-handoff:
+    rows: ["deployment:pools[].role", "deployment:pools[].nodes", "deployment:pools[].parallel.dp", "deployment:pools[].parallel.tp"]
+    note: prefill and decode pools of different layout, including a prefill pool whose data-parallel ranks span nodes (Handoff.At)
+  per-rank-cpu-tier:
+    rows: ["deployment:offload.tiers[].bytes"]
+    note: the CPU KV tier and its size, off as the control
+  per-pool-cpu-tier:
+    requires_schema: deployment:pools[].offload.tiers[].bytes
+    rows: ["deployment:pools[].offload.tiers[].bytes"]
+    note: a disaggregated deployment's CPU tier on the prefill pool, the decode pool or both (blis-substrate#307)
+  offload-with-drafting:
+    rows: ["deployment:offload.tiers[].bytes", "engine:vllm:config:speculative_config.method"]
+    note: the KV tier beside an EAGLE-3 or MTP drafter
+  dp-balancing-modes:
+    rows: ["deployment:pools[].parallel.data_parallel_load_balancing"]
+    note: the data-parallel load-balancing mode of a pool
+  all-reduce-lane:
+    rows: ["engine:vllm:config:disable_custom_all_reduce"]
+    note: custom or NCCL all-reduce (the field list says why it is not swept yet)
+  moe-backend:
+    rows: ["engine:vllm:config:moe_backend"]
+    note: the MoE kernel backend (the field list says why it is not swept yet)
+  block-size:
+    rows: ["engine:vllm:config:block_size"]
+    note: the KV block size

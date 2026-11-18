@@ -13,8 +13,22 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blis_cli  # noqa: E402
 
-# The engine kind every scenario this repository writes names. SGLang searches come in M3.
+# The engine kind the scenarios of this process name: the spec's scenario.engine_kind, default vllm.
+ENGINE_KINDS = ("vllm", "sglang")
 ENGINE_KIND = "vllm"
+
+
+def use_engine(kind):
+    """Select the engine kind this process writes scenarios for and reads field lists of."""
+    global ENGINE_KIND
+    if kind not in ENGINE_KINDS:
+        raise ValueError(f"engine kind {kind!r} is none of {', '.join(ENGINE_KINDS)}")
+    ENGINE_KIND = kind
+
+
+def spec_engine_kind(spec):
+    """The engine kind a parsed spec asks for."""
+    return ((spec or {}).get("scenario") or {}).get("engine_kind") or "vllm"
 
 # Engine-block names that differ from vLLM's own name for the setting, mapped to the field-list
 # entry ("config:<name>" or "env:<NAME>"). blis-vllm's engine block (rules/engineconfig/engine.go
@@ -74,7 +88,12 @@ class Vocabulary:
         return self.flat | frozenset(self.blocks)
 
 
-def vocabulary_from(field_list, deployment_schema):
+def renames_for(kind):
+    """The engine-block renames of an engine kind: only vLLM's block spells settings differently."""
+    return ENGINE_BLOCK_NAMES if kind == "vllm" else {}
+
+
+def vocabulary_from(field_list, deployment_schema, renames=None):
     """A Vocabulary from a parsed field list and the deployment document's JSON Schema.
 
     A field that ENGINE_BLOCK_NAMES renames is named only by its engine-block name, because the
@@ -82,7 +101,9 @@ def vocabulary_from(field_list, deployment_schema):
     ENGINE_BLOCK_NAMES; a spec does not set the launch environment.
     """
     entries = {f"{f['source']}:{f['name']}": f for f in field_list["fields"]}
-    renamed = {target: alias for alias, target in ENGINE_BLOCK_NAMES.items() if target in entries}
+    if renames is None:
+        renames = renames_for(field_list["engine"]["kind"])
+    renamed = {target: alias for alias, target in renames.items() if target in entries}
     status = {}
     for key, entry in entries.items():
         if key in renamed:

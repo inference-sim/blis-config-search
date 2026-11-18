@@ -96,6 +96,31 @@ sweeps:
   sweep all belong in a `#` comment, which stays in the spec and never reaches the report. The
   validator prints a style note (not a failure) for anything longer.
 
+## The engine
+
+`scenario.engine_kind` names the engine every run uses: `vllm` (the default) or `sglang`. The
+settings a sweep may vary are that engine's own, read from its field list (`blis fields`), so an
+SGLang spec uses SGLang's names (`chunked_prefill_size`, `mem_fraction_static`, ...) and none of
+vLLM's. The SGLang engine runs one colocated pool; a spec that asks for more is refused by the
+simulator and the row says so. A spec for an engine kind the pinned simulator does not register
+yet lives in `experiments/pending-pin/`, where the checks do not run it; `scripts/check_pending_pin.py`
+fails once the pinned build registers the kind, which is the cue to move the spec to `experiments/`.
+
+## The CPU KV tier
+
+A sweep may state `offload: {cpu_bytes: [0, 512GiB], eviction_policy: [lru]}` for a colocated pool: a
+CPU tier of that size below HBM, and `0` for no tier, the control. Sizes carry units (`512GiB`) or are
+bytes. The row records `cpu_tier_hit_rate` beside the throughput, so a reader can tell whether the tier
+was used; a tier only helps once the GPU KV pool fills (long contexts, a replay). The fs, obj and p2p
+tiers have no key yet (#94).
+
+On a disaggregated sweep the sweep-level `offload:` block is the default for both pools, and
+`prefill: {offload: {...}}` / `decode: {offload: {...}}` state one pool's own, replacing the default for
+that pool (`cpu_bytes: [0]` is a pool with no tier). A pool with a tier runs NIXL beside it as a
+`MultiConnector`; a pool without one runs NIXL alone, as the runner writes it. This needs a simulator
+whose deployment schema lets a pool state its own offload (blis-substrate#307); the runner reads that from
+`blis schema deployment`, and a sweep against an older build is refused with that reason.
+
 ## Knobs are vLLM's own settings
 
 | Spec knob | vLLM setting |

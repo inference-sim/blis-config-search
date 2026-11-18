@@ -35,7 +35,8 @@ def label(cand):
 
 # Readable knob names, spelled out on purpose: "b2k" for max_num_batched_tokens=2048 tells a
 # reader nothing. Mirrors report.KNOB_NAMES, keyed by candidate-config key.
-KNOB_NAMES = {"chunked_prefill_size": "chunk size", "mem_fraction_static": "static memory share",
+KNOB_NAMES = {"offload_cpu_bytes": "CPU KV tier", "offload_eviction_policy": "tier eviction",
+              "chunked_prefill_size": "chunk size", "mem_fraction_static": "static memory share",
               "max_running_requests": "running-request cap", "disable_radix_cache": "radix cache off",
               "cuda_graph_max_bs_decode": "decode graph cap", "attention_backend": "attention backend",
               "pd_transfer_contention": "handoff contention", "num_speculative_tokens": "draft tokens", "speculative_method": "drafter",
@@ -110,6 +111,14 @@ def routing_arm_name(path):
     return base[:-5] if base.endswith(".yaml") else base
 
 
+def _size_words(n):
+    """Bytes as the largest binary unit that divides them evenly (549755813888 -> "512 GiB")."""
+    for unit, size in (("TiB", 2**40), ("GiB", 2**30), ("MiB", 2**20)):
+        if n % size == 0:
+            return f"{n // size} {unit}"
+    return f"{n:,} B"
+
+
 def knob_phrase(key, value):
     """Spelled-out description of one knob setting, e.g. "batch tokens 2,048"."""
     if key == "num_speculative_tokens":
@@ -122,6 +131,8 @@ def knob_phrase(key, value):
         on, off = _BOOL_KNOB_WORDS[key]
         return on if value else off
     name = KNOB_NAMES.get(key, key)
+    if key == "offload_cpu_bytes":
+        return f"{name} off" if not value else f"{name} {_size_words(value)}"
     if key == "cudagraph_mode":
         # The enum is SHOUTED (FULL_AND_PIECEWISE); spell it as words.
         return f"{name} {str(value).lower().replace('_and_', '+').replace('_', ' ')}"

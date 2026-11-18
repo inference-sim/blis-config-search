@@ -117,6 +117,25 @@ def _engine_candidates(engine):
     return out
 
 
+def _offload_candidates(block):
+    """A sweep's `offload:` block as candidate keys: offload_cpu_bytes (bytes, 0 = no tier, the control)
+    and offload_eviction_policy. One candidate per combination; a 0-byte tier takes no policy."""
+    if not block:
+        return [{}]
+    sizes = [validator.parse_size(v) for v in block["cpu_bytes"]]
+    out = []
+    for size in dict.fromkeys(sizes):
+        if size == 0 or "eviction_policy" not in block:
+            combo = [{"offload_cpu_bytes": size}]
+        else:
+            combo = [{"offload_cpu_bytes": size, "offload_eviction_policy": p}
+                     for p in dict.fromkeys(block["eviction_policy"])]
+        for c in combo:
+            if c not in out:
+                out.append(c)
+    return out
+
+
 def expand_sweep(sweep, gpus):
     """(kept, dropped) candidate configs for one sweep.
 
@@ -125,7 +144,8 @@ def expand_sweep(sweep, gpus):
     than only what survived (the same reason pareto.json carries `dropped[]`).
     """
     router_variants = _router_variants(sweep.get("router") or {})
-    engine_combos = _engine_candidates(sweep.get("engine"))
+    engine_combos = [{**e, **o} for e in _engine_candidates(sweep.get("engine"))
+                     for o in _offload_candidates(sweep.get("offload"))]
     sim_combos = grid(sweep.get("simulator") or {})   # simulator switches: [{}] when none
     kept, dropped = [], []
     if _is_disaggregated(sweep):
@@ -350,6 +370,8 @@ VARIANT_KEYS = ("num_speculative_tokens", "speculative_method", "speculative_dra
                 # Only the priced ones are here -- the eleven that decode but measure
                 # byte-identical are refused up front, so no sweep can label them.
                 "max_num_active_seqs", "max_num_scheduled_tokens", "frontend",
+                # the CPU KV tier (a sweep's `offload:` block)
+                "offload_cpu_bytes", "offload_eviction_policy",
                 # SGLang's own settings (scenario.engine_kind: sglang)
                 "chunked_prefill_size", "mem_fraction_static", "max_running_requests",
                 "disable_radix_cache", "cuda_graph_max_bs_decode", "attention_backend")

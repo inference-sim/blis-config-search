@@ -75,8 +75,15 @@ knobs:
     sweep: "sweeps[].parallel.enable_expert_parallel"
   deployment:pools[].parallel.data_parallel_load_balancing:
     sweep: "sweeps[].parallel.data_parallel_load_balancing"
+  deployment:offload.tiers[].bytes:
+    sweep: "sweeps[].offload.cpu_bytes (0 is the control)"
+  deployment:offload.eviction_policy:
+    sweep: sweeps[].offload.eviction_policy
+  deployment:offload.tiers[].tier:
+    reason: "the spec states the CPU tier only; the fs, obj and p2p tiers have no key yet"
+    issue: inference-sim/blis-config-search#94
   deployment:offload.*:
-    reason: "KV tiers and connectors are never swept"
+    reason: "the connector, its spec, its options and the prefetch depth take the simulator's defaults; secondary tiers have no key"
     issue: inference-sim/blis-config-search#94
   deployment:pd_transfer.connector:
     reason: "the P/D connector has no spec key"
@@ -100,10 +107,10 @@ capabilities:
     rows: ["deployment:pools[].role", "deployment:pools[].nodes", "deployment:pools[].parallel.dp", "deployment:pools[].parallel.tp"]
     note: prefill and decode pools of different layout, including a prefill pool whose data-parallel ranks span nodes (Handoff.At)
   per-rank-cpu-tier:
-    rows: ["deployment:offload.*"]
+    rows: ["deployment:offload.tiers[].bytes"]
     note: the CPU KV tier and its size, off as the control
   offload-with-drafting:
-    rows: ["deployment:offload.*", "engine:vllm:config:speculative_config.method"]
+    rows: ["deployment:offload.tiers[].bytes", "engine:vllm:config:speculative_config.method"]
     note: the KV tier beside an EAGLE-3 or MTP drafter
   dp-balancing-modes:
     rows: ["deployment:pools[].parallel.data_parallel_load_balancing"]

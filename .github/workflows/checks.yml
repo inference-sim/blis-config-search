@@ -75,6 +75,7 @@ jobs:
           python3 -I scripts/test_experiment.py
           python3 -I scripts/test_knobs.py
           python3 -I scripts/test_engine_kind.py
+          python3 -I scripts/test_offload.py
       - name: Which jobs a change selects (scripts/ci_scope.py)
         if: steps.scope.outputs.python == 'true'
         run: |

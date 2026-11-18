@@ -106,6 +106,14 @@ simulator and the row says so. A spec for an engine kind the pinned simulator do
 yet lives in `experiments/pending-pin/`, where the checks do not run it; `scripts/check_pending_pin.py`
 fails once the pinned build registers the kind, which is the cue to move the spec to `experiments/`.
 
+## The CPU KV tier
+
+A sweep may state `offload: {cpu_bytes: [0, 512GiB], eviction_policy: [lru]}` for a colocated pool: a
+CPU tier of that size below HBM, and `0` for no tier, the control. Sizes carry units (`512GiB`) or are
+bytes. The row records `cpu_tier_hit_rate` beside the throughput, so a reader can tell whether the tier
+was used; a tier only helps once the GPU KV pool fills (long contexts, a replay). The fs, obj and p2p
+tiers and a disaggregated pool have no key yet (#94).
+
 ## Knobs are vLLM's own settings
 
 | Spec knob | vLLM setting |

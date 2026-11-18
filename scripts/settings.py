@@ -13,8 +13,22 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blis_cli  # noqa: E402
 
-# The engine kind every scenario this repository writes names. SGLang searches come in M3.
+# The engine kind the scenarios of this process name: the spec's scenario.engine_kind, default vllm.
+ENGINE_KINDS = ("vllm", "sglang")
 ENGINE_KIND = "vllm"
+
+
+def use_engine(kind):
+    """Select the engine kind this process writes scenarios for and reads field lists of."""
+    global ENGINE_KIND
+    if kind not in ENGINE_KINDS:
+        raise ValueError(f"engine kind {kind!r} is none of {', '.join(ENGINE_KINDS)}")
+    ENGINE_KIND = kind
+
+
+def spec_engine_kind(spec):
+    """The engine kind a parsed spec asks for."""
+    return ((spec or {}).get("scenario") or {}).get("engine_kind") or "vllm"
 
 # Engine-block names that differ from vLLM's own name for the setting, mapped to the field-list
 # entry ("config:<name>" or "env:<NAME>"). blis-vllm's engine block (rules/engineconfig/engine.go

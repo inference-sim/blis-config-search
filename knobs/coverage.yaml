@@ -15,8 +15,7 @@ knobs:
   scenario:engine_version:
     reason: "derived from the engine kind's release"
   scenario:engine.kind:
-    reason: "the spec format names the vLLM engine only"
-    issue: inference-sim/blis-config-search#142
+    sweep: "scenario.engine_kind (one engine per experiment)"
   scenario:engine.version:
     reason: "derived from the engine kind's release"
   scenario:cluster.hardware:

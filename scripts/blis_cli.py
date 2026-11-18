@@ -169,3 +169,37 @@ def validate_document(blis, document, path):
     if pr.returncode == 1:
         raise DocumentInvalid(f"{document} {os.path.basename(path)}: {_stderr(pr)}")
     raise BlisCommandError(f"`blis schema validate {document}` failed: {_stderr(pr)}")
+
+
+_PROBE = """kind: Scenario
+name: kind-probe
+engine:
+  kind: kind-probe
+  version: "0"
+model: kind-probe
+cluster:
+  hardware: kind-probe
+  nodes: 1
+---
+kind: Deployment
+name: kind-probe
+pools:
+  - role: colocated
+    nodes: 1
+"""
+
+
+def registered_kinds(blis):
+    """The engine kinds this build registers, from the refusal it prints for a kind it lacks:
+    `names engine kind "x"; this build runs the kinds a, b`. TEMPORARY until `blis fields` lists them."""
+    import re
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "kind-probe.yaml"), "w", encoding="utf-8") as f:
+            f.write(_PROBE)
+        pr = _run(blis, ["fields", "--scenario", "kind-probe.yaml", "--scenarios", d], 120)
+    m = re.search(r"this build runs the kinds? ([\w, -]+)", (pr.stderr or "") + (pr.stdout or ""))
+    if not m:
+        raise BlisCommandError("`blis fields` did not say which engine kinds the build runs: "
+                               + _stderr(pr))
+    return sorted(k.strip() for k in m.group(1).split(",") if k.strip())

@@ -149,9 +149,15 @@ def check_sweep_keys(coverage, spec_schema, parallel_keys):
     """Every sweep key a coverage entry names is a key the spec format has (and, for `parallel`, a
     property of the deployment document's Parallelism)."""
     props = spec_schema["$defs"]["sweep"]["properties"]
+    scenario_props = spec_schema["$defs"]["scenario"]["properties"]
     problems = []
     for key, entry in coverage["knobs"].items():
         for target in re.split(r",\s*", entry.get("sweep") or ""):
+            sm = re.match(r"scenario\.([\w]+)", target)
+            if sm:
+                if sm.group(1) not in scenario_props:
+                    problems.append(f"{key}: the spec format has no scenario key {sm.group(1)!r}")
+                continue
             m = re.match(r"sweeps\[\]\.([\w-]+)(?:\.([\w]+))?", target)
             if not m:
                 if target:

@@ -535,8 +535,8 @@ def run_row(rec, cand, label, variant, sweep_name, concurrency, gpus):
         "total_tokens_per_sec_per_gpu": _round(m.get("total_tokens_per_sec_per_gpu"), 3),
         "output_tokens_per_sec_per_decode_gpu": _round(m.get("output_tokens_per_sec_per_decode_gpu"), 3),
         "disaggregated": cand.get("prefill_instances") is not None,
-        # A drafting row's acceptance as its Result records it: value, layer, profile, source and,
-        # once the Result carries it (inference-sim/inference-sim#2079), the lookup's step.
+        # A drafting row's acceptance as its Result records it: value, layer, profile, source and
+        # the lookup's step, the key fields that differed and the K rule.
         **({"acceptance": acc} if acc else {}),
     }
 

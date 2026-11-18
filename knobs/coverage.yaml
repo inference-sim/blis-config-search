@@ -1,8 +1,10 @@
 # How a spec reaches each property of the scenario and deployment documents (CFG-6).
 # knob_table.py generates the property list from `blis schema`; this file only classifies it:
-# `sweep` is a spec path, `reason` says why a search cannot vary it. A property missing here, or an
-# entry for a property that no longer exists, fails scripts/test_knobs.py. Engine settings are not
-# listed: the field list decides them.
+# `sweep` is a spec path, `reason` says why a search cannot vary it. A property missing here, an
+# entry for a property that no longer exists, or a property under a prefix entry (`a.*`) that the
+# entry's `covers` list does not name, fails `knob_table.py --check` (the checks workflow). A prefix
+# entry therefore classifies only what a person reviewed; list a new property in `covers` after
+# reviewing it, or give it an exact entry. Engine settings are not listed: the field list decides them.
 knobs:
   scenario:name:
     reason: "the document's identity, derived from the experiment name"
@@ -42,10 +44,140 @@ knobs:
     reason: "the switch topology belongs to the cluster the experiment describes, not a search dimension"
   scenario:acceptance.*:
     reason: "the acceptance of a drafter is read from the catalog's measured profile and recorded with its source on each arm"
+    covers:
+      - scenario:acceptance.exact_only
+      - scenario:acceptance.fallback_category
+      - scenario:acceptance.profiles
+      - scenario:acceptance.value.acceptance_length
+      - scenario:acceptance.value.acceptance_rate
+      - scenario:acceptance.value.num_spec_tokens
+      - scenario:acceptance.value.per_position_rates[]
+      - scenario:acceptance.value.realisation
+      - scenario:acceptance.value.source
   scenario:routing.*:
     reason: "the routing profile is read from the catalog's measured profile, not chosen by a search"
+    covers:
+      - scenario:routing.fallback_category
+      - scenario:routing.profiles
+      - scenario:routing.value.expert_imbalance
+      - scenario:routing.value.source
+      - scenario:routing.value.token_imbalance
   scenario:workload.*:
     reason: "one workload per experiment (experiments/README.md); the replay's constants come from scenario.replay and the workload descriptor"
+    covers:
+      - scenario:workload.replay.acceptance.acceptance_length
+      - scenario:workload.replay.acceptance.acceptance_rate
+      - scenario:workload.replay.acceptance.num_spec_tokens
+      - scenario:workload.replay.acceptance.per_position_rates[]
+      - scenario:workload.replay.acceptance.realisation
+      - scenario:workload.replay.acceptance.source
+      - scenario:workload.replay.benchmark_duration_s
+      - scenario:workload.replay.cache_bust
+      - scenario:workload.replay.category
+      - scenario:workload.replay.concurrency
+      - scenario:workload.replay.corpus.encoding
+      - scenario:workload.replay.corpus.format
+      - scenario:workload.replay.corpus.loader
+      - scenario:workload.replay.corpus.sha256
+      - scenario:workload.replay.corpus.source.file
+      - scenario:workload.replay.corpus.source.huggingface
+      - scenario:workload.replay.corpus.source.revision
+      - scenario:workload.replay.corpus.source.split
+      - scenario:workload.replay.grace_period_s
+      - scenario:workload.replay.harness_version
+      - scenario:workload.replay.ignore_eos
+      - scenario:workload.replay.ignore_trace_delays
+      - scenario:workload.replay.inter_turn_delay_cap_s
+      - scenario:workload.replay.load.measured_sessions
+      - scenario:workload.replay.load.recycling
+      - scenario:workload.replay.load.trace_idle_gap_cap_s
+      - scenario:workload.replay.load.warmup_duration_s
+      - scenario:workload.replay.max_context_length
+      - scenario:workload.replay.random_seed
+      - scenario:workload.replay.routing.expert_imbalance
+      - scenario:workload.replay.routing.source
+      - scenario:workload.replay.routing.token_imbalance
+      - scenario:workload.replay.scenario
+      - scenario:workload.replay.split_flattened_agents
+      - scenario:workload.replay.streaming
+      - scenario:workload.replay.synthesis_max_isl
+      - scenario:workload.replay.system_idle_gap_cap_s
+      - scenario:workload.replay.thinking
+      - scenario:workload.replay.trace_idle_gap_cap_s
+      - scenario:workload.replay.trajectory_start.max_ratio
+      - scenario:workload.replay.trajectory_start.min_ratio
+      - scenario:workload.replay.warmup.duration_s
+      - scenario:workload.replay.warmup.mode
+      - scenario:workload.replay.warmup.requests_per_lane
+      - scenario:workload.replay.workload
+      - scenario:workload.shape
+      - scenario:workload.trace.acceptance.acceptance_length
+      - scenario:workload.trace.acceptance.acceptance_rate
+      - scenario:workload.trace.acceptance.num_spec_tokens
+      - scenario:workload.trace.acceptance.per_position_rates[]
+      - scenario:workload.trace.acceptance.realisation
+      - scenario:workload.trace.acceptance.source
+      - scenario:workload.trace.category
+      - scenario:workload.trace.data
+      - scenario:workload.trace.header.acceptance.category
+      - scenario:workload.trace.header.acceptance.thinking
+      - scenario:workload.trace.header.acceptance.value.acceptance_length
+      - scenario:workload.trace.header.acceptance.value.acceptance_rate
+      - scenario:workload.trace.header.acceptance.value.num_spec_tokens
+      - scenario:workload.trace.header.acceptance.value.per_position_rates[]
+      - scenario:workload.trace.header.acceptance.value.realisation
+      - scenario:workload.trace.header.acceptance.value.source
+      - scenario:workload.trace.header.goodput_slo_targets
+      - scenario:workload.trace.header.kv_offload.block_size
+      - scenario:workload.trace.header.kv_offload.blocks_per_chunk
+      - scenario:workload.trace.header.kv_offload.cpu_bytes_to_use
+      - scenario:workload.trace.header.kv_offload.eviction_policy
+      - scenario:workload.trace.header.kv_offload.lazy_offload
+      - scenario:workload.trace.header.kv_offload.offload_prompt_only
+      - scenario:workload.trace.header.kv_offload.per_block_bytes
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].base_latency
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].capacity_bytes
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].device_class
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].direct_io
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].enable_kv_events
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].latency_jitter_stddev
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].locality
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].n_read_threads
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].n_write_threads
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].read_bandwidth
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].root_dir
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].saturation_queue_depth
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].single_transfer_fraction
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].type
+      - scenario:workload.trace.header.kv_offload.secondary_tiers[].write_bandwidth
+      - scenario:workload.trace.header.kv_offload.self_describing_kv_events
+      - scenario:workload.trace.header.kv_offload.simple_cpu_offload
+      - scenario:workload.trace.header.kv_offload.tokens_per_hash
+      - scenario:workload.trace.header.max_nodes_spanned
+      - scenario:workload.trace.header.mode
+      - scenario:workload.trace.header.phases[].concurrency
+      - scenario:workload.trace.header.phases[].name
+      - scenario:workload.trace.header.phases[].offset_us
+      - scenario:workload.trace.header.phases[].start
+      - scenario:workload.trace.header.router.epp_flags[]
+      - scenario:workload.trace.header.router.gateway_latency_us
+      - scenario:workload.trace.header.router.kv_event_delay_us
+      - scenario:workload.trace.header.router.manifests
+      - scenario:workload.trace.header.router.pod_labels
+      - scenario:workload.trace.header.router.scrape_jitter_us
+      - scenario:workload.trace.header.router.seed
+      - scenario:workload.trace.header.session_context_growth
+      - scenario:workload.trace.header.time_unit
+      - scenario:workload.trace.header.trace_version
+      - scenario:workload.trace.header.workload_seed
+      - scenario:workload.trace.routing.expert_imbalance
+      - scenario:workload.trace.routing.source
+      - scenario:workload.trace.routing.token_imbalance
+      - scenario:workload.trace.rows
+      - scenario:workload.trace.sha256
+      - scenario:workload.trace.thinking
+      - scenario:workload.trace.token_blocks.path
+      - scenario:workload.trace.token_blocks.sha256
 
   deployment:kind:
     reason: "the document's kind"
@@ -85,6 +217,11 @@ knobs:
   deployment:offload.*:
     reason: "the connector, its spec, its options and the prefetch depth take the simulator's defaults; secondary tiers have no key"
     issue: inference-sim/blis-config-search#94
+    covers:
+      - deployment:offload.connector
+      - deployment:offload.connector_options
+      - deployment:offload.prefetch_depth
+      - deployment:offload.spec
   deployment:pd_transfer.connector:
     reason: "the P/D connector has no spec key"
     issue: inference-sim/blis-config-search#144

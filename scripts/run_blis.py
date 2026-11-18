@@ -582,10 +582,12 @@ def acceptance_record(doc):
     """The acceptance a drafting run was priced with, as the pinned simulator's Result records it,
     or None when the run did not speculate.
 
-    Read from `reports.engine.cluster.acceptance` (value, layer and profile). The lookup's step and
-    the key fields that differed are taken from the Result's `input.workload_properties` when it
-    carries them; the pinned release does not yet (inference-sim/inference-sim#2079), and then
-    `step` is None.
+    Read from `reports.engine.cluster.acceptance` (value, layer and profile). The lookup's step,
+    the key fields that differed and the K rule are the simulator's own record of the resolution,
+    at `acceptance.entry.{step,differed,k_rule}`. A Result that carries them only as the
+    substrate's `speculative_acceptance` workload property (input.workload_properties) is read as
+    a fallback, and a field neither states is None (an empty list for `differed`); a field the
+    simulator adds later is simply absent from the record until it is read here.
     """
     acc = (_engine_report(doc).get("cluster") or {}).get("acceptance")
     if not isinstance(acc, dict):
@@ -600,8 +602,9 @@ def acceptance_record(doc):
             "copied_from": entry.get("copied_from") or None,
             "measured_on": entry.get("measured_on") or None,
             "fallback_from": entry.get("fallback_from") or None,
-            "step": prop.get("step") or None, "differed": prop.get("differed") or [],
-            "k_rule": prop.get("k_rule") or None}
+            "step": entry.get("step") or prop.get("step") or None,
+            "differed": entry.get("differed") or prop.get("differed") or [],
+            "k_rule": entry.get("k_rule") or prop.get("k_rule") or None}
 
 
 def draft_depth(run):

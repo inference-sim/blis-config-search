@@ -130,6 +130,17 @@ class PendingPin(unittest.TestCase):
         self.assertEqual(["vllm"], blis_cli.registered_kinds(fake_blis(self.tmp.name, "vllm")))
         self.assertEqual(["sglang", "vllm"], blis_cli.registered_kinds(fake_blis(self.tmp.name, "vllm, sglang")))
 
+    def test_only_the_refusal_line_itself_names_the_kinds(self):
+        """A line that merely mentions the phrase, or a refusal with trailing words, is not the list."""
+        for text in ("hint: this build runs the kinds fake, other",
+                     'Error: scenario "x" names engine kind "k"; this build runs the kinds vllm and some words'):
+            path = os.path.join(self.tmp.name, "blis")
+            with open(path, "w") as f:
+                f.write(f"#!/bin/sh\necho '{text}' >&2\nexit 1\n")
+            os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR)
+            with self.assertRaises(blis_cli.BlisCommandError):
+                blis_cli.registered_kinds(path)
+
     def test_the_committed_pending_specs_are_pending_on_a_build_without_the_kind(self):
         self.assertEqual([], check_pending_pin.problems(fake_blis(self.tmp.name, "vllm"), PENDING))
 

@@ -78,11 +78,49 @@ def test_an_entry_needs_exactly_one_of_a_sweep_key_and_a_reason():
 def test_a_prefix_entry_covers_what_lies_under_it_and_an_exact_one_wins():
     cov = copy.deepcopy(COVERAGE)
     del cov["knobs"]["scenario:cluster.pools[].hardware"]
-    cov["knobs"]["scenario:cluster.*"] = {"reason": "the cluster is a constant"}
+    cov["knobs"]["scenario:cluster.*"] = {"reason": "the cluster is a constant", "covers": [
+        "scenario:cluster.fabric", "scenario:cluster.pools[].hardware"]}
     del cov["knobs"]["scenario:cluster.fabric"]
     table, problems = build(coverage=cov)
     assert problems == [], problems
     assert {r["class"] for r in table["knobs"] if r["id"].startswith("scenario:cluster")} == {"scenario:cluster.*"}
+
+
+def prefix_coverage():
+    cov = copy.deepcopy(COVERAGE)
+    del cov["knobs"]["scenario:cluster.pools[].hardware"], cov["knobs"]["scenario:cluster.fabric"]
+    cov["knobs"]["scenario:cluster.*"] = {"reason": "the cluster is a constant", "covers": [
+        "scenario:cluster.fabric", "scenario:cluster.pools[].hardware"]}
+    return cov
+
+
+def test_a_property_added_under_a_prefix_entry_is_an_error_until_reviewed():
+    """A wildcard must not absorb a property nobody looked at."""
+    grown = copy.deepcopy(SCENARIO)
+    grown["$defs"]["scenario.Cluster"]["properties"]["uplink"] = {"type": "number"}
+    _, problems = build(scenario=grown, coverage=prefix_coverage())
+    assert any("scenario:cluster.uplink" in p and "new under scenario:cluster.*" in p for p in problems), problems
+    reviewed = prefix_coverage()
+    reviewed["knobs"]["scenario:cluster.*"]["covers"].append("scenario:cluster.uplink")
+    _, problems = build(scenario=grown, coverage=reviewed)
+    assert problems == [], problems
+
+
+def test_a_prefix_entry_without_a_reviewed_list_is_an_error():
+    cov = prefix_coverage()
+    del cov["knobs"]["scenario:cluster.*"]["covers"]
+    _, problems = build(coverage=cov)
+    assert any("scenario:cluster.*" in p and "covers" in p for p in problems), problems
+
+
+def test_a_property_nested_deeper_than_the_old_cap_is_still_listed():
+    """document_paths once stopped expanding at depth 5, leaving what lay below it unlisted."""
+    defs = {"n.Top": {"properties": {"a": {"$ref": "#/$defs/n.L1"}}}}
+    for i in range(1, 9):
+        defs[f"n.L{i}"] = {"properties": {"x": {"$ref": f"#/$defs/n.L{i + 1}"}}}
+    defs["n.L9"] = {"properties": {"leaf": {"type": "string"}}}
+    paths = kt.document_paths({"$ref": "#/$defs/n.Top", "$defs": defs})
+    assert paths == ["a.x.x.x.x.x.x.x.x.leaf"], paths
 
 
 def test_a_sweep_key_the_spec_format_lacks_is_an_error():
@@ -164,6 +202,7 @@ def test_the_committed_coverage_file_parses_and_every_entry_has_one_of_the_two()
     cov = kt.load_coverage()
     for key, entry in cov["knobs"].items():
         assert bool(entry.get("sweep")) != bool(entry.get("reason")), key
+        assert key.endswith(".*") == bool(entry.get("covers")), key
         if entry.get("issue"):
             assert entry["issue"].count("#") == 1, key
 

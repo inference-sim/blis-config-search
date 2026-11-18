@@ -848,17 +848,32 @@ def offload_errors(sw, where):
     return errs
 
 
-def offload_policy_errors(spec, blis, fields=None):
+def offload_policy_errors(spec, blis, fields=None, catalog=None):
     """Ask the engine whether it models each eviction policy a spec names (`blis fields --scenario` opens it),
-    on a probe scenario of the spec's own model and hardware. The policy names belong to the engine (CFG-3)."""
+    on a probe scenario of the spec's own model and hardware. The policy names belong to the engine (CFG-3).
+
+    The probe's packaging is the catalog's where it fixes one (and then the scenario states nothing,
+    as a run's does), else the specification's. A spec that gives the probe no packaging is
+    refused here rather than probed on an assumed eight GPUs a node (#154), because a packaging
+    refusal would hide the policy refusal this check exists to find."""
     import blis_cli
     import run_blis
     sc = spec.get("scenario") or {}
     errs = []
+    node_size = states_node_size = None
     for i, sw in enumerate(spec.get("sweeps") or []):
         block = sw.get("offload") if isinstance(sw, dict) else None
         if not isinstance(block, dict) or not _is_list(block.get("eviction_policy")):
             continue
+        if node_size is None:
+            cluster = sc.get("cluster")
+            stated = cluster.get("gpus_per_node") if isinstance(cluster, dict) else None
+            try:
+                node_size, states_node_size = run_blis.cluster_node_size(
+                    blis, catalog, sc.get("hardware"), stated)
+            except (run_blis.ConfigError, blis_cli.BlisCommandError) as e:
+                return [f"sweeps[{i}].offload.eviction_policy: cannot probe the engine without the "
+                        f"hardware's packaging: {e}"]
         tps = ((sw.get("parallel") or {}).get("tp")) or [1]
         # The largest tp: a smaller one may not hold the model, and the engine would refuse that, not the policy.
         tp = max([t for t in tps if isinstance(t, int) and not isinstance(t, bool)] or [1]) if _is_list(tps) else 1
@@ -867,7 +882,7 @@ def offload_policy_errors(spec, blis, fields=None):
             body = run_blis.scenario_yaml(sc.get("model"), sc.get("hardware"),
                                           blis_cli.engine_release(blis, settings.ENGINE_KIND, fields),
                                           parallel, run_blis.engine_defaults(), "policy-probe",
-                                          node_size=(sc.get("cluster") or {}).get("gpus_per_node") or 8)
+                                          node_size=node_size, states_node_size=states_node_size)
             line = blis_cli.engine_refusal(blis, body, word="eviction_policy")
             if line:
                 errs.append(f"sweeps[{i}].offload.eviction_policy: the engine refuses {policy!r}: {line}")
@@ -1113,7 +1128,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
                 top = max(reasons, key=reasons.get)
                 errs.append(f"{where}: the runner refuses every arm ({n}): {top}")
     if not errs:
-        errs.extend(offload_policy_errors(spec, blis, fields))
+        errs.extend(offload_policy_errors(spec, blis, fields, catalog))
     return errs
 
 

@@ -216,6 +216,19 @@ class MeasuredWindow(unittest.TestCase):
         self.assertFalse(missing, "a single-instance run must still measure ITL")
         self.assertEqual(worst, 18.0)       # TPOT p99, not the step interval's 33.9
 
+    def test_a_pd_runs_prefill_instances_are_judged_too(self):
+        """No request row names a prefill instance, so a P/D row carried only the decode instance's figures (#158).
+        The prefill instances come from the Result's per-instance measured window (inference-sim#2246)."""
+        doc = json.loads(RESULT_DOC)
+        mw = {"role": "prefill", "measured_user_requests": 4, "ttft_p99_ms": 950.0, "e2e_p99_ms": 2700.0,
+              "tpot_p99_ms": 26.0, "ttft_mean_ms": 500.0}
+        doc["reports"]["engine"]["instances"]["instance_2"] = {"measured_window": mw}
+        doc["reports"]["engine"]["instances"]["instance_3"] = {"measured_window": dict(mw, measured_user_requests=0)}
+        got = {o["instance_id"]: o for o in run_blis.measured_instances(doc)}
+        self.assertEqual(["instance_0", "instance_1", "instance_2"], sorted(got), "an idle prefill instance has no figures")
+        self.assertEqual((4, 950.0, 2700.0, 26.0, 26.0), tuple(got["instance_2"][k] for k in (
+            "requests", "ttft_p99_ms", "e2e_p99_ms", "tpot_p99_ms", "itl_p99_ms")))
+
     def test_a_pre_v0150_flat_output_still_parses(self):
         # A contributor testing an older binary: the flat MetricsOutput shape is read as written.
         s = '{"instance_id":"cluster","tokens_per_sec":11.0,"itl_p99_ms":5.47}'
@@ -550,6 +563,47 @@ class FieldListPath(unittest.TestCase):
             blis_cli.fields(FIXTURE_BLIS, "vllm", "/nonexistent/fields.json")
 
 
+class FieldListFromTheBinary(unittest.TestCase):
+    """`blis fields` takes `--scenario <file> --scenarios <dir>`, never `--engine` (#158)."""
+
+    def logging_blis(self):
+        """The stand-in behind a wrapper that logs each call's arguments and the scenario it was given."""
+        import stat
+        import tempfile
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d)
+        self.log = os.path.join(d, "calls.log")
+        path = os.path.join(d, "blis")
+        with open(path, "w") as f:
+            f.write(f'#!/bin/sh\necho "ARGS $*" >> {self.log}\n'
+                    f'[ "$2" = --scenario ] && cat "$5/$3" >> {self.log}\n'
+                    f'exec {FIXTURE_BLIS} "$@"\n')
+        os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR)
+        return path
+
+    def calls(self):
+        with open(self.log) as f:
+            return f.read()
+
+    def test_the_binary_is_asked_with_the_scenario_form(self):
+        blis = self.logging_blis()
+        self.assertEqual("FieldList", blis_cli.fields(blis, "vllm")["kind"])
+        self.assertNotIn("--engine", self.calls())
+        self.assertIn("fields --scenario", self.calls())
+
+    def test_a_spec_is_asked_on_a_probe_of_its_own_model_and_hardware(self):
+        blis = self.logging_blis()
+        sc = {"model": "qwen3-14b", "hardware": "h100", "cluster": {"gpus_per_node": 4}}
+        doc = run_blis.ask_field_list(blis, None, sc)
+        log = self.calls()
+        for line in ("model: qwen3-14b", "hardware: h100", "gpus_per_node: 4", "tp: 4",
+                     f'version: "{doc["engine"]["version"]}"'):
+            self.assertIn(line, log)
+        # Asked once: a later call without --fields reuses the list.
+        self.assertIs(doc, blis_cli.fields(blis, "vllm"))
+        self.assertEqual(1, log.count("model: qwen3-14b"))
+
+
 class Footprint(unittest.TestCase):
     def test_tp_pp_dp(self):
         self.assertEqual(run_blis.footprint_gpus({"tp": 8, "pp": 1, "dp": 2}), 16)
@@ -743,12 +797,13 @@ class EmbeddedData(unittest.TestCase):
             self.assertEqual("/cat", cmd[cmd.index("--catalog") + 1])
             self.assertEqual("/reg", cmd[cmd.index("--registry") + 1])
 
-    def _record(self, **kw):
+    def _record(self, stdout="", **kw):
         seen = []
         real = run_blis.subprocess.run
 
         class Done:
-            returncode, stdout, stderr = 0, "", ""
+            returncode, stderr = 0, ""
+        Done.stdout = stdout
 
         def fake(cmd, **k):
             if cmd[1:2] in (["run"], ["replay"]):
@@ -776,6 +831,15 @@ class EmbeddedData(unittest.TestCase):
         self.assertNotIn("--catalog", seen[0])
         self.assertNotIn("--registry", seen[0])
         self.assertNotIn("catalog", rec["pinned_stack"])
+
+    def test_the_row_records_the_simulator_its_result_names(self):
+        """The binary's own version and commit, from the Result's revisions block (#158)."""
+        doc = json.loads(RESULT_DOC)
+        doc["data"] = {"catalog": {"source": "embedded"}, "registry": {"source": "embedded"}}
+        doc["revisions"] = {"simulator": "v0.18.1-0.20261118172949-d2a6cc04ab7f+d2a6cc04ab7f38b1cddb662a78ded9831609fed3",
+                            "substrate": "v0.15.1"}
+        rec, _ = self._record(stdout=json.dumps(doc))
+        self.assertEqual(doc["revisions"]["simulator"], rec["simulator"])
 
     def test_an_override_run_passes_the_directories_and_is_marked(self):
         rec, seen = self._record(data_override=True)

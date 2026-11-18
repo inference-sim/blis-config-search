@@ -1202,6 +1202,18 @@ class WorkloadByFile(unittest.TestCase):
         self.assertEqual(E.workload_spec_sha256(path), r["workload_spec_sha256"])
         self.assertEqual(64, len(r["workload_spec_sha256"]))
 
+    def test_the_specs_window_overrides_the_files_and_reaches_the_command(self):
+        """`replay.benchmark_duration` beside a workload_spec was dropped, so every replay ran the file's window (#158).
+        BLIS lets the flag win over the file, so the runner passes the spec's value and the report names it."""
+        path = self.write(self.GOOD)
+        r = E.resolve_workload_spec(path, E.load_workload_spec(path),
+                                    {"corpus": "/c/t.jsonl", "benchmark_duration": "300s"}, dry_run=True)
+        self.assertEqual("300s", r["benchmark_duration"])
+        replay = {k: v for k, v in r.items() if k not in E.RECORD_ONLY_REPLAY}
+        cmd = run_blis.build_replay_cmd("/b", None, None, "/sc", "s.yaml", 42, None, {}, replay)
+        self.assertEqual("300s", cmd[cmd.index("--benchmark-duration") + 1])
+        self.assertEqual([900, 300], E.recipe_record(self.GOOD, r)["overrides"]["benchmark_duration_s"])
+
     def test_the_command_passes_the_file_and_the_catalog_is_not_read(self):
         path = self.write(self.GOOD)
         r = E.resolve_workload_spec(path, E.load_workload_spec(path), {"corpus": "/c/t.jsonl"})
@@ -2763,6 +2775,19 @@ class PinCheck(unittest.TestCase):
             self.assertTrue(blis.get("sha256") and blis.get("commit"))
         finally:
             shutil.rmtree(d, ignore_errors=True)
+
+    def test_the_stack_records_the_binary_the_results_name_and_warns_off_pin(self):
+        """A binary outside its source tree is recorded by the version and commit its Results name (#158)."""
+        runs = [{"simulator": None}, {"simulator": "v0.18.1-0.20261118172949-d2a6cc04ab7f+d2a6cc04ab7f38b1cddb662a78ded9831609fed3"}]
+        blis = E._pinned_stack(None, None, None, "0.33.0", runs=runs)["resolved"]["blis"]
+        self.assertEqual("v0.18.1-0.20261118172949-d2a6cc04ab7f", blis["version"])
+        self.assertEqual("d2a6cc04ab7f38b1cddb662a78ded9831609fed3", blis["commit"])
+        w = E.blis_pin_warning(E._pinned_stack(None, None, None, "0.33.0", runs=runs), self.PINS)
+        self.assertIn("d2a6cc04ab7f", w)
+        on_pin = [{"simulator": "v0.14.0+" + self.PINS["BLIS_SHA"]}]
+        self.assertEqual("", E.blis_pin_warning(E._pinned_stack(None, None, None, "0.33.0", runs=on_pin), self.PINS))
+        dirty = [{"simulator": "v0.14.0+" + self.PINS["BLIS_SHA"] + "-dirty"}]
+        self.assertIn("UNCOMMITTED", E.blis_pin_warning(E._pinned_stack(None, None, None, "0.33.0", runs=dirty), self.PINS))
 
     def test_pinned_stack_invents_nothing_when_nothing_is_on_disk(self):
         ps = E._pinned_stack(None, None, None, "0.32.0")

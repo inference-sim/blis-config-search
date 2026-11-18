@@ -118,6 +118,9 @@ jobs:
         if: steps.scope.outputs.experiments == 'true'
         env: { BLIS: upstream/blis }
         run: python3 -I scripts/validate_experiment.py experiments/ --fields "$RUNNER_TEMP/fields.json"
+      - name: The pinned binary prints a spec's field list (blis fields --scenario, no --fields; #158)
+        if: steps.scope.outputs.experiments == 'true'
+        run: python3 -I scripts/validate_experiment.py experiments/kimi-k2-5-h200-multidoc.yaml --blis upstream/blis
       - name: Knob profile smoke test (no catalog checkout -> must degrade, not crash)
         if: steps.scope.outputs.experiments == 'true'
         run: |

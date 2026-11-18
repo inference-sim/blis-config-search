@@ -13,6 +13,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 
 
 class BlisCommandError(RuntimeError):
@@ -60,16 +61,23 @@ def _key(blis, *rest):
     return (os.path.realpath(blis) if blis else None, *rest)
 
 
-def _field_list_json(blis, engine, path):
-    """The engine's field list as a parsed document.
-
-    With `path`, the list is that file: the pinned blis-vllm release's fields.json, which the
-    caller names (--fields). TEMPORARY until the M2 substrate release lets the engine report its
-    own list through `blis fields`: the pinned simulator has no such command. Without a path the
-    binary is asked, so a build that has the command needs no file.
-    """
+def _field_list_json(blis, engine, path, scenario):
+    """The engine's field list as a parsed document: the file `path` names (--fields), or what
+    `blis fields --scenario` prints for the scenario text `scenario()` returns."""
     if not path:
-        return _json(blis, ["fields", "--engine", engine])
+        # Without a spec's scenario, one that names only the engine; a build that needs a model refuses it.
+        text = scenario() if scenario else _engine_probe(engine, build_release(blis, engine))
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "fields-probe.yaml"), "w", encoding="utf-8") as f:
+                f.write(text)
+            pr = _run(blis, ["fields", "--scenario", "fields-probe.yaml", "--scenarios", d], 120)
+        if pr.returncode != 0:
+            raise BlisCommandError(f"`blis fields --scenario` for engine {engine} failed: {_stderr(pr)}"
+                                   + ("" if scenario else "; pass --fields FILE, or run from a spec"))
+        try:
+            return json.loads(pr.stdout)
+        except ValueError as e:
+            raise BlisCommandError(f"`blis fields --scenario` printed no JSON: {e}") from e
     try:
         with open(path, encoding="utf-8") as f:
             doc = json.load(f)
@@ -85,28 +93,50 @@ def _field_list_json(blis, engine, path):
         raise BlisCommandError(f"the field list of engine {engine!r} ({path}): {e}") from e
 
 
-def fields(blis, engine, path=None):
-    """The engine's field list (fields.json) at the release this build runs: `blis fields`, or the
-    file `path` names until the binary has the command."""
+def fields(blis, engine, path=None, scenario=None):
+    """The engine's field list (fields.json) at the release this build runs: the file `path` names,
+    or `blis fields --scenario` on the text `scenario()` returns. The list is the same for every
+    scenario of one engine release, so the binary is asked once and later calls without a path reuse it."""
     def load():
-        doc = _field_list_json(blis, engine, path)
+        doc = _field_list_json(blis, engine, path, scenario)
         if not isinstance(doc, dict) or doc.get("kind") != "FieldList":
-            raise BlisCommandError(f"`blis fields --engine {engine}` printed no FieldList")
+            raise BlisCommandError(f"`blis fields` for engine {engine} printed no FieldList")
         got = (doc.get("engine") or {}).get("kind")
         if got != engine:
-            raise BlisCommandError(f"`blis fields --engine {engine}` printed the field list of "
+            raise BlisCommandError(f"`blis fields` for engine {engine} printed the field list of "
                                    f"engine {got!r}")
         if not (doc.get("engine") or {}).get("version"):
-            raise BlisCommandError(f"`blis fields --engine {engine}` names no engine version")
+            raise BlisCommandError(f"`blis fields` for engine {engine} names no engine version")
         rows = doc.get("fields")
         if not isinstance(rows, list) or not rows:
-            raise BlisCommandError(f"`blis fields --engine {engine}` lists no fields")
+            raise BlisCommandError(f"`blis fields` for engine {engine} lists no fields")
         for row in rows:
             if not (isinstance(row, dict) and row.get("name") and row.get("source") in
                     ("config", "env") and row.get("status")):
-                raise BlisCommandError(f"`blis fields --engine {engine}`: malformed entry {row!r}")
+                raise BlisCommandError(f"`blis fields` for engine {engine}: malformed entry {row!r}")
         return doc
     return _cached(_key(blis, "fields", engine, path), load)
+
+
+def build_release(blis, engine):
+    """The upstream release of `engine` this build runs, from the refusal it prints for a scenario
+    naming another: `names engine vllm 0; this build runs vllm 0.33.0, ...`. It lets config search
+    write the probe scenario `blis fields` needs before it has the field list."""
+    import re
+
+    def load():
+        text = _engine_probe(engine, "0")
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "release-probe.yaml"), "w", encoding="utf-8") as f:
+                f.write(text)
+            pr = _run(blis, ["fields", "--scenario", "release-probe.yaml", "--scenarios", d], 120)
+        m = re.search(rf'names engine {re.escape(engine)} 0; this build runs {re.escape(engine)} (\S+?),',
+                      (pr.stderr or "") + "\n" + (pr.stdout or ""))
+        if not m:
+            raise BlisCommandError(f"`blis fields` did not say which {engine} release the build runs: "
+                                   + _stderr(pr))
+        return m.group(1)
+    return _cached(_key(blis, "build_release", engine), load)
 
 
 def engine_release(blis, engine, fields_path=None):
@@ -204,6 +234,10 @@ pools:
   - role: colocated
     nodes: 1
 """
+
+
+def _engine_probe(engine, version):
+    return _PROBE.replace("kind: kind-probe", f"kind: {engine}", 1).replace('version: "0"', f'version: "{version}"', 1)
 
 
 def registered_kinds(blis):

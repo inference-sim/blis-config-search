@@ -936,6 +936,9 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
     if kind not in settings.ENGINE_KINDS:
         return [f"scenario.engine_kind: {kind!r} is none of {', '.join(settings.ENGINE_KINDS)}"]
     settings.use_engine(kind)
+    if not fields and isinstance(spec.get("scenario"), dict):
+        import run_blis
+        run_blis.ask_field_list(blis, catalog, spec["scenario"])
     vocab = knob_vocabulary(blis, fields)
     pool_offload = blis_cli.supports_pool_offload(blis)
     par_vocab, eng_vocab, source = vocab.parallel, vocab.engine_names(), vocab.source
@@ -1275,11 +1278,15 @@ def main(argv=None):
     if not paths:
         print(f"no spec files under {args.target}", file=sys.stderr)
         return 1
+    first, _ = load(paths[0])
     if len(paths) == 1:
-        first, _ = load(paths[0])
         if isinstance(first, dict) and settings.spec_engine_kind(first) in settings.ENGINE_KINDS:
             settings.use_engine(settings.spec_engine_kind(first))
     try:
+        if (not args.fields and isinstance(first, dict) and isinstance(first.get("scenario"), dict)
+                and settings.spec_engine_kind(first) == settings.ENGINE_KIND):
+            import run_blis
+            run_blis.ask_field_list(args.blis, args.catalog, first["scenario"])
         vocab = knob_vocabulary(args.blis, args.fields)
     except blis_cli.BlisCommandError as e:
         print(f"validate_experiment: {e}", file=sys.stderr)

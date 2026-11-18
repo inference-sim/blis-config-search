@@ -663,6 +663,8 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     concurrency = list(sc["concurrency"])
     slo_ms = slo_limits(sc.get("slo"))
     shared_engine = dict(sc.get("engine") or {})
+    if not fields:
+        run_blis.ask_field_list(blis, catalog, sc)
     engine_version = blis_cli.engine_release(blis, settings.ENGINE_KIND, fields)
     replay = dict(sc.get("replay") or {}) or None
     # The cluster's inter-node fabric, defaulting to IB so a spec that states none is byte-identical.
@@ -906,7 +908,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
         "outcomes": outcome_counts(all_rows),
         "refusals": refusal_groups(all_rows),
         "pinned_stack": _pinned_stack(blis, catalog, registry, engine_version,
-                                      _priced_with_other_data(runs, data_override), router_cfg),
+                                      _priced_with_other_data(runs, data_override), router_cfg, runs),
         "experimental": _priced_with_other_data(runs, data_override),
         "model_arch": (entry or {}).get("arch"),
         "totals": {"configs": sum(s["configs"] for s in sweep_results),
@@ -918,6 +920,11 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                    "configs_refused": refused_configs(all_rows)},
     }
     if not dry_run:
+        # The Results name the binary's own commit, which a binary outside its source tree cannot (#158).
+        ran = blis_pin_warning(report["pinned_stack"])
+        if ran and ran != warn:
+            print(f"WARNING: {ran}\n         Every number in this report is priced by that binary, and "
+                  f"scenario.json records its version and commit.", file=sys.stderr, flush=True)
         # The refusal above covers a requested override. This one covers what the Results say: a
         # report priced with other data, or by an untagged build, is never written to reports/.
         if stage and report["experimental"]:
@@ -1260,8 +1267,10 @@ def resolve_workload_spec(path, doc, stated, dry_run=False):
     for key in ("corpus", "corpus_cache"):
         if stated.get(key):
             out[key] = stated[key]
-    if "grace_period" in stated:
-        out["grace_period"] = stated["grace_period"]
+    # A spec's window and grace override the file's; recipe_record names the override (#158).
+    for key in ("benchmark_duration", "grace_period"):
+        if key in stated:
+            out[key] = stated[key]
     if not dry_run and not out.get("corpus"):
         raise SystemExit(
             f"workload_spec {path!r} is a trace REPLAY, so it needs a local corpus file:\n"
@@ -1361,10 +1370,11 @@ def _other_data_reason(runs):
     return "a Result names a build that is not a tagged release"
 
 
-def _pinned_stack(blis, catalog, registry, engine_version, data_override=False, router_cfg=None):
+def _pinned_stack(blis, catalog, registry, engine_version, data_override=False, router_cfg=None, runs=()):
     """What priced these runs: the pins.env refs, the engine release the simulator ran, and the
     commits and binary digest that ran. The catalog and registry are the simulator's embedded data
-    (the substrate release in pins.env) unless the run overrode them."""
+    (the substrate release in pins.env) unless the run overrode them. The binary's own version and
+    commit are what its Results name (`revisions.simulator`), so an off-pin binary is recorded as itself."""
     pins = build_catalog.read_pins()
     out = {"blis": pins.get("BLIS_REF", "unpinned"),
            "kernel": pins.get("KERNEL_REF", "unpinned"),
@@ -1389,6 +1399,14 @@ def _pinned_stack(blis, catalog, registry, engine_version, data_override=False, 
             resolved["blis"]["commit"] = commit
         if desc:
             resolved["blis"]["describe"] = desc
+    ran = next((r["simulator"] for r in runs if r.get("simulator")), None)
+    if ran:
+        version, _, commit = ran.partition("+")
+        resolved.setdefault("blis", {})["version"] = version
+        if commit:
+            resolved["blis"]["commit"] = commit.removesuffix("-dirty")
+            if commit.endswith("-dirty"):
+                resolved["blis"]["describe"] = commit
     if resolved:
         out["resolved"] = resolved
     return out

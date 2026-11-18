@@ -94,6 +94,26 @@ def cluster_node_size(blis, catalog, hardware, stated=None):
     return int(stated), True
 
 
+def ask_field_list(blis, catalog, sc):
+    """The engine's field list from `blis fields --scenario`, on a one-node probe of the spec's model and
+    hardware (#158). Asked once per binary and engine; later calls without --fields reuse it."""
+    def probe():
+        stated = (sc.get("cluster") or {}).get("gpus_per_node")
+        fixed = blis_cli.chip_packaging(blis, sc.get("hardware"), catalog)["gpus_per_node"]
+        engine = dict(engine_defaults(), **(sc.get("engine") or {}))
+        if settings.ENGINE_KIND == "vllm":
+            engine.setdefault("block_size", default_block_size(catalog, sc.get("model"), sc.get("hardware")))
+        node = int(fixed or stated or 1)
+        return scenario_yaml(sc.get("model"), sc.get("hardware"), blis_cli.build_release(blis, settings.ENGINE_KIND),
+                             {"tp": node, "pp": 1, "dp": 1}, engine, "fields-probe",
+                             node_size=node, states_node_size=not fixed)
+    try:
+        return blis_cli.fields(blis, settings.ENGINE_KIND, scenario=probe)
+    except blis_cli.BlisCommandError as e:
+        raise blis_cli.BlisCommandError(f"{e}; pass --fields FILE (scripts/fetch_fields.py), or --catalog so "
+                                        f"the probe states the model's block size") from e
+
+
 # Cross-node cost resolves from the fabric (a catalog networks/ entry), required once nodes > 1.
 DEFAULT_FABRIC = "ib-400g"   # InfiniBand NDR 400 Gb/s; the standard H100 multi-node interconnect
 # The ONE engine value the runner supplies when a spec omits it. Every other omitted knob is left
@@ -1070,6 +1090,25 @@ def measured_instances(doc):
                 for k in ("mean", "p50", "p90", "p95", "p99"):
                     o[f"itl_{k}_ms"] = o[f"tpot_{k}_ms"]
         out.append(o)
+    return out + _prefill_instances(doc, set(by))
+
+
+def _prefill_instances(doc, seen):
+    """A P/D run's prefill instances, which no request row names (each row names its decode instance): their
+    user-level measured window, as the Result reports it (inference-sim#2246), in the shape measured_instances gives."""
+    out = []
+    for inst, block in sorted(((_engine_report(doc).get("instances")) or {}).items()):
+        mw = (block or {}).get("measured_window") or {}
+        if inst in seen or mw.get("role") != "prefill" or not mw.get("measured_user_requests"):
+            continue
+        o = {"instance_id": inst, "requests": mw["measured_user_requests"]}
+        for stem, _col in _ROW_LATENCY:
+            for k in ("mean", "p50", "p90", "p95", "p99"):
+                if isinstance(mw.get(f"{stem}_{k}_ms"), (int, float)):
+                    o[f"{stem}_{k}_ms"] = mw[f"{stem}_{k}_ms"]
+                    if stem == "tpot":
+                        o[f"itl_{k}_ms"] = mw[f"tpot_{k}_ms"]
+        out.append(o)
     return out
 
 
@@ -1820,6 +1859,8 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     if seen is not None:
         rec["data"] = seen
         rec["released_build"] = released_build(doc)
+        # The binary's own version and commit ("v0.18.0+<sha>"), which pins.env cannot vouch for (#158).
+        rec["simulator"] = (doc.get("revisions") or {}).get("simulator")
         if not data_override and seen != "embedded" and not error:
             error = ("priced with other data than the simulator release's embedded data "
                      "(the Result's data block does not name catalog and registry source embedded)")
@@ -1962,6 +2003,8 @@ def main():
         replay = replay_from_args(args)
     except ValueError as e:
         sys.exit(str(e))
+    if not args.fields:
+        ask_field_list(args.blis, args.catalog, {"model": args.model, "hardware": args.hardware})
     rec = run_one(args.blis, args.catalog, args.registry, args.scenarios, args.model, args.hardware,
                   blis_cli.engine_release(args.blis, settings.ENGINE_KIND, args.fields), args.workload, args.num_requests,
                   args.seed, args.horizon,

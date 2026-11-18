@@ -5,6 +5,7 @@
 # (contracts/schema, catalog names); see NOTE.md. Delete with this directory once #2077 merges.
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -22,10 +23,19 @@ def fail(msg, code=1):
 
 def main(argv):
     args = [a for a in argv if a != "--json"]
-    if args[:1] == ["fields"] and args[1:2] == ["--engine"] and len(args) == 3:
-        if args[2] not in ("vllm", "sglang"):
-            fail(f"fields: no field list for engine {args[2]!r}")
-        print(json.dumps(read(f"fields-{args[2]}.json")))
+    if args[:1] == ["fields"] and "--scenario" in args and "--scenarios" in args:
+        name = args[args.index("--scenario") + 1]
+        with open(os.path.join(args[args.index("--scenarios") + 1], name), encoding="utf-8") as f:
+            text = f.read()
+        kind = re.search(r"^  kind: (\S+)", text, re.M).group(1)
+        version = re.search(r'^  version: "?([^"\n]*)"?', text, re.M).group(1)
+        if kind not in ("vllm", "sglang"):
+            fail(f'scenario "{name}" names engine kind "{kind}"; this build runs the kinds sglang, vllm')
+        doc = read(f"fields-{kind}.json")
+        if version != doc["engine"]["version"]:
+            fail(f'scenario "{name}" names engine {kind} {version}; this build runs {kind} '
+                 f'{doc["engine"]["version"]}, and no inference-sim release runs it')
+        print(json.dumps(doc))
         return
     if args[:2] == ["schema", "validate"] and len(args) == 4:
         doc, path = args[2], args[3]

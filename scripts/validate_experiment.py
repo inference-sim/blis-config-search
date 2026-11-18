@@ -364,10 +364,6 @@ def _check_gpu_math_pd(sweep, gpus, where, errs):
         errs.append(f"{where}: the prefill pool sweeps dp {list(pf_dp)} and the decode pool "
                     f"dp {list(dc_dp)}; BLIS applies ONE replica factor to both pools, so "
                     f"their dp must match")
-    if any(str(d) != "1" for d in (list(pf_dp) if _is_list(pf_dp) else [pf_dp])):
-        errs.append(f"{where}: P/D pools at dp {list(pf_dp)}; the pinned engine (vLLM 0.32.0) has no "
-                    f"kv_transfer under data parallelism yet, so every run panics "
-                    f"(https://github.com/inference-sim/blis-vllm/issues/44)")
     ok = []
     for pfp in _parallel_combos(pf_par):
         for dfp in _parallel_combos(dc_par):
@@ -704,7 +700,7 @@ def advisories(spec, path=None):
     return notes
 
 
-def runner_refusals(sw, sc, vocab, node_size=None):
+def runner_refusals(sw, sc, vocab, node_size=None, pool_offload=False):
     """(arms, {reason: arms}) for a sweep: how many candidates it expands to and, for those the
     runner would refuse before any simulator run, the reason (run_blis.classify_config's, which
     mirrors the engine's own pool rules). Arms the engine alone can refuse (a model-dependent
@@ -718,7 +714,7 @@ def runner_refusals(sw, sc, vocab, node_size=None):
     for cand in kept:
         cand = {k: v for k, v in cand.items() if k not in ("router_config", "router_overrides")}
         try:
-            run_blis.classify_config(cand, vocab, node_size)
+            run_blis.classify_config(cand, vocab, node_size, pool_offload)
         except run_blis.ConfigError as e:
             reasons[str(e)] += 1
     return len(kept), dict(reasons)
@@ -738,7 +734,8 @@ def refusal_notes(spec, blis, fields=None, catalog=None):
         if not isinstance(sw, dict):
             continue
         try:
-            n, reasons = runner_refusals(sw, sc, vocab, _node_size(sc, blis, catalog))
+            n, reasons = runner_refusals(sw, sc, vocab, _node_size(sc, blis, catalog),
+                                      blis_cli.supports_pool_offload(blis))
         except Exception:
             continue                    # a malformed sweep is validate()'s to report
         bad = sum(reasons.values())
@@ -816,35 +813,49 @@ def parse_size(v):
     return int(float(m.group(1)) * _SIZE_UNITS[m.group(2)]) if m else None
 
 
-def offload_errors(sw, where):
-    """Errors in a sweep's `offload:` block: the CPU KV tier, off as the control (#94).
+def offload_errors(sw, where, pool_offload=False):
+    """Errors in a sweep's `offload:` blocks: the CPU KV tier, off as the control (#94).
 
-    cpu_bytes: sizes with units, 0 for no tier; eviction_policy: names the engine validates. The
-    tier sits below HBM of a colocated pool; a disaggregated sweep has no key for it yet.
+    cpu_bytes: sizes with units, 0 for no tier; eviction_policy: names the engine validates. On a
+    colocated sweep the block is the pool's tier. On a disaggregated one it is the default for
+    both pools, and `prefill.offload` / `decode.offload` state one pool's own (replacing the
+    default for it; `cpu_bytes: [0]` is a pool with no tier). That needs a simulator whose
+    deployment schema lets a pool state its offload (`pool_offload`, blis-substrate#307).
     """
-    block = sw.get("offload")
-    if block is None:
-        return []
+    errs = []
+    blocks = [("offload", sw.get("offload"))]
+    for role in ("prefill", "decode"):
+        if isinstance(sw.get(role), dict):
+            blocks.append((f"{role}.offload", sw[role].get("offload")))
+    for name, block in blocks:
+        if block is None:
+            continue
+        errs.extend(_offload_block_errors(block, f"{where}.{name}"))
+        if not _sweep_is_colocated(sw) and not pool_offload:
+            errs.append(f"{where}.{name}: this simulator's deployment schema has no per-pool offload "
+                        f"(blis-substrate#307), so a disaggregated sweep cannot state a CPU tier "
+                        f"(inference-sim/blis-config-search#94)")
+    return errs
+
+
+def _offload_block_errors(block, where):
     if not isinstance(block, dict) or not block:
-        return [f"{where}.offload: must be a non-empty mapping"]
+        return [f"{where}: must be a non-empty mapping"]
     errs = []
     for key, vals in block.items():
         if key not in ("cpu_bytes", "eviction_policy"):
-            errs.append(f"{where}.offload.{key}: unknown offload option (allowed: cpu_bytes, eviction_policy)")
+            errs.append(f"{where}.{key}: unknown offload option (allowed: cpu_bytes, eviction_policy)")
         elif not _is_list(vals) or not vals:
-            errs.append(f"{where}.offload.{key}: must be a non-empty list")
+            errs.append(f"{where}.{key}: must be a non-empty list")
         elif key == "cpu_bytes":
             for v in vals:
                 if parse_size(v) is None:
-                    errs.append(f"{where}.offload.cpu_bytes: {v!r} is not a size: use 0 or a number with a unit "
+                    errs.append(f"{where}.cpu_bytes: {v!r} is not a size: use 0 or a number with a unit "
                                 f"such as 512GiB")
         elif any(not isinstance(v, str) or not v for v in vals):
-            errs.append(f"{where}.offload.eviction_policy: must be a list of policy names")
+            errs.append(f"{where}.eviction_policy: must be a list of policy names")
     if "eviction_policy" in block and "cpu_bytes" not in block:
-        errs.append(f"{where}.offload.eviction_policy: needs cpu_bytes (a policy of no tier states nothing)")
-    if block and not _sweep_is_colocated(sw):
-        errs.append(f"{where}.offload: a disaggregated sweep has no offload key yet "
-                    f"(inference-sim/blis-config-search#94)")
+        errs.append(f"{where}.eviction_policy: needs cpu_bytes (a policy of no tier states nothing)")
     return errs
 
 
@@ -862,9 +873,15 @@ def offload_policy_errors(spec, blis, fields=None, catalog=None):
     errs = []
     node_size = states_node_size = None
     for i, sw in enumerate(spec.get("sweeps") or []):
-        block = sw.get("offload") if isinstance(sw, dict) else None
-        if not isinstance(block, dict) or not _is_list(block.get("eviction_policy")):
+        if not isinstance(sw, dict):
             continue
+        blocks = [sw.get("offload")] + [(sw.get(r) or {}).get("offload") if isinstance(sw.get(r), dict) else None
+                                       for r in ("prefill", "decode")]
+        policies = [p for b in blocks if isinstance(b, dict) and _is_list(b.get("eviction_policy"))
+                    for p in b["eviction_policy"]]
+        if not policies:
+            continue
+        block = {"eviction_policy": policies}
         if node_size is None:
             cluster = sc.get("cluster")
             stated = cluster.get("gpus_per_node") if isinstance(cluster, dict) else None
@@ -874,7 +891,8 @@ def offload_policy_errors(spec, blis, fields=None, catalog=None):
             except (run_blis.ConfigError, blis_cli.BlisCommandError) as e:
                 return [f"sweeps[{i}].offload.eviction_policy: cannot probe the engine without the "
                         f"hardware's packaging: {e}"]
-        tps = ((sw.get("parallel") or {}).get("tp")) or [1]
+        tps = ((sw.get("parallel") or {}).get("tp")
+               or (((sw.get("prefill") or {}).get("parallel") or {}).get("tp")) or [1])
         # The largest tp: a smaller one may not hold the model, and the engine would refuse that, not the policy.
         tp = max([t for t in tps if isinstance(t, int) and not isinstance(t, bool)] or [1]) if _is_list(tps) else 1
         for policy in dict.fromkeys(p for p in block["eviction_policy"] if isinstance(p, str)):
@@ -919,6 +937,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
         return [f"scenario.engine_kind: {kind!r} is none of {', '.join(settings.ENGINE_KINDS)}"]
     settings.use_engine(kind)
     vocab = knob_vocabulary(blis, fields)
+    pool_offload = blis_cli.supports_pool_offload(blis)
     par_vocab, eng_vocab, source = vocab.parallel, vocab.engine_names(), vocab.source
 
     name = spec.get("name")
@@ -1029,7 +1048,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
         known_sw = {"name", "narrative", "num-instances", "parallel", "engine", "router",
                     "prefill-instances", "decode-instances", "prefill", "decode", "simulator",
                     "offload"}
-        errs.extend(offload_errors(sw, where))
+        errs.extend(offload_errors(sw, where, pool_offload))
         for key in sw:
             if key not in known_sw:
                 errs.append(f"{where}.{key}: unknown sweep key "
@@ -1071,11 +1090,11 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
             block = sw.get(role)
             if not isinstance(block, dict):
                 if block is not None:
-                    errs.append(f"{where}.{role}: must be a mapping with parallel/engine")
+                    errs.append(f"{where}.{role}: must be a mapping with parallel/engine/offload")
                 continue
             for key in block:
-                if key not in ("parallel", "engine"):
-                    errs.append(f"{where}.{role}.{key}: only `parallel` and `engine` may be "
+                if key not in ("parallel", "engine", "offload"):
+                    errs.append(f"{where}.{role}.{key}: only `parallel`, `engine` and `offload` may be "
                                 f"stated per role")
             _check_value_lists(block.get("parallel") or {}, f"{where}.{role}.parallel", errs)
             _check_knob_names(block.get("parallel") or {}, f"{where}.{role}.parallel", par_vocab,
@@ -1123,7 +1142,8 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
             _check_cross_knob(sw, sc, where, errs)
         # A sweep whose every arm the runner refuses expands to no runs worth making: say so now.
         if not errs and isinstance(sc.get("gpus"), int) and not isinstance(sc.get("gpus"), bool):
-            n, reasons = runner_refusals(sw, sc, vocab, _node_size(sc, blis, catalog))
+            n, reasons = runner_refusals(sw, sc, vocab, _node_size(sc, blis, catalog),
+                                      blis_cli.supports_pool_offload(blis))
             if n and sum(reasons.values()) == n:
                 top = max(reasons, key=reasons.get)
                 errs.append(f"{where}: the runner refuses every arm ({n}): {top}")

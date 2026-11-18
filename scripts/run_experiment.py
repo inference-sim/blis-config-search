@@ -117,9 +117,12 @@ def _engine_candidates(engine):
     return out
 
 
-def _offload_candidates(block):
+def _offload_candidates(block, role=None):
     """A sweep's `offload:` block as candidate keys: offload_cpu_bytes (bytes, 0 = no tier, the control)
-    and offload_eviction_policy. One candidate per combination; a 0-byte tier takes no policy."""
+    and offload_eviction_policy. One candidate per combination; a 0-byte tier takes no policy.
+
+    With a `role`, a disaggregated sweep's block for that pool: the same keys, prefixed
+    (prefill_offload_cpu_bytes), which replace the sweep-level block for that pool alone."""
     if not block:
         return [{}]
     sizes = [validator.parse_size(v) for v in block["cpu_bytes"]]
@@ -131,6 +134,7 @@ def _offload_candidates(block):
             combo = [{"offload_cpu_bytes": size, "offload_eviction_policy": p}
                      for p in dict.fromkeys(block["eviction_policy"])]
         for c in combo:
+            c = {_flag(role, k): v for k, v in c.items()} if role else c
             if c not in out:
                 out.append(c)
     return out
@@ -153,6 +157,8 @@ def expand_sweep(sweep, gpus):
         dc_par = ((sweep.get("decode") or {}).get("parallel")) or {}
         pf_eng = ((sweep.get("prefill") or {}).get("engine")) or {}
         dc_eng = ((sweep.get("decode") or {}).get("engine")) or {}
+        pf_off = _offload_candidates((sweep.get("prefill") or {}).get("offload"), "prefill")
+        dc_off = _offload_candidates((sweep.get("decode") or {}).get("offload"), "decode")
         for pf in grid(pf_par):
             for dc in grid(dc_par):
                 for pi in sweep.get("prefill-instances") or [1]:
@@ -162,19 +168,20 @@ def expand_sweep(sweep, gpus):
                         base.update({_flag("decode", k): v for k, v in dc.items()})
                         base["prefill_instances"] = pi
                         base["decode_instances"] = di
-                        for pfe in grid(pf_eng):
-                            for dce in grid(dc_eng):
-                                cfg = dict(base)
-                                cfg.update({_flag("prefill", k): v for k, v in pfe.items()})
-                                cfg.update({_flag("decode", k): v for k, v in dce.items()})
-                                for eng in engine_combos:
-                                    for router in router_variants:
-                                        for sim in sim_combos:
-                                            cand = {**cfg, **eng, **router, **sim}
-                                            if total == gpus:
-                                                kept.append(cand)
-                                            else:
-                                                dropped.append((cand, total))
+                        for pfe, dce, pfo, dco in itertools.product(grid(pf_eng), grid(dc_eng), pf_off, dc_off):
+                            cfg = dict(base)
+                            cfg.update({_flag("prefill", k): v for k, v in pfe.items()})
+                            cfg.update({_flag("decode", k): v for k, v in dce.items()})
+                            cfg.update(pfo)
+                            cfg.update(dco)
+                            for eng in engine_combos:
+                                for router in router_variants:
+                                    for sim in sim_combos:
+                                        cand = {**cfg, **eng, **router, **sim}
+                                        if total == gpus:
+                                            kept.append(cand)
+                                        else:
+                                            dropped.append((cand, total))
     else:
         for par in grid(sweep.get("parallel") or {}):
             for ni in sweep.get("num-instances") or [1]:
@@ -372,6 +379,8 @@ VARIANT_KEYS = ("num_speculative_tokens", "speculative_method", "speculative_dra
                 "max_num_active_seqs", "max_num_scheduled_tokens", "frontend",
                 # the CPU KV tier (a sweep's `offload:` block)
                 "offload_cpu_bytes", "offload_eviction_policy",
+                "prefill_offload_cpu_bytes", "prefill_offload_eviction_policy",
+                "decode_offload_cpu_bytes", "decode_offload_eviction_policy",
                 # SGLang's own settings (scenario.engine_kind: sglang)
                 "chunked_prefill_size", "mem_fraction_static", "max_running_requests",
                 "disable_radix_cache", "cuda_graph_max_bs_decode", "attention_backend")

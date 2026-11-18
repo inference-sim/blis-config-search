@@ -156,8 +156,8 @@ def document_rows(scenario_schema, deployment_schema, coverage):
             if full not in reviewed:
                 problems.append(f"{full} is new under {key}, which was reviewed without it: classify "
                                 f"it (an exact entry) or add it to that entry's `covers` after review")
-    for key in coverage["knobs"]:
-        if key not in used:
+    for key, entry in coverage["knobs"].items():
+        if key not in used and not entry.get("optional"):
             problems.append(f"{key} classifies no property of the scenario or deployment document "
                             f"(it was removed or renamed upstream)")
     return rows, problems
@@ -203,10 +203,12 @@ def build(scenario_schema, deployment_schema, field_lists, coverage, spec_schema
     return table, problems
 
 
-def pending_capabilities(table_engines, coverage):
-    """Capabilities that need an engine kind the build does not report yet (until the pin moves)."""
+def pending_capabilities(table_engines, coverage, row_ids=None):
+    """Capabilities that need an engine kind, or a document property (`requires_schema`, given the
+    table's row ids), the build does not report yet (until the pin moves)."""
     return [n for n, c in (coverage.get("capabilities") or {}).items()
-            if c.get("requires_engine") and c["requires_engine"] not in table_engines]
+            if (c.get("requires_engine") and c["requires_engine"] not in table_engines)
+            or (c.get("requires_schema") and row_ids is not None and c["requires_schema"] not in row_ids)]
 
 
 def check_capabilities(rows, coverage, engines=()):
@@ -215,6 +217,8 @@ def check_capabilities(rows, coverage, engines=()):
     problems = []
     for name, cap in (coverage.get("capabilities") or {}).items():
         if cap.get("requires_engine") and cap["requires_engine"] not in engines:
+            continue
+        if cap.get("requires_schema") and cap["requires_schema"] not in ids:
             continue
         for rid in cap.get("rows") or []:
             row = next((ids[i] for i in ids if _matches(rid, i) or i == rid), None)
@@ -257,7 +261,7 @@ def render_md(table, coverage):
         sweepable = sorted(r["sweep"] for r in mine if r.get("sweep"))
         out += ["", "Sweepable: " + (", ".join(f"`{s}`" for s in sweepable) or "none") + ".",
                 "", "The other settings, with their status and issue, are in the full table (`knob_table.py --json FILE`)."]
-    pending = pending_capabilities(table["engines"], coverage)
+    pending = pending_capabilities(table["engines"], coverage, {r["id"] for r in rows})
     caps = coverage.get("capabilities") or {}
     if caps:
         out += ["", "## M3.1 capabilities", "", "| capability | what a sweep varies | knobs |", "|---|---|---|"]

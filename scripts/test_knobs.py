@@ -123,6 +123,33 @@ def test_a_property_nested_deeper_than_the_old_cap_is_still_listed():
     assert paths == ["a.x.x.x.x.x.x.x.x.leaf"], paths
 
 
+def test_an_optional_entry_may_classify_nothing_until_the_schema_has_its_property():
+    """A property only a newer simulator has (per-pool offload) is classified ahead of the pin."""
+    cov = copy.deepcopy(COVERAGE)
+    cov["knobs"]["deployment:pools[].offload.tiers[].bytes"] = {"reason": "r", "optional": True}
+    table, problems = build(coverage=cov)
+    assert problems == [], problems
+    cov["knobs"]["deployment:pools[].offload.tiers[].bytes"] = {"reason": "r"}
+    _, problems = build(coverage=cov)
+    assert any("classifies no property" in p for p in problems), problems
+    grown = copy.deepcopy(DEPLOYMENT)
+    grown["$defs"]["deployment.Pool"]["properties"]["offload"] = {"$ref": "#/$defs/deployment.Offload"}
+    grown["$defs"]["deployment.Offload"] = {
+        "properties": {"tiers": {"type": "array", "items": {"$ref": "#/$defs/deployment.Tier"}}}}
+    grown["$defs"]["deployment.Tier"] = {"properties": {"bytes": {"type": "integer"}}}
+    cov["knobs"]["deployment:pools[].offload.tiers[].bytes"] = {"reason": "r", "optional": True}
+    table, problems = build(deployment=grown, coverage=cov)
+    assert problems == [], problems
+    assert "deployment:pools[].offload.tiers[].bytes" in {r["id"] for r in table["knobs"]}
+
+
+def test_a_capability_that_needs_a_schema_property_waits_for_it():
+    cov = {"capabilities": {"c": {"requires_schema": "deployment:x", "rows": ["deployment:x"], "note": "n"}}}
+    assert kt.check_capabilities([], cov, engines=("vllm",)) == []
+    assert kt.pending_capabilities({"vllm": "0"}, cov, set()) == ["c"]
+    assert kt.pending_capabilities({"vllm": "0"}, cov, {"deployment:x"}) == []
+
+
 def test_a_sweep_key_the_spec_format_lacks_is_an_error():
     cov = copy.deepcopy(COVERAGE)
     cov["knobs"]["deployment:pools[].parallel.tp"] = {"sweep": "sweeps[].warp.tp"}

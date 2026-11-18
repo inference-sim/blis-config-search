@@ -36,6 +36,9 @@ def label(cand):
 # Readable knob names, spelled out on purpose: "b2k" for max_num_batched_tokens=2048 tells a
 # reader nothing. Mirrors report.KNOB_NAMES, keyed by candidate-config key.
 KNOB_NAMES = {"offload_cpu_bytes": "CPU KV tier", "offload_eviction_policy": "tier eviction",
+              "prefill_offload_cpu_bytes": "prefill CPU KV tier", "decode_offload_cpu_bytes": "decode CPU KV tier",
+              "prefill_offload_eviction_policy": "prefill tier eviction",
+              "decode_offload_eviction_policy": "decode tier eviction",
               "chunked_prefill_size": "chunk size", "mem_fraction_static": "static memory share",
               "max_running_requests": "running-request cap", "disable_radix_cache": "radix cache off",
               "cuda_graph_max_bs_decode": "decode graph cap", "attention_backend": "attention backend",
@@ -131,7 +134,7 @@ def knob_phrase(key, value):
         on, off = _BOOL_KNOB_WORDS[key]
         return on if value else off
     name = KNOB_NAMES.get(key, key)
-    if key == "offload_cpu_bytes":
+    if key.endswith("offload_cpu_bytes"):
         return f"{name} off" if not value else f"{name} {_size_words(value)}"
     if key == "cudagraph_mode":
         # The enum is SHOUTED (FULL_AND_PIECEWISE); spell it as words.

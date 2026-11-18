@@ -77,6 +77,7 @@ The other settings, with their status and issue, are in the full table (`knob_ta
 | sglang-engine | the engine kind of an experiment, and the SGLang settings the simulator models Pending the pinned build. | `scenario:engine.kind`, `engine:sglang:config:chunked_prefill_size` |
 | multi-node-pd-handoff | prefill and decode pools of different layout, including a prefill pool whose data-parallel ranks span nodes (Handoff.At) | `deployment:pools[].role`, `deployment:pools[].nodes`, `deployment:pools[].parallel.dp`, `deployment:pools[].parallel.tp` |
 | per-rank-cpu-tier | the CPU KV tier and its size, off as the control | `deployment:offload.tiers[].bytes` |
+| per-pool-cpu-tier | a disaggregated deployment's CPU tier on the prefill pool, the decode pool or both (blis-substrate#307) Pending the pinned build. | `deployment:pools[].offload.tiers[].bytes` |
 | offload-with-drafting | the KV tier beside an EAGLE-3 or MTP drafter | `deployment:offload.tiers[].bytes`, `engine:vllm:config:speculative_config.method` |
 | dp-balancing-modes | the data-parallel load-balancing mode of a pool | `deployment:pools[].parallel.data_parallel_load_balancing` |
 | all-reduce-lane | custom or NCCL all-reduce (the field list says why it is not swept yet) | `engine:vllm:config:disable_custom_all_reduce` |

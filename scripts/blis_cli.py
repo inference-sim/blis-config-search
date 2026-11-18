@@ -115,6 +115,14 @@ def schema(blis, document):
     return _cached(_key(blis, "schema", document), load)
 
 
+def supports_pool_offload(blis):
+    """True when this build's deployment schema lets a pool state its own `offload` and
+    `pd_transfer` (blis-substrate#307). A build without it takes one offload block for the whole
+    deployment, so a disaggregated deployment cannot give only some pools a CPU tier."""
+    pool = (schema(blis, "deployment").get("$defs") or {}).get("deployment.Pool") or {}
+    return "offload" in (pool.get("properties") or {})
+
+
 def resolve(blis, model=None, chip=None, catalog=None):
     """(identity, reason) for a model or chip name: `blis catalog resolve`.
 

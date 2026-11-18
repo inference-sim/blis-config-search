@@ -222,6 +222,28 @@ knobs:
       - deployment:offload.connector_options
       - deployment:offload.prefetch_depth
       - deployment:offload.spec
+  deployment:pools[].offload.tiers[].bytes:
+    sweep: "sweeps[].offload.cpu_bytes (a disaggregated sweep: the default for both pools), sweeps[].prefill.offload.cpu_bytes, sweeps[].decode.offload.cpu_bytes (0 is a pool with no tier)"
+    optional: true
+  deployment:pools[].offload.eviction_policy:
+    sweep: "sweeps[].offload.eviction_policy, sweeps[].prefill.offload.eviction_policy, sweeps[].decode.offload.eviction_policy"
+    optional: true
+  deployment:pools[].offload.tiers[].tier:
+    reason: "the spec states the CPU tier only; the fs, obj and p2p tiers have no key yet"
+    issue: inference-sim/blis-config-search#94
+    optional: true
+  deployment:pools[].offload.*:
+    reason: "the connector, its spec, its options and the prefetch depth take the simulator's defaults; secondary tiers have no key"
+    issue: inference-sim/blis-config-search#94
+    optional: true
+    covers:
+      - deployment:pools[].offload.connector
+      - deployment:pools[].offload.connector_options
+      - deployment:pools[].offload.prefetch_depth
+      - deployment:pools[].offload.spec
+  deployment:pools[].pd_transfer.connector:
+    reason: "derived from the pool: a pool with a CPU tier runs NIXL as a MultiConnector, any other pool the deployment's connector"
+    optional: true
   deployment:pd_transfer.connector:
     reason: "the P/D connector has no spec key"
     issue: inference-sim/blis-config-search#144
@@ -246,6 +268,10 @@ capabilities:
   per-rank-cpu-tier:
     rows: ["deployment:offload.tiers[].bytes"]
     note: the CPU KV tier and its size, off as the control
+  per-pool-cpu-tier:
+    requires_schema: deployment:pools[].offload.tiers[].bytes
+    rows: ["deployment:pools[].offload.tiers[].bytes"]
+    note: a disaggregated deployment's CPU tier on the prefill pool, the decode pool or both (blis-substrate#307)
   offload-with-drafting:
     rows: ["deployment:offload.tiers[].bytes", "engine:vllm:config:speculative_config.method"]
     note: the KV tier beside an EAGLE-3 or MTP drafter

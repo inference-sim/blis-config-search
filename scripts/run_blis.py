@@ -223,7 +223,7 @@ class ConfigError(ValueError):
 SCENARIO_OFFLOAD = frozenset({"offload_cpu_bytes", "offload_eviction_policy"})
 
 
-def classify_config(config, vocab, node_size=None):
+def classify_config(config, vocab, node_size=None, pool_offload=False):
     """Split a candidate into (parallel, engine, cli, router); raise ConfigError on unknown keys.
 
     `vocab` is the settings.Vocabulary of the simulator that will run the candidate: its pool-
@@ -231,6 +231,9 @@ def classify_config(config, vocab, node_size=None):
 
     The speculative keys are folded into engine["speculative"], the nested block the schema wants,
     and the acceptance selectors go to the CLI.
+
+    `pool_offload` says the simulator's deployment schema lets a pool state its own offload block
+    (blis_cli.supports_pool_offload); a disaggregated candidate's CPU tier is refused without it.
 
     A DISAGGREGATED candidate (one carrying `prefill_instances`/`decode_instances` or any
     `prefill_*`/`decode_*` layout key) additionally gets a `pd` block on the returned parallel
@@ -242,6 +245,7 @@ def classify_config(config, vocab, node_size=None):
     pd_parallel = {r: {} for r in PD_ROLES}
     pd_engine = {r: {} for r in PD_ROLES}
     offload = {}
+    pd_offload = {r: {} for r in PD_ROLES}
     for k, v in config.items():
         role, _, knob = k.partition("_")
         if k in UNSUPPORTED:
@@ -266,6 +270,8 @@ def classify_config(config, vocab, node_size=None):
             if not isinstance(v, bool):
                 raise ConfigError(f"{k!r}: {v!r} is not true or false (it is a bare flag)")
             cli[k] = v
+        elif role in PD_ROLES and knob in SCENARIO_OFFLOAD:
+            pd_offload[role][knob[len("offload_"):]] = v
         elif role in PD_ROLES and knob in vocab.parallel:
             pd_parallel[role][knob] = v
         elif role in PD_ROLES and (knob in vocab.engine_names() or k in PD_SPECULATIVE):
@@ -328,10 +334,27 @@ def classify_config(config, vocab, node_size=None):
             f"multi-node instance must fill whole {node_size}-GPU nodes (use a footprint that "
             f"is a multiple of {node_size}, or scale out with num_instances instead)")
     pd = resolve_pd(cli, pd_parallel, pd_engine, parallel, engine, node_size)
-    if offload.get("cpu_bytes"):
-        if pd:
-            raise ConfigError("offload_cpu_bytes: a disaggregated deployment has no offload key yet "
-                              "(inference-sim/blis-config-search#94)")
+    if pd:
+        # One block for both pools is the default; a pool's own keys replace it for that pool, and a
+        # size of 0 is a pool with no tier. A pool that runs a tier carries NIXL beside it as a
+        # MultiConnector (vLLM refuses a NixlConnector beside an offload tier, and a
+        # MultiConnector over NIXL alone), so the connector follows the pool, not the deployment.
+        for role in PD_ROLES:
+            own = {**offload, **pd_offload[role]}
+            if own.get("cpu_bytes"):
+                pd[role]["offload"] = own
+        if any(pd[r].get("offload") for r in PD_ROLES):
+            if not pool_offload:
+                raise ConfigError("offload_cpu_bytes: this simulator's deployment schema has no per-pool "
+                                  "offload (blis-substrate#307), so a disaggregated deployment cannot "
+                                  "state a CPU tier (inference-sim/blis-config-search#94)")
+            if pd["connector"] not in ("NixlConnector", "MultiConnector"):
+                raise ConfigError(f"pd_connector {pd['connector']!r} with a CPU tier: a pool that runs a tier "
+                                  f"carries NIXL as a MultiConnector, which is modelled over NixlConnector only")
+    elif any(pd_offload.values()):
+        raise ConfigError(f"{sorted(f'{r}_offload_{k}' for r in PD_ROLES for k in pd_offload[r])[0]!r}: a per-pool offload "
+                          f"block needs a disaggregated deployment (prefill/decode pools)")
+    elif offload.get("cpu_bytes"):
         parallel = {**parallel, "offload": offload}
     if cli.get("pd_transfer_contention") and not pd:
         raise ConfigError("pd_transfer_contention: concurrent handoffs only exist in a disaggregated "
@@ -1191,6 +1214,14 @@ def pool_nodes(parallel, num_instances=1, node_size=8):
     return max(1, -(-total // node_size))           # ceil(total / the node size)
 
 
+def _pool_offload_block(off):
+    """A pool's own `offload:` block (the CPU tier), or "" for a pool with none."""
+    if not off:
+        return ""
+    policy = f"      eviction_policy: {json.dumps(off['eviction_policy'])}\n" if off.get("eviction_policy") else ""
+    return f"    offload:\n{policy}      tiers:\n        - {{tier: cpu_dram, bytes: {int(off['cpu_bytes'])}}}\n"
+
+
 def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router,
                       node_size, states_node_size):
     """Render a DISAGGREGATED Scenario+Deployment: one pool per role plus `pd_transfer`.
@@ -1199,13 +1230,21 @@ def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, 
     not overlap), so each pool is sized in WHOLE nodes and the cluster is their sum -- which is
     also why a P/D cluster always names a fabric: every handoff crosses nodes.
     """
-    pools, total_nodes = [], 0
+    pools, total_nodes, any_offload = [], 0, False
     for role in PD_ROLES:
         spec = pd[role]
         nodes = pool_nodes(spec["parallel"], spec["instances"], node_size)
         total_nodes += nodes
+        off = spec.get("offload")
+        any_offload = any_offload or bool(off)
+        # The pool's own connector, only where it differs from the deployment's: a pool with a tier
+        # runs NIXL beside it (MultiConnector), a pool without one runs NIXL alone.
+        base = pd.get("connector", DEFAULT_PD_CONNECTOR)
+        want = "MultiConnector" if off else ("NixlConnector" if base == "MultiConnector" else base)
+        pool_pd = f"    pd_transfer: {{connector: {want}}}\n" if want != base else ""
         pools.append(
             f"  - role: {role}\n"
+            f"{pool_pd}{_pool_offload_block(off)}"
             f"    nodes: {nodes}\n"
             f"    parallel:\n{block(spec['parallel'], 6)}\n"
             f"    engine:\n{block(spec['engine'], 6)}")
@@ -1220,7 +1259,7 @@ engine:
   kind: {settings.ENGINE_KIND}
   version: "{engine_version}"
 model: {model}
-coefficients: [{", ".join(COEFFICIENTS)}]
+coefficients: [{", ".join(COEFFICIENTS + (["cost-model-offload-tiers"] if any_offload else []))}]
 cluster:
   hardware: {hardware}
   fabric: {fabric}
@@ -1694,7 +1733,8 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     rec["pinned_stack"] = row_stack(blis, sim_catalog, sim_registry)
     try:
         node_size, states_node_size = cluster_node_size(blis, sim_catalog, hardware, gpus_per_node)
-        parallel, engine, cli, router = classify_config(config, settings.vocabulary(blis, fields), node_size)
+        parallel, engine, cli, router = classify_config(config, settings.vocabulary(blis, fields), node_size,
+                                                            blis_cli.supports_pool_offload(blis))
         # Resolve the preset's token shape so a closed-loop run actually prices the traffic it
         # names (see WORKLOAD_IGNORED). A replay carries its lengths in the corpus, so no shape.
         shape = {} if replay else load_workload_shape(catalog, workload)

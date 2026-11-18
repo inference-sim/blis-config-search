@@ -203,3 +203,21 @@ def registered_kinds(blis):
         raise BlisCommandError("`blis fields` did not say which engine kinds the build runs: "
                                + _stderr(pr))
     return sorted(k.strip() for k in m.group(1).split(",") if k.strip())
+
+
+def engine_refusal(blis, scenario_text, word=None, timeout=120):
+    """What the engine says when it opens the scenario, as its last stderr line, or None if it opens.
+
+    `blis fields --scenario` builds the engine the scenario names, so a setting the engine cannot model
+    (an eviction policy it does not simulate) is refused here, as it would be by a run. With `word`, a
+    refusal that does not mention it is not this check's and returns None.
+    """
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "probe.yaml"), "w", encoding="utf-8") as f:
+            f.write(scenario_text)
+        pr = _run(blis, ["fields", "--scenario", "probe.yaml", "--scenarios", d], timeout)
+    if pr.returncode == 0:
+        return None
+    line = _stderr(pr)
+    return line if word is None or word in (pr.stderr or "") else None

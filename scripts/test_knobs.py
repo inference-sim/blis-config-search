@@ -105,6 +105,31 @@ def test_a_scenario_key_the_spec_format_lacks_is_an_error():
     assert any("no scenario key 'warp'" in p for p in problems), problems
 
 
+def test_a_classification_that_classifies_nothing_is_an_error_for_any_kind_of_key():
+    cov = copy.deepcopy(COVERAGE)
+    cov["knobs"]["scenario:cluster.gone"] = {"reason": "a property the schema never had"}
+    _, problems = build(coverage=cov)
+    assert any("scenario:cluster.gone" in p and "classifies no property" in p for p in problems), problems
+
+
+def test_a_sweep_key_that_is_no_spec_path_is_an_error():
+    cov = copy.deepcopy(COVERAGE)
+    cov["knobs"]["scenario:model"] = {"sweep": "engine.block_size"}
+    _, problems = build(coverage=cov)
+    assert any("not a sweeps[] path" in p for p in problems), problems
+
+
+def test_a_capability_row_that_is_neither_swept_nor_explained_is_an_error():
+    table, _ = build()
+    rows = copy.deepcopy(table["knobs"])
+    for r in rows:
+        if r["id"] == "scenario:model":
+            r.pop("reason", None), r.pop("issue", None), r.update(sweep=None)
+    cap = {"capabilities": {"c": {"rows": ["scenario:model"], "note": "n"}}}
+    problems = kt.check_capabilities(rows, cap, engines=("vllm",))
+    assert any("neither sweepable nor explained" in p for p in problems), problems
+
+
 def test_engine_rows_follow_the_field_list_status():
     table, _ = build()
     rows = {r["setting"]: r for r in table["knobs"] if r["kind"] == "engine"}

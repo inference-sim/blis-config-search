@@ -90,12 +90,26 @@ class EngineKind(unittest.TestCase):
         settings.use_engine("vllm")
         self.assertEqual({"kv_cache_dtype": "x"}, run_blis.to_vllm_block({"cache_dtype": "x"}))
 
-    def test_the_dry_run_expands_a_sglang_spec_with_the_engines_release(self):
+    def test_the_dry_run_carries_the_release_of_the_engines_own_field_list(self):
+        """The release in the report is read from the field list the engine's kind supplied: a list at
+        another release gives that release, so the report cannot state a release it did not read."""
+        spec = sglang_spec(chunked_prefill_size=[512, 2048, 8192])
+        rep = E.run_experiment(copy.deepcopy(spec), BLIS, None, None, "/nonexistent", dry_run=True,
+                               verbose=False, fields=self.fields)
+        self.assertEqual("0.5.23", rep["scenario"]["engine_version"])
+        self.assertEqual("0.5.23", rep["pinned_stack"]["engine_version"])
+        self.assertEqual("sglang", settings.ENGINE_KIND)
+        other = os.path.join(self.tmp.name, "other-fields.json")
+        with open(other, "w") as f:
+            json.dump(dict(SGLANG_FIELDS, engine={"kind": "sglang", "version": "0.5.99"}), f)
+        rep = E.run_experiment(copy.deepcopy(spec), BLIS, None, None, "/nonexistent", dry_run=True,
+                               verbose=False, fields=other)
+        self.assertEqual("0.5.99", rep["scenario"]["engine_version"])
+
+    def test_the_dry_run_expands_one_arm_per_chunk_size(self):
         spec = sglang_spec(chunked_prefill_size=[512, 2048, 8192])
         rep = E.run_experiment(spec, BLIS, None, None, "/nonexistent", dry_run=True, verbose=False, fields=self.fields)
-        self.assertEqual("0.5.23", rep["scenario"]["engine_version"] if "scenario" in rep and "engine_version" in rep["scenario"]
-                         else "0.5.23")
-        self.assertEqual("sglang", settings.ENGINE_KIND)
+        self.assertEqual({"configs": 3, "runs": 3}, {k: rep["totals"][k] for k in ("configs", "runs")})
 
 
 def fake_blis(directory, kinds):

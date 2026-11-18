@@ -63,6 +63,34 @@ class SizesAndValidation(unittest.TestCase):
         self.assertTrue(any("disaggregated sweep has no offload key" in e for e in errs), errs)
 
 
+def fake_engine(directory, refuses):
+    """A simulator that opens every scenario except one naming a policy in `refuses`."""
+    import stat
+    path = os.path.join(directory, "blis-fake")
+    real = BLIS
+    with open(path, "w") as f:
+        f.write(f"#!/bin/sh\n"
+                f"if [ \"$1\" = fields ] && [ \"$2\" = --scenario ]; then\n"
+                f"  if grep -q 'eviction_policy: \"{refuses}\"' \"$5/$3\"; then\n"
+                f"    echo 'Error: offloading: eviction_policy \"{refuses}\" is not modelled, only lru' >&2; exit 1\n"
+                f"  fi\n  exit 0\nfi\nexec {real} \"$@\"\n")
+    os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR)
+    return path
+
+
+class PolicyNames(unittest.TestCase):
+    def test_a_policy_the_engine_refuses_is_a_validation_error_naming_it(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            fake = fake_engine(d, "arc")
+            ok = doc({"cpu_bytes": ["512GiB"], "eviction_policy": ["lru"]})
+            self.assertEqual([], V.validate(copy.deepcopy(ok), fake, ROUTING))
+            bad = doc({"cpu_bytes": ["512GiB"], "eviction_policy": ["lru", "arc"]})
+            errs = V.validate(copy.deepcopy(bad), fake, ROUTING)
+            self.assertTrue(any("refuses 'arc'" in e and "not modelled" in e for e in errs), errs)
+            self.assertFalse(any("refuses 'lru'" in e for e in errs), errs)
+
+
 class ArmsDiffer(unittest.TestCase):
     def test_the_grid_has_a_no_tier_control_and_one_arm_per_size_and_policy(self):
         sw = doc({"cpu_bytes": [0, "256GiB", "512GiB"], "eviction_policy": ["lru", "fifo"]})["sweeps"][0]

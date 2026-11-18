@@ -1,0 +1,926 @@
+{
+  "dropped": [
+    {
+      "count": 1,
+      "gpus": 16,
+      "reason": "uses 16 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 3,
+      "gpus": 32,
+      "reason": "uses 32 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 1,
+      "gpus": 128,
+      "reason": "uses 128 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 40,
+      "reason": "uses 40 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 8,
+      "gpus": 48,
+      "reason": "uses 48 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 12,
+      "gpus": 56,
+      "reason": "uses 56 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 12,
+      "gpus": 72,
+      "reason": "uses 72 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 8,
+      "gpus": 80,
+      "reason": "uses 80 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 88,
+      "reason": "uses 88 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 1,
+      "gpus": 40,
+      "reason": "uses 40 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 2,
+      "gpus": 48,
+      "reason": "uses 48 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 3,
+      "gpus": 56,
+      "reason": "uses 56 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 3,
+      "gpus": 72,
+      "reason": "uses 72 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 2,
+      "gpus": 80,
+      "reason": "uses 80 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 1,
+      "gpus": 88,
+      "reason": "uses 88 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 2,
+      "gpus": 32,
+      "reason": "uses 32 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 48,
+      "reason": "uses 48 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 80,
+      "reason": "uses 80 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 2,
+      "gpus": 96,
+      "reason": "uses 96 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 48,
+      "reason": "uses 48 GPUs, not the scenario's 64"
+    },
+    {
+      "count": 4,
+      "gpus": 80,
+      "reason": "uses 80 GPUs, not the scenario's 64"
+    }
+  ],
+  "finalists": [
+    {
+      "at_c_use": {
+        "interactivity": 23.12,
+        "itl_p99_ms": 100.706,
+        "tok_per_s_per_user": 9.9,
+        "tokens_per_sec": 2119.3,
+        "tokens_per_sec_per_gpu": 33.11,
+        "total_tokens_per_sec_per_gpu": 3462.672
+      },
+      "c_star": 128,
+      "c_use": 128,
+      "config": {
+        "concurrency": 128,
+        "enable_expert_parallel": true,
+        "gpu_memory_utilization": 0.95,
+        "max_model_len": 262144,
+        "num_instances": 2,
+        "pp": 4,
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 47.92,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 20.9,
+          "tokens_per_sec": 1445.7,
+          "ttft_p99_ms": 2553.1
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 100.706,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 9.9,
+          "tokens_per_sec": 2119.3,
+          "ttft_p99_ms": 4106.5
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 683.353,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 1.5,
+          "tokens_per_sec": 851.5,
+          "ttft_p99_ms": 136124.1
+        },
+        {
+          "concurrency": 512,
+          "itl_p99_ms": 698.691,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 1.4,
+          "tokens_per_sec": 565.0,
+          "ttft_p99_ms": 583904.0
+        }
+      ],
+      "gpus": 64,
+      "label": "2x TP8xPP4 + EP",
+      "sweep": "pipeline",
+      "variant": ""
+    },
+    {
+      "at_c_use": {
+        "interactivity": 15.631,
+        "itl_p99_ms": 611.401,
+        "tok_per_s_per_user": 1.6,
+        "tokens_per_sec": 908.4,
+        "tokens_per_sec_per_gpu": 14.19,
+        "total_tokens_per_sec_per_gpu": 1414.99
+      },
+      "c_star": 64,
+      "c_use": 64,
+      "config": {
+        "cache_dtype": "fp8",
+        "concurrency": 64,
+        "enable_expert_parallel": true,
+        "gpu_memory_utilization": 0.95,
+        "max_model_len": 262144,
+        "num_instances": 8,
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 611.401,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 1.6,
+          "tokens_per_sec": 908.4,
+          "ttft_p99_ms": 39399.0
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 486.681,
+          "preemption_count": 20,
+          "tok_per_s_per_user": 2.1,
+          "tokens_per_sec": 756.5,
+          "ttft_p99_ms": 194031.3
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 480.794,
+          "preemption_count": 16,
+          "tok_per_s_per_user": 2.1,
+          "tokens_per_sec": 776.9,
+          "ttft_p99_ms": 357108.4
+        },
+        {
+          "concurrency": 512,
+          "itl_p99_ms": 573.917,
+          "preemption_count": 14,
+          "tok_per_s_per_user": 1.7,
+          "tokens_per_sec": 827.8,
+          "ttft_p99_ms": 828591.8
+        }
+      ],
+      "gpus": 64,
+      "label": "8x TP8 + EP",
+      "sweep": "kv-capacity",
+      "variant": "KV dtype fp8"
+    },
+    {
+      "at_c_use": {
+        "interactivity": 44.55,
+        "itl_p99_ms": 27.737,
+        "tok_per_s_per_user": 36.1,
+        "tokens_per_sec": 851.3,
+        "tokens_per_sec_per_gpu": 13.3,
+        "total_tokens_per_sec_per_gpu": 1276.54
+      },
+      "c_star": 64,
+      "c_use": 64,
+      "config": {
+        "concurrency": 64,
+        "decode_enable_expert_parallel": true,
+        "decode_instances": 1,
+        "decode_tp": 16,
+        "gpu_memory_utilization": 0.95,
+        "max_model_len": 262144,
+        "num_instances": 7,
+        "prefill_enable_expert_parallel": true,
+        "prefill_instances": 6,
+        "prefill_tp": 8,
+        "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-h100-agentx-8node/routing/pd-prefix-based-d2878efc34.yaml",
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 27.164,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 36.8,
+          "tokens_per_sec": 843.5,
+          "ttft_p99_ms": 89718.5
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 28.562,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 35.0,
+          "tokens_per_sec": 844.5,
+          "ttft_p99_ms": 190319.2
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 28.228,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 35.4,
+          "tokens_per_sec": 869.8,
+          "ttft_p99_ms": 393165.4
+        },
+        {
+          "concurrency": 512,
+          "itl_p99_ms": 30.159,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 33.2,
+          "tokens_per_sec": 1005.2,
+          "ttft_p99_ms": 793079.5
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 27.737,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 36.1,
+          "tokens_per_sec": 851.3,
+          "ttft_p99_ms": 86376.0
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 29.77,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 33.6,
+          "tokens_per_sec": 857.6,
+          "ttft_p99_ms": 196417.2
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 29.368,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 34.1,
+          "tokens_per_sec": 893.3,
+          "ttft_p99_ms": 418752.8
+        },
+        {
+          "concurrency": 512,
+          "itl_p99_ms": 32.454,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 30.8,
+          "tokens_per_sec": 998.6,
+          "ttft_p99_ms": 836093.8
+        }
+      ],
+      "gpus": 64,
+      "label": "6P TP8 + EP / 1D TP16 + EP",
+      "sweep": "pd-wide-decode",
+      "variant": ""
+    }
+  ],
+  "front": {
+    "interval": null,
+    "overall": {
+      "decode": {
+        "members": [
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 1,
+              "decode_tp": 16,
+              "gpu_memory_utilization": 0.95,
+              "max_model_len": 262144,
+              "num_instances": 7,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 6,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-h100-agentx-8node/routing/pd-prefix-based-d2878efc34.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 44.55,
+            "label": "6P TP8 + EP / 1D TP16 + EP",
+            "status": "front",
+            "sweep": "pd-wide-decode",
+            "throughput_per_gpu": 53.204,
+            "variant": ""
+          }
+        ],
+        "points": 1,
+        "unrated": 10
+      },
+      "total": {
+        "members": [
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "enable_expert_parallel": true,
+              "gpu_memory_utilization": 0.95,
+              "max_model_len": 262144,
+              "num_instances": 2,
+              "pp": 4,
+              "tp": 8
+            },
+            "disaggregated": false,
+            "interactivity": 23.12,
+            "label": "2x TP8xPP4 + EP",
+            "status": "front",
+            "sweep": "pipeline",
+            "throughput_per_gpu": 3462.672,
+            "variant": ""
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "enable_expert_parallel": true,
+              "gpu_memory_utilization": 0.95,
+              "max_model_len": 262144,
+              "num_instances": 4,
+              "pp": 2,
+              "tp": 8
+            },
+            "disaggregated": false,
+            "interactivity": 44.235,
+            "label": "4x TP8xPP2 + EP",
+            "status": "front",
+            "sweep": "pipeline",
+            "throughput_per_gpu": 2502.512,
+            "variant": ""
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 1,
+              "decode_tp": 16,
+              "gpu_memory_utilization": 0.95,
+              "max_model_len": 262144,
+              "num_instances": 7,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 6,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-h100-agentx-8node/routing/pd-prefix-based-d2878efc34.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 44.55,
+            "label": "6P TP8 + EP / 1D TP16 + EP",
+            "status": "front",
+            "sweep": "pd-wide-decode",
+            "throughput_per_gpu": 1276.54,
+            "variant": ""
+          }
+        ],
+        "points": 11,
+        "unrated": 0
+      }
+    },
+    "sweeps": [
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "topology",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "ep-off",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 9
+        },
+        "name": "pipeline",
+        "total": {
+          "members": [
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "enable_expert_parallel": true,
+                "gpu_memory_utilization": 0.95,
+                "max_model_len": 262144,
+                "num_instances": 2,
+                "pp": 4,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 23.12,
+              "label": "2x TP8xPP4 + EP",
+              "status": "front",
+              "sweep": "pipeline",
+              "throughput_per_gpu": 3462.672,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "enable_expert_parallel": true,
+                "gpu_memory_utilization": 0.95,
+                "max_model_len": 262144,
+                "num_instances": 4,
+                "pp": 2,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 44.235,
+              "label": "4x TP8xPP2 + EP",
+              "status": "front",
+              "sweep": "pipeline",
+              "throughput_per_gpu": 2502.512,
+              "variant": ""
+            }
+          ],
+          "points": 9,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "moe-collective",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 1
+        },
+        "name": "kv-capacity",
+        "total": {
+          "members": [
+            {
+              "concurrency": 64,
+              "config": {
+                "cache_dtype": "fp8",
+                "concurrency": 64,
+                "enable_expert_parallel": true,
+                "gpu_memory_utilization": 0.95,
+                "max_model_len": 262144,
+                "num_instances": 8,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 15.631,
+              "label": "8x TP8 + EP",
+              "status": "front",
+              "sweep": "kv-capacity",
+              "throughput_per_gpu": 1414.99,
+              "variant": "KV dtype fp8"
+            }
+          ],
+          "points": 1,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "batch-caps",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "routing-prefix-cache",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "prefill-chunking",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "pd-ratio",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "pd-always",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 1,
+                "decode_tp": 16,
+                "gpu_memory_utilization": 0.95,
+                "max_model_len": 262144,
+                "num_instances": 7,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 6,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-h100-agentx-8node/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 44.55,
+              "label": "6P TP8 + EP / 1D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-wide-decode",
+              "throughput_per_gpu": 53.204,
+              "variant": ""
+            }
+          ],
+          "points": 1,
+          "unrated": 0
+        },
+        "name": "pd-wide-decode",
+        "total": {
+          "members": [
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 1,
+                "decode_tp": 16,
+                "gpu_memory_utilization": 0.95,
+                "max_model_len": 262144,
+                "num_instances": 7,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 6,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-h100-agentx-8node/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 44.55,
+              "label": "6P TP8 + EP / 1D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-wide-decode",
+              "throughput_per_gpu": 1276.54,
+              "variant": ""
+            }
+          ],
+          "points": 1,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "pd-pool-engine",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "pd-decode-cudagraph",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "cudagraph",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      }
+    ],
+    "throughput": "total",
+    "x": "interactivity_of_mean_tpot",
+    "y": {
+      "decode": "output_tokens_per_second_per_decode_gpu",
+      "total": "total_tokens_per_second_per_gpu"
+    }
+  },
+  "outcomes": {
+    "overloaded": 225,
+    "refused": 4,
+    "served": 11
+  },
+  "ranking": {
+    "description": "max output tok/s per accelerator subject to the scenario's SLOs",
+    "throughput": "total",
+    "used": "scalar"
+  },
+  "refusals": [
+    {
+      "configs": 2,
+      "examples": [
+        "4P/4D TP8 + EP"
+      ],
+      "issue": null,
+      "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[1141].e2e_us: is 127270137, less than ttft_us 131537500\\n  error: result.request_rows[1141].tpot_us: must be a finite number, not negative",
+      "runs": 2,
+      "source": "engine"
+    },
+    {
+      "configs": 1,
+      "examples": [
+        "4P/4D TP8 + EP"
+      ],
+      "issue": null,
+      "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[2486].e2e_us: is 73809840, less than ttft_us 75751987\\n  error: result.request_rows[2486].tpot_us: must be a finite number, not negative",
+      "runs": 1,
+      "source": "engine"
+    },
+    {
+      "configs": 1,
+      "examples": [
+        "4P/4D TP8 + EP"
+      ],
+      "issue": null,
+      "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[7523].e2e_us: is 1140139310, less than ttft_us 1151865527\\n  error: result.request_rows[7523].tpot_us: must be a finite number, not negative",
+      "runs": 1,
+      "source": "engine"
+    }
+  ],
+  "run_id": "muse-spark-open-816b-a42b-h100-agentx-8node",
+  "sweep_outcomes": [
+    {
+      "name": "topology",
+      "outcomes": {
+        "overloaded": 4
+      },
+      "refusals": []
+    },
+    {
+      "name": "ep-off",
+      "outcomes": {
+        "overloaded": 4
+      },
+      "refusals": []
+    },
+    {
+      "name": "pipeline",
+      "outcomes": {
+        "overloaded": 3,
+        "served": 9
+      },
+      "refusals": []
+    },
+    {
+      "name": "moe-collective",
+      "outcomes": {
+        "overloaded": 16
+      },
+      "refusals": []
+    },
+    {
+      "name": "kv-capacity",
+      "outcomes": {
+        "overloaded": 7,
+        "served": 1
+      },
+      "refusals": []
+    },
+    {
+      "name": "batch-caps",
+      "outcomes": {
+        "overloaded": 16
+      },
+      "refusals": []
+    },
+    {
+      "name": "routing-prefix-cache",
+      "outcomes": {
+        "overloaded": 24
+      },
+      "refusals": []
+    },
+    {
+      "name": "prefill-chunking",
+      "outcomes": {
+        "overloaded": 4
+      },
+      "refusals": []
+    },
+    {
+      "name": "pd-ratio",
+      "outcomes": {
+        "overloaded": 63,
+        "refused": 1
+      },
+      "refusals": [
+        {
+          "configs": 1,
+          "examples": [
+            "4P/4D TP8 + EP"
+          ],
+          "issue": null,
+          "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[2486].e2e_us: is 73809840, less than ttft_us 75751987\\n  error: result.request_rows[2486].tpot_us: must be a finite number, not negative",
+          "runs": 1,
+          "source": "engine"
+        }
+      ]
+    },
+    {
+      "name": "pd-always",
+      "outcomes": {
+        "overloaded": 15,
+        "refused": 1
+      },
+      "refusals": [
+        {
+          "configs": 1,
+          "examples": [
+            "4P/4D TP8 + EP"
+          ],
+          "issue": null,
+          "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[1141].e2e_us: is 127270137, less than ttft_us 131537500\\n  error: result.request_rows[1141].tpot_us: must be a finite number, not negative",
+          "runs": 1,
+          "source": "engine"
+        }
+      ]
+    },
+    {
+      "name": "pd-wide-decode",
+      "outcomes": {
+        "overloaded": 23,
+        "served": 1
+      },
+      "refusals": []
+    },
+    {
+      "name": "pd-pool-engine",
+      "outcomes": {
+        "overloaded": 30,
+        "refused": 2
+      },
+      "refusals": [
+        {
+          "configs": 1,
+          "examples": [
+            "4P/4D TP8 + EP"
+          ],
+          "issue": null,
+          "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[1141].e2e_us: is 127270137, less than ttft_us 131537500\\n  error: result.request_rows[1141].tpot_us: must be a finite number, not negative",
+          "runs": 1,
+          "source": "engine"
+        },
+        {
+          "configs": 1,
+          "examples": [
+            "4P/4D TP8 + EP"
+          ],
+          "issue": null,
+          "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[7523].e2e_us: is 1140139310, less than ttft_us 1151865527\\n  error: result.request_rows[7523].tpot_us: must be a finite number, not negative",
+          "runs": 1,
+          "source": "engine"
+        }
+      ]
+    },
+    {
+      "name": "pd-decode-cudagraph",
+      "outcomes": {
+        "overloaded": 8
+      },
+      "refusals": []
+    },
+    {
+      "name": "cudagraph",
+      "outcomes": {
+        "overloaded": 8
+      },
+      "refusals": []
+    }
+  ],
+  "winner": {
+    "chosen": "2x TP8xPP4 + EP",
+    "label": "2x TP8xPP4 + EP",
+    "reason": "2x TP8xPP4 + EP in sweep 'pipeline' gives the most tok/s/accelerator (33.11 tok/s/accelerator, 2119.3 tok/s fleet) while holding the scenario's SLOs, at concurrency 128.",
+    "sweep": "pipeline",
+    "variant": ""
+  }
+}

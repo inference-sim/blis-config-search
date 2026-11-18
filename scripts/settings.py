@@ -74,7 +74,12 @@ class Vocabulary:
         return self.flat | frozenset(self.blocks)
 
 
-def vocabulary_from(field_list, deployment_schema):
+def renames_for(kind):
+    """The engine-block renames of an engine kind: only vLLM's block spells settings differently."""
+    return ENGINE_BLOCK_NAMES if kind == "vllm" else {}
+
+
+def vocabulary_from(field_list, deployment_schema, renames=None):
     """A Vocabulary from a parsed field list and the deployment document's JSON Schema.
 
     A field that ENGINE_BLOCK_NAMES renames is named only by its engine-block name, because the
@@ -82,7 +87,9 @@ def vocabulary_from(field_list, deployment_schema):
     ENGINE_BLOCK_NAMES; a spec does not set the launch environment.
     """
     entries = {f"{f['source']}:{f['name']}": f for f in field_list["fields"]}
-    renamed = {target: alias for alias, target in ENGINE_BLOCK_NAMES.items() if target in entries}
+    if renames is None:
+        renames = renames_for(field_list["engine"]["kind"])
+    renamed = {target: alias for alias, target in renames.items() if target in entries}
     status = {}
     for key, entry in entries.items():
         if key in renamed:

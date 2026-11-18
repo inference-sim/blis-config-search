@@ -198,7 +198,10 @@ def registered_kinds(blis):
         with open(os.path.join(d, "kind-probe.yaml"), "w", encoding="utf-8") as f:
             f.write(_PROBE)
         pr = _run(blis, ["fields", "--scenario", "kind-probe.yaml", "--scenarios", d], 120)
-    m = re.search(r"this build runs the kinds? ([\w, -]+)", (pr.stderr or "") + (pr.stdout or ""))
+    # The whole refusal line, not a phrase found anywhere in the output: a line that merely mentions
+    # "this build runs the kinds" (a hint, a log line) must not be read as the list.
+    m = re.search(r'^.*names engine kind "[^"]*"; this build runs the kinds? ([\w-]+(?:, ?[\w-]+)*)\s*$',
+                  (pr.stderr or "") + "\n" + (pr.stdout or ""), re.M)
     if not m:
         raise BlisCommandError("`blis fields` did not say which engine kinds the build runs: "
                                + _stderr(pr))

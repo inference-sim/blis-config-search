@@ -11,7 +11,9 @@ schema scenario|deployment`). What a spec can do with a row is decided in two pl
     or a reason (and the open issue that would lift it).
 
 A document property in neither is an error, and so is a classification of a property that no
-longer exists. A new simulator capability therefore cannot arrive unseen.
+longer exists. A new simulator capability therefore cannot arrive unseen: a prefix entry (`a.*`)
+lists in `covers` the properties it was reviewed against, and a property under it that is not
+listed is as unclassified as one with no entry at all.
 
   knob_table.py --blis BLIS --fields vllm=FILE [--fields sglang=FILE] [--check | --write]
 """
@@ -29,7 +31,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COVERAGE = os.path.join(ROOT, "knobs", "coverage.yaml")
 TABLE_MD = os.path.join(ROOT, "knobs", "knob-table.md")
 SPEC_SCHEMA = os.path.join(ROOT, "experiments", "schema.json")
-MAX_DEPTH = 5
+# A guard against a malformed schema only. Nesting is bounded by the schema's own definitions
+# (a definition met again on the way down is a recursion and ends the path); a cap low enough to
+# be reached by a real document would leave the properties below it unlisted and so unclassified.
+MAX_DEPTH = 64
 
 
 def document_paths(schema):
@@ -49,8 +54,9 @@ def document_paths(schema):
         for key, node in sorted((defs.get(name, {}).get("properties") or {}).items()):
             path = prefix + key + ("[]" if node.get("type") == "array" else "")
             target = ref(node)
-            if (target in defs and target not in stack and depth < MAX_DEPTH
-                    and defs[target].get("properties")):
+            if target in defs and target not in stack and defs[target].get("properties"):
+                if depth >= MAX_DEPTH:
+                    raise ValueError(f"schema nests deeper than {MAX_DEPTH} levels at {path}")
                 walk(target, path + ".", depth + 1, stack + (target,))
             else:
                 out.append(path)
@@ -117,7 +123,7 @@ def classify(document, path, coverage):
 
 
 def document_rows(scenario_schema, deployment_schema, coverage):
-    rows, problems, used = [], [], set()
+    rows, problems, used, under = [], [], set(), {}
     for document, schema in (("scenario", scenario_schema), ("deployment", deployment_schema)):
         for path in document_paths(schema):
             entry, key = classify(document, path, coverage)
@@ -128,6 +134,8 @@ def document_rows(scenario_schema, deployment_schema, coverage):
                 row["sweep"], row["reason"] = None, "unclassified"
             else:
                 used.add(key)
+                if key.endswith(".*"):
+                    under.setdefault(key, []).append(f"{document}:{path}")
                 row["class"] = key
                 sweep, reason = entry.get("sweep"), entry.get("reason")
                 if bool(sweep) == bool(reason):
@@ -138,6 +146,16 @@ def document_rows(scenario_schema, deployment_schema, coverage):
                     if entry.get("issue"):
                         row["issue"] = entry["issue"]
             rows.append(row)
+    for key, found in under.items():
+        reviewed = coverage["knobs"][key].get("covers")
+        if not isinstance(reviewed, list) or not reviewed:
+            problems.append(f"{key}: a prefix entry lists in `covers` each property it was reviewed "
+                            f"against, so a property added later is reviewed, not absorbed")
+            continue
+        for full in found:
+            if full not in reviewed:
+                problems.append(f"{full} is new under {key}, which was reviewed without it: classify "
+                                f"it (an exact entry) or add it to that entry's `covers` after review")
     for key in coverage["knobs"]:
         if key not in used:
             problems.append(f"{key} classifies no property of the scenario or deployment document "

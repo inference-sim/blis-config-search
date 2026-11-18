@@ -63,8 +63,9 @@ class SizesAndValidation(unittest.TestCase):
         self.assertTrue(any("disaggregated sweep has no offload key" in e for e in errs), errs)
 
 
-def fake_engine(directory, refuses, min_tp=1):
-    """A simulator that opens every scenario except one naming a policy in `refuses` or one with tp below `min_tp`."""
+def fake_engine(directory, refuses, min_tp=1, packaging=None):
+    """A simulator that opens every scenario except one naming a policy in `refuses` or one with tp below `min_tp`.
+    With `packaging`, a scenario that states `gpus_per_node: N` for another N is refused for its packaging."""
     import stat
     path = os.path.join(directory, "blis-fake")
     real = BLIS
@@ -73,6 +74,8 @@ def fake_engine(directory, refuses, min_tp=1):
                 f"if [ \"$1\" = fields ] && [ \"$2\" = --scenario ]; then\n"
                 f"  if [ {min_tp} -gt \"$(sed -n 's/^ *tp: *//p' \"$5/$3\" | head -1)\" ]; then\n"
                 f"    echo 'Error: the model does not fit at this tp' >&2; exit 1\n  fi\n"
+                + (f"  if grep -q 'gpus_per_node:' \"$5/$3\" && ! grep -q 'gpus_per_node: {packaging}$' \"$5/$3\"; then\n"
+                   f"    echo 'Error: cluster: gpus_per_node contradicts the catalog' >&2; exit 1\n  fi\n" if packaging else "") +
                 f"  if grep -q 'eviction_policy: \"{refuses}\"' \"$5/$3\"; then\n"
                 f"    echo 'Error: offloading: eviction_policy \"{refuses}\" is not modelled, only lru' >&2; exit 1\n"
                 f"  fi\n  exit 0\nfi\nexec {real} \"$@\"\n")
@@ -106,6 +109,35 @@ class PolicyNames(unittest.TestCase):
             good["sweeps"][0]["parallel"]["tp"] = [1, 4]
             good["scenario"]["gpus"] = 8
             self.assertEqual([], V.validate(copy.deepcopy(good), fake, ROUTING))
+
+
+class ProbePackaging(unittest.TestCase):
+    """The policy probe uses the hardware's packaging, not an assumed eight GPUs a node (#154)."""
+
+    def spec(self, policy):
+        d = doc({"cpu_bytes": ["512GiB"], "eviction_policy": [policy]})
+        d["scenario"]["hardware"] = "gb200-nvl72"      # the catalog fixes 4 GPUs a node
+        del d["scenario"]["cluster"]
+        d["sweeps"][0]["parallel"]["tp"] = [4]
+        d["scenario"]["gpus"] = 8
+        return d
+
+    def test_a_bad_policy_is_found_on_hardware_whose_packaging_is_not_eight(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            fake = fake_engine(d, "arc", packaging=4)
+            errs = V.offload_policy_errors(self.spec("arc"), fake)
+            self.assertTrue(any("refuses 'arc'" in e for e in errs), errs)
+            self.assertEqual([], V.offload_policy_errors(self.spec("lru"), fake))
+
+    def test_a_chip_with_no_packaging_anywhere_is_refused_not_probed_on_eight(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            fake = fake_engine(d, "arc")
+            sp = self.spec("arc")
+            sp["scenario"]["hardware"] = "h100"        # the catalog fixes nothing; the spec states nothing
+            errs = V.offload_policy_errors(sp, fake)
+            self.assertTrue(any("packaging" in e for e in errs), errs)
 
 
 class ArmsDiffer(unittest.TestCase):

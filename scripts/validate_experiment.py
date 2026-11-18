@@ -860,7 +860,8 @@ def offload_policy_errors(spec, blis, fields=None):
         if not isinstance(block, dict) or not _is_list(block.get("eviction_policy")):
             continue
         tps = ((sw.get("parallel") or {}).get("tp")) or [1]
-        tp = tps[0] if _is_list(tps) and isinstance(tps[0], int) else 1
+        # The largest tp: a smaller one may not hold the model, and the engine would refuse that, not the policy.
+        tp = max([t for t in tps if isinstance(t, int) and not isinstance(t, bool)] or [1]) if _is_list(tps) else 1
         for policy in dict.fromkeys(p for p in block["eviction_policy"] if isinstance(p, str)):
             parallel = {"tp": tp, "pp": 1, "dp": 1, "offload": {"cpu_bytes": 2**30, "eviction_policy": policy}}
             body = run_blis.scenario_yaml(sc.get("model"), sc.get("hardware"),

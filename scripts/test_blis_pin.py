@@ -627,7 +627,26 @@ def test_a_pending_regeneration_is_not_planned_on_a_pin_push():
         shutil.rmtree(root)
 
 
+def test_every_committed_report_is_current_or_marked_pending():
+    """#139: a report priced by another simulator than pins.env names must say so (REGENERATION_PENDING),
+    and a report the pin prices must not. The test reads each report's own header, pinned_stack."""
+    print("test_every_committed_report_is_current_or_marked_pending")
+    pins = B.read_pins(os.path.join(B.ROOT, "pins.env"))
+    ids = B.report_ids(B.ROOT)
+    check(ids, "the repository commits reports")
+    for rid in ids:
+        scen = os.path.join(B.ROOT, "reports", rid)
+        tag = ((B._load_json(os.path.join(scen, "scenario.json"), {}) or {}).get("pinned_stack") or {}).get("blis")
+        check(tag, f"reports/{rid}/scenario.json names the simulator that priced it (pinned_stack.blis)")
+        current = B.is_current(scen, pins)
+        marked = B.pending(rid) is not None
+        check(current != marked,
+              f"reports/{rid} was priced by {tag}, the pin is {pins.get('BLIS_REF')}: "
+              f"{'it is current and must not carry' if current else 'it is stale and must carry'} {B.PENDING}")
+
+
 if __name__ == "__main__":
+    test_every_committed_report_is_current_or_marked_pending()
     test_version_ordering()
     test_go_mod_versions()
     test_sync_pins_reads_replace()

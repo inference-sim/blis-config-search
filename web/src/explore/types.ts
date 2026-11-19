@@ -51,6 +51,8 @@ export interface ExploreData {
   routers: Record<string, Router>
   /** The spec.yaml this report was swept from, as written. */
   spec_yaml: string
+  /** The figure tok/s per user is 1000 over (worst instance), when the spec states its statistic; absent means TPOT p99. */
+  per_user_of?: string
   /** The stack that priced the report and a script installing it; null for a ledger with no pinned_stack. */
   setup?: Setup | null
 }

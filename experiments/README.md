@@ -44,7 +44,7 @@ scenario:                       # shared by EVERY sweep
   hardware: h100                # one GPU type per experiment
   workload: agentx-mvp          # one workload per experiment
   gpus: 32                      # EVERY run uses exactly 32 GPUs
-  slo: {itl_p99: 20ms}          # latency caps need units; throughput_per_gpu is a tok/s floor
+  slo: {itl_p99: 20ms}          # caps need units, e.g. tpot_p90: 25ms, ttft_p95: 2s (see SLOs below)
   concurrency: [4, 8, 16, 32, 64, 128]
   cluster: {fabric: ib-400g}    # inter-node interconnect; omit for the ib-400g default (H100 on RoCE: roce-200g)
 
@@ -95,6 +95,31 @@ sweeps:
   prediction and nothing else. Grid rationale, prior measurements, and why you skipped some other
   sweep all belong in a `#` comment, which stays in the spec and never reaches the report. The
   validator prints a style note (not a failure) for anything longer.
+
+### SLOs
+
+`scenario.slo` holds caps and floors, each judged on the **worst instance** (the max over the
+cluster figure and every instance's):
+
+| key | meaning |
+|---|---|
+| `<metric>_<stat>: 25ms` | a cap on the Result's `<metric>_<stat>_ms`, for `ttft`, `e2e` or `tpot` at a statistic the simulator's metric registry defines (`blis metrics`) and the per-instance figures are rebuilt at (mean, p50, p90, p95, p99; `run_blis.INSTANCE_STATS`): `tpot_p90`, `ttft_p95`, `e2e_mean`, ... Needs a unit and a positive value. |
+| `interactivity_<stat>: 40` | a floor in tok/s/user: `1000 / tpot_<stat>_ms >= 40`, at any statistic `tpot` has. The key is defined by that figure: `interactivity_mean` is 1000 / the mean TPOT (the registry's `interactivity_of_mean_tpot`), not the registry's `interactivity_mean`, a mean of per-request rates; the report names the figure (`of: tpot_mean_ms`) |
+| `itl_p99: 20ms` | the alias of `tpot_p99` (the slot it reads holds TPOT) |
+| `throughput_per_gpu: 500` | a floor on output tok/s per accelerator |
+
+The `tpot` caps and `interactivity` floors state the **per-user statistic**: the interactivity
+floor, each row's `tok_per_s_per_user` and the Pareto front's x axis are all `1000 /` the worst
+instance's `tpot_<stat>_ms`, so a config cannot pass the gate and fail the ranking. State them at
+one statistic. A spec that states none keeps the p99 rate and the `interactivity_of_mean_tpot` axis;
+a report that states one names it (`interactivity_floor.statistic` and `.of`, `pareto.x_basis`).
+
+The validator refuses a key the registry does not define, naming the statistics it does
+(`tpot_p75`). A statistic the registry defines but the Result does not report (`tpot_p95` on the
+pinned release) passes validation and is refused by the sweeper at the first Result, naming the
+statistics the Result reports; it is never computed here. On a ledger written before the Result's
+measured window (`--runs-from`), only `itl_p99`, `ttft_p99` and `e2e_p99` can be judged; any other key
+is refused.
 
 ## The engine
 

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import type { Catalog, Scenario, WorkloadEntry } from './types'
 import { facetCounts, filterScenarios, NO_FILTERS, parseRoute, coverageRows, TAB_LABELS } from './lib'
-import { ScenarioPage } from './explore/Explorer'
+import { ScenarioPage, perUserNote, sloBound } from './explore/Explorer'
 import { FIXTURE } from './explore/model.test'
 import { RunsTable, type Commands } from './explore/RunsTable'
 import { useExplorer } from './explore/useExplorer'
@@ -842,4 +842,16 @@ describe('footer pinned-stack disclosure', () => {
     expect(pills()).toEqual([ROOT_PILL])
   })
 
+})
+
+describe('scenario SLO chips', () => {
+  it('reads an interactivity floor as at-least and a latency cap as at-most', () => {
+    expect(sloBound('interactivity_p90')).toBe('≥')
+    expect(sloBound('tpot_p90')).toBe('≤')
+    expect(sloBound('itl_p99')).toBe('≤')
+  })
+  it('names the per-user figure only when the report states one', () => {
+    expect(perUserNote('tpot_p90_ms')).toBe('tok/s per user = 1000 / worst-instance tpot_p90_ms')
+    expect(perUserNote(undefined)).toBeNull()
+  })
 })

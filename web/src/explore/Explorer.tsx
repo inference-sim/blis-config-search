@@ -20,6 +20,10 @@ const sloLabel = (k: string) => {
   const m = (Object.keys(SLO_OF) as (keyof typeof SLO_OF)[]).find((x) => SLO_OF[x] === k)
   return m ? METRIC[m].label : k.replace('_', ' ')
 }
+/** An interactivity key is a floor in tok/s/user (at least); every other latency key is a cap. */
+export const sloBound = (k: string) => (k.startsWith('interactivity_') ? '≥' : '≤')
+/** What every tok/s-per-user figure on the page is, when the spec states its statistic (DEV-8). */
+export const perUserNote = (of?: string) => (of ? `tok/s per user = 1000 / worst-instance ${of}` : null)
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
 
 export async function loadExplore(runId: string): Promise<ExploreData> {
@@ -56,7 +60,8 @@ export function ScenarioPage({ runId, scenarios, catalog, load = loadExplore }: 
         <CatRef href={modelDoc}>{s.model}</CatRef>
         <CatRef href={catalogDoc(catalog, 'hardware', s.hardware)}>{s.gpu_budget} {s.hardware}</CatRef>
         <CatRef href={catalogDoc(catalog, 'workload', s.workload)}>{s.workload}</CatRef>
-        {data && Object.entries(data.slo).map(([k, v]) => <span key={k} className="spec floor" title={`From the spec's scenario.slo (${k}); a run is servable only if it meets every SLO.`}>SLO {sloLabel(k)} ≤ {v}</span>)}
+        {data && Object.entries(data.slo).map(([k, v]) => <span key={k} className="spec floor" title={`From the spec's scenario.slo (${k}); a run is servable only if it meets every SLO.`}>SLO {sloLabel(k)} {sloBound(k)} {v}</span>)}
+        {data && perUserNote(data.per_user_of) && <span className="spec floor" title="The spec states the per-user statistic: the floor, each run's tok/s per user and the ranking are on it.">{perUserNote(data.per_user_of)}</span>}
         <a className="xf-speclink" href={`${REPO}/blob/main/experiments/${encodeURIComponent(runId)}.yaml`} target="_blank" rel="noreferrer">experiment spec ↗</a>
       </div>
       {s.caveat && <div className="warnnote">{s.caveat}</div>}

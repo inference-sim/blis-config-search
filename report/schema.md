@@ -96,7 +96,7 @@ Assembled in `scripts/explore_data.py`. Knobs the engine doesn't vary come throu
 
 `id, src, conc, tp, dp, ni, gpus, series, route, pd, mtp, mnbt, mns, a2a, epw,`
 `pu (per-user tok/s: authoritative tok_per_s_per_user if present; else 1000/ITL-p99 when one step`
-`   == one token (mtp==0) -- the p99 basis matches the floor + pareto; else null, never a step rate),`
+`   == one token (mtp==0) -- on the p99 basis, or the per-user statistic the spec states, the basis of the floor + pareto; else null, never a step rate),`
 `pu_is_step_estimate (True = under MTP with no authoritative field, so pu is null not a wrong number),`
 `cl (=tokens_per_sec), itl (=mean ITL ms), ttft (=ttft_p99_ms),`
 `hit (prefix hit or null), to (timed out), drop (unservable), p95 (=e2e_p95_ms),`
@@ -105,11 +105,13 @@ Assembled in `scripts/explore_data.py`. Knobs the engine doesn't vary come throu
 ### The basis of every figure
 
 Every figure a report shows, ranks on or gates on is the Result's **measured window**, the
-profiling window after warm-up, at the **cluster** scope. The TTFT and end-to-end gates are also
-judged on the worst instance, rebuilt from the measured window's per-request rows
-(`phase == "profile"`, grouped by the instance that served them, percentile by linear
-interpolation). The ITL gate is the cluster's measured decode-step interval, because a step is not
-a per-request quantity. Whole-run figures include warm-up and drain and are never ranked on. The
+profiling window after warm-up, at the **cluster** scope. Every latency gate (TTFT, end-to-end and
+TPOT, at the statistic its `scenario.slo` key names) is also judged on the worst instance, rebuilt
+from the measured window's per-request rows (`phase == "profile"`, grouped by the instance that
+served them, percentile by linear interpolation). The `itl_p99` gate reads TPOT, the per-request
+time per output token; `tok_per_s_per_user` is 1000 over the worst instance's TPOT at the
+per-user statistic, p99 unless the spec states another, which `interactivity_floor.statistic`
+and `.of` then name. Whole-run figures include warm-up and drain and are never ranked on. The
 report states this in `scenario.json` (`basis`, `scope`) and in its meta line. A ledger that mixes
 records with and without a basis is flagged, not rendered as one comparison.
 

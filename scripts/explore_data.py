@@ -345,6 +345,9 @@ def build(run_dir):
         "routers": routers,
         "spec_yaml": spec_text,
         "setup": setup(exp, run_dir),
+        # Only when the spec states a per-user statistic (#171), so an older explore.json is unchanged.
+        **({"per_user_of": (exp.get("interactivity_floor") or {})["of"]}
+           if (exp.get("interactivity_floor") or {}).get("of") else {}),
     }
 
 

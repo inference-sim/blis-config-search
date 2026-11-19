@@ -56,6 +56,7 @@ import blis_cli            # noqa: E402
 import build_catalog       # noqa: E402
 import pareto              # noqa: E402
 import router_configs      # noqa: E402
+import slo                 # noqa: E402
 import validate_experiment as validator   # noqa: E402
 
 # Setting names in a spec are the engine block's names; run_blis's candidate keys are flat. These are the only two that differ, and they differ because run_blis folds
@@ -446,11 +447,12 @@ def sweep_baseline(cands):
 # --- running -----------------------------------------------------------------------------------
 
 
-def slo_limits(slo):
-    """The spec's SLO as {metric: cap_ms}; throughput_per_gpu passes through as a tok/s floor."""
+def slo_limits(spec_slo):
+    """The spec's SLO as {key: cap_ms}; throughput_per_gpu and the interactivity floors pass through
+    as tok/s floors."""
     out = {}
-    for key, raw in (slo or {}).items():
-        if key == "throughput_per_gpu":
+    for key, raw in (spec_slo or {}).items():
+        if (slo.parse(key) or {}).get("kind") in ("throughput", "floor"):
             out[key] = float(raw)
             continue
         ms = validator.parse_duration_ms(raw)
@@ -460,20 +462,30 @@ def slo_limits(slo):
 
 
 def floor_rate_from(slo_ms):
-    """The per-user token rate an `itl_p99` cap implies: 20 ms/token == 50 tok/s/user.
+    """The per-user token rate the per-user gates imply: an `itl_p99` or tpot cap of 20 ms/token ==
+    50 tok/s/user, an interactivity floor its own rate; the tightest when several are stated.
 
     The spec states the cap, the ranking needs the rate, and they must be the same constraint
     expressed two ways or a config could pass one and fail the other.
     """
-    itl = (slo_ms or {}).get("itl_p99")
-    return (1000.0 / itl) if itl else None
+    return slo.floor_rate(slo_ms)
+
+
+def per_user_basis(spec_slo):
+    """What the per-user rate is on, for a report that states its statistic (DEV-8), or None when
+    the spec states none and the rate keeps its p99 default."""
+    stat, stated = slo.per_user(spec_slo)
+    if not stated:
+        return None
+    return {"statistic": stat, "of": slo.figure(slo.PER_USER_METRIC, stat),
+            "aggregate": "max", "over": "instance"}
 
 
 def servable(rec, slo_ms, gpus=None):
     """(ok, why_not) for one run against the spec's SLOs.
 
-    Uses run_blis.per_user_rate / worst_itl_p99 -- the worst-instance per-token basis the
-    report displays -- so a config the sweeper rejects is never one the report shows as passing.
+    Every latency gate is judged on the worst instance (slo.worst) -- the basis the report displays --
+    so a config the sweeper rejects is never one the report shows as passing.
     A declared SLO whose metric is missing counts as a FAILURE, not a silent pass.
     """
     if rec.get("returncode") != 0:
@@ -490,37 +502,35 @@ def servable(rec, slo_ms, gpus=None):
         per_gpu = m["tokens_per_sec"] / gpus
         if per_gpu < floor:
             return False, f"throughput_per_gpu {per_gpu:.1f} tok/s < {floor:g} tok/s"
-    itl_cap = (slo_ms or {}).get("itl_p99")
-    if itl_cap:
-        worst, missing = run_blis.worst_itl_p99(rec)
-        if missing or worst is None:
-            return False, "itl_p99 SLO declared but not measured"
-        # The worst p99 is the per-request time per output token, already per TOKEN: what speculation
-        # gains is in it, so it is compared with the cap as it is (no acceptance-length division; that
-        # belonged to the engine's per-step interval, which is no longer the gate).
-        if worst > itl_cap:
-            return False, f"itl_p99 {worst:.1f} ms > {itl_cap:g} ms"
-    for key, field in (("ttft_p99", "ttft_p99_ms"), ("e2e_p99", "e2e_p99_ms")):
-        cap = (slo_ms or {}).get(key)
-        if not cap:
+    for g in slo.gates(slo_ms):
+        if g["kind"] == "throughput" or not g["limit"]:
             continue
-        # Worst instance, like the ITL cap above and like report.py's _feasible -- NOT the cluster
-        # aggregate, which can sit under the cap while one instance is over it. TTFT is the sharpest
-        # case: it is a prefill-pool property, so on a disaggregated run one slow prefill instance
-        # is exactly what an aggregate hides (susiejojo review).
-        value, missing = run_blis.worst_metric(rec, field)
+        # Worst instance for every gate, like report.py's _feasible -- NOT the cluster aggregate, which
+        # can sit under the cap while one instance is over it. TTFT is the sharpest case: it is a
+        # prefill-pool property, so on a disaggregated run one slow prefill instance is exactly what
+        # an aggregate hides (susiejojo review). TPOT is per token, so what speculation gains is in it
+        # and it is compared as it is (no acceptance-length division).
+        value, missing = slo.worst(rec, g)
         if missing or value is None:
-            return False, f"{key} SLO declared but not measured"
-        if value > cap:
-            return False, f"{key} {value:.1f} ms > {cap:g} ms"
+            return False, f"{g['key']} SLO declared but not measured"
+        if g["kind"] == "floor":
+            rate = 1000.0 / value if value else 0.0
+            if rate < g["limit"]:
+                return False, (f"{g['key']} {rate:.1f} tok/s/user < {g['limit']:g} tok/s/user "
+                               f"({g['figure']} {value:.1f} ms)")
+        elif value > g["limit"]:
+            return False, f"{g['key']} {value:.1f} ms > {g['limit']:g} ms"
     return True, None
 
 
-def run_row(rec, cand, label, variant, sweep_name, concurrency, gpus):
-    """One ledger row's derived fields, on the same bases report.py uses."""
+def run_row(rec, cand, label, variant, sweep_name, concurrency, gpus, slo_ms=None, spec_slo=None):
+    """One ledger row's derived fields, on the same bases report.py uses. `spec_slo` states the
+    per-user statistic; with it, the row also carries the worst instance's figure of each gate a
+    legacy key does not already record."""
     m = rec.get("metrics") or {}
     tps = m.get("tokens_per_sec")
-    pu, _basis, _itl = run_blis.per_user_rate(rec)
+    stat, stated = slo.per_user(spec_slo)
+    pu, _basis, _itl = run_blis.per_user_rate(rec, stat)
     worst, missing = run_blis.worst_itl_p99(rec)
     # Recorded on the basis `servable` JUDGES on, with the aggregate kept beside it as for ITL: a
     # row showing a passing aggregate next to an infeasible verdict is unreadable.
@@ -547,7 +557,20 @@ def run_row(rec, cand, label, variant, sweep_name, concurrency, gpus):
         # A drafting row's acceptance as its Result records it: value, layer, profile, source and
         # the lookup's step, the key fields that differed and the K rule.
         **({"acceptance": acc} if acc else {}),
+        **_gate_figures(rec, slo_ms),
     }
+
+
+def _gate_figures(rec, slo_ms):
+    """{figure: worst instance's value} for each gate a legacy key does not already record."""
+    out = {}
+    for g in slo.gates(slo_ms):
+        if g["kind"] == "throughput" or g["key"] in slo.LEGACY or g["figure"] in out:
+            continue
+        v, missing = slo.worst(rec, g)
+        # Unrounded: the value servable() compared, so a row at 25.0004 ms never reads as 25.0.
+        out[g["figure"]] = None if missing else v
+    return out
 
 
 def _round(v, n):
@@ -612,20 +635,25 @@ def refused_configs(rows):
     return len({_config_key(r) for r in rows if r.get("outcome") == "refused"})
 
 
-def ranked_best(rows, objective):
+def ranked_best(rows, objective, per_user=None):
     """The row the report headlines: the scalar rule (best_of) or the head of the Pareto front,
     as the spec's `objective.ranking` says."""
     if objective["ranking"] == "pareto":
-        return pareto.best_on_front(rows, objective["throughput"])
+        return pareto.best_on_front(rows, objective["throughput"],
+                                    pareto.PER_USER_FIELD if per_user else pareto.X_FIELD)
     return best_of(rows)
 
 
-def pareto_report(sweep_results, all_rows, objective):
+def pareto_report(sweep_results, all_rows, objective, per_user=None):
     """The non-dominated front of every sweep and of all sweeps together, for both throughput
-    forms. Always computed, whichever ranking headlines the report."""
+    forms. Always computed, whichever ranking headlines the report. With a stated per-user
+    statistic (`per_user`, per_user_basis) the x axis is each row's tok/s/user on it."""
+    x_field = pareto.PER_USER_FIELD if per_user else pareto.X_FIELD
+
     def both(rows):
-        return {form: pareto.front(rows, form) for form in pareto.THROUGHPUT_FORMS}
-    return {"x": pareto.X_METRIC,
+        return {form: pareto.front(rows, form, x_field) for form in pareto.THROUGHPUT_FORMS}
+    return {"x": pareto.PER_USER_FIELD if per_user else pareto.X_METRIC,
+            **({"x_basis": per_user} if per_user else {}),
             "y": {form: pareto.THROUGHPUT_FORMS[form][1] for form in pareto.THROUGHPUT_FORMS},
             "interval": None, "throughput": objective["throughput"],
             "overall": both(all_rows),
@@ -662,6 +690,9 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     workload = sc.get("workload") or workload_spec_label(workload_spec)
     concurrency = list(sc["concurrency"])
     slo_ms = slo_limits(sc.get("slo"))
+    per_user = per_user_basis(sc.get("slo"))
+    # A key other than the legacy p99 caps: each record then names the figures this spec gates on.
+    restated = any(k not in slo.LEGACY and k != slo.THROUGHPUT for k in slo_ms)
     shared_engine = dict(sc.get("engine") or {})
     if not fields:
         run_blis.ask_field_list(blis, catalog, sc)
@@ -735,6 +766,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     objective = pareto.objective_of(spec.get("objective"))
     runs, sweep_results, all_rows = [], [], []
     corpus_warm = False
+    slo_checked = False                         # a Result has been checked against a restated SLO
     seq = 0                                     # the run's position in the whole spec, for `shard`
     for sweep in spec["sweeps"]:
         sname = sweep["name"]
@@ -791,8 +823,18 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
             if router_rec:
                 rec["router_file"] = router_rec
             _relativize_cmd(rec, out_dir)
+            refused = slo.unreported(rec, slo_ms)
+            if refused:
+                raise SystemExit(f"{name}: {refused[1]}. A statistic the Result does not report is "
+                                 f"refused, not computed here; state one it reports.")
+            if restated and (rec.get("feasibility_aggregate") or (rec.get("measured") or {}).get("metrics")):
+                # The figures this spec's gates read, in the registry's names (DEV-8), on every record
+                # with Result figures, a recorded one that predates the field included.
+                rec["feasibility_aggregate"] = {**(rec.get("feasibility_aggregate")
+                                                   or run_blis.FEASIBILITY_AGGREGATE),
+                                                "metrics": slo.figures(slo_ms)}
             ok, why = servable(rec, slo_ms, gpus)
-            row = run_row(rec, cfg, label, variant, sname, c, gpus)
+            row = run_row(rec, cfg, label, variant, sname, c, gpus, slo_ms, sc.get("slo"))
             # The resolved config travels with the row so pareto.json's finalists can carry
             # it: build_gallery reads `finalist.config.tp` / `.num_instances` for the winner
             # card, and showed "tp 0, 0 instances" without it.
@@ -844,6 +886,12 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                     work = work[1:]
                     # A run refused before BLIS starts (returncode None) never loaded the corpus.
                     corpus_warm = done[-1][1].get("returncode") is not None
+                # A restated SLO is checked against the first Result before the pool starts, so a
+                # statistic the Result does not report costs one run, not a batch (slo.unreported).
+                while restated and not slo_checked and work:
+                    done.append(_execute(work[0]))
+                    work = work[1:]
+                    slo_checked = bool((done[-1][1].get("measured") or {}).get("metrics"))
                 # One BLIS run is single-threaded (a discrete-event loop measured at ~1.1 cores),
                 # so the only way to use more cores is more processes. A thread pool is enough:
                 # each worker just waits on a subprocess.
@@ -866,7 +914,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
             "configs": len(kept),
             "runs": len(kept) * len(concurrency),
             "dropped": sweep_dropped,
-            "best": ranked_best(rows, objective),
+            "best": ranked_best(rows, objective, per_user),
             "outcomes": outcome_counts(rows),
             "refusals": refusal_groups(rows),
             "rows": rows,
@@ -898,14 +946,17 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
         # come from their own measured window (#158). Each instance's interactivity slot holds its
         # per-request TPOT, because the decode-step interval is not per request (inference-sim #2087).
         "basis": run_blis.BASIS,
-        "scope": "cluster; worst instance for TTFT and end-to-end gates",
-        "interactivity_floor": {"tok_per_s_per_user": floor_rate_from(slo_ms)},
-        "objective": pareto.describe(objective),
+        # Restated only for a spec that states another key, so a committed report keeps its bytes.
+        "scope": ("cluster; worst instance for every latency gate" if restated
+                  else "cluster; worst instance for TTFT and end-to-end gates"),
+        "interactivity_floor": {"tok_per_s_per_user": floor_rate_from(slo_ms),
+                                **(per_user or {})},
+        "objective": pareto.describe(objective, per_user),
         # Which ranking picked best/best_overall/finalists, and the figures it used.
         "ranking": {"used": objective["ranking"], "throughput": objective["throughput"]},
         "sweeps": sweep_results,
-        "best_overall": ranked_best(all_rows, objective),
-        "pareto": pareto_report(sweep_results, all_rows, objective),
+        "best_overall": ranked_best(all_rows, objective, per_user),
+        "pareto": pareto_report(sweep_results, all_rows, objective, per_user),
         "outcomes": outcome_counts(all_rows),
         "refusals": refusal_groups(all_rows),
         "pinned_stack": _pinned_stack(blis, catalog, registry, engine_version,
@@ -1631,7 +1682,9 @@ def _scenario_json(spec, report):
                      if sc.get("replay") else {"preset": sc["workload"]}),
         "objective": report.get("objective", SCALAR_OBJECTIVE),
         "basis": report["basis"], "scope": report["scope"],
-        "interactivity_floor": ({"tok_per_s_per_user": floor["tok_per_s_per_user"]}
+        "interactivity_floor": ({"tok_per_s_per_user": floor["tok_per_s_per_user"],
+                                 **{k: floor[k] for k in ("statistic", "of", "aggregate", "over")
+                                    if k in floor}}
                                 if floor.get("tok_per_s_per_user") else {}),
         "slos": sc.get("slo") or {},
         "headroom": 1.0,          # an experiment measures the stated loads; it sizes nothing

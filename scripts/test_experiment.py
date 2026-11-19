@@ -34,6 +34,7 @@ import settings                     # noqa: E402
 import fetch_corpus as FC           # noqa: E402
 import router_configs as RC         # noqa: E402
 import pareto as PA                 # noqa: E402
+import slo as SLO                   # noqa: E402
 
 # TEMPORARY: the inference-sim commands, from scripts/testdata/blis-m1 (inference-sim#2077).
 BLIS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata", "blis-m1", "blis")
@@ -2171,6 +2172,387 @@ class SloHandling(unittest.TestCase):
         row = E.run_row(rec, {}, "label", "", "sweep", 8, 8)
         self.assertEqual(10010.1, row["ttft_p99_ms"], "the row must carry the worst instance")
         self.assertEqual(9981.2, row["ttft_p99_ms_aggregate"], "the aggregate stays, beside it")
+
+
+class SloAtAnyStatistic(unittest.TestCase):
+    """#171: a cap or a floor at any statistic the registry and the Result carry, judged on the worst
+    instance, and the per-user rate on the statistic the spec states."""
+
+    REGISTRY = blis_cli.metric_registry(BLIS)
+
+    @staticmethod
+    def rec(cluster, instances, tps=100.0):
+        """A run whose Result reports `cluster` ({figure: value}) and whose instances report
+        `instances` ([{figure: value}]), shaped as run_blis records it."""
+        return {"returncode": 0, "error": None, "deployment": {},
+                "metrics": {"tokens_per_sec": tps, "itl_p99_ms": cluster.get("tpot_p99_ms", 1.0)},
+                "measured": {"metrics": {k: {"value": v, "samples": 10} for k, v in cluster.items()}},
+                "metrics_all_instances": [{"instance_id": f"i{n}", **inst}
+                                          for n, inst in enumerate(instances)]}
+
+    def errs(self, slo):
+        doc = spec()
+        doc["scenario"]["slo"] = slo
+        return [e for e in V.validate(doc, BLIS, ROUTING) if "slo" in e]
+
+    def judged(self):
+        """Every (metric, statistic) the fixture registry defines for a metric judged per instance."""
+        return [(r["formula"], r["statistic"]) for rid, r in sorted(self.REGISTRY.items())
+                if r.get("unit") == "ms" and r["formula"] in SLO.JUDGED
+                and rid == f"{r['formula']}_{r['statistic']}_ms"]
+
+    def test_the_acceptance_spec_validates_judges_and_ranks_on_p90(self):
+        slo = {"tpot_p90": "25ms", "ttft_p95": "2s"}
+        self.assertEqual([], self.errs(slo))
+        slo_ms = E.slo_limits(slo)
+        self.assertEqual({"tpot_p90": 25.0, "ttft_p95": 2000.0}, slo_ms)
+        held = self.rec({"tpot_p90_ms": 20.0, "ttft_p95_ms": 1500.0, "tpot_p99_ms": 60.0},
+                        [{"tpot_p90_ms": 25.0, "ttft_p95_ms": 2000.0, "tpot_p99_ms": 80.0}])
+        self.assertEqual((True, None), E.servable(held, slo_ms),
+                         "a worst instance AT both caps holds, whatever its p99")
+        for figure, over in (("tpot_p90_ms", 25.1), ("ttft_p95_ms", 2000.5)):
+            with self.subTest(over=figure):
+                bad = copy.deepcopy(held)
+                bad["metrics_all_instances"][0][figure] = over
+                ok, why = E.servable(bad, slo_ms)
+                self.assertFalse(ok)
+                self.assertIn(figure[:-3], why)
+        row = E.run_row(held, {}, "l", "", "s", 8, 8, slo_ms, slo)
+        self.assertEqual(40.0, row["tok_per_s_per_user"], "1000 / the worst tpot_p90_ms, not p99")
+        self.assertEqual(25.0, row["tpot_p90_ms"])
+        near = copy.deepcopy(held)
+        near["metrics_all_instances"][0]["tpot_p90_ms"] = 25.0004
+        self.assertFalse(E.servable(near, slo_ms)[0])
+        self.assertEqual(25.0004, E.run_row(near, {}, "l", "", "s", 8, 8, slo_ms, slo)["tpot_p90_ms"],
+                         "the row carries the value the gate compared, not a rounding that reads as the cap")
+        self.assertEqual(2000.0, row["ttft_p95_ms"])
+        self.assertEqual(40.0, E.floor_rate_from(slo_ms))
+        self.assertEqual({"statistic": "p90", "of": "tpot_p90_ms", "aggregate": "max", "over": "instance"},
+                         E.per_user_basis(slo))
+
+    def test_a_cap_at_each_recorded_statistic_reads_that_statistic(self):
+        self.assertTrue({("tpot", "p90"), ("ttft", "p50"), ("e2e", "mean")} <= set(self.judged()))
+        for metric, stat in self.judged():
+            key, fig = f"{metric}_{stat}", f"{metric}_{stat}_ms"
+            with self.subTest(key=key):
+                self.assertEqual([], self.errs({key: "100ms"}))
+                # Every other statistic of every metric is far over the cap: only `fig` can pass.
+                others = {f"{m}_{s}_ms": 10_000.0 for m, s in self.judged()}
+                ok_rec = self.rec({**others, fig: 50.0}, [{**others, fig: 100.0}])
+                self.assertTrue(E.servable(ok_rec, {key: 100.0})[0])
+                bad = self.rec({**others, fig: 50.0}, [{**others, fig: 100.5}])
+                self.assertFalse(E.servable(bad, {key: 100.0})[0], "judged on the worst instance")
+
+    def test_a_statistic_the_cluster_record_does_not_copy_is_read_from_the_result(self):
+        """ttft_p50_ms is in the Result but not in the flat record (_MEASURED_KEYS has no ttft p50)."""
+        self.assertNotIn("ttft_p50_ms", run_blis._MEASURED_KEYS)
+        rec = self.rec({"ttft_p50_ms": 900.0}, [{"ttft_p50_ms": 400.0}])
+        self.assertEqual((900.0, False), run_blis.worst_figure(rec, "ttft_p50_ms"))
+        self.assertFalse(E.servable(rec, {"ttft_p50": 500.0})[0])
+
+    def test_a_key_the_registry_does_not_define_is_refused_naming_its_statistics(self):
+        errs = self.errs({"tpot_p75": "25ms"})
+        self.assertEqual(1, len(errs), errs)
+        self.assertIn("tpot_p75_ms", errs[0])
+        self.assertIn("mean, p50, p90, p95, p99", errs[0])
+        for key in ("step_interval_p90", "itl_p90", "ttft_fast", "p99"):
+            with self.subTest(key=key):
+                self.assertTrue(self.errs({key: "25ms"}))
+        self.assertIn("alias of tpot_p99", self.errs({"itl_p90": "25ms"})[0])
+
+    def test_a_statistic_the_result_does_not_report_is_refused_naming_what_it_reports(self):
+        """The pinned registry defines tpot_p95_ms but the pinned Result does not report it: the
+        sweeper refuses the key on the first Result, naming the statistics it does report."""
+        self.assertIn("tpot_p95_ms", self.REGISTRY)
+        rec = self.rec({"tpot_mean_ms": 9.0, "tpot_p50_ms": 9.0, "tpot_p90_ms": 9.0, "tpot_p99_ms": 9.0},
+                       [{"tpot_p95_ms": 9.0}])
+        key, msg = SLO.unreported(rec, {"tpot_p95": 25.0})
+        self.assertEqual("tpot_p95", key)
+        self.assertIn("tpot at mean, p50, p90, p99", msg)
+        self.assertIsNone(SLO.unreported(rec, {"tpot_p90": 25.0, "itl_p99": 20.0}))
+
+        self.assertEqual("interactivity_p95", SLO.unreported(rec, {"interactivity_p95": 40.0})[0])
+        import threading
+        calls = []
+
+        def fake_run_one(*a, **kw):
+            cfg = dict(kw.get("config") or a[11])
+            calls.append((cfg["concurrency"], threading.current_thread() is threading.main_thread()))
+            return {**rec, "cmd": None, "config": cfg, "concurrency": cfg["concurrency"]}
+
+        doc = spec()
+        doc["scenario"]["slo"] = {"tpot_p95": "25ms"}
+        real = E.run_blis.run_one
+        E.run_blis.run_one = fake_run_one
+        try:
+            with tempfile.TemporaryDirectory() as out, self.assertRaises(SystemExit) as e:
+                E.run_experiment(doc, BLIS, "/c", "/r", out, verbose=False, max_parallel=4)
+        finally:
+            E.run_blis.run_one = real
+        self.assertIn("does not report tpot_p95_ms", str(e.exception))
+        self.assertEqual([(1, True)], calls,
+                         "the first run is made alone on the caller's thread, before any pool, and is the only one")
+
+    def test_interactivity_floors_are_rates_on_the_same_statistic(self):
+        self.assertEqual([], self.errs({"interactivity_p90": 40}))
+        self.assertEqual([], self.errs({"interactivity_p50": 40, "tpot_p50": "20ms"}))
+        slo_ms = E.slo_limits({"interactivity_p90": 40})
+        self.assertEqual({"interactivity_p90": 40.0}, slo_ms)
+        self.assertEqual(40.0, E.floor_rate_from(slo_ms))
+        at = self.rec({"tpot_p90_ms": 20.0}, [{"tpot_p90_ms": 25.0}])
+        self.assertTrue(E.servable(at, slo_ms)[0], "1000 / 25 ms == 40 tok/s/user holds a 40 floor")
+        under = self.rec({"tpot_p90_ms": 20.0}, [{"tpot_p90_ms": 25.5}])
+        ok, why = E.servable(under, slo_ms)
+        self.assertFalse(ok)
+        self.assertIn("interactivity_p90 39.2 tok/s/user < 40 tok/s/user", why)
+        self.assertEqual(50.0, E.floor_rate_from(E.slo_limits({"interactivity_p90": 40, "tpot_p90": "20ms"})),
+                         "the tightest per-user gate is the floor")
+
+    def test_a_floor_at_any_tpot_statistic_is_1000_over_that_tpot(self):
+        """interactivity_<stat> is a spec key defined by its tpot figure (#171 point 2): interactivity_mean
+        is 1000 / tpot_mean_ms, the typical user, whatever the registry's own interactivity_mean is."""
+        for stat in ("mean", "p50", "p99"):
+            with self.subTest(stat=stat):
+                key, fig = f"interactivity_{stat}", f"tpot_{stat}_ms"
+                self.assertEqual([], self.errs({key: 40}))
+                others = {f"tpot_{s}_ms": 1000.0 for s in ("mean", "p50", "p90", "p99")}
+                held = self.rec({**others, fig: 20.0}, [{**others, fig: 25.0}])
+                self.assertTrue(E.servable(held, {key: 40.0})[0])
+                self.assertFalse(E.servable(self.rec({**others, fig: 20.0}, [{**others, fig: 26.0}]),
+                                            {key: 40.0})[0])
+                self.assertEqual({"statistic": stat, "of": fig, "aggregate": "max", "over": "instance"},
+                                 E.per_user_basis({key: 40}))
+        errs = self.errs({"interactivity_p75": 40})
+        self.assertEqual(1, len(errs), errs)
+        self.assertIn("tpot is recorded at mean, p50, p90, p95, p99", errs[0])
+        self.assertIn("must be a positive tok/s per user", self.errs({"interactivity_p90": "40ms"})[0])
+
+    def test_the_per_user_rate_is_stated_at_one_statistic(self):
+        errs = self.errs({"itl_p99": "20ms", "tpot_p90": "25ms"})
+        self.assertTrue(any("per-user rate is stated at p90, p99" in e for e in errs), errs)
+        self.assertEqual([], self.errs({"itl_p99": "20ms", "tpot_p99": "20ms"}))
+
+    def test_none_stated_keeps_the_p99_rate_and_the_mean_axis(self):
+        self.assertEqual(("p99", False), SLO.per_user({"itl_p99": "20ms", "ttft_p95": "2s"}))
+        self.assertIsNone(E.per_user_basis({"itl_p99": "20ms"}))
+        rec = self.rec({"tpot_p90_ms": 10.0, "tpot_p99_ms": 20.0}, [{"tpot_p99_ms": 20.0, "itl_p99_ms": 20.0}])
+        self.assertEqual(50.0, E.run_row(rec, {}, "l", "", "s", 8, 8, {"itl_p99": 20.0},
+                                         {"itl_p99": "20ms"})["tok_per_s_per_user"])
+
+    def test_the_front_ranks_on_the_stated_statistic(self):
+        """Two rows the mean axis cannot order and the p90 rate can: the front follows the spec."""
+        a = {**_row("a", 100.0, 900.0), "tok_per_s_per_user": 30.0}
+        b = {**_row("b", 80.0, 1000.0), "tok_per_s_per_user": 60.0}
+        obj = PA.objective_of({"ranking": "pareto"})
+        basis = E.per_user_basis({"tpot_p90": "25ms"})
+        default = E.pareto_report([], [a, b], obj)
+        self.assertEqual(PA.X_METRIC, default["x"])
+        self.assertNotIn("x_basis", default)
+        self.assertEqual(["a", "b"], sorted(m["label"] for m in default["overall"]["total"]["members"]),
+                         "on the mean axis neither dominates")
+        stated = E.pareto_report([], [a, b], obj, basis)
+        self.assertEqual("tok_per_s_per_user", stated["x"])
+        self.assertEqual(basis, stated["x_basis"])
+        self.assertEqual([("b", 60.0)], [(m["label"], m["interactivity"])
+                                         for m in stated["overall"]["total"]["members"]],
+                         "on the stated rate b dominates a")
+        self.assertEqual("b", E.ranked_best([a, b], obj, basis)["label"])
+        self.assertIn("tpot_p90_ms", PA.describe(obj, basis))
+        self.assertNotIn("tpot_p90_ms", PA.describe(obj))
+
+    def test_the_sweeper_and_the_report_agree_on_a_restated_slo(self):
+        import report as rep
+        slo = {"tpot_p90": "25ms", "ttft_p95": "2s"}
+        floor = {"tok_per_s_per_user": 40.0, **E.per_user_basis(slo)}
+        for inst in ({"tpot_p90_ms": 25.0, "ttft_p95_ms": 2000.0}, {"tpot_p90_ms": 26.0, "ttft_p95_ms": 1.0},
+                     {"tpot_p90_ms": 1.0, "ttft_p95_ms": 2001.0}):
+            with self.subTest(inst=inst):
+                rec = self.rec({"tpot_p90_ms": 1.0, "ttft_p95_ms": 1.0}, [inst])
+                ok, _ = E.servable(rec, E.slo_limits(slo))
+                for fl in (floor, {}):
+                    self.assertEqual(ok, rep._feasible(rec, fl, slo)[0], fl)
+
+    def test_a_restated_report_names_its_statistic_and_figures(self):
+        doc = spec()
+        doc["scenario"]["slo"] = {"tpot_p90": "25ms", "ttft_p95": "2s"}
+        rec = self.rec({"tpot_p90_ms": 20.0, "ttft_p95_ms": 1500.0, "tpot_p99_ms": 30.0},
+                       [{"tpot_p90_ms": 20.0, "ttft_p95_ms": 1500.0}])
+        rec["feasibility_aggregate"] = dict(run_blis.FEASIBILITY_AGGREGATE)
+
+        def fake_run_one(*a, **kw):
+            cfg = dict(kw.get("config") or a[11])
+            out = {**copy.deepcopy(rec), "cmd": None, "config": cfg, "concurrency": cfg["concurrency"]}
+            if cfg["concurrency"] == 2:
+                out.pop("feasibility_aggregate")      # a recorded row written before the field existed
+            return out
+
+        import build_gallery
+        import explore_data
+        real = E.run_blis.run_one
+        E.run_blis.run_one = fake_run_one
+        try:
+            with tempfile.TemporaryDirectory() as out:
+                report = E.run_experiment(doc, BLIS, "/c", "/r", out, verbose=False)
+                d = os.path.join(out, doc["name"])
+                with open(os.path.join(d, "scenario.json"), encoding="utf-8") as f:
+                    scen = json.load(f)
+                with open(os.path.join(d, "runs.jsonl"), encoding="utf-8") as f:
+                    runs = [json.loads(ln) for ln in f]
+                card = build_gallery.validate_and_project(d)[1]
+                explore = explore_data.build(d)
+        finally:
+            E.run_blis.run_one = real
+        self.assertTrue(all(r["servable"] for s in report["sweeps"] for r in s["rows"]))
+        self.assertEqual({"tok_per_s_per_user": 40.0, "statistic": "p90", "of": "tpot_p90_ms",
+                          "aggregate": "max", "over": "instance"}, scen["interactivity_floor"])
+        self.assertEqual("tok_per_s_per_user", report["pareto"]["x"])
+        self.assertEqual([["tpot_p90_ms", "ttft_p95_ms"]] * len(runs),
+                         [r["feasibility_aggregate"]["metrics"] for r in runs])
+        self.assertEqual("40 tok/s/user (1000 / worst-instance tpot_p90_ms)", card["floor"])
+        self.assertEqual("tpot_p90_ms", explore["per_user_of"])
+        committed = sorted(glob.glob(os.path.join(ROOT, "reports", "*", "experiment.json")))[0]
+        self.assertNotIn("per_user_of", explore_data.build(os.path.dirname(committed)))
+
+
+class SloReviewCases(unittest.TestCase):
+    """Cases from the review of #172: the old ledger format, the report's statistic, the per-instance
+    statistics, non-positive caps, and parity on each key shape."""
+
+    rec = staticmethod(SloAtAnyStatistic.rec)
+
+    def errs(self, slo):
+        return SloAtAnyStatistic.errs(self, slo)
+
+    @staticmethod
+    def legacy_record():
+        """The first record of a committed ledger written before the measured window existed."""
+        for path in sorted(glob.glob(os.path.join(ROOT, "reports", "*", "runs.jsonl"))):
+            with open(path, encoding="utf-8") as f:
+                for ln in f:
+                    r = json.loads(ln)
+                    if r.get("returncode") == 0 and r.get("metrics") and not r.get("measured"):
+                        return r
+        raise unittest.SkipTest("no committed ledger predates the measured window")
+
+    def test_a_restated_key_on_a_ledger_without_a_measured_window_is_refused(self):
+        r = self.legacy_record()
+        self.assertIsNone(SLO.unreported(r, E.slo_limits({"itl_p99": "20ms", "ttft_p99": "10s"})),
+                          "the legacy keys read the slots such a record has")
+        for key in ("tpot_p99", "tpot_p90", "interactivity_p90"):
+            with self.subTest(key=key):
+                val = 40 if key.startswith("interactivity") else "20ms"
+                got = SLO.unreported(r, E.slo_limits({key: val}))
+                self.assertEqual(key, got[0])
+                self.assertIn("no measured window", got[1])
+
+        def fake_run_one(*a, **kw):
+            cfg = dict(kw.get("config") or a[11])
+            return {**copy.deepcopy(r), "cmd": None, "config": cfg, "concurrency": cfg["concurrency"]}
+
+        doc = spec()
+        doc["scenario"]["slo"] = {"tpot_p99": "20ms"}
+        real = E.run_blis.run_one
+        E.run_blis.run_one = fake_run_one
+        try:
+            with tempfile.TemporaryDirectory() as out, self.assertRaises(SystemExit) as e:
+                E.run_experiment(doc, BLIS, "/c", "/r", out, verbose=False)
+        finally:
+            E.run_blis.run_one = real
+        self.assertIn("no measured window", str(e.exception))
+
+    def test_the_report_judges_the_floor_on_the_specs_statistic(self):
+        import report as rep
+        rec = self.rec({"tpot_p90_ms": 20.0, "tpot_p99_ms": 30.0}, [{"tpot_p90_ms": 23.0, "tpot_p99_ms": 30.0}])
+        slo = {"interactivity_p90": 42}
+        ok, _ = E.servable(rec, E.slo_limits(slo))
+        self.assertTrue(ok, "1000 / 23 ms = 43.5 tok/s/user holds 42")
+        for floor in ({"tok_per_s_per_user": 42.0}, {"tok_per_s_per_user": 42.0, "statistic": "p99"}, {}):
+            with self.subTest(floor=floor):
+                self.assertEqual((ok, []), rep._feasible(rec, floor, slo))
+
+    def test_tpot_p99_and_itl_p99_are_one_gate(self):
+        import report as rep
+        for worst, ok in ((20.0, True), (20.5, False)):
+            rec = self.rec({"tpot_p99_ms": 10.0}, [{"tpot_p99_ms": worst, "itl_p99_ms": worst}])
+            rec["metrics"]["itl_p99_ms"] = 10.0
+            with self.subTest(worst=worst):
+                for slo in ({"tpot_p99": "20ms"}, {"itl_p99": "20ms"}):
+                    self.assertEqual(ok, E.servable(rec, E.slo_limits(slo))[0], slo)
+                    self.assertEqual(ok, rep._feasible(rec, {}, slo)[0], slo)
+        self.assertEqual("tpot_p99_ms", E.per_user_basis({"tpot_p99": "20ms"})["of"])
+        self.assertIsNone(E.per_user_basis({"itl_p99": "20ms"}))
+
+    def test_a_cap_and_a_floor_at_one_statistic_agree_in_the_sweeper_and_the_report(self):
+        import report as rep
+        slo = {"tpot_p90": "25ms", "interactivity_p90": 45}
+        self.assertEqual([], self.errs(slo))
+        slo_ms = E.slo_limits(slo)
+        self.assertEqual(45.0, E.floor_rate_from(slo_ms), "the tighter of 1000 / 25 and 45")
+        floor = {"tok_per_s_per_user": 45.0, **E.per_user_basis(slo)}
+        for worst in (22.0, 23.0, 26.0):           # holds both; holds the cap only; holds neither
+            rec = self.rec({"tpot_p90_ms": 1.0}, [{"tpot_p90_ms": worst}])
+            with self.subTest(worst=worst):
+                ok, _ = E.servable(rec, slo_ms)
+                self.assertEqual(worst == 22.0, ok)
+                self.assertEqual(ok, rep._feasible(rec, floor, slo)[0])
+                self.assertEqual(ok, rep._feasible(rec, {}, slo)[0])
+
+    def test_a_statistic_the_instances_are_not_rebuilt_at_is_refused(self):
+        registry = {**SloAtAnyStatistic.REGISTRY,
+                    "ttft_p75_ms": {"id": "ttft_p75_ms", "formula": "ttft", "statistic": "p75", "unit": "ms"},
+                    "tpot_p75_ms": {"id": "tpot_p75_ms", "formula": "tpot", "statistic": "p75", "unit": "ms"}}
+        for key, val in (("ttft_p75", "2s"), ("interactivity_p75", 40)):
+            with self.subTest(key=key):
+                errs = SLO.key_errors({key: val}, registry, V.parse_duration_ms)
+                self.assertEqual(1, len(errs), errs)
+                self.assertIn("judged at mean, p50, p90, p95, p99", errs[0])
+
+    def test_a_cap_that_is_not_positive_is_refused(self):
+        for key in ("ttft_p90", "itl_p99"):
+            with self.subTest(key=key):
+                self.assertTrue(any("positive duration" in e for e in self.errs({key: "0ms"})))
+
+    def test_a_restated_report_says_every_gate_is_on_the_worst_instance(self):
+        doc = spec()
+        doc["scenario"]["slo"] = {"tpot_p90": "25ms"}
+        self.assertEqual("cluster; worst instance for every latency gate",
+                         E.run_experiment(doc, BLIS, None, None, "/nonexistent", dry_run=True,
+                                          verbose=False)["scope"])
+        self.assertEqual("cluster; worst instance for TTFT and end-to-end gates",
+                         E.run_experiment(spec(), BLIS, None, None, "/nonexistent", dry_run=True,
+                                          verbose=False)["scope"])
+
+
+class CommittedReportsKeepTheirSloVerdicts(unittest.TestCase):
+    """Byte-identity guard for #171: every committed report's rows hold the verdict, reason and
+    per-user figures the sweeper derives from its own ledger, so a change to the SLO path that
+    would move a committed report fails here. Passes on the code before #171 too, by design."""
+
+    FIELDS = ("servable", "not_servable_because", "tok_per_s_per_user", "itl_p99_ms", "ttft_p99_ms",
+              "interactivity")
+
+    def test_rows_rederive_from_the_ledger(self):
+        dirs = sorted(glob.glob(os.path.join(ROOT, "reports", "*", "runs.jsonl")))
+        self.assertTrue(dirs, "no committed reports")
+        for runs_path in dirs:
+            d = os.path.dirname(runs_path)
+            with self.subTest(report=os.path.basename(d)):
+                with open(os.path.join(d, "spec.yaml"), encoding="utf-8") as f:
+                    sc = yaml.safe_load(f)["scenario"]
+                slo_ms, gpus = E.slo_limits(sc.get("slo")), int(sc["gpus"])
+                with open(os.path.join(d, "experiment.json"), encoding="utf-8") as f:
+                    exp = json.load(f)
+                rows = [r for s in exp["sweeps"] for r in s["rows"]]
+                with open(runs_path, encoding="utf-8") as f:
+                    recs = [json.loads(ln) for ln in f]
+                self.assertEqual(len(rows), len(recs))
+                for row, rec in zip(rows, recs):
+                    ok, why = E.servable(rec, slo_ms, gpus)
+                    got = {**E.run_row(rec, {}, "", "", "", 0, gpus, slo_ms, sc.get("slo")),
+                           "servable": ok, "not_servable_because": why}
+                    self.assertEqual({k: row.get(k) for k in self.FIELDS}, {k: got.get(k) for k in self.FIELDS})
+                self.assertEqual(exp["interactivity_floor"],
+                                 {"tok_per_s_per_user": E.floor_rate_from(slo_ms)})
 
 
 # --- P/D support in the runner ----------------------------------------------------------------

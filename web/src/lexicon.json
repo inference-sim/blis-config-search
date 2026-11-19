@@ -26,7 +26,7 @@
       "label": "tok/s per user",
       "unit": "tok/s",
       "digits": 1,
-      "help": "Output tokens per second a single session sees: the interactivity each caller feels. On a p99 basis, the same basis as the interactivity floor."
+      "help": "Output tokens per second a single session sees: the interactivity each caller feels. 1000 over the worst instance's TPOT at the per-user statistic, p99 unless the spec states another; the same basis as the interactivity floor."
     },
     "cl": {
       "label": "tok/s fleet",

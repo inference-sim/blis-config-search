@@ -827,9 +827,11 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
             if refused:
                 raise SystemExit(f"{name}: {refused[1]}. A statistic the Result does not report is "
                                  f"refused, not computed here; state one it reports.")
-            if restated and rec.get("feasibility_aggregate"):
-                # The figures this spec's gates read, in the registry's names (DEV-8).
-                rec["feasibility_aggregate"] = {**rec["feasibility_aggregate"],
+            if restated and (rec.get("feasibility_aggregate") or (rec.get("measured") or {}).get("metrics")):
+                # The figures this spec's gates read, in the registry's names (DEV-8), on every record
+                # with Result figures, a recorded one that predates the field included.
+                rec["feasibility_aggregate"] = {**(rec.get("feasibility_aggregate")
+                                                   or run_blis.FEASIBILITY_AGGREGATE),
                                                 "metrics": slo.figures(slo_ms)}
             ok, why = servable(rec, slo_ms, gpus)
             row = run_row(rec, cfg, label, variant, sname, c, gpus, slo_ms, sc.get("slo"))

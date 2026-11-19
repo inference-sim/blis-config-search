@@ -2381,9 +2381,13 @@ class SloAtAnyStatistic(unittest.TestCase):
 
         def fake_run_one(*a, **kw):
             cfg = dict(kw.get("config") or a[11])
-            return {**copy.deepcopy(rec), "cmd": None, "config": cfg, "concurrency": cfg["concurrency"]}
+            out = {**copy.deepcopy(rec), "cmd": None, "config": cfg, "concurrency": cfg["concurrency"]}
+            if cfg["concurrency"] == 2:
+                out.pop("feasibility_aggregate")      # a recorded row written before the field existed
+            return out
 
         import build_gallery
+        import explore_data
         real = E.run_blis.run_one
         E.run_blis.run_one = fake_run_one
         try:
@@ -2395,6 +2399,7 @@ class SloAtAnyStatistic(unittest.TestCase):
                 with open(os.path.join(d, "runs.jsonl"), encoding="utf-8") as f:
                     runs = [json.loads(ln) for ln in f]
                 card = build_gallery.validate_and_project(d)[1]
+                explore = explore_data.build(d)
         finally:
             E.run_blis.run_one = real
         self.assertTrue(all(r["servable"] for s in report["sweeps"] for r in s["rows"]))
@@ -2404,6 +2409,9 @@ class SloAtAnyStatistic(unittest.TestCase):
         self.assertEqual([["tpot_p90_ms", "ttft_p95_ms"]] * len(runs),
                          [r["feasibility_aggregate"]["metrics"] for r in runs])
         self.assertEqual("40 tok/s/user (1000 / worst-instance tpot_p90_ms)", card["floor"])
+        self.assertEqual("tpot_p90_ms", explore["per_user_of"])
+        committed = sorted(glob.glob(os.path.join(ROOT, "reports", "*", "experiment.json")))[0]
+        self.assertNotIn("per_user_of", explore_data.build(os.path.dirname(committed)))
 
 
 class CommittedReportsKeepTheirSloVerdicts(unittest.TestCase):

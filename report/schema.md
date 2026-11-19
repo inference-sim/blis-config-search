@@ -128,6 +128,7 @@ A record keeps the run's inputs and outputs as written. The fields added with th
 | `measured.window` | the Result's measured window: start, end, duration, requests |
 | `measured.instances` | per-instance TTFT, end-to-end and TPOT figures for the window, and `interactivity_mean` (the mean of each request's 1000 / TPOT in ms), rebuilt from the per-request rows until the simulator emits them (inference-sim #2087) |
 | `whole_run` | the whole-run cluster aggregate, raw data only; nothing ranks or displays it |
+| `server_series` | the Result's per-engine diagnostic series (`reports.engine.cluster.server_series`), present only when the spec set `scenario.replay.server_series_interval_s`; nothing ranks or displays it |
 | `config_key` | the hash of `config` with `concurrency` removed: the records of one configuration across loads share it |
 
 `config_hash` is unchanged: the hash of the whole `config`, so one run at one load. `measured` is

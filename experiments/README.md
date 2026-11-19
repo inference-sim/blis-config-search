@@ -320,6 +320,17 @@ and is a no-op once the corpus is there — so `run-experiment.yml` runs it on e
 whose workload is a generated shape needs nothing and the script says so. `.corpus/` is
 gitignored; the corpus is 568 MB and deliberately not vendored.
 
+### Diagnostic server series
+
+`scenario.replay.server_series_interval_s` (seconds, above 0), for either way of naming a replay
+workload, passes the interval to `blis replay --server-series-interval-s`. The simulator then
+reports each engine's binned KV usage, running and waiting requests, prefix-cache and prompt-token
+counters, and generated tokens at `reports.engine.cluster.server_series` of the Result, and the
+sweeper keeps that block on the run record as `server_series`. Omit the key and nothing changes.
+Collecting the series moves no figure that is ranked: `metrics`, `measured`, `whole_run`, the
+outcome and the SLO verdict are the same with and without it. Series are large when the interval is
+small, so use it on a probe rather than a committed sweep.
+
 ### A workload the catalog does not have: `workload_spec`
 
 A spec names its workload by catalog name (`workload:`) or by a file in this repository

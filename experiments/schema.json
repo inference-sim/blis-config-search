@@ -132,9 +132,15 @@
           "minProperties": 1
         },
         "replay": {
-          "description": "Replay knobs when `workload` names a trace corpus: corpus_sha256, benchmark_duration, grace_period, max_context_length, category, thinking.",
+          "description": "Replay knobs when `workload` names a trace corpus: corpus_sha256, benchmark_duration, grace_period, max_context_length, category, thinking. Optional server_series_interval_s (seconds, above 0) asks the simulator for per-engine diagnostic series, kept on each run record as server_series; it changes no figure that is ranked.",
           "type": "object",
-          "minProperties": 1
+          "minProperties": 1,
+          "properties": {
+            "server_series_interval_s": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
         }
       }
     },

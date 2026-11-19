@@ -61,16 +61,17 @@ def _key(blis, *rest):
     return (os.path.realpath(blis) if blis else None, *rest)
 
 
-def _field_list_json(blis, engine, path, scenario):
+def _field_list_json(blis, engine, path, scenario, catalog=None):
     """The engine's field list as a parsed document: the file `path` names (--fields), or what
-    `blis fields --scenario` prints for the scenario text `scenario()` returns."""
+    `blis fields --scenario` prints for the scenario text `scenario()` returns, built over `catalog`."""
     if not path:
         # Without a spec's scenario, one that names only the engine; a build that needs a model refuses it.
         text = scenario() if scenario else _engine_probe(engine, build_release(blis, engine))
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, "fields-probe.yaml"), "w", encoding="utf-8") as f:
                 f.write(text)
-            pr = _run(blis, ["fields", "--scenario", "fields-probe.yaml", "--scenarios", d], 120)
+            pr = _run(blis, ["fields", "--scenario", "fields-probe.yaml", "--scenarios", d]
+                      + (["--catalog", catalog] if catalog else []), 120)
         if pr.returncode != 0:
             raise BlisCommandError(f"`blis fields --scenario` for engine {engine} failed: {_stderr(pr)}"
                                    + ("" if scenario else "; pass --fields FILE, or run from a spec"))
@@ -93,12 +94,12 @@ def _field_list_json(blis, engine, path, scenario):
         raise BlisCommandError(f"the field list of engine {engine!r} ({path}): {e}") from e
 
 
-def fields(blis, engine, path=None, scenario=None):
+def fields(blis, engine, path=None, scenario=None, catalog=None):
     """The engine's field list (fields.json) at the release this build runs: the file `path` names,
     or `blis fields --scenario` on the text `scenario()` returns. The list is the same for every
     scenario of one engine release, so the binary is asked once and later calls without a path reuse it."""
     def load():
-        doc = _field_list_json(blis, engine, path, scenario)
+        doc = _field_list_json(blis, engine, path, scenario, catalog)
         if not isinstance(doc, dict) or doc.get("kind") != "FieldList":
             raise BlisCommandError(f"`blis fields` for engine {engine} printed no FieldList")
         got = (doc.get("engine") or {}).get("kind")

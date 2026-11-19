@@ -1240,8 +1240,9 @@ def resolve_workload_spec(path, doc, stated, dry_run=False):
     """The replay descriptor for a workload named by file.
 
     The corpus digest, the window, the grace period and the context filter come from the file, as
-    they come from the catalog entry for a named workload. The report records the whole document
-    and the file's own sha256, and `_overrides` is empty: the file is the workload.
+    they come from the catalog entry for a named workload. A spec's `benchmark_duration` and
+    `grace_period` override the file's, and recipe_record names each override. The report records
+    the whole document and the file's own sha256.
     """
     stated = dict(stated or {})
     corpus = doc.get("corpus") if isinstance(doc.get("corpus"), dict) else {}
@@ -1402,11 +1403,17 @@ def _pinned_stack(blis, catalog, registry, engine_version, data_override=False, 
     ran = next((r["simulator"] for r in runs if r.get("simulator")), None)
     if ran:
         version, _, commit = ran.partition("+")
-        resolved.setdefault("blis", {})["version"] = version
+        b = resolved.setdefault("blis", {})
+        b["version"] = version
         if commit:
-            resolved["blis"]["commit"] = commit.removesuffix("-dirty")
+            clean = commit.removesuffix("-dirty")
+            # The checkout's describe names the tree, not the binary: a stale build in a clean tree, or a
+            # clean build in an edited one, keeps it only when it names the commit the Results name.
+            if b.get("commit") != clean or b.get("describe", "").endswith("-dirty"):
+                b.pop("describe", None)
+            b["commit"] = clean
             if commit.endswith("-dirty"):
-                resolved["blis"]["describe"] = commit
+                b["describe"] = commit
     if resolved:
         out["resolved"] = resolved
     return out

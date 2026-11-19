@@ -108,10 +108,11 @@ def ask_field_list(blis, catalog, sc):
                              {"tp": node, "pp": 1, "dp": 1}, engine, "fields-probe",
                              node_size=node, states_node_size=not fixed)
     try:
-        return blis_cli.fields(blis, settings.ENGINE_KIND, scenario=probe)
+        return blis_cli.fields(blis, settings.ENGINE_KIND, scenario=probe, catalog=catalog)
     except blis_cli.BlisCommandError as e:
-        raise blis_cli.BlisCommandError(f"{e}; pass --fields FILE (scripts/fetch_fields.py), or --catalog so "
-                                        f"the probe states the model's block size") from e
+        raise blis_cli.BlisCommandError(f"{e}; pass --fields FILE (scripts/fetch_fields.py)"
+                                        + ("" if catalog else ", or --catalog so the probe states the model's "
+                                           "block size")) from e
 
 
 # Cross-node cost resolves from the fabric (a catalog networks/ entry), required once nodes > 1.
@@ -1057,13 +1058,15 @@ _ROW_LATENCY = (("ttft", "ttft_us"), ("e2e", "e2e_us"), ("tpot", "tpot_us"))
 
 
 def measured_instances(doc):
-    """Each instance's measured-window latency figures, rebuilt from the Result's per-request rows.
+    """Each instance's measured-window latency figures, rebuilt from the Result's per-request rows,
+    plus a P/D run's prefill instances from the Result's per-instance measured window (_prefill_instances).
 
     The pinned simulator reports a per-instance block only for the whole run, so the worst-instance
     gate takes the completed non-warm-up requests that finish inside the window, grouped by the instance that served them.
     Only latencies a row carries can be rebuilt (TTFT, end-to-end, TPOT): the decode-step interval
-    is not per request, so the ITL gate stays on the cluster. Remove this when the simulator emits
-    the per-instance measured window (inference-sim #2087). [] when the Result has no rows.
+    is not per request, so the ITL gate stays on the cluster. Remove the rebuild when the simulator emits
+    the per-instance measured window for every instance (inference-sim #2087). [] when the Result has
+    neither rows nor a prefill instance's window.
     """
     by = {}
     end = (doc.get("window") or {}).get("end_us")

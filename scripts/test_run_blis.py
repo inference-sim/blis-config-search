@@ -603,6 +603,23 @@ class FieldListFromTheBinary(unittest.TestCase):
         self.assertIs(doc, blis_cli.fields(blis, "vllm"))
         self.assertEqual(1, log.count("model: qwen3-14b"))
 
+    def test_the_probe_is_built_over_the_catalog_the_run_uses(self):
+        blis = self.logging_blis()
+        text = blis_cli._engine_probe("vllm", blis_cli.build_release(blis, "vllm"))
+        blis_cli.fields(blis, "vllm", scenario=lambda: text, catalog="/cat")
+        self.assertIn("--scenarios", self.calls())
+        self.assertIn("--catalog /cat", self.calls())
+
+    def test_a_refused_probe_points_at_catalog_only_when_none_was_given(self):
+        sc = {"model": "qwen3-14b", "hardware": "no-such-chip", "cluster": {"gpus_per_node": 4}}
+        with self.assertRaises(blis_cli.BlisCommandError) as none:
+            run_blis.ask_field_list(self.logging_blis(), None, sc)
+        self.assertIn("--catalog", str(none.exception))
+        with self.assertRaises(blis_cli.BlisCommandError) as given:
+            run_blis.ask_field_list(self.logging_blis(), "/cat", sc)
+        self.assertIn("--fields FILE", str(given.exception))
+        self.assertNotIn("or --catalog", str(given.exception))
+
 
 class Footprint(unittest.TestCase):
     def test_tp_pp_dp(self):

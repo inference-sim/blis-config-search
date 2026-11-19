@@ -40,6 +40,7 @@ import re
 import shutil
 import sys
 import tempfile
+import threading
 import time
 
 try:
@@ -665,10 +666,41 @@ def pareto_report(sweep_results, all_rows, objective, per_user=None):
             "sweeps": [{"name": s["name"], **both(s["rows"])} for s in sweep_results]}
 
 
+class _AttemptJournal:
+    """An append-only JSONL file of finished attempts, each flushed and fsynced before the next
+    attempt is waited on. Opened for append, so an existing journal is never truncated."""
+
+    def __init__(self, path):
+        self.path = path
+        self._lock = threading.Lock()
+        parent = os.path.dirname(os.path.abspath(path))
+        os.makedirs(parent, exist_ok=True)
+        new = not os.path.exists(path)
+        with open(path, "a", encoding="utf-8") as f:
+            os.fsync(f.fileno())
+        if new:
+            fd = os.open(parent, os.O_RDONLY)
+            try:
+                os.fsync(fd)             # the directory entry, so the file itself survives a crash
+            finally:
+                os.close(fd)
+
+    def append(self, rec):
+        line = json.dumps(rec, sort_keys=True) + "\n"
+        with self._lock, open(self.path, "a", encoding="utf-8") as f:
+            f.write(line)
+            f.flush()
+            os.fsync(f.fileno())
+
+
 def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dry_run=False,
                    run_timeout=600, max_parallel=1, verbose=True, fields=None, data_override=False,
-                   router_cfg=None, shard=None, recorded=None):
+                   router_cfg=None, shard=None, recorded=None, checkpoint_runs=None):
     """Expand, filter, run and rank one spec. Returns the assembled report dict.
+
+    `checkpoint_runs` is a journal path: each attempt BLIS ran (passed, refused or incomplete) is
+    appended and fsynced there as soon as it returns, so an interrupted search keeps what finished.
+    The file is only appended to, never truncated; the report and runs.jsonl are unchanged by it.
 
     `shard` = (i, n) runs only every n-th run of the whole spec, starting at the i-th (counted
     across sweeps in spec order), so n jobs share one report's BLIS time; each writes the rows it
@@ -719,6 +751,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     generated_routing = os.path.join(out_dir, "routing")
     if not dry_run:
         os.makedirs(scenarios_dir, exist_ok=True)
+    journal = _AttemptJournal(checkpoint_runs) if checkpoint_runs and not dry_run else None
 
     # Which simulator is about to price this sweep. Only the CI workflows verified BLIS_SHA, so a
     # contributor sweeping locally against an off-pin binary got real-looking numbers with no
@@ -877,6 +910,8 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                                            if k not in RECORD_ONLY_REPLAY} if replay else None,
                                    fabric=fabric, gpus_per_node=gpus_per_node, fields=fields,
                                    data_override=data_override)
+            if journal:
+                journal.append({**rec, "sweep": sname})
             return _row_of(idx, rec, cfg, label, variant, c, router_rec)
 
         if work:
@@ -1806,6 +1841,9 @@ def main(argv=None):
                          "single-threaded (~1.1 cores), so this is the ONLY way to use more "
                          "cores. Output is independent of this value: rows are re-sorted into "
                          "expansion order, so a spec reproduces byte-for-byte at any setting.")
+    ap.add_argument("--checkpoint-runs", dest="checkpoint_runs", metavar="JOURNAL.jsonl",
+                    help="also append every attempt BLIS ran (passed, refused or incomplete) to this "
+                         "file, fsynced as it finishes; never truncated. It is not a resume command.")
     ap.add_argument("--json", action="store_true", dest="as_json",
                     help="print the assembled report to stdout")
     args = ap.parse_args(argv)
@@ -1836,7 +1874,8 @@ def main(argv=None):
                             routing_dir=args.routing, dry_run=args.dry_run,
                             run_timeout=args.timeout, max_parallel=args.max_parallel, fields=args.fields,
                             data_override=args.data_override, router_cfg=router_cfg,
-                            shard=parse_shard(args.shard), recorded=load_recorded(args.runs_from))
+                            shard=parse_shard(args.shard), recorded=load_recorded(args.runs_from),
+                            checkpoint_runs=args.checkpoint_runs)
     if args.as_json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:

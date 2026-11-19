@@ -557,6 +557,9 @@ def run_row(rec, cand, label, variant, sweep_name, concurrency, gpus, slo_ms=Non
         # A drafting row's acceptance as its Result records it: value, layer, profile, source and
         # the lookup's step, the key fields that differed and the K rule.
         **({"acceptance": acc} if acc else {}),
+        # The stated rate unrounded enough to rank on (pareto.PER_USER_FIELD); absent by default, so
+        # a spec that states no statistic keeps the row it had.
+        **({pareto.PER_USER_FIELD: round(pu, 3) if pu is not None else None} if stated else {}),
         **_gate_figures(rec, slo_ms),
     }
 
@@ -652,7 +655,7 @@ def pareto_report(sweep_results, all_rows, objective, per_user=None):
 
     def both(rows):
         return {form: pareto.front(rows, form, x_field) for form in pareto.THROUGHPUT_FORMS}
-    return {"x": pareto.PER_USER_FIELD if per_user else pareto.X_METRIC,
+    return {"x": pareto.PER_USER_X if per_user else pareto.X_METRIC,
             **({"x_basis": per_user} if per_user else {}),
             "y": {form: pareto.THROUGHPUT_FORMS[form][1] for form in pareto.THROUGHPUT_FORMS},
             "interval": None, "throughput": objective["throughput"],

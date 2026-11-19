@@ -123,7 +123,7 @@ jobs:
         run: |
           set -euo pipefail
           set -a; . ./pins.env; set +a
-          ( cd upstream && go build -o blis main.go )
+          sh scripts/build_blis.sh upstream
           # The simulator prices with this release's EMBEDDED catalog and registry (CFG-1) and is
           # given neither flag-by-path; the checkout is only where the scripts read files from.
           sh scripts/clone_pinned.sh "$SUBSTRATE_REF" https://github.com/inference-sim/blis-substrate.git blis-substrate

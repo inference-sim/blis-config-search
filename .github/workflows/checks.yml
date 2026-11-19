@@ -129,6 +129,22 @@ jobs:
           for spec in experiments/*.yaml; do
             python3 -I scripts/run_experiment.py "$spec" --dry-run --blis upstream/blis --fields "$RUNNER_TEMP/fields.json"
           done
+      # What run-experiment does after a spec merges, for every SGLang spec: the real sweep, written to
+      # reports/ of this throwaway checkout (the sweeper refuses a report not priced by a tagged release's
+      # embedded data, so an unstamped build fails here and not on main), then the ledger is checked for it.
+      - name: Sweep each SGLang spec as run-experiment does (the binary must be the stamped release)
+        if: steps.scope.outputs.experiments == 'true'
+        run: |
+          set -euo pipefail
+          set -a; . ./pins.env; set +a
+          sh scripts/clone_pinned.sh "$SUBSTRATE_REF" https://github.com/inference-sim/blis-substrate.git blis-substrate
+          for spec in experiments/*.yaml; do
+            grep -Eq '^[[:space:]]+engine_kind:[[:space:]]*sglang' "$spec" || continue
+            python3 -I scripts/run_experiment.py "$spec" --blis upstream/blis \
+              --catalog blis-substrate/catalog --registry blis-substrate/registry \
+              --fields "$RUNNER_TEMP/fields.json" --out reports/ --timeout 600 --max-parallel 4
+            python3 -I scripts/check_released_build.py "reports/$(basename "$spec" .yaml)"
+          done
 
   web:
     runs-on: ubuntu-latest

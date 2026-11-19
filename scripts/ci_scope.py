@@ -43,7 +43,8 @@ JOBS = ("python", "experiments", "web", "pages")
 # fetch_fields.py and clone_pinned.sh are run as commands, not imported, so they are named.
 CLOSURE_ROOTS = {
     "experiments": ("validate_experiment.py", "run_experiment.py", "fetch_fields.py", "knob_profile.py",
-                    "knob_table.py", "check_pending_pin.py"),
+                    "knob_table.py", "check_pending_pin.py", "check_released_build.py", "clone_pinned.sh",
+                    "build_blis.sh"),
     "web": ("build_gallery.py",),
     "smoke": ("blis_pin.py", "fetch_fields.py", "clone_pinned.sh"),
 }

@@ -550,7 +550,7 @@ def test_pins_are_the_single_source_of_the_sim_version():
 
     # The validator reads setting names and catalog identities from the pinned binary, so the
     # binary must be built BEFORE the validate step, and the step must pass it.
-    build_at = exp_wf.find("go build -o blis main.go")
+    build_at = exp_wf.find("scripts/build_blis.sh")
     validate_at = exp_wf.find("validate_experiment.py")
     check(build_at != -1 and validate_at != -1 and build_at < validate_at,
           "run-experiment.yml must build the simulator BEFORE validating, so the validator can "
@@ -969,7 +969,61 @@ def test_explore_data():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_build_script_stamps_the_pinned_release_tag():
+    """The simulator calls a build released only when the linker stamps cmd.buildRelease with a release
+    tag; an unstamped build makes every Result "unreleased", and the sweeper refuses its report. The
+    build script must stamp the tag pins.env names, whatever it is."""
+    print("test_build_script_stamps_the_pinned_release_tag")
+    import subprocess
+    tmp = tempfile.mkdtemp()
+    try:
+        bindir, up = os.path.join(tmp, "bin"), os.path.join(tmp, "up")
+        os.makedirs(bindir); os.makedirs(up)
+        fake = os.path.join(bindir, "go")
+        with open(fake, "w") as f:
+            f.write('#!/bin/sh\npwd > "$FAKE_GO_LOG"; echo "$@" >> "$FAKE_GO_LOG"\n')
+        os.chmod(fake, 0o755)
+        log = os.path.join(tmp, "log")
+        env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"], FAKE_GO_LOG=log)
+        r = subprocess.run(["sh", os.path.join(ROOT, "scripts", "build_blis.sh"), up], env=env,
+                           capture_output=True, text=True)
+        check(r.returncode == 0, f"build_blis.sh runs the build: {r.stderr}")
+        with open(log) as f:
+            where, args = f.read().splitlines()
+        ref = bc.read_pins()["BLIS_REF"]
+        check(os.path.realpath(where) == os.path.realpath(up), "the build runs inside the simulator checkout")
+        check(f"-X github.com/inference-sim/inference-sim/cmd.buildRelease={ref}" in args,
+              f"the build stamps pins.env's BLIS_REF {ref}: {args}")
+        check(args.endswith("-o blis main.go"), f"the binary is DIR/blis: {args}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_released_build_check_names_unstamped_rows():
+    """check_released_build.py is the CI gate on a real sweep: it fails on any ledger row whose Result
+    says the build was not a tagged release, and names the cause."""
+    print("test_released_build_check_names_unstamped_rows")
+    import subprocess
+    tmp = tempfile.mkdtemp()
+    try:
+        def ledger(rows):
+            os.makedirs(os.path.join(tmp, "r"), exist_ok=True)
+            with open(os.path.join(tmp, "r", "runs.jsonl"), "w") as f:
+                f.write("".join(json.dumps(r) + "\n" for r in rows))
+            return subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "check_released_build.py"),
+                                   os.path.join(tmp, "r")], capture_output=True, text=True)
+        good = {"data": "embedded", "released_build": True}
+        check(ledger([good, good]).returncode == 0, "rows priced by a tagged release pass")
+        bad = ledger([good, {"data": "embedded", "released_build": False}])
+        check(bad.returncode == 1 and "not a tagged release" in bad.stderr, f"an unstamped row fails: {bad.stderr}")
+        check(ledger([]).returncode == 1, "an empty ledger proves nothing and fails")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
+    test_build_script_stamps_the_pinned_release_tag()
+    test_released_build_check_names_unstamped_rows()
     test_winner_with_a_knob_variant()
     test_winner_mismatch_raises_not_falls_back()
     test_gallery_renders_no_standalone_html()

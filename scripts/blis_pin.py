@@ -211,19 +211,34 @@ def is_current(scen_dir, pins=None):
     return not commit or commit == pins.get("BLIS_SHA")
 
 
-# A committed report whose regeneration is under way elsewhere (a follow-up PR) carries this file,
-# stating why and where. A push to main does not plan it, so the run that would repeat a known
-# failure never starts; the follow-up's regenerated directory replaces it whole, file included.
+# A committed report whose regeneration is waiting on a release not yet pinned carries this file.
+# Its first line is `until: vX.Y.Z`: the report is held back from a push to main's plan only while
+# pins.env's BLIS_REF is OLDER than that tag. The day the pin reaches it the hold lapses by itself,
+# the report is planned like any other stale one, and the plan says so. A marker with no readable
+# `until:` line holds nothing, so no marker can silence the stale check without a stated end.
 PENDING = "REGENERATION_PENDING"
+_UNTIL = re.compile(r"^until:\s*(v\d+\.\d+\.\d+)\s*$")
 
 
-def pending(run_id, root=ROOT):
-    """The reason a report's regeneration is pending elsewhere, or None."""
+def marker(run_id, root=ROOT):
+    """(until tag or None, the marker's text) for a report carrying PENDING, else None."""
     try:
         with open(os.path.join(root, "reports", run_id, PENDING)) as f:
-            return f.read().strip() or "pending"
+            text = f.read().strip() or "pending"
     except OSError:
         return None
+    m = _UNTIL.match(text.splitlines()[0])
+    return (m.group(1) if m else None), text
+
+
+def pending(run_id, root=ROOT, pins=None):
+    """The reason a report's regeneration is held, or None: it has no marker, the marker names no
+    release to wait for, or the pinned release has reached the one it waits for."""
+    found = marker(run_id, root)
+    if not found or not found[0]:
+        return None
+    pins = pins if pins is not None else read_pins(os.path.join(root, "pins.env"))
+    return found[1] if newer(found[0], pins.get("BLIS_REF")) else None
 
 
 def stale_ids(root=ROOT, pins=None):
@@ -307,10 +322,12 @@ def plan(root=ROOT, only=None, max_batch=MAX_BATCH, stale_only=False):
         if unknown:
             raise SystemExit(f"no committed report named {', '.join(unknown)}")
         ids = [i for i in ids if i in set(only)]
-    held = []
+    held, lapsed = [], []
     if stale_only:
         stale = set(stale_ids(root))
         held = [i for i in ids if i in stale and pending(i, root)]
+        # A marker that holds nothing (no `until:`, or its release is pinned): planned, and named.
+        lapsed = [i for i in ids if i in stale and i not in held and marker(i, root)]
         ids = [i for i in ids if i in stale and i not in held]
     entries = [classify(i, root) for i in ids]
     runnable = [e for e in entries if e["kind"] != "orphan"]
@@ -328,7 +345,8 @@ def plan(root=ROOT, only=None, max_batch=MAX_BATCH, stale_only=False):
     for e in entries:
         e["batch"] = batch_of.get(e["id"])
     return {"reports": runnable, "orphans": [e for e in entries if e["kind"] == "orphan"],
-            "batches": batches, "pending": [{"id": i, "why": pending(i, root)} for i in held]}
+            "batches": batches, "pending": [{"id": i, "why": pending(i, root)} for i in held],
+            "lapsed": [{"id": i, "why": marker(i, root)[1]} for i in lapsed]}
 
 
 # ---------------------------------------------------------------------------------- regen
@@ -558,7 +576,11 @@ def _run_context(entry, root, blis, catalog, corpus, corpus_cache, fields=None):
     source, built the way its runner builds them, so a smoke run is a run the regeneration would
     make -- including the cluster fabric, or a multi-node RoCE report re-prices on IB."""
     import run_experiment
-    sc = _load_yaml(os.path.join(root, entry["source"]))["scenario"]
+    spec = _load_yaml(os.path.join(root, entry["source"]))
+    # The engine the report was swept on, or a SGLang report is priced as vLLM: the scenario it
+    # writes, the settings it accepts and the engine release it records all follow this choice.
+    run_experiment.settings.use_engine(run_experiment.settings.spec_engine_kind(spec))
+    sc = spec["scenario"]
     local = {"corpus": os.path.abspath(corpus)} if corpus else {}
     if corpus and corpus_cache:
         local["corpus_cache"] = os.path.abspath(corpus_cache)
@@ -683,6 +705,10 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
         checks.append({"config": old["config"], "old_tps": round(_tps(old), 1),
                        "new_tps": None if _broken(n) else round(_tps(n), 1),
                        "error": None if _ok(n) else why})
+        if not _broken(n) and n.get("released_build") is False:
+            failures.append(f"LOUD: {run_id} {_cfg_phrase(old['config'])} ran on a binary that is not a tagged "
+                            f"release (its Result says data.build is unreleased): the build must be "
+                            f"stamped with the release tag (scripts/build_blis.sh)")
         if _broken(n) and _fit_refusal(why):
             warnings.append(f"{run_id} {_cfg_phrase(old['config'])} no longer fits on the new stack "
                             f"and is refused ({why[-400:]}): its report records it as a named "

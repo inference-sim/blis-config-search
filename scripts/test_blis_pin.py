@@ -610,49 +610,91 @@ def test_shards_fit_a_long_report_into_jobs():
         shutil.rmtree(root)
 
 
-def test_a_pending_regeneration_is_not_planned_on_a_pin_push():
-    """A stale report whose regeneration runs in a follow-up PR is not re-run by main's push."""
-    print("test_a_pending_regeneration_is_not_planned_on_a_pin_push")
+def _stale_pair_repo(marker_text):
+    """A fake repo pinned to v2.0.0 with exp-a priced by v1.0.0 (carrying `marker_text`) and exp-c stale."""
     root = _fake_repo()
-    try:
-        with open(os.path.join(root, "pins.env"), "w") as f:
-            f.write("".join(f"{k}={v}\n" for k, v in PINS_NEW.items()))
-        for rid in B.report_ids(root):
-            _write_stack(root, rid, "v2.0.0", "r2", "s2", commit="b" * 40)
-        _write_stack(root, "exp-a", "v1.0.0", "r2", "s2")
-        _write_stack(root, "exp-c", "v1.0.0", "r2", "s2")
+    with open(os.path.join(root, "pins.env"), "w") as f:
+        f.write("".join(f"{k}={v}\n" for k, v in PINS_NEW.items()))
+    for rid in B.report_ids(root):
+        _write_stack(root, rid, "v2.0.0", "r2", "s2", commit="b" * 40)
+    _write_stack(root, "exp-a", "v1.0.0", "r2", "s2")
+    _write_stack(root, "exp-c", "v1.0.0", "r2", "s2")
+    if marker_text is not None:
         with open(os.path.join(root, "reports", "exp-a", B.PENDING), "w") as f:
-            f.write("regenerated in a follow-up PR\n")
+            f.write(marker_text)
+    return root
+
+
+def test_a_pending_regeneration_is_held_only_until_its_release_is_pinned():
+    """A report waiting on a release newer than the pin is held; once the pin reaches that release the
+    hold lapses by itself and the plan names it (#139 follow-up: M3.0 reports said "regenerates in M3.1",
+    the pin moved to M3.1, and the push run still skipped them)."""
+    print("test_a_pending_regeneration_is_held_only_until_its_release_is_pinned")
+    root = _stale_pair_repo("until: v3.0.0\nregenerated against v3.0.0\n")
+    try:
         p = B.plan(root, stale_only=True)
         check([r["id"] for r in p["reports"]] == ["exp-c"],
-              f"the pending report is held back and the other stale one still planned: {p['reports']}")
-        check([x["id"] for x in p["pending"]] == ["exp-a"], "the plan names the held-back report")
-        check("exp-a" in [r["id"] for r in B.plan(root)["reports"]],
-              "a forced plan still regenerates it (that is what the follow-up runs)")
+              f"a report waiting on an unpinned release is held back: {p['reports']}")
+        check([x["id"] for x in p["pending"]] == ["exp-a"] and not p["lapsed"], "the plan names the held-back report")
+        check("exp-a" in [r["id"] for r in B.plan(root)["reports"]], "a forced plan still regenerates it")
     finally:
+        shutil.rmtree(root)
+    for text, what in (("until: v2.0.0\nthe pin has reached it\n", "its release is the pinned one"),
+                       ("until: v1.5.0\nthe pin is past it\n", "its release is behind the pin"),
+                       ("Regenerates against the M3.0 simulator in M3.1.\n", "it names no release")):
+        root = _stale_pair_repo(text)
+        try:
+            p = B.plan(root, stale_only=True)
+            check(sorted(r["id"] for r in p["reports"]) == ["exp-a", "exp-c"],
+                  f"a marker whose hold has ended ({what}) does not skip the stale report: {p['reports']}")
+            check([x["id"] for x in p["lapsed"]] == ["exp-a"] and not p["pending"],
+                  f"the plan names the lapsed marker ({what}): {p['lapsed']}")
+        finally:
+            shutil.rmtree(root)
+
+
+def test_committed_pending_markers_hold_something():
+    """Every REGENERATION_PENDING marker in the repository must still hold its report: it names a release the
+    pin has not reached, and the report is stale. Anything else is a silent skip waiting to happen."""
+    print("test_committed_pending_markers_hold_something")
+    pins = B.read_pins(os.path.join(B.ROOT, "pins.env"))
+    check(B.report_ids(B.ROOT), "the repository commits reports")
+    for rid in B.report_ids(B.ROOT):
+        if B.marker(rid) is None:
+            continue
+        scen = os.path.join(B.ROOT, "reports", rid)
+        check(B.pending(rid, pins=pins) is not None and not B.is_current(scen, pins),
+              f"reports/{rid}/{B.PENDING} holds nothing: delete it (its release is pinned, it names none, "
+              f"or the report is current)")
+
+
+def test_smoke_prices_a_sglang_report_as_sglang():
+    """A SGLang report's smoke re-run must be built for the SGLang engine and record its release; the
+    process default is vLLM, and a smoke run that kept it would re-run the report as a different engine."""
+    print("test_smoke_prices_a_sglang_report_as_sglang")
+    import settings
+    root = tempfile.mkdtemp()
+    try:
+        os.makedirs(os.path.join(root, "experiments"))
+        with open(os.path.join(root, "experiments", "s.yaml"), "w") as f:
+            f.write("name: s\nscenario: {model: m, engine_kind: sglang, hardware: h200, workload: w, gpus: 8}\n")
+        for kind, version, name in (("vllm", "0.33.0", "fields.json"), ("sglang", "0.5.23", "fields.sglang.json")):
+            with open(os.path.join(root, name), "w") as f:
+                json.dump({"kind": "FieldList", "engine": {"kind": kind, "version": version},
+                           "fields": [{"name": "x", "source": "config", "status": "modeled"}]}, f)
+        settings.use_engine("vllm")
+        ctx = B._run_context({"source": "experiments/s.yaml", "replay": False}, root, os.path.join(root, "no-blis"),
+                             None, None, None, fields=os.path.join(root, "fields.json"))
+        check(settings.ENGINE_KIND == "sglang", "the smoke run is set up for the engine the spec names")
+        check(ctx[2] == "0.5.23", f"it records the SGLang release, not vLLM's: {ctx[2]}")
+    finally:
+        settings.use_engine("vllm")
         shutil.rmtree(root)
 
 
-def test_every_committed_report_is_current_or_marked_pending():
-    """#139: a report priced by another simulator than pins.env names must say so (REGENERATION_PENDING),
-    and a report the pin prices must not. The test reads each report's own header, pinned_stack."""
-    print("test_every_committed_report_is_current_or_marked_pending")
-    pins = B.read_pins(os.path.join(B.ROOT, "pins.env"))
-    ids = B.report_ids(B.ROOT)
-    check(ids, "the repository commits reports")
-    for rid in ids:
-        scen = os.path.join(B.ROOT, "reports", rid)
-        tag = ((B._load_json(os.path.join(scen, "scenario.json"), {}) or {}).get("pinned_stack") or {}).get("blis")
-        check(tag, f"reports/{rid}/scenario.json names the simulator that priced it (pinned_stack.blis)")
-        current = B.is_current(scen, pins)
-        marked = B.pending(rid) is not None
-        check(current != marked,
-              f"reports/{rid} was priced by {tag}, the pin is {pins.get('BLIS_REF')}: "
-              f"{'it is current and must not carry' if current else 'it is stale and must carry'} {B.PENDING}")
-
-
 if __name__ == "__main__":
-    test_every_committed_report_is_current_or_marked_pending()
+    test_committed_pending_markers_hold_something()
+    test_smoke_prices_a_sglang_report_as_sglang()
     test_version_ordering()
     test_go_mod_versions()
     test_sync_pins_reads_replace()
@@ -672,6 +714,6 @@ if __name__ == "__main__":
     test_workflow_wiring()
     test_stale_reports_and_the_post_merge_plan()
     test_shards_fit_a_long_report_into_jobs()
-    test_a_pending_regeneration_is_not_planned_on_a_pin_push()
+    test_a_pending_regeneration_is_held_only_until_its_release_is_pinned()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

@@ -224,7 +224,9 @@ def _feasible(run, floor, slos):
     # factor enters; this replaces the engine's per-step interval, which needed one.
     itl_max = _floor_itl_p99_max(floor)
     if itl_max is not None:
-        stat = (floor or {}).get("statistic") or slo.DEFAULT_STAT
+        # The spec's own statement wins, so a floor written without one cannot be re-judged on p99.
+        stated, said = slo.per_user(slos)
+        stat = stated if said else ((floor or {}).get("statistic") or slo.DEFAULT_STAT)
         rate, basis, itl = run_blis.per_user_rate(run, stat)
         floor_rate = _floor_rate(floor)
         if rate is None:

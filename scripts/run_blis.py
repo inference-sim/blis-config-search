@@ -719,8 +719,8 @@ def worst_figure(run, figure):
 
 
 def worst_itl_p99(run):
-    """The worst-instance p99 time per output token -- `worst_metric` at the key the per-user rate is
-    built on. The slot is still called itl_p99_ms in the records, on the cluster figure and on each
+    """The worst-instance p99 time per output token -- `worst_metric` at the key the default (p99)
+    per-user rate is built on; a spec that states another statistic reads tpot_<stat>_ms (worst_figure). The slot is still called itl_p99_ms in the records, on the cluster figure and on each
     instance's; the value is TPOT (see _MEASURED_KEYS and measured_instances)."""
     return worst_metric(run, "itl_p99_ms")
 
@@ -982,7 +982,8 @@ def figure_form_problems(doc):
 
 
 # The aggregate behind the feasibility test of a latency SLO: the max, over the cluster figure and every
-# instance's, of each p99 (worst_metric). Stated on the report so the figure that gates a row is named
+# instance's, of each p99 (worst_metric). A spec that caps another statistic restates `metrics` per record
+# (run_experiment, slo.figures). Stated on the report so the figure that gates a row is named
 # in the registry's terms: aggregate max, over instances. The `itl_p99` cap gates on tpot_p99_ms (the
 # record's legacy itl_p99_ms slot holds it, _MEASURED_KEYS): the per-request (E2E - TTFT) / (tokens - 1),
 # which is aiperf's ITL (inter_token_latency) and vllm bench serve's TPOT. The registry's itl_p99_ms is
@@ -1073,6 +1074,9 @@ def _percentile(xs, p):
 
 
 _ROW_LATENCY = (("ttft", "ttft_us"), ("e2e", "e2e_us"), ("tpot", "tpot_us"))
+# The statistics measured_instances rebuilds per instance: the only ones a worst-instance gate can judge.
+INSTANCE_PERCENTILES = (50, 90, 95, 99)
+INSTANCE_STATS = ("mean", *(f"p{p}" for p in INSTANCE_PERCENTILES))
 
 
 def measured_instances(doc):
@@ -1081,8 +1085,8 @@ def measured_instances(doc):
 
     The pinned simulator reports a per-instance block only for the whole run, so the worst-instance
     gate takes the completed non-warm-up requests that finish inside the window, grouped by the instance that served them.
-    Only latencies a row carries can be rebuilt (TTFT, end-to-end, TPOT): the decode-step interval
-    is not per request, so the ITL gate stays on the cluster. Remove the rebuild when the simulator emits
+    Only latencies a row carries can be rebuilt (TTFT, end-to-end, TPOT), at INSTANCE_STATS; each
+    instance's legacy itl_* slots hold its TPOT, as the cluster's do, so the itl_p99 gate judges TPOT too. Remove the rebuild when the simulator emits
     the per-instance measured window for every instance (inference-sim #2087). [] when the Result has
     neither rows nor a prefill instance's window.
     """
@@ -1103,12 +1107,12 @@ def measured_instances(doc):
             if not xs:
                 continue
             o[f"{stem}_mean_ms"] = sum(xs) / len(xs)
-            for p in (50, 90, 95, 99):
+            for p in INSTANCE_PERCENTILES:
                 o[f"{stem}_p{p}_ms"] = _percentile(xs, p)
             if stem == "tpot":
                 # The interactivity gate's slot holds the per-request TPOT on each instance, as on the
                 # cluster figure (_MEASURED_KEYS), so the worst-instance gate judges the same quantity.
-                for k in ("mean", "p50", "p90", "p95", "p99"):
+                for k in INSTANCE_STATS:
                     o[f"itl_{k}_ms"] = o[f"tpot_{k}_ms"]
         out.append(o)
     return out + _prefill_instances(doc, set(by))
@@ -1124,7 +1128,7 @@ def _prefill_instances(doc, seen):
             continue
         o = {"instance_id": inst, "requests": mw["measured_user_requests"]}
         for stem, _col in _ROW_LATENCY:
-            for k in ("mean", "p50", "p90", "p95", "p99"):
+            for k in INSTANCE_STATS:
                 if isinstance(mw.get(f"{stem}_{k}_ms"), (int, float)):
                     o[f"{stem}_{k}_ms"] = mw[f"{stem}_{k}_ms"]
                     if stem == "tpot":

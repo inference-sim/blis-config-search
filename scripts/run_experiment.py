@@ -946,7 +946,9 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
         # come from their own measured window (#158). Each instance's interactivity slot holds its
         # per-request TPOT, because the decode-step interval is not per request (inference-sim #2087).
         "basis": run_blis.BASIS,
-        "scope": "cluster; worst instance for TTFT and end-to-end gates",
+        # Restated only for a spec that states another key, so a committed report keeps its bytes.
+        "scope": ("cluster; worst instance for every latency gate" if restated
+                  else "cluster; worst instance for TTFT and end-to-end gates"),
         "interactivity_floor": {"tok_per_s_per_user": floor_rate_from(slo_ms),
                                 **(per_user or {})},
         "objective": pareto.describe(objective, per_user),

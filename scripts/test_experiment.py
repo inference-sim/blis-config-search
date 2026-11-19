@@ -2414,6 +2414,115 @@ class SloAtAnyStatistic(unittest.TestCase):
         self.assertNotIn("per_user_of", explore_data.build(os.path.dirname(committed)))
 
 
+class SloReviewCases(unittest.TestCase):
+    """Cases from the review of #172: the old ledger format, the report's statistic, the per-instance
+    statistics, non-positive caps, and parity on each key shape."""
+
+    rec = staticmethod(SloAtAnyStatistic.rec)
+
+    def errs(self, slo):
+        return SloAtAnyStatistic.errs(self, slo)
+
+    @staticmethod
+    def legacy_record():
+        """The first record of a committed ledger written before the measured window existed."""
+        for path in sorted(glob.glob(os.path.join(ROOT, "reports", "*", "runs.jsonl"))):
+            with open(path, encoding="utf-8") as f:
+                for ln in f:
+                    r = json.loads(ln)
+                    if r.get("returncode") == 0 and r.get("metrics") and not r.get("measured"):
+                        return r
+        raise unittest.SkipTest("no committed ledger predates the measured window")
+
+    def test_a_restated_key_on_a_ledger_without_a_measured_window_is_refused(self):
+        r = self.legacy_record()
+        self.assertIsNone(SLO.unreported(r, E.slo_limits({"itl_p99": "20ms", "ttft_p99": "10s"})),
+                          "the legacy keys read the slots such a record has")
+        for key in ("tpot_p99", "tpot_p90", "interactivity_p90"):
+            with self.subTest(key=key):
+                val = 40 if key.startswith("interactivity") else "20ms"
+                got = SLO.unreported(r, E.slo_limits({key: val}))
+                self.assertEqual(key, got[0])
+                self.assertIn("no measured window", got[1])
+
+        def fake_run_one(*a, **kw):
+            cfg = dict(kw.get("config") or a[11])
+            return {**copy.deepcopy(r), "cmd": None, "config": cfg, "concurrency": cfg["concurrency"]}
+
+        doc = spec()
+        doc["scenario"]["slo"] = {"tpot_p99": "20ms"}
+        real = E.run_blis.run_one
+        E.run_blis.run_one = fake_run_one
+        try:
+            with tempfile.TemporaryDirectory() as out, self.assertRaises(SystemExit) as e:
+                E.run_experiment(doc, BLIS, "/c", "/r", out, verbose=False)
+        finally:
+            E.run_blis.run_one = real
+        self.assertIn("no measured window", str(e.exception))
+
+    def test_the_report_judges_the_floor_on_the_specs_statistic(self):
+        import report as rep
+        rec = self.rec({"tpot_p90_ms": 20.0, "tpot_p99_ms": 30.0}, [{"tpot_p90_ms": 23.0, "tpot_p99_ms": 30.0}])
+        slo = {"interactivity_p90": 42}
+        ok, _ = E.servable(rec, E.slo_limits(slo))
+        self.assertTrue(ok, "1000 / 23 ms = 43.5 tok/s/user holds 42")
+        for floor in ({"tok_per_s_per_user": 42.0}, {"tok_per_s_per_user": 42.0, "statistic": "p99"}, {}):
+            with self.subTest(floor=floor):
+                self.assertEqual((ok, []), rep._feasible(rec, floor, slo))
+
+    def test_tpot_p99_and_itl_p99_are_one_gate(self):
+        import report as rep
+        for worst, ok in ((20.0, True), (20.5, False)):
+            rec = self.rec({"tpot_p99_ms": 10.0}, [{"tpot_p99_ms": worst, "itl_p99_ms": worst}])
+            rec["metrics"]["itl_p99_ms"] = 10.0
+            with self.subTest(worst=worst):
+                for slo in ({"tpot_p99": "20ms"}, {"itl_p99": "20ms"}):
+                    self.assertEqual(ok, E.servable(rec, E.slo_limits(slo))[0], slo)
+                    self.assertEqual(ok, rep._feasible(rec, {}, slo)[0], slo)
+        self.assertEqual("tpot_p99_ms", E.per_user_basis({"tpot_p99": "20ms"})["of"])
+        self.assertIsNone(E.per_user_basis({"itl_p99": "20ms"}))
+
+    def test_a_cap_and_a_floor_at_one_statistic_agree_in_the_sweeper_and_the_report(self):
+        import report as rep
+        slo = {"tpot_p90": "25ms", "interactivity_p90": 45}
+        self.assertEqual([], self.errs(slo))
+        slo_ms = E.slo_limits(slo)
+        self.assertEqual(45.0, E.floor_rate_from(slo_ms), "the tighter of 1000 / 25 and 45")
+        floor = {"tok_per_s_per_user": 45.0, **E.per_user_basis(slo)}
+        for worst in (22.0, 23.0, 26.0):           # holds both; holds the cap only; holds neither
+            rec = self.rec({"tpot_p90_ms": 1.0}, [{"tpot_p90_ms": worst}])
+            with self.subTest(worst=worst):
+                ok, _ = E.servable(rec, slo_ms)
+                self.assertEqual(worst == 22.0, ok)
+                self.assertEqual(ok, rep._feasible(rec, floor, slo)[0])
+                self.assertEqual(ok, rep._feasible(rec, {}, slo)[0])
+
+    def test_a_statistic_the_instances_are_not_rebuilt_at_is_refused(self):
+        registry = {**SloAtAnyStatistic.REGISTRY,
+                    "ttft_p75_ms": {"id": "ttft_p75_ms", "formula": "ttft", "statistic": "p75", "unit": "ms"},
+                    "tpot_p75_ms": {"id": "tpot_p75_ms", "formula": "tpot", "statistic": "p75", "unit": "ms"}}
+        for key, val in (("ttft_p75", "2s"), ("interactivity_p75", 40)):
+            with self.subTest(key=key):
+                errs = SLO.key_errors({key: val}, registry, V.parse_duration_ms)
+                self.assertEqual(1, len(errs), errs)
+                self.assertIn("judged at mean, p50, p90, p95, p99", errs[0])
+
+    def test_a_cap_that_is_not_positive_is_refused(self):
+        for key in ("ttft_p90", "itl_p99"):
+            with self.subTest(key=key):
+                self.assertTrue(any("positive duration" in e for e in self.errs({key: "0ms"})))
+
+    def test_a_restated_report_says_every_gate_is_on_the_worst_instance(self):
+        doc = spec()
+        doc["scenario"]["slo"] = {"tpot_p90": "25ms"}
+        self.assertEqual("cluster; worst instance for every latency gate",
+                         E.run_experiment(doc, BLIS, None, None, "/nonexistent", dry_run=True,
+                                          verbose=False)["scope"])
+        self.assertEqual("cluster; worst instance for TTFT and end-to-end gates",
+                         E.run_experiment(spec(), BLIS, None, None, "/nonexistent", dry_run=True,
+                                          verbose=False)["scope"])
+
+
 class CommittedReportsKeepTheirSloVerdicts(unittest.TestCase):
     """Byte-identity guard for #171: every committed report's rows hold the verdict, reason and
     per-user figures the sweeper derives from its own ledger, so a change to the SLO path that

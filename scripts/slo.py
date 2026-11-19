@@ -13,7 +13,8 @@
 
 The statistics are the registry's (`blis metrics --json`), checked when a spec is validated, and the
 Result's (`measured.metrics`), checked on each run: a statistic the Result does not report is refused,
-never computed here. Nothing in this module lists them.
+never computed here. The worst-instance figures are rebuilt at run_blis.INSTANCE_STATS, so a statistic
+outside it is refused too: one the simulator adds needs that one constant extended.
 
 The per-user rate (the interactivity floor, each row's tok/s/user and the Pareto axis) is on the
 statistic the tpot caps and interactivity floors state. A spec that states none keeps the p99 rate and
@@ -89,6 +90,9 @@ def key_errors(slo, registry, parse_duration_ms):
                 errs.append(f"{where}: the metric registry has no {g['figure']}, which this floor is "
                             f"1000 over; {PER_USER_METRIC} is recorded at "
                             f"{', '.join(_registry_stats(registry, PER_USER_METRIC)) or 'no statistic'}")
+            elif g["stat"] not in run_blis.INSTANCE_STATS:
+                errs.append(f"{where}: the worst instance is judged at {', '.join(run_blis.INSTANCE_STATS)}, "
+                            f"not {g['stat']}")
             elif isinstance(val, bool) or not isinstance(val, (int, float)) or val <= 0:
                 errs.append(f"{where}: {val!r} must be a positive tok/s per user, e.g. 50")
             continue
@@ -102,9 +106,16 @@ def key_errors(slo, registry, parse_duration_ms):
             errs.append(f"{where}: the metric registry has no {g['figure']}; {g['metric']} is "
                         f"recorded at {', '.join(_registry_stats(registry, g['metric'])) or 'no statistic'}")
             continue
-        if parse_duration_ms(val) is None:
+        if g["stat"] not in run_blis.INSTANCE_STATS:
+            errs.append(f"{where}: the worst instance is judged at {', '.join(run_blis.INSTANCE_STATS)} "
+                        f"(the statistics the per-instance figures are rebuilt at), not {g['stat']}")
+            continue
+        ms = parse_duration_ms(val)
+        if ms is None:
             errs.append(f"{where}: {val!r} needs an explicit unit "
                         f"(e.g. 20ms, 5s) -- a bare number is ambiguous")
+        elif ms <= 0:
+            errs.append(f"{where}: {val!r} must be a positive duration, e.g. 20ms")
     stats = sorted({g["stat"] for g in map(parse, slo) if g and g.get("metric") == PER_USER_METRIC},
                    key=_stat_order)
     if len(stats) > 1:
@@ -167,6 +178,15 @@ def unreported(run, slo_ms):
     the statistic is the simulator's to add, never computed here."""
     measured = ((run.get("measured") or {}).get("metrics")) or {}
     if not isinstance(measured, dict) or not measured:
+        if run.get("returncode") == 0 and run.get("metrics"):
+            # A record written before the measured window: its legacy slots are not the registry's
+            # figures, so only the legacy keys, which read those slots, can be judged on it.
+            for g in gates(slo_ms):
+                if g["kind"] != "throughput" and g["key"] not in LEGACY:
+                    return g["key"], (f"scenario.slo.{g['key']}: this record has no measured window "
+                                      f"(it predates the Result's measured.metrics), so {g['figure']} "
+                                      f"cannot be read from it; only {', '.join(LEGACY)} can be judged "
+                                      f"on such a ledger. Run the sweep again")
         return None
     for g in gates(slo_ms):
         if g["kind"] == "throughput" or g["figure"] in measured:

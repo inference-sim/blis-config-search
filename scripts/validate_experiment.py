@@ -920,6 +920,8 @@ def _ask_field_list(blis, catalog, spec):
     sc = spec.get("scenario") if isinstance(spec, dict) else None
     if not (isinstance(sc, dict) and all(isinstance(sc.get(k), str) and sc[k] for k in ("model", "hardware"))):
         return None   # nothing to probe: knob_vocabulary reuses a list already asked, or says why it has none
+    if not isinstance(sc.get("engine") or {}, dict):
+        return None   # validate reports the malformed engine block
     import run_blis
     try:
         run_blis.ask_field_list(blis, catalog, sc)
@@ -1026,14 +1028,18 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
         # scenario.engine holds settings every run carries, so its values are SINGLE, not lists.
         # Getting this backwards is easy, and a list here would be written into the scenario
         # verbatim and refused by the engine, so say which way round it goes.
-        for key, val in (sc.get("engine") or {}).items():
+        shared = sc.get("engine") or {}
+        if not isinstance(shared, dict):
+            errs.append(f"scenario.engine: must be a mapping of setting to value, not {shared!r}")
+            shared = {}
+        for key, val in shared.items():
             if _is_list(val) and key not in ENGINE_INT_LISTS:
                 errs.append(f"scenario.engine.{key}: a shared setting takes ONE value, not a "
                             f"list (sweep it under a sweep's `engine:` instead)")
-        _check_knob_names(sc.get("engine") or {}, "scenario.engine", eng_vocab, "engine", errs,
+        _check_knob_names(shared, "scenario.engine", eng_vocab, "engine", errs,
                           source)
         for block, inner in vocab.blocks.items():
-            val = (sc.get("engine") or {}).get(block)
+            val = shared.get(block)
             if isinstance(val, dict):
                 for field in val:
                     if field not in inner:
@@ -1285,8 +1291,8 @@ def main(argv=None):
                     help="the simulator binary whose commands supply setting names and catalog "
                          "identities (default: $BLIS)")
     ap.add_argument("--fields",
-                    help="the engine's field list: the pinned blis-vllm release's fields.json, until the "
-                         "binary has `blis fields` (default: ask the binary)")
+                    help="the engine's field list: the pinned blis-vllm release's fields.json (scripts/fetch_fields.py). "
+                         "Default: ask the binary (`blis fields --scenario` on a probe of the spec's model and hardware)")
     ap.add_argument("--catalog",
                     help="a catalog directory for `blis catalog resolve` (default: the catalog "
                          "the binary embeds)")

@@ -894,8 +894,9 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
         "slo_ms": slo_ms,
         # What every ranked figure is (CFG-4, DEV-8): the metric basis and the scope it ranges over.
         # The cluster figures are the Result's measured window. The worst-instance TTFT, end-to-end
-        # and TPOT gates are rebuilt from its profiling-phase rows; the ITL gate is the cluster's,
-        # because the decode-step interval is not per request (inference-sim #2087 gives the rest).
+        # and TPOT gates are rebuilt from its profiling-phase rows, and a P/D run's prefill instances
+        # come from their own measured window (#158). Each instance's interactivity slot holds its
+        # per-request TPOT, because the decode-step interval is not per request (inference-sim #2087).
         "basis": run_blis.BASIS,
         "scope": "cluster; worst instance for TTFT and end-to-end gates",
         "interactivity_floor": {"tok_per_s_per_user": floor_rate_from(slo_ms)},
@@ -1728,8 +1729,9 @@ def main(argv=None):
     ap.add_argument("--data-override", action="store_true", dest="data_override",
                     help="EXPERIMENTAL: price with --catalog/--registry instead of the simulator's embedded "
                          "data. The report is marked experimental and may not be written to reports/")
-    ap.add_argument("--fields", help="the engine's field list: the pinned blis-vllm release's fields.json, "
-                                     "until the binary has `blis fields` (default: ask the binary)")
+    ap.add_argument("--fields", help="the engine's field list: the pinned blis-vllm release's fields.json "
+                                     "(scripts/fetch_fields.py). Default: ask the binary (`blis fields --scenario` "
+                                     "on a probe of the spec's model and hardware)")
     ap.add_argument("--routing", default=os.path.join(ROOT, "routing"))
     ap.add_argument("--router-configs", dest="router_configs", default=None,
                     help="developer override: a router checkout whose reference-configs/ replace the "

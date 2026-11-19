@@ -274,6 +274,29 @@ class FieldListProbe(unittest.TestCase):
         errs = V.validate(doc, self.fresh_blis(), ROUTING)
         self.assertTrue(any(e.startswith("scenario.hardware") for e in errs), errs)
 
+    def test_a_malformed_engine_block_does_not_crash(self):
+        doc = spec()
+        doc["scenario"]["engine"] = "bad"
+        self.assertTrue(V.validate(doc, self.fresh_blis(), ROUTING))
+
+    def test_a_directory_whose_first_spec_is_refused_still_validates_the_rest(self):
+        import contextlib
+        import io
+        bad, good = spec(name="a-bad"), spec(name="b-good")
+        bad["scenario"]["hardware"] = "no-such-chip"
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d)
+        for doc in (bad, good):
+            with open(os.path.join(d, doc["name"] + ".yaml"), "w") as f:
+                yaml.safe_dump(doc, f)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = V.main([d, "--blis", self.fresh_blis(), "--routing", ROUTING])
+        text = out.getvalue() + err.getvalue()
+        self.assertEqual(1, rc, text)
+        self.assertIn("no-such-chip", text)
+        self.assertIn("b-good", text)
+
 
 class CommittedSpecsValidate(unittest.TestCase):
     """Every spec in experiments/ must validate -- the acceptance criterion from #21."""

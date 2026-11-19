@@ -1915,8 +1915,8 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
 def add_common_args(p):
     p.add_argument("--blis", default="./blis")
     p.add_argument("--fields",
-                   help="the engine's field list: the pinned blis-vllm release's fields.json, until the "
-                        "binary has `blis fields` (default: ask the binary)")
+                   help="the engine's field list: the pinned blis-vllm release's fields.json (scripts/fetch_fields.py). "
+                        "Default: ask the binary (`blis fields --scenario` on a probe of the model and hardware)")
     p.add_argument("--catalog", default=os.environ.get("SUBSTRATE_CATALOG"),
                    help="the catalog/ of a blis-substrate checkout at the pinned release: the runner reads files from it")
     p.add_argument("--registry", default=os.environ.get("SUBSTRATE_REGISTRY"),

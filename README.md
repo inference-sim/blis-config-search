@@ -27,7 +27,7 @@ spec; everything after it is deterministic and runs in CI.
 Write `experiments/<name>.yaml` (the site's Submit tab drafts one), then:
 
 ```bash
-python3 -I scripts/fetch_fields.py fields.json   # the pinned engine's field list, until `blis fields` exists
+python3 -I scripts/fetch_fields.py fields.json   # optional: without --fields the binary is asked (`blis fields --scenario`)
 python3 -I scripts/validate_experiment.py experiments/<name>.yaml --blis ./blis --fields fields.json
 python3 -I scripts/run_experiment.py experiments/<name>.yaml --dry-run --blis ./blis --fields fields.json   # check the run budget
 ```

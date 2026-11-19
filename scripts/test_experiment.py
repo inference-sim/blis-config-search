@@ -2220,6 +2220,11 @@ class SloAtAnyStatistic(unittest.TestCase):
         row = E.run_row(held, {}, "l", "", "s", 8, 8, slo_ms, slo)
         self.assertEqual(40.0, row["tok_per_s_per_user"], "1000 / the worst tpot_p90_ms, not p99")
         self.assertEqual(25.0, row["tpot_p90_ms"])
+        near = copy.deepcopy(held)
+        near["metrics_all_instances"][0]["tpot_p90_ms"] = 25.0004
+        self.assertFalse(E.servable(near, slo_ms)[0])
+        self.assertEqual(25.0004, E.run_row(near, {}, "l", "", "s", 8, 8, slo_ms, slo)["tpot_p90_ms"],
+                         "the row carries the value the gate compared, not a rounding that reads as the cap")
         self.assertEqual(2000.0, row["ttft_p95_ms"])
         self.assertEqual(40.0, E.floor_rate_from(slo_ms))
         self.assertEqual({"statistic": "p90", "of": "tpot_p90_ms", "aggregate": "max", "over": "instance"},
@@ -2266,8 +2271,13 @@ class SloAtAnyStatistic(unittest.TestCase):
         self.assertIn("tpot at mean, p50, p90, p99", msg)
         self.assertIsNone(SLO.unreported(rec, {"tpot_p90": 25.0, "itl_p99": 20.0}))
 
+        self.assertEqual("interactivity_p95", SLO.unreported(rec, {"interactivity_p95": 40.0})[0])
+        import threading
+        calls = []
+
         def fake_run_one(*a, **kw):
             cfg = dict(kw.get("config") or a[11])
+            calls.append((cfg["concurrency"], threading.current_thread() is threading.main_thread()))
             return {**rec, "cmd": None, "config": cfg, "concurrency": cfg["concurrency"]}
 
         doc = spec()
@@ -2280,6 +2290,8 @@ class SloAtAnyStatistic(unittest.TestCase):
         finally:
             E.run_blis.run_one = real
         self.assertIn("does not report tpot_p95_ms", str(e.exception))
+        self.assertEqual([(1, True)], calls,
+                         "the first run is made alone on the caller's thread, before any pool, and is the only one")
 
     def test_interactivity_floors_are_rates_on_the_same_statistic(self):
         self.assertEqual([], self.errs({"interactivity_p90": 40}))
@@ -2296,13 +2308,23 @@ class SloAtAnyStatistic(unittest.TestCase):
         self.assertEqual(50.0, E.floor_rate_from(E.slo_limits({"interactivity_p90": 40, "tpot_p90": "20ms"})),
                          "the tightest per-user gate is the floor")
 
-    def test_a_floor_whose_registry_figure_is_another_formula_is_refused(self):
-        """The registry's interactivity_mean is the mean of per-request rates, not 1000 / tpot_mean_ms."""
-        for key in ("interactivity_mean", "interactivity_p99"):
-            with self.subTest(key=key):
-                errs = self.errs({key: 40})
-                self.assertEqual(1, len(errs), errs)
-                self.assertIn("interactivity is 1000 / tpot at p50, p90", errs[0])
+    def test_a_floor_at_any_tpot_statistic_is_1000_over_that_tpot(self):
+        """interactivity_<stat> is a spec key defined by its tpot figure (#171 point 2): interactivity_mean
+        is 1000 / tpot_mean_ms, the typical user, whatever the registry's own interactivity_mean is."""
+        for stat in ("mean", "p50", "p99"):
+            with self.subTest(stat=stat):
+                key, fig = f"interactivity_{stat}", f"tpot_{stat}_ms"
+                self.assertEqual([], self.errs({key: 40}))
+                others = {f"tpot_{s}_ms": 1000.0 for s in ("mean", "p50", "p90", "p99")}
+                held = self.rec({**others, fig: 20.0}, [{**others, fig: 25.0}])
+                self.assertTrue(E.servable(held, {key: 40.0})[0])
+                self.assertFalse(E.servable(self.rec({**others, fig: 20.0}, [{**others, fig: 26.0}]),
+                                            {key: 40.0})[0])
+                self.assertEqual({"statistic": stat, "of": fig, "aggregate": "max", "over": "instance"},
+                                 E.per_user_basis({key: 40}))
+        errs = self.errs({"interactivity_p75": 40})
+        self.assertEqual(1, len(errs), errs)
+        self.assertIn("tpot is recorded at mean, p50, p90, p95, p99", errs[0])
         self.assertIn("must be a positive tok/s per user", self.errs({"interactivity_p90": "40ms"})[0])
 
     def test_the_per_user_rate_is_stated_at_one_statistic(self):

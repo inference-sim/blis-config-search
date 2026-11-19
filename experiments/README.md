@@ -104,7 +104,7 @@ cluster figure and every instance's):
 | key | meaning |
 |---|---|
 | `<metric>_<stat>: 25ms` | a cap on the Result's `<metric>_<stat>_ms`, for `ttft`, `e2e` or `tpot` at any statistic the simulator's metric registry defines (`blis metrics`): `tpot_p90`, `ttft_p95`, `e2e_mean`, ... Needs a unit. |
-| `interactivity_<stat>: 40` | a floor in tok/s/user: `1000 / tpot_<stat>_ms >= 40`, at a statistic where the registry's `interactivity_<stat>` is that formula (p50 and p90 today; `interactivity_mean` is the registry's mean of per-request rates, a different figure, so a floor at the mean TPOT is a `tpot_mean` cap) |
+| `interactivity_<stat>: 40` | a floor in tok/s/user: `1000 / tpot_<stat>_ms >= 40`, at any statistic `tpot` has. The key is defined by that figure: `interactivity_mean` is 1000 / the mean TPOT (the registry's `interactivity_of_mean_tpot`), not the registry's `interactivity_mean`, a mean of per-request rates; the report names the figure (`of: tpot_mean_ms`) |
 | `itl_p99: 20ms` | the alias of `tpot_p99` (the slot it reads holds TPOT) |
 | `throughput_per_gpu: 500` | a floor on output tok/s per accelerator |
 

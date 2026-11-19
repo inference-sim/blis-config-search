@@ -23,6 +23,11 @@ measured window, not defined here:
 | y, tokens/s per GPU | `total_tokens_per_second_per_gpu` | (input + output tokens)/s over all GPUs. `throughput: total`, the default. |
 | y, decode form | `output_tokens_per_second_per_decode_gpu` | output tokens/s over the decode GPUs (all GPUs when there is no decode pool). `throughput: decode`. |
 
+A spec that states its per-user statistic (a `tpot_<stat>` cap or an `interactivity_<stat>` floor,
+see experiments/README.md, SLOs) replaces x with each row's `tok_per_s_per_user`, 1000 / the worst
+instance's `tpot_<stat>_ms`, so the front ranks on the figure the SLO gates on; `pareto.json` names it
+in `x` and `x_basis`. Otherwise x is as above.
+
 The Result's own `interactivity_of_mean_tpot` is the only source (a definition is read from the
 registry, never rebuilt from another field). A Result that does not state it leaves the run unrated:
 it is counted (`unrated`) and not placed on the front.

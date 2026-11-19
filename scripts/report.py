@@ -218,9 +218,9 @@ def _feasible(run, floor, slos):
         viol.append(f"timed_out_requests = {m['timed_out_requests']}")
     if m.get("dropped_unservable"):
         viol.append(f"dropped_unservable = {m['dropped_unservable']}")
-    # The interactivity floor is a per-TOKEN promise, and the rate tested is 1000 over the worst p99 time
-    # per output token (run_blis.per_user_rate), the one definition the display and the sweeper's
-    # `servable` also use. TPOT is per token and already holds what speculation gains, so no acceptance
+    # The interactivity floor is a per-TOKEN promise, and the rate tested is 1000 over the worst instance's
+    # time per output token at the floor's statistic (p99 unless the floor states one; run_blis.per_user_rate),
+    # the one definition the display and the sweeper's `servable` also use. TPOT is per token and already holds what speculation gains, so no acceptance
     # factor enters; this replaces the engine's per-step interval, which needed one.
     itl_max = _floor_itl_p99_max(floor)
     if itl_max is not None:
@@ -263,13 +263,13 @@ def _feasible(run, floor, slos):
     return (len(viol) == 0, viol)
 
 
-def _per_user_rate(run, mtp=0):
+def _per_user_rate(run, mtp=0, stat=None):
     """Per-user token rate for display, through the ONE definition in run_blis.per_user_rate --
     the same one _feasible judges on, so a row can no longer be displayed above the floor while
     being marked infeasible (namasl review #2).
 
-    The rate is 1000 over the worst-instance p99 time per output token, drafting or not (no acceptance
-    factor: TPOT is per token). `mtp` is accepted for call-site compatibility but the depth is read from the run itself.
+    The rate is 1000 over the worst-instance time per output token at `stat` (p99 when None), drafting
+    or not (no acceptance factor: TPOT is per token). `mtp` is accepted for call-site compatibility but the depth is read from the run itself.
 
     There is deliberately NO short-circuit on a `metrics.tok_per_s_per_user` field. An earlier
     version preferred it and returned it raw -- an aggregate, neither acceptance-scaled nor
@@ -279,7 +279,7 @@ def _per_user_rate(run, mtp=0):
     closed. One definition means one definition (susiejojo review #1).
 
     Returns (pu_or_None, basis); basis is always "" (a direct rate), kept so callers need no change."""
-    pu, basis, _itl = run_blis.per_user_rate(run)
+    pu, basis, _itl = run_blis.per_user_rate(run, stat)
     return (round(pu, 2) if pu is not None else None), basis
 
 

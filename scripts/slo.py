@@ -4,8 +4,10 @@
   <metric>_<stat>: 25ms    a cap on the worst instance's `<metric>_<stat>_ms` (tpot_p90, ttft_p95,
                            e2e_mean, ...): any statistic the metric registry defines for a metric
                            whose per-instance figures the record carries
-  interactivity_<stat>: R  a floor in tok/s/user: the worst instance's 1000 / tpot_<stat>_ms >= R,
-                           where the registry's interactivity_<stat> is that same formula
+  interactivity_<stat>: R  a floor in tok/s/user: the worst instance's 1000 / tpot_<stat>_ms >= R.
+                           A spec key, defined by its tpot figure: interactivity_mean is 1000 / the
+                           mean TPOT (the registry's interactivity_of_mean_tpot), not the registry's
+                           interactivity_mean, and a report names the figure (`of: tpot_mean_ms`)
   throughput_per_gpu: N    a floor on output tok/s per accelerator
   itl_p99: 20ms            kept as the alias of tpot_p99 (#126: the slot it reads holds TPOT)
 
@@ -26,8 +28,6 @@ THROUGHPUT = "throughput_per_gpu"
 ALIASES = {"itl_p99": "tpot_p99"}
 LEGACY = ("itl_p99", "ttft_p99", "e2e_p99")
 FLOOR_METRIC = "interactivity"
-# The registry's formula for interactivity_<stat>: 1000 over tpot's <stat> in ms.
-FLOOR_FORMULA = "interactivity"
 PER_USER_METRIC = "tpot"
 DEFAULT_STAT = "p99"
 # The metrics a cap can be on: those whose per-instance figures the record rebuilds (worst instance).
@@ -68,13 +68,6 @@ def _registry_stats(registry, metric, unit="ms"):
     return sorted((s for s in out if s), key=_stat_order)
 
 
-def _floor_stats(registry):
-    """The statistics at which the registry's interactivity_<stat> is 1000 / tpot_<stat>."""
-    out = [r.get("statistic") for rid, r in registry.items()
-           if r.get("formula") == FLOOR_FORMULA and rid == f"{FLOOR_METRIC}_{r.get('statistic')}"]
-    return sorted((s for s in out if s), key=_stat_order)
-
-
 def key_errors(slo, registry, parse_duration_ms):
     """Why each key of a spec's `scenario.slo` cannot be judged, as validator messages ([] when all
     can). `registry` is blis_cli.metric_registry's {id: record}."""
@@ -92,14 +85,10 @@ def key_errors(slo, registry, parse_duration_ms):
                 errs.append(f"{where}: {val!r} must be a positive tok/s per accelerator, e.g. 500")
             continue
         if g["kind"] == "floor":
-            rec = registry.get(key) or {}
-            if rec.get("formula") != FLOOR_FORMULA:
-                stats = _floor_stats(registry)
-                what = (f"the registry's {key} is {rec.get('formula')!r}, not 1000 / {g['figure']}"
-                        if rec else f"the registry defines no {key}")
-                errs.append(f"{where}: {what}; interactivity is 1000 / tpot at "
-                            f"{', '.join(stats) or 'no statistic'} (state another statistic as a "
-                            f"{PER_USER_METRIC}_<stat> cap)")
+            if g["figure"] not in registry:
+                errs.append(f"{where}: the metric registry has no {g['figure']}, which this floor is "
+                            f"1000 over; {PER_USER_METRIC} is recorded at "
+                            f"{', '.join(_registry_stats(registry, PER_USER_METRIC)) or 'no statistic'}")
             elif isinstance(val, bool) or not isinstance(val, (int, float)) or val <= 0:
                 errs.append(f"{where}: {val!r} must be a positive tok/s per user, e.g. 50")
             continue

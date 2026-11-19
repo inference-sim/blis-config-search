@@ -568,7 +568,8 @@ def _gate_figures(rec, slo_ms):
         if g["kind"] == "throughput" or g["key"] in slo.LEGACY or g["figure"] in out:
             continue
         v, missing = slo.worst(rec, g)
-        out[g["figure"]] = None if missing or v is None else round(v, 3)
+        # Unrounded: the value servable() compared, so a row at 25.0004 ms never reads as 25.0.
+        out[g["figure"]] = None if missing else v
     return out
 
 

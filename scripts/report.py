@@ -22,6 +22,7 @@ import decimal, json, os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import run_blis  # noqa: E402  -- the ONE per-user / feasibility definition (namasl review #2)
+import slo  # noqa: E402  -- what each scenario.slo key gates
 
 # report/ still holds the canonical lexicon.json (read by lexicon.py, mirrored to the SPA) and
 # schema.md (documents report.json); REPORT_DIR is kept so those readers resolve them.
@@ -182,16 +183,22 @@ _SPEC_DURATION = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(us|ms|s)$")
 
 
 def _spec_slo_caps(slos, floor_set):
-    """Experiment-spec SLO keys (`itl_p99: '20ms'`) as the `<metric>_ms` caps checked here.
-    A spec's itl_p99 is already enforced, acceptance-aware, as the interactivity floor."""
+    """Experiment-spec SLO keys (`itl_p99: '20ms'`) as the `<metric>_ms` caps checked here: a legacy
+    key keyed by the slot it reads, any other cap by its Result figure (tpot_p90_ms), an interactivity
+    floor as its tok/s/user. A per-user gate is already enforced as the interactivity floor when one
+    is set."""
     out = {}
     for k, cap in slos.items():
+        g = slo.parse(k) or {}
+        if floor_set and g.get("metric") == slo.PER_USER_METRIC:
+            continue
+        if g.get("kind") == "floor":
+            out[k] = _as_num(cap)
+            continue
         mt = _SPEC_DURATION.match(str(cap).strip()) if isinstance(cap, str) else None
-        if mt and k in ("itl_p99", "ttft_p99", "e2e_p99"):
-            if k == "itl_p99" and floor_set:
-                continue
+        if mt and g.get("kind") == "cap":
             scale = {"us": 0.001, "ms": 1.0, "s": 1000.0}[mt.group(2)]
-            k, cap = f"{k}_ms", float(mt.group(1)) * scale
+            k, cap = (f"{k}_ms" if k in slo.LEGACY else g["figure"]), float(mt.group(1)) * scale
         out[k] = cap
     return out
 
@@ -217,12 +224,14 @@ def _feasible(run, floor, slos):
     # factor enters; this replaces the engine's per-step interval, which needed one.
     itl_max = _floor_itl_p99_max(floor)
     if itl_max is not None:
-        rate, basis, itl = run_blis.per_user_rate(run)
+        stat = (floor or {}).get("statistic") or slo.DEFAULT_STAT
+        rate, basis, itl = run_blis.per_user_rate(run, stat)
         floor_rate = _floor_rate(floor)
         if rate is None:
-            viol.append("itl_p99_ms missing (cannot verify interactivity floor)")
+            viol.append(f"{'itl_p99_ms' if stat == slo.DEFAULT_STAT else slo.figure('tpot', stat)} "
+                        f"missing (cannot verify interactivity floor)")
         elif rate < floor_rate:
-            viol.append(f"tok_per_s_per_user = {rate:.1f} < {floor_rate:g} (tpot p99 {itl:.1f} ms)")
+            viol.append(f"tok_per_s_per_user = {rate:.1f} < {floor_rate:g} (tpot {stat} {itl:.1f} ms)")
     slos = dict(slos or {})
     # Experiment specs write throughput_per_gpu as a floor, not a cap.
     tput = _as_num(slos.pop("throughput_per_gpu", None))
@@ -236,7 +245,17 @@ def _feasible(run, floor, slos):
     for k, cap in _spec_slo_caps(slos, itl_max is not None).items():
         if cap is None:
             continue
-        val, missing = _metric_any(run, k)
+        g = slo.parse(k) or {}
+        if g.get("kind") == "floor":
+            val, missing = run_blis.worst_figure(run, g["figure"])
+            if missing or not val:
+                viol.append(f"{g['figure']} missing (cannot verify SLO {k} >= {cap:g})")
+            elif 1000.0 / val < cap:
+                viol.append(f"{k} = {1000.0 / val:.1f} < {cap:g}")
+            continue
+        # A legacy slot is read as it always was; a Result figure (tpot_p90_ms) from the Result.
+        legacy = k in {f"{key}_ms" for key in slo.LEGACY} or not str(k).endswith("_ms")
+        val, missing = _metric_any(run, k) if legacy else run_blis.worst_figure(run, k)
         if missing:
             viol.append(f"{k} missing (cannot verify SLO <= {cap})")
         elif val > cap:

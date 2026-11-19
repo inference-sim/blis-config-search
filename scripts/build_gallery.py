@@ -127,6 +127,9 @@ def validate_and_project(run_dir):
         floor_str = f"{floor['tok_per_s_per_user']:g} tok/s/user"
         if floor.get("itl_p99_ms_max") is not None:
             floor_str += f" (ITL p99 ≤ {floor['itl_p99_ms_max']:g} ms)"
+        elif floor.get("of"):
+            # A spec that states the per-user statistic: say which figure the rate is on (DEV-8).
+            floor_str += f" (1000 / worst-instance {floor['of']})"
 
     # A ledger mixing seeds or stacks is not one comparison; say so on the card.
     split = report_py.provenance_split(runs)

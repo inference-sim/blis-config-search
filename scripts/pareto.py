@@ -9,6 +9,11 @@ The axes are the metric registry's, not this repository's (design DEV-8):
   y  total_tokens_per_second_per_gpu            (input + output tokens)/s over ALL the GPUs, or
      output_tokens_per_second_per_decode_gpu    output tokens/s over the decode GPUs
 
+A spec that states its per-user statistic (scenario.slo: a tpot_<stat> cap or an interactivity_<stat>
+floor, see slo.py) replaces x with each row's tok_per_s_per_user on that statistic, 1000 / the worst
+instance's tpot_<stat>_ms, so the ranking and the SLO gate are one figure; pareto.json then names it
+(`x`, `x_basis`).
+
 Both are higher-is-better, so a point is dominated when another is at least as good on both axes and
 better on one. Only runs that held the scenario's SLOs are points: the SLO gate is a separate
 constraint, not an axis.
@@ -29,6 +34,8 @@ THROUGHPUT_FORMS = {
     "decode": ("output_tokens_per_sec_per_decode_gpu", "output_tokens_per_second_per_decode_gpu"),
 }
 X_METRIC = "interactivity_of_mean_tpot"
+X_FIELD = "interactivity"            # the row field holding X_METRIC
+PER_USER_FIELD = "tok_per_s_per_user"   # the row field holding the stated per-user rate
 DEFAULT_OBJECTIVE = {"ranking": "scalar", "throughput": "total"}
 
 
@@ -60,8 +67,8 @@ def non_dominated(points):
     return [p for p in points if not any(_dominates(q, p) for q in points if q is not p)]
 
 
-def _point(row, y_field):
-    x, y = row.get("interactivity"), row.get(y_field)
+def _point(row, y_field, x_field=X_FIELD):
+    x, y = row.get(x_field), row.get(y_field)
     if not row.get("servable") or x is None or y is None:
         return None
     return {"x": float(x), "y": float(y), "row": row}
@@ -75,22 +82,23 @@ def _member(p, status="front"):
             "status": status, "config": r.get("config") or {}}
 
 
-def front(rows, throughput="total"):
-    """The exact front of `rows` (ledger rows, see run_experiment.run_row).
+def front(rows, throughput="total", x_field=X_FIELD):
+    """The exact front of `rows` (ledger rows, see run_experiment.run_row), x read from `x_field`.
+    A member's `interactivity` is its x, whichever figure the report's `x` names.
 
     Returns {"members": [...], "points": n, "unrated": n}: members sorted by interactivity then
     throughput; `unrated` the servable rows lacking either figure (they cannot be placed, and an older
     Result does not state every figure). No member is dominated by any point."""
     y_field = THROUGHPUT_FORMS[throughput][0]
     servable = [r for r in rows if r.get("servable")]
-    pts = [p for p in (_point(r, y_field) for r in servable) if p]
+    pts = [p for p in (_point(r, y_field, x_field) for r in servable) if p]
     members = [_member(p) for p in non_dominated(pts)]
     members.sort(key=lambda m: (m["interactivity"], m["throughput_per_gpu"], m["label"],
                                 m["variant"], m["concurrency"] or 0))
     return {"members": members, "points": len(pts), "unrated": len(servable) - len(pts)}
 
 
-def best_on_front(rows, throughput="total"):
+def best_on_front(rows, throughput="total", x_field=X_FIELD):
     """The ledger row that heads the front: the member with the greatest throughput per GPU, then the
     greatest interactivity, then the lowest concurrency. None when no row can be placed.
 
@@ -98,7 +106,7 @@ def best_on_front(rows, throughput="total"):
     throughput end of the front, so choosing it never hides a member. The full front is emitted
     beside it."""
     y_field = THROUGHPUT_FORMS[throughput][0]
-    f = front(rows, throughput)
+    f = front(rows, throughput, x_field)
     if not f["members"]:
         return None
     top = max(f["members"], key=lambda m: (m["throughput_per_gpu"], m["interactivity"],
@@ -111,9 +119,12 @@ def best_on_front(rows, throughput="total"):
     return None
 
 
-def describe(objective):
-    """One line saying which ranking and objective a report used."""
+def describe(objective, per_user=None):
+    """One line saying which ranking and objective a report used; `per_user` is the stated per-user
+    basis (run_experiment.per_user_basis), which the front's x is then on."""
     form, metric = THROUGHPUT_FORMS[objective["throughput"]][1], X_METRIC
+    if per_user:
+        metric = f"tok/s/user (1000 / the worst instance's {per_user['of']})"
     if objective["ranking"] == "pareto":
         return (f"Pareto front of {form} against {metric} among runs that held the scenario's SLOs, "
                 f"compared exactly on one run per arm (no interval)")

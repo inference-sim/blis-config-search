@@ -1,0 +1,1203 @@
+{
+  "metrics": [
+    {
+      "id": "busy_share",
+      "formula": "busy_share",
+      "statistic": "rate",
+      "population": "ran_steps",
+      "window": "measured",
+      "unit": "fraction",
+      "unfinished": "not_applicable",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "higher_is_better",
+      "description": "Simulated time an instance's engine spent running steps, over the measured window's length; steps are clipped to the window, and pipeline stages that overlap count once. At a pool or the cluster, the instances' busy time over the window's length times the instance count. It is not a service-level figure: a share near 1 means the engine had work for every moment, not that it served it well."
+    },
+    {
+      "id": "cache_hit_rate",
+      "formula": "cache_hit_rate",
+      "statistic": "rate",
+      "population": "admissions",
+      "window": "measured",
+      "unit": "fraction",
+      "unfinished": "not_applicable",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "higher_is_better",
+      "description": "Prompt tokens served from the prefix cache over prompt tokens looked up."
+    },
+    {
+      "id": "decode_busy_share",
+      "formula": "decode_busy_share",
+      "statistic": "rate",
+      "population": "ran_steps",
+      "window": "measured",
+      "unit": "fraction",
+      "unfinished": "not_applicable",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "higher_is_better",
+      "description": "The part of busy_share charged to decode: each step's time is split by the step's scheduled tokens (see prefill_busy_share). prefill_busy_share and decode_busy_share add up to busy_share."
+    },
+    {
+      "id": "e2e_mean_ms",
+      "formula": "e2e",
+      "statistic": "mean",
+      "population": "requests",
+      "window": "measured",
+      "unit": "ms",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Request latency, arrival to last output token, mean, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/serve.py:624-634"
+    },
+    {
+      "id": "e2e_p50_ms",
+      "formula": "e2e",
+      "statistic": "p50",
+      "population": "requests",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Request latency, arrival to last output token, p50, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/serve.py:624-634"
+    },
+    {
+      "id": "e2e_p90_ms",
+      "formula": "e2e",
+      "statistic": "p90",
+      "population": "requests",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Request latency, arrival to last output token, p90, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/serve.py:624-634"
+    },
+    {
+      "id": "e2e_p95_ms",
+      "formula": "e2e",
+      "statistic": "p95",
+      "population": "requests",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Request latency, arrival to last output token, p95, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/serve.py:624-634"
+    },
+    {
+      "id": "e2e_p99_ms",
+      "formula": "e2e",
+      "statistic": "p99",
+      "population": "requests",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Request latency, arrival to last output token, p99, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/serve.py:624-634"
+    },
+    {
+      "id": "gateway_queue_delay_mean_ms",
+      "formula": "gateway_queue_delay",
+      "statistic": "mean",
+      "population": "gateway_queued_requests",
+      "window": "measured",
+      "unit": "ms",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster"
+      ],
+      "better": "lower_is_better",
+      "description": "Time a request waited in the router's flow-control queue, mean, over the measured window."
+    },
+    {
+      "id": "gateway_queue_delay_p50_ms",
+      "formula": "gateway_queue_delay",
+      "statistic": "p50",
+      "population": "gateway_queued_requests",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster"
+      ],
+      "better": "lower_is_better",
+      "description": "Time a request waited in the router's flow-control queue, p50, over the measured window."
+    },
+    {
+      "id": "gateway_queue_delay_p90_ms",
+      "formula": "gateway_queue_delay",
+      "statistic": "p90",
+      "population": "gateway_queued_requests",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster"
+      ],
+      "better": "lower_is_better",
+      "description": "Time a request waited in the router's flow-control queue, p90, over the measured window."
+    },
+    {
+      "id": "gateway_queue_delay_p95_ms",
+      "formula": "gateway_queue_delay",
+      "statistic": "p95",
+      "population": "gateway_queued_requests",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster"
+      ],
+      "better": "lower_is_better",
+      "description": "Time a request waited in the router's flow-control queue, p95, over the measured window."
+    },
+    {
+      "id": "gateway_queue_delay_p99_ms",
+      "formula": "gateway_queue_delay",
+      "statistic": "p99",
+      "population": "gateway_queued_requests",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster"
+      ],
+      "better": "lower_is_better",
+      "description": "Time a request waited in the router's flow-control queue, p99, over the measured window."
+    },
+    {
+      "id": "goodput_rps",
+      "formula": "goodput",
+      "statistic": "rate",
+      "population": "targeted_requests",
+      "window": "measured",
+      "unit": "requests_per_s",
+      "unfinished": "not_applicable",
+      "denominator": "window",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "higher_is_better",
+      "description": "Completed requests that met every SLO target of their class, over the window's length."
+    },
+    {
+      "id": "icl_mean_ms",
+      "formula": "icl",
+      "statistic": "mean",
+      "population": "chunks",
+      "window": "measured",
+      "unit": "ms",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Inter-chunk latency, pooled over every gap between chunks streamed to the client (vllm bench serve's ITL), mean, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/lib/endpoint_request_func.py:270,442 and vllm/benchmarks/serve.py:632,766-769 (ITL); aiperf v0.12.0 src/aiperf/metrics/types/inter_chunk_latency_metric.py:31,63-73 (inter_chunk_latency; mean only, its percentiles are t-digest estimates); inference-perf v0.7.0 inference_perf/apis/chat.py:578 and inference_perf/reportgen/base.py:659-662,734,781 (inter_token_latency, no tokenizer)"
+    },
+    {
+      "id": "icl_p50_ms",
+      "formula": "icl",
+      "statistic": "p50",
+      "population": "chunks",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Inter-chunk latency, pooled over every gap between chunks streamed to the client (vllm bench serve's ITL), p50, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/lib/endpoint_request_func.py:270,442 and vllm/benchmarks/serve.py:632,766-769 (ITL); aiperf v0.12.0 src/aiperf/metrics/types/inter_chunk_latency_metric.py:31,63-73 (inter_chunk_latency; mean only, its percentiles are t-digest estimates); inference-perf v0.7.0 inference_perf/apis/chat.py:578 and inference_perf/reportgen/base.py:659-662,734,781 (inter_token_latency, no tokenizer)"
+    },
+    {
+      "id": "icl_p90_ms",
+      "formula": "icl",
+      "statistic": "p90",
+      "population": "chunks",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Inter-chunk latency, pooled over every gap between chunks streamed to the client (vllm bench serve's ITL), p90, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/lib/endpoint_request_func.py:270,442 and vllm/benchmarks/serve.py:632,766-769 (ITL); aiperf v0.12.0 src/aiperf/metrics/types/inter_chunk_latency_metric.py:31,63-73 (inter_chunk_latency; mean only, its percentiles are t-digest estimates); inference-perf v0.7.0 inference_perf/apis/chat.py:578 and inference_perf/reportgen/base.py:659-662,734,781 (inter_token_latency, no tokenizer)"
+    },
+    {
+      "id": "icl_p95_ms",
+      "formula": "icl",
+      "statistic": "p95",
+      "population": "chunks",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Inter-chunk latency, pooled over every gap between chunks streamed to the client (vllm bench serve's ITL), p95, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/lib/endpoint_request_func.py:270,442 and vllm/benchmarks/serve.py:632,766-769 (ITL); aiperf v0.12.0 src/aiperf/metrics/types/inter_chunk_latency_metric.py:31,63-73 (inter_chunk_latency; mean only, its percentiles are t-digest estimates); inference-perf v0.7.0 inference_perf/apis/chat.py:578 and inference_perf/reportgen/base.py:659-662,734,781 (inter_token_latency, no tokenizer)"
+    },
+    {
+      "id": "icl_p99_ms",
+      "formula": "icl",
+      "statistic": "p99",
+      "population": "chunks",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Inter-chunk latency, pooled over every gap between chunks streamed to the client (vllm bench serve's ITL), p99, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/lib/endpoint_request_func.py:270,442 and vllm/benchmarks/serve.py:632,766-769 (ITL); aiperf v0.12.0 src/aiperf/metrics/types/inter_chunk_latency_metric.py:31,63-73 (inter_chunk_latency; mean only, its percentiles are t-digest estimates); inference-perf v0.7.0 inference_perf/apis/chat.py:578 and inference_perf/reportgen/base.py:659-662,734,781 (inter_token_latency, no tokenizer)"
+    },
+    {
+      "id": "interactivity_mean",
+      "formula": "user_tps",
+      "statistic": "mean",
+      "population": "requests_min_2_output_tokens",
+      "window": "measured",
+      "unit": "tokens_per_s_per_user",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "higher_is_better",
+      "description": "Mean over requests of output tokens per second after the first.",
+      "follows": "aiperf 0.12.0 src/aiperf/metrics/types/output_token_throughput_metrics.py:40-78"
+    },
+    {
+      "id": "interactivity_of_mean_tpot",
+      "formula": "interactivity",
+      "statistic": "mean",
+      "population": "requests_min_2_output_tokens",
+      "window": "measured",
+      "unit": "tokens_per_s_per_user",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "higher_is_better",
+      "description": "1000 over the mean of tpot in milliseconds, the reciprocal of the mean and not the mean of the reciprocals (interactivity_mean): InferenceX's mean_intvty.",
+      "follows": "InferenceX 96d6fb58721b9eac4bfd6aec5b6c84e780835d9b inferencex-e2e/infx/results/fixed_sequence.py:204-206 and inferencex-e2e/infx/results/agentic/request_metrics.py:71-86; InferenceX 08d7a9cda233099b1d19aa1ba6ea32446d4d18a0 utils/process_result.py:129-132"
+    },
+    {
+      "id": "interactivity_p50",
+      "formula": "interactivity",
+      "statistic": "p50",
+      "population": "requests_min_2_output_tokens",
+      "window": "measured",
+      "unit": "tokens_per_s_per_user",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "higher_is_better",
+      "description": "1000 over the p50 of tpot in milliseconds.",
+      "follows": "InferenceX 96d6fb58721b9eac4bfd6aec5b6c84e780835d9b inferencex-e2e/infx/results/fixed_sequence.py:204-206 and inferencex-e2e/infx/results/agentic/request_metrics.py:71-86; InferenceX 08d7a9cda233099b1d19aa1ba6ea32446d4d18a0 utils/process_result.py:129-132"
+    },
+    {
+      "id": "interactivity_p90",
+      "formula": "interactivity",
+      "statistic": "p90",
+      "population": "requests_min_2_output_tokens",
+      "window": "measured",
+      "unit": "tokens_per_s_per_user",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "higher_is_better",
+      "description": "1000 over the p90 of tpot in milliseconds.",
+      "follows": "InferenceX 96d6fb58721b9eac4bfd6aec5b6c84e780835d9b inferencex-e2e/infx/results/fixed_sequence.py:204-206 and inferencex-e2e/infx/results/agentic/request_metrics.py:71-86; InferenceX 08d7a9cda233099b1d19aa1ba6ea32446d4d18a0 utils/process_result.py:129-132"
+    },
+    {
+      "id": "itl_mean_ms",
+      "formula": "itl",
+      "statistic": "mean",
+      "population": "tokens",
+      "window": "measured",
+      "unit": "ms",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Inter-token latency, pooled over every gap between output tokens, zero between tokens of one chunk, mean, over the measured window.",
+      "follows": "inference-perf v0.7.0 inference_perf/reportgen/base.py:614-622,659-662,734,781 (inter_token_latency, a tokenizer configured)"
+    },
+    {
+      "id": "itl_p50_ms",
+      "formula": "itl",
+      "statistic": "p50",
+      "population": "tokens",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Inter-token latency, pooled over every gap between output tokens, zero between tokens of one chunk, p50, over the measured window.",
+      "follows": "inference-perf v0.7.0 inference_perf/reportgen/base.py:614-622,659-662,734,781 (inter_token_latency, a tokenizer configured)"
+    },
+    {
+      "id": "itl_p90_ms",
+      "formula": "itl",
+      "statistic": "p90",
+      "population": "tokens",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Inter-token latency, pooled over every gap between output tokens, zero between tokens of one chunk, p90, over the measured window.",
+      "follows": "inference-perf v0.7.0 inference_perf/reportgen/base.py:614-622,659-662,734,781 (inter_token_latency, a tokenizer configured)"
+    },
+    {
+      "id": "itl_p95_ms",
+      "formula": "itl",
+      "statistic": "p95",
+      "population": "tokens",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Inter-token latency, pooled over every gap between output tokens, zero between tokens of one chunk, p95, over the measured window.",
+      "follows": "inference-perf v0.7.0 inference_perf/reportgen/base.py:614-622,659-662,734,781 (inter_token_latency, a tokenizer configured)"
+    },
+    {
+      "id": "itl_p99_ms",
+      "formula": "itl",
+      "statistic": "p99",
+      "population": "tokens",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Inter-token latency, pooled over every gap between output tokens, zero between tokens of one chunk, p99, over the measured window.",
+      "follows": "inference-perf v0.7.0 inference_perf/reportgen/base.py:614-622,659-662,734,781 (inter_token_latency, a tokenizer configured)"
+    },
+    {
+      "id": "mfu",
+      "formula": "mfu",
+      "statistic": "rate",
+      "population": "ran_steps",
+      "window": "measured",
+      "unit": "fraction",
+      "unfinished": "not_applicable",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "higher_is_better",
+      "description": "Estimated model-FLOPs utilization: the model FLOPs of the steps run in the measured window (each step clipped to it, FLOPs in proportion), counted from the model graph as the kernel prices it (dense and expert GEMMs per token, the head over the sampling rows, attention over the keys each query reads; the elementwise work, recurrent mixers, sparse index scoring and drafter passes are not counted), over the window's length times the scope's GPUs times one GPU's datasheet dense peak at the format the linear layers run in. A model that is mostly recurrent therefore reads low."
+    },
+    {
+      "id": "output_tok_s",
+      "formula": "output_throughput",
+      "statistic": "rate",
+      "population": "requests",
+      "window": "measured",
+      "unit": "tokens_per_s",
+      "unfinished": "not_applicable",
+      "denominator": "window",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "higher_is_better",
+      "description": "Output tokens of the window's completed requests over the window's length.",
+      "follows": "aiperf 0.12.0 src/aiperf/metrics/types/output_token_throughput_metrics.py:40-78"
+    },
+    {
+      "id": "output_tok_s_per_gpu",
+      "formula": "output_throughput",
+      "statistic": "rate",
+      "population": "requests",
+      "window": "measured",
+      "unit": "tokens_per_s",
+      "unfinished": "not_applicable",
+      "denominator": "window_and_gpus",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "higher_is_better",
+      "description": "output_tok_s over the GPUs of the scope it describes: the deployment's pools at the cluster, a pool's or an instance's own at those scopes."
+    },
+    {
+      "id": "output_tokens_per_second_per_decode_gpu",
+      "formula": "output_throughput",
+      "statistic": "rate",
+      "population": "requests",
+      "window": "measured",
+      "unit": "tokens_per_s",
+      "unfinished": "not_applicable",
+      "denominator": "window_and_decode_gpus",
+      "scopes": [
+        "cluster"
+      ],
+      "better": "higher_is_better",
+      "description": "Output tokens of the window's completed requests over the window's length and over the decode GPUs of the deployment only, or all its GPUs when it has no decode pool: InferenceX's output_tput_per_gpu. Defined at the cluster, where the decode GPUs are counted.",
+      "follows": "InferenceX 96d6fb58721b9eac4bfd6aec5b6c84e780835d9b inferencex-e2e/infx/results/fixed_sequence.py:145,159,193; InferenceX 08d7a9cda233099b1d19aa1ba6ea32446d4d18a0 utils/process_result.py:84,101,121"
+    },
+    {
+      "id": "preemptions",
+      "formula": "preemptions",
+      "statistic": "total",
+      "population": "steps",
+      "window": "run",
+      "unit": "count",
+      "unfinished": "not_applicable",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Preemptions the engines performed over the whole run."
+    },
+    {
+      "id": "prefill_busy_share",
+      "formula": "prefill_busy_share",
+      "statistic": "rate",
+      "population": "ran_steps",
+      "window": "measured",
+      "unit": "fraction",
+      "unfinished": "not_applicable",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "higher_is_better",
+      "description": "The part of busy_share charged to prefill: each step's time is split by the step's scheduled tokens, those of requests still computing their prompt against those past it (decode tokens, speculative drafts included)."
+    },
+    {
+      "id": "request_throughput",
+      "formula": "request_throughput",
+      "statistic": "rate",
+      "population": "requests",
+      "window": "measured",
+      "unit": "requests_per_s",
+      "unfinished": "not_applicable",
+      "denominator": "window",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "higher_is_better",
+      "description": "Completed requests over the window's length.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/serve.py:624-634"
+    },
+    {
+      "id": "scheduling_delay_mean_ms",
+      "formula": "scheduling_delay",
+      "statistic": "mean",
+      "population": "requests",
+      "window": "measured",
+      "unit": "ms",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Time from arrival at an engine to the request's first scheduled step, mean, over the measured window."
+    },
+    {
+      "id": "scheduling_delay_p50_ms",
+      "formula": "scheduling_delay",
+      "statistic": "p50",
+      "population": "requests",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Time from arrival at an engine to the request's first scheduled step, p50, over the measured window."
+    },
+    {
+      "id": "scheduling_delay_p90_ms",
+      "formula": "scheduling_delay",
+      "statistic": "p90",
+      "population": "requests",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Time from arrival at an engine to the request's first scheduled step, p90, over the measured window."
+    },
+    {
+      "id": "scheduling_delay_p95_ms",
+      "formula": "scheduling_delay",
+      "statistic": "p95",
+      "population": "requests",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Time from arrival at an engine to the request's first scheduled step, p95, over the measured window."
+    },
+    {
+      "id": "scheduling_delay_p99_ms",
+      "formula": "scheduling_delay",
+      "statistic": "p99",
+      "population": "requests",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Time from arrival at an engine to the request's first scheduled step, p99, over the measured window."
+    },
+    {
+      "id": "slo_attainment",
+      "formula": "slo_attainment",
+      "statistic": "rate",
+      "population": "targeted_requests",
+      "window": "measured",
+      "unit": "fraction",
+      "unfinished": "not_applicable",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "higher_is_better",
+      "description": "Completed requests that met every SLO target of their class, over the targeted requests that arrived."
+    },
+    {
+      "id": "step_interval_mean_ms",
+      "formula": "step_interval",
+      "statistic": "mean",
+      "population": "steps",
+      "window": "measured",
+      "unit": "ms",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Engine step interval between token-emitting steps of a request; not per token under speculative decoding, mean, over the measured window."
+    },
+    {
+      "id": "step_interval_p50_ms",
+      "formula": "step_interval",
+      "statistic": "p50",
+      "population": "steps",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Engine step interval between token-emitting steps of a request; not per token under speculative decoding, p50, over the measured window."
+    },
+    {
+      "id": "step_interval_p90_ms",
+      "formula": "step_interval",
+      "statistic": "p90",
+      "population": "steps",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Engine step interval between token-emitting steps of a request; not per token under speculative decoding, p90, over the measured window."
+    },
+    {
+      "id": "step_interval_p95_ms",
+      "formula": "step_interval",
+      "statistic": "p95",
+      "population": "steps",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Engine step interval between token-emitting steps of a request; not per token under speculative decoding, p95, over the measured window."
+    },
+    {
+      "id": "step_interval_p99_ms",
+      "formula": "step_interval",
+      "statistic": "p99",
+      "population": "steps",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Engine step interval between token-emitting steps of a request; not per token under speculative decoding, p99, over the measured window."
+    },
+    {
+      "id": "total_tok_s",
+      "formula": "total_throughput",
+      "statistic": "rate",
+      "population": "requests",
+      "window": "measured",
+      "unit": "tokens_per_s",
+      "unfinished": "not_applicable",
+      "denominator": "window",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "higher_is_better",
+      "description": "Prompt and output tokens of the window's completed requests over the window's length.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/serve.py:624-634"
+    },
+    {
+      "id": "total_tokens_per_second_per_gpu",
+      "formula": "total_throughput",
+      "statistic": "rate",
+      "population": "requests",
+      "window": "measured",
+      "unit": "tokens_per_s",
+      "unfinished": "not_applicable",
+      "denominator": "window_and_gpus",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "higher_is_better",
+      "description": "Prompt and output tokens of the window's completed requests over the window's length and over all the GPUs of the scope it describes, prefill GPUs included: InferenceX's tput_per_gpu.",
+      "follows": "InferenceX 96d6fb58721b9eac4bfd6aec5b6c84e780835d9b inferencex-e2e/infx/bench_serving/benchmark_serving.py:483-484 and inferencex-e2e/infx/results/fixed_sequence.py:139,158,192; InferenceX 08d7a9cda233099b1d19aa1ba6ea32446d4d18a0 utils/bench_serving/benchmark_serving.py:466-467 and utils/process_result.py:78,100,120"
+    },
+    {
+      "id": "tpot_mean_ms",
+      "formula": "tpot",
+      "statistic": "mean",
+      "population": "requests_min_2_output_tokens",
+      "window": "measured",
+      "unit": "ms",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Time per output token, excluding the first, computed per request (aiperf's ITL), mean, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/serve.py:624-634 (TPOT); aiperf v0.12.0 src/aiperf/metrics/types/inter_token_latency_metric.py:24,55 (inter_token_latency); inference-perf v0.7.0 inference_perf/reportgen/base.py:653-657 (time_per_output_token)"
+    },
+    {
+      "id": "tpot_p50_ms",
+      "formula": "tpot",
+      "statistic": "p50",
+      "population": "requests_min_2_output_tokens",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Time per output token, excluding the first, computed per request (aiperf's ITL), p50, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/serve.py:624-634 (TPOT); aiperf v0.12.0 src/aiperf/metrics/types/inter_token_latency_metric.py:24,55 (inter_token_latency); inference-perf v0.7.0 inference_perf/reportgen/base.py:653-657 (time_per_output_token)"
+    },
+    {
+      "id": "tpot_p90_ms",
+      "formula": "tpot",
+      "statistic": "p90",
+      "population": "requests_min_2_output_tokens",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Time per output token, excluding the first, computed per request (aiperf's ITL), p90, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/serve.py:624-634 (TPOT); aiperf v0.12.0 src/aiperf/metrics/types/inter_token_latency_metric.py:24,55 (inter_token_latency); inference-perf v0.7.0 inference_perf/reportgen/base.py:653-657 (time_per_output_token)"
+    },
+    {
+      "id": "tpot_p95_ms",
+      "formula": "tpot",
+      "statistic": "p95",
+      "population": "requests_min_2_output_tokens",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Time per output token, excluding the first, computed per request (aiperf's ITL), p95, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/serve.py:624-634 (TPOT); aiperf v0.12.0 src/aiperf/metrics/types/inter_token_latency_metric.py:24,55 (inter_token_latency); inference-perf v0.7.0 inference_perf/reportgen/base.py:653-657 (time_per_output_token)"
+    },
+    {
+      "id": "tpot_p99_ms",
+      "formula": "tpot",
+      "statistic": "p99",
+      "population": "requests_min_2_output_tokens",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Time per output token, excluding the first, computed per request (aiperf's ITL), p99, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/serve.py:624-634 (TPOT); aiperf v0.12.0 src/aiperf/metrics/types/inter_token_latency_metric.py:24,55 (inter_token_latency); inference-perf v0.7.0 inference_perf/reportgen/base.py:653-657 (time_per_output_token)"
+    },
+    {
+      "id": "ttft_mean_ms",
+      "formula": "ttft",
+      "statistic": "mean",
+      "population": "requests",
+      "window": "measured",
+      "unit": "ms",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Time to first token, mean, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/serve.py:624-634"
+    },
+    {
+      "id": "ttft_p50_ms",
+      "formula": "ttft",
+      "statistic": "p50",
+      "population": "requests",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Time to first token, p50, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/serve.py:624-634"
+    },
+    {
+      "id": "ttft_p90_ms",
+      "formula": "ttft",
+      "statistic": "p90",
+      "population": "requests",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Time to first token, p90, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/serve.py:624-634"
+    },
+    {
+      "id": "ttft_p95_ms",
+      "formula": "ttft",
+      "statistic": "p95",
+      "population": "requests",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Time to first token, p95, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/serve.py:624-634"
+    },
+    {
+      "id": "ttft_p99_ms",
+      "formula": "ttft",
+      "statistic": "p99",
+      "population": "requests",
+      "window": "measured",
+      "unit": "ms",
+      "percentile_method": "numpy_linear",
+      "unfinished": "excluded",
+      "scopes": [
+        "cluster",
+        "pool",
+        "instance"
+      ],
+      "aggregates": [
+        "max",
+        "min"
+      ],
+      "better": "lower_is_better",
+      "description": "Time to first token, p99, over the measured window.",
+      "follows": "vllm v0.32.0 vllm/benchmarks/serve.py:624-634"
+    }
+  ]
+}

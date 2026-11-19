@@ -704,6 +704,20 @@ def worst_metric(run, key):
     return (max(vals), False) if vals else (None, True)
 
 
+def worst_figure(run, figure):
+    """`worst_metric` for a figure named by its metric-registry id (tpot_p90_ms, ttft_p50_ms, ...):
+    the cluster figure is the Result's own (`measured.metrics`), so a statistic the flat record does
+    not copy is still read, and the instances are the ones measured_instances rebuilt. A record with
+    no measured block (written before it existed) falls back to the flat cluster figure."""
+    measured = (run.get("measured") or {}).get("metrics")
+    if isinstance(measured, dict) and measured:
+        cluster = {figure: _figure(measured.get(figure) or {})}
+    else:
+        cluster = run.get("metrics") or {}
+    return worst_metric({"metrics": cluster, "metrics_all_instances": run.get("metrics_all_instances")},
+                        figure)
+
+
 def worst_itl_p99(run):
     """The worst-instance p99 time per output token -- `worst_metric` at the key the per-user rate is
     built on. The slot is still called itl_p99_ms in the records, on the cluster figure and on each
@@ -711,7 +725,7 @@ def worst_itl_p99(run):
     return worst_metric(run, "itl_p99_ms")
 
 
-def per_user_rate(run):
+def per_user_rate(run, stat=None):
     """THE per-user token rate for a recorded run -- the one definition the search, the report's
     feasibility test and the displayed number all use (namasl review #2).
 
@@ -722,10 +736,14 @@ def per_user_rate(run):
     displayed rate on the aggregate while testing feasibility on the worst instance is how a row came
     to be shown at 101.9 tok/s/user and simultaneously marked infeasible at 31.8 ms.
 
+    `stat` is the statistic the spec states the rate at (slo.per_user): None or p99 is the worst p99
+    above; any other is 1000 / the worst tpot_<stat>_ms (worst_figure).
+
     Returns (rate_or_None, basis, tpot_used); basis is always "" (a direct rate), kept so callers need
     no change.
     """
-    tpot, missing = worst_itl_p99(run)
+    tpot, missing = (worst_itl_p99(run) if stat in (None, "p99")
+                     else worst_figure(run, f"tpot_{stat}_ms"))
     if missing or not tpot:
         return None, "", None
     return 1000.0 / tpot, "", tpot

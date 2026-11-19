@@ -2,7 +2,7 @@
 """The one place config search calls the simulator's own commands.
 
 Design §5 (blis-config-search card): config search reads settings lists through `blis fields`,
-catalog identities through `blis catalog resolve`, and the schemas of its inputs and outputs
+catalog identities through `blis catalog resolve`, the metric registry through `blis metrics`, and the schemas of its inputs and outputs
 through `blis schema`, and validates every scenario and Result with `blis schema validate`
 (CFG-3, SUB-19, X7). Each function here runs one of those commands on the binary it is given
 and returns the parsed output.
@@ -153,6 +153,18 @@ def schema(blis, document):
             raise BlisCommandError(f"`blis schema {document}` printed no JSON Schema")
         return doc
     return _cached(_key(blis, "schema", document), load)
+
+
+def metric_registry(blis):
+    """The metric registry this build pins, as `blis metrics --json` prints it: {id: record}, each
+    record with the registry's own keys (formula, statistic, unit, scopes, aggregates, ...)."""
+    def load():
+        doc = _json(blis, ["metrics"])
+        recs = doc.get("metrics") if isinstance(doc, dict) else None
+        if not isinstance(recs, list) or not all(isinstance(r, dict) and r.get("id") for r in recs):
+            raise BlisCommandError("`blis metrics --json` printed no metric list")
+        return {r["id"]: r for r in recs}
+    return _cached(_key(blis, "metrics"), load)
 
 
 def supports_pool_offload(blis):

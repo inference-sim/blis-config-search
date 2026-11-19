@@ -20,6 +20,8 @@ const sloLabel = (k: string) => {
   const m = (Object.keys(SLO_OF) as (keyof typeof SLO_OF)[]).find((x) => SLO_OF[x] === k)
   return m ? METRIC[m].label : k.replace('_', ' ')
 }
+/** An interactivity key is a floor in tok/s/user (at least); every other latency key is a cap. */
+export const sloBound = (k: string) => (k.startsWith('interactivity_') ? '≥' : '≤')
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
 
 export async function loadExplore(runId: string): Promise<ExploreData> {
@@ -56,7 +58,7 @@ export function ScenarioPage({ runId, scenarios, catalog, load = loadExplore }: 
         <CatRef href={modelDoc}>{s.model}</CatRef>
         <CatRef href={catalogDoc(catalog, 'hardware', s.hardware)}>{s.gpu_budget} {s.hardware}</CatRef>
         <CatRef href={catalogDoc(catalog, 'workload', s.workload)}>{s.workload}</CatRef>
-        {data && Object.entries(data.slo).map(([k, v]) => <span key={k} className="spec floor" title={`From the spec's scenario.slo (${k}); a run is servable only if it meets every SLO.`}>SLO {sloLabel(k)} ≤ {v}</span>)}
+        {data && Object.entries(data.slo).map(([k, v]) => <span key={k} className="spec floor" title={`From the spec's scenario.slo (${k}); a run is servable only if it meets every SLO.`}>SLO {sloLabel(k)} {sloBound(k)} {v}</span>)}
         <a className="xf-speclink" href={`${REPO}/blob/main/experiments/${encodeURIComponent(runId)}.yaml`} target="_blank" rel="noreferrer">experiment spec ↗</a>
       </div>
       {s.caveat && <div className="warnnote">{s.caveat}</div>}

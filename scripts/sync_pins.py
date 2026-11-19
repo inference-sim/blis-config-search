@@ -48,6 +48,8 @@ END = "# <<< end derived block <<<"
 DERIVED = {
     "github.com/inference-sim/blis-substrate": "SUBSTRATE_REF",
     "github.com/inference-sim/blis-vllm": "VLLM_REF",
+    # The SGLang engine, a Go dependency from v0.18.1 on (absent from earlier go.mod files).
+    "github.com/inference-sim/blis-sglang": "SGLANG_REF",
     # The router fork keeps upstream's module path, so go.mod reaches it via `replace`.
     "github.com/inference-sim/llm-d-router": "ROUTER_REF",
 }

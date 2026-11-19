@@ -19,6 +19,10 @@ One row for each coverage entry; `knob_table.py --json FILE` writes every proper
 | `deployment:pools[].engine` | 1 | `sweeps[].engine.<setting> (the engine rows)` |  |
 | `deployment:pools[].labels` | 1 |  | router selectors are derived from the pool's role |
 | `deployment:pools[].nodes` | 1 | `sweeps[].num-instances (nodes follow the layout)` |  |
+| `deployment:pools[].offload.*` | 4 |  | the connector, its spec, its options and the prefetch depth take the simulator's defaults; secondary tiers have no key (inference-sim/blis-config-search#94) |
+| `deployment:pools[].offload.eviction_policy` | 1 | `sweeps[].offload.eviction_policy, sweeps[].prefill.offload.eviction_policy, sweeps[].decode.offload.eviction_policy` |  |
+| `deployment:pools[].offload.tiers[].bytes` | 1 | `sweeps[].offload.cpu_bytes (a disaggregated sweep: the default for both pools), sweeps[].prefill.offload.cpu_bytes, sweeps[].decode.offload.cpu_bytes (0 is a pool with no tier)` |  |
+| `deployment:pools[].offload.tiers[].tier` | 1 |  | the spec states the CPU tier only; the fs, obj and p2p tiers have no key yet (inference-sim/blis-config-search#94) |
 | `deployment:pools[].parallel.data_parallel_load_balancing` | 1 | `sweeps[].parallel.data_parallel_load_balancing` |  |
 | `deployment:pools[].parallel.dcp` | 1 | `sweeps[].parallel.dcp` |  |
 | `deployment:pools[].parallel.dp` | 1 | `sweeps[].parallel.dp` |  |
@@ -27,6 +31,7 @@ One row for each coverage entry; `knob_table.py --json FILE` writes every proper
 | `deployment:pools[].parallel.pcp` | 1 | `sweeps[].parallel.pcp` |  |
 | `deployment:pools[].parallel.pp` | 1 | `sweeps[].parallel.pp` |  |
 | `deployment:pools[].parallel.tp` | 1 | `sweeps[].parallel.tp` |  |
+| `deployment:pools[].pd_transfer.connector` | 1 |  | derived from the pool: a pool with a CPU tier runs NIXL as a MultiConnector, any other pool the deployment's connector |
 | `deployment:pools[].role` | 1 | `sweeps[].prefill-instances, sweeps[].decode-instances` |  |
 | `deployment:router.endpoint_picker_config` | 1 | `sweeps[].router.endpoint_picker_config` |  |
 | `deployment:router.epp_flags[]` | 1 |  | router flags have no spec key (inference-sim/blis-config-search#144) |
@@ -57,16 +62,16 @@ One row for each coverage entry; `knob_table.py --json FILE` writes every proper
 | source | status | sweepable | settings |
 |---|---|---|---|
 | config | inert_unproven | no | 119 |
-| config | modelled | yes | 42 |
-| config | not_modelled | no | 382 |
+| config | modelled | yes | 50 |
+| config | not_modelled | no | 374 |
 | config | proven_inert | no | 2 |
 | env | inert_unproven | no | 3 |
-| env | modelled | no | 3 |
+| env | modelled | no | 4 |
 | env | modelled | yes | 1 |
-| env | not_modelled | no | 451 |
+| env | not_modelled | no | 461 |
 | env | proven_inert | no | 5 |
 
-Sweepable: `engine.async_scheduling`, `engine.block_size`, `engine.cache_dtype`, `engine.compilation_config.cudagraph_capture_sizes`, `engine.compilation_config.max_cudagraph_capture_size`, `engine.cudagraph_capture_sizes`, `engine.cudagraph_mode`, `engine.data_parallel_size`, `engine.decoder_replay_cudagraph_capture_sizes`, `engine.disable_hybrid_kv_cache_manager`, `engine.dp_sync_interval`, `engine.enable_chunked_prefill`, `engine.enable_expert_parallel`, `engine.enable_prefix_caching`, `engine.frontend`, `engine.gpu_memory_utilization`, `engine.indexer_kv_dtype`, `engine.kv_events.enable_kv_cache_events`, `engine.kv_transfer_config.kv_connector`, `engine.kv_transfer_config.kv_role`, `engine.language_model_only`, `engine.long_prefill_token_threshold`, `engine.long_prefill_token_threshold_adaptive`, `engine.max_cudagraph_capture_size`, `engine.max_loras`, `engine.max_model_len`, `engine.max_num_active_seqs`, `engine.max_num_batched_tokens`, `engine.max_num_scheduled_tokens`, `engine.max_num_seqs`, `engine.pipeline_parallel_size`, `engine.prefill_schedule_interval`, `engine.quantization`, `engine.scheduling_policy`, `engine.speculative.draft_model`, `engine.speculative.enable_adaptive_verification`, `engine.speculative.method`, `engine.speculative.num_spec_tokens`, `engine.speculative.rejection_sample_method`, `engine.speculative_config.synthetic_acceptance_length`, `engine.swa_bounded_replay`, `engine.tensor_parallel_size`, `engine.watermark`.
+Sweepable: `engine.api_server_count`, `engine.async_scheduling`, `engine.block_size`, `engine.cache_dtype`, `engine.compilation_config.cudagraph_capture_sizes`, `engine.compilation_config.max_cudagraph_capture_size`, `engine.cudagraph_capture_sizes`, `engine.cudagraph_mode`, `engine.data_parallel_external_lb`, `engine.data_parallel_hybrid_lb`, `engine.data_parallel_multi_port_external_lb`, `engine.data_parallel_size`, `engine.data_parallel_size_local`, `engine.decoder_replay_cudagraph_capture_sizes`, `engine.disable_hybrid_kv_cache_manager`, `engine.dp_sync_interval`, `engine.enable_chunked_prefill`, `engine.enable_expert_parallel`, `engine.enable_prefix_caching`, `engine.enable_scale_out`, `engine.frontend`, `engine.gpu_memory_utilization`, `engine.indexer_kv_dtype`, `engine.kv_cache_memory_bytes`, `engine.kv_events.enable_kv_cache_events`, `engine.kv_transfer_config.kv_connector`, `engine.kv_transfer_config.kv_role`, `engine.language_model_only`, `engine.long_prefill_token_threshold`, `engine.long_prefill_token_threshold_adaptive`, `engine.max_cpu_loras`, `engine.max_cudagraph_capture_size`, `engine.max_loras`, `engine.max_model_len`, `engine.max_num_active_seqs`, `engine.max_num_batched_tokens`, `engine.max_num_scheduled_tokens`, `engine.max_num_seqs`, `engine.pipeline_parallel_size`, `engine.prefill_schedule_interval`, `engine.quantization`, `engine.scheduling_policy`, `engine.speculative.draft_model`, `engine.speculative.enable_adaptive_verification`, `engine.speculative.method`, `engine.speculative.num_spec_tokens`, `engine.speculative.rejection_sample_method`, `engine.speculative_config.synthetic_acceptance_length`, `engine.swa_bounded_replay`, `engine.tensor_parallel_size`, `engine.watermark`.
 
 The other settings, with their status and issue, are in the full table (`knob_table.py --json FILE`).
 
@@ -77,7 +82,7 @@ The other settings, with their status and issue, are in the full table (`knob_ta
 | sglang-engine | the engine kind of an experiment, and the SGLang settings the simulator models Pending the pinned build. | `scenario:engine.kind`, `engine:sglang:config:chunked_prefill_size` |
 | multi-node-pd-handoff | prefill and decode pools of different layout, including a prefill pool whose data-parallel ranks span nodes (Handoff.At) | `deployment:pools[].role`, `deployment:pools[].nodes`, `deployment:pools[].parallel.dp`, `deployment:pools[].parallel.tp` |
 | per-rank-cpu-tier | the CPU KV tier and its size, off as the control | `deployment:offload.tiers[].bytes` |
-| per-pool-cpu-tier | a disaggregated deployment's CPU tier on the prefill pool, the decode pool or both (blis-substrate#307) Pending the pinned build. | `deployment:pools[].offload.tiers[].bytes` |
+| per-pool-cpu-tier | a disaggregated deployment's CPU tier on the prefill pool, the decode pool or both (blis-substrate#307) | `deployment:pools[].offload.tiers[].bytes` |
 | offload-with-drafting | the KV tier beside an EAGLE-3 or MTP drafter | `deployment:offload.tiers[].bytes`, `engine:vllm:config:speculative_config.method` |
 | dp-balancing-modes | the data-parallel load-balancing mode of a pool | `deployment:pools[].parallel.data_parallel_load_balancing` |
 | all-reduce-lane | custom or NCCL all-reduce (the field list says why it is not swept yet) | `engine:vllm:config:disable_custom_all_reduce` |

@@ -35,7 +35,10 @@ THROUGHPUT_FORMS = {
 }
 X_METRIC = "interactivity_of_mean_tpot"
 X_FIELD = "interactivity"            # the row field holding X_METRIC
-PER_USER_FIELD = "tok_per_s_per_user"   # the row field holding the stated per-user rate
+PER_USER_X = "tok_per_s_per_user"       # the figure pareto.json's `x` names when a spec states one
+# The row field the front reads it from: the rate to 3 decimals, as `interactivity`. The displayed
+# tok_per_s_per_user is rounded to 0.1, and ties from that rounding dropped real front members.
+PER_USER_FIELD = "per_user_rate"
 DEFAULT_OBJECTIVE = {"ranking": "scalar", "throughput": "total"}
 
 

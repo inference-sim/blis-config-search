@@ -2341,8 +2341,8 @@ class SloAtAnyStatistic(unittest.TestCase):
 
     def test_the_front_ranks_on_the_stated_statistic(self):
         """Two rows the mean axis cannot order and the p90 rate can: the front follows the spec."""
-        a = {**_row("a", 100.0, 900.0), "tok_per_s_per_user": 30.0}
-        b = {**_row("b", 80.0, 1000.0), "tok_per_s_per_user": 60.0}
+        a = {**_row("a", 100.0, 900.0), "per_user_rate": 30.0}
+        b = {**_row("b", 80.0, 1000.0), "per_user_rate": 60.0}
         obj = PA.objective_of({"ranking": "pareto"})
         basis = E.per_user_basis({"tpot_p90": "25ms"})
         default = E.pareto_report([], [a, b], obj)
@@ -2358,6 +2358,27 @@ class SloAtAnyStatistic(unittest.TestCase):
                          "on the stated rate b dominates a")
         self.assertEqual("b", E.ranked_best([a, b], obj, basis)["label"])
         self.assertIn("tpot_p90_ms", PA.describe(obj, basis))
+
+    def test_the_front_ranks_the_stated_rate_unrounded(self):
+        """kalantar's #172 review case: tpot_p90 19.99 ms at 100 tok/s/GPU and 20.01 ms at 101 both
+        display as 50.0 tok/s/user; the front reads the 3-decimal rate and keeps both."""
+        slo = {"tpot_p90": "25ms"}
+        slo_ms, basis = E.slo_limits(slo), E.per_user_basis(slo)
+        obj = PA.objective_of({"ranking": "pareto"})
+        rows = []
+        for label, tpot, tput in (("a", 19.99, 100.0), ("b", 20.01, 101.0)):
+            rec = self.rec({"tpot_p90_ms": tpot, "tpot_p99_ms": tpot},
+                           [{"tpot_p90_ms": tpot, "tpot_p99_ms": tpot}])
+            row = E.run_row(rec, {}, label, "", "s", 8, 8, slo_ms, slo)
+            self.assertEqual(50.0, row["tok_per_s_per_user"], "displayed to 0.1")
+            rows.append({**row, "servable": True, "total_tokens_per_sec_per_gpu": tput})
+        self.assertEqual([50.025, 49.975], [r["per_user_rate"] for r in rows])
+        members = E.pareto_report([], rows, obj, basis)["overall"]["total"]["members"]
+        self.assertEqual(["a", "b"], sorted(m["label"] for m in members), "neither dominates")
+        self.assertEqual("b", E.ranked_best(rows, obj, basis)["label"])
+        default = E.run_row(self.rec({"tpot_p99_ms": 20.0}, [{"tpot_p99_ms": 20.0}]),
+                            {}, "l", "", "s", 8, 8, {"itl_p99": 20.0}, {"itl_p99": "20ms"})
+        self.assertNotIn("per_user_rate", default, "a spec stating no statistic keeps its row")
         self.assertNotIn("tpot_p90_ms", PA.describe(obj))
 
     def test_the_sweeper_and_the_report_agree_on_a_restated_slo(self):

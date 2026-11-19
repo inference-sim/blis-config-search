@@ -1,0 +1,46 @@
+{
+  "explore_prose": [
+    "Every run in this experiment is in the explorer below: filter by outcome to see which settings held the SLOs, or by setting to compare one sweep against another.",
+    "Each sweep's hypothesis was written before the runs, and is quoted beside that sweep's measured result below."
+  ],
+  "hero": [
+    {
+      "h": "What was tested",
+      "html": "3 configurations over 1 sweep (chunk-size), each at 2 load levels, every run on exactly 8 GPUs."
+    },
+    {
+      "h": "What was found",
+      "html": "<strong>1x TP8 (chunk size 8192)</strong>, from the <em>chunk-size</em> sweep, reached 69.44 tok/s/accelerator (555.5 tok/s across the fleet) at concurrency 16 while holding the scenario's SLOs. Ranking: max output tok/s per accelerator subject to the scenario's SLOs."
+    },
+    {
+      "h": "What to run",
+      "html": "1x TP8 (chunk size 8192) at concurrency 16. 6 of 6 runs held the SLOs.",
+      "run": true
+    }
+  ],
+  "meta": [
+    "BLIS discrete-event simulation",
+    "Experiment Spec (RFC #21)",
+    "deterministic sweep \u2014 no LLM in the measurement path",
+    "seed 42",
+    "basis: measured window",
+    "scope: cluster; worst instance for TTFT and end-to-end gates"
+  ],
+  "recommendation_num": 3,
+  "recommendation_prose": [
+    "The table below lists the measured operating points. Headline ranking: max output tok/s per accelerator subject to the scenario's SLOs. The Pareto front of every sweep is in pareto.json."
+  ],
+  "sections": [
+    {
+      "caption_note": "3 configurations, 6 runs.",
+      "num": 2,
+      "prose": [
+        "Smaller prefill chunks should cost both tail inter-token latency and time-to-first-token, as each prompt then needs more passes.",
+        "Measured: best was <strong>1x TP8 (chunk size 8192)</strong> at 69.44 tok/s/accelerator (concurrency 16)."
+      ],
+      "title": "Sweep: chunk-size"
+    }
+  ],
+  "standfirst": "A deterministic sweep over multidoc traffic, comparing 1 designs on one GPU budget.",
+  "title": "glm-5 on 8x h200: glm-5-h200-sglang-chunked-prefill"
+}

@@ -1,0 +1,47 @@
+{
+  "basis": "measured_window",
+  "experiment": {
+    "description": "",
+    "name": "glm-5-h200-sglang-chunked-prefill",
+    "sweeps": [
+      {
+        "name": "chunk-size",
+        "narrative": "Smaller prefill chunks should cost both tail inter-token latency and time-to-first-token, as each prompt then needs more passes."
+      }
+    ]
+  },
+  "gpu_budget": 8,
+  "hardware": "h200",
+  "headroom": 1.0,
+  "interactivity_floor": {},
+  "model": "glm-5",
+  "objective": "max output tok/s per accelerator subject to the scenario's SLOs",
+  "pinned_stack": {
+    "blis": "v0.18.1",
+    "data": "embedded",
+    "engine_version": "0.5.23",
+    "kernel": "unpinned",
+    "resolved": {
+      "blis": {
+        "commit": "dfa898752ccbacc8d0ecab8e434fc9c4c7373587",
+        "describe": "v0.18.1",
+        "sha256": "a46b166df786bc1b97feaf6604eea02fc7e5020d480cbefc09db148b30dbee50"
+      }
+    },
+    "router": "v1.0.0-blis.5.0.20261118163949-601ff6e9d37d",
+    "router_configs": {
+      "resolved": {
+        "module": "github.com/llm-d/llm-d-router",
+        "version": "v1.0.0-blis.5.0.20261118163949-601ff6e9d37d"
+      }
+    },
+    "substrate": "v0.15.1-0.20261118162118-b6748ca9d757"
+  },
+  "run_id": "glm-5-h200-sglang-chunked-prefill",
+  "scope": "cluster; worst instance for TTFT and end-to-end gates",
+  "seed": 42,
+  "slos": {},
+  "workload": {
+    "preset": "multidoc"
+  }
+}

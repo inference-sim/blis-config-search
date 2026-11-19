@@ -103,7 +103,7 @@ cluster figure and every instance's):
 
 | key | meaning |
 |---|---|
-| `<metric>_<stat>: 25ms` | a cap on the Result's `<metric>_<stat>_ms`, for `ttft`, `e2e` or `tpot` at any statistic the simulator's metric registry defines (`blis metrics`): `tpot_p90`, `ttft_p95`, `e2e_mean`, ... Needs a unit. |
+| `<metric>_<stat>: 25ms` | a cap on the Result's `<metric>_<stat>_ms`, for `ttft`, `e2e` or `tpot` at a statistic the simulator's metric registry defines (`blis metrics`) and the per-instance figures are rebuilt at (mean, p50, p90, p95, p99; `run_blis.INSTANCE_STATS`): `tpot_p90`, `ttft_p95`, `e2e_mean`, ... Needs a unit and a positive value. |
 | `interactivity_<stat>: 40` | a floor in tok/s/user: `1000 / tpot_<stat>_ms >= 40`, at any statistic `tpot` has. The key is defined by that figure: `interactivity_mean` is 1000 / the mean TPOT (the registry's `interactivity_of_mean_tpot`), not the registry's `interactivity_mean`, a mean of per-request rates; the report names the figure (`of: tpot_mean_ms`) |
 | `itl_p99: 20ms` | the alias of `tpot_p99` (the slot it reads holds TPOT) |
 | `throughput_per_gpu: 500` | a floor on output tok/s per accelerator |
@@ -117,7 +117,9 @@ a report that states one names it (`interactivity_floor.statistic` and `.of`, `p
 The validator refuses a key the registry does not define, naming the statistics it does
 (`tpot_p75`). A statistic the registry defines but the Result does not report (`tpot_p95` on the
 pinned release) passes validation and is refused by the sweeper at the first Result, naming the
-statistics the Result reports; it is never computed here.
+statistics the Result reports; it is never computed here. On a ledger written before the Result's
+measured window (`--runs-from`), only `itl_p99`, `ttft_p99` and `e2e_p99` can be judged; any other key
+is refused.
 
 ## The engine
 

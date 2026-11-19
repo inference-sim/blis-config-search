@@ -1,5 +1,4 @@
 # GLM-5 on one 8-GPU H200 node under SGLang: how much does the prefill chunk size cost or buy?
-# Pending the pin: the pinned simulator does not register the sglang engine yet (see ./README.md).
 # The first SGLang search; the recipe's mem_fraction_static (0.85) and the model's window are stated.
 
 name: glm-5-h200-sglang-chunked-prefill

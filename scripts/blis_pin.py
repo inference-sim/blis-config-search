@@ -54,7 +54,7 @@ UPSTREAM = "inference-sim/inference-sim"
 TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 # The keys whose VALUE says which stack priced a report. A comment-only edit to pins.env moves
 # none of them and must not queue hours of sweeps.
-STACK_KEYS = ("BLIS_REF", "BLIS_SHA", "SUBSTRATE_REF", "VLLM_REF", "ROUTER_REF")
+STACK_KEYS = ("BLIS_REF", "BLIS_SHA", "SUBSTRATE_REF", "VLLM_REF", "SGLANG_REF", "ROUTER_REF")
 # A batch is one PR. Small enough to review the numbers, large enough not to open a PR per report.
 MAX_BATCH = 4
 
@@ -486,6 +486,19 @@ def _broken(rec):
             or (rec.get("error") or "").startswith("unsupported config"))
 
 
+# The engine's answer that a deployment does not fit the device: no room for weights, no KV budget, or
+# a KV pool too small for one request at the stated window. These are capacity verdicts of the new
+# release (a corrected memory model moves them), not a knob this repo writes being refused, so a row
+# that now gets one is a numbers change that the regeneration records as a named refusal (the
+# M3.1 rule: a refused point is a named row, it does not stop a publish), not LOUD.
+_FIT_REFUSALS = ("No available memory for the cache blocks", "No KV budget exists",
+                 "To serve at least one request with the model's max seq len")
+
+
+def _fit_refusal(why):
+    return any(m in why for m in _FIT_REFUSALS) or ("does not fit" in why and "devices" in why)
+
+
 def _tps(rec):
     return (rec.get("metrics") or {}).get("tokens_per_sec") or 0.0
 
@@ -670,7 +683,11 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
         checks.append({"config": old["config"], "old_tps": round(_tps(old), 1),
                        "new_tps": None if _broken(n) else round(_tps(n), 1),
                        "error": None if _ok(n) else why})
-        if _broken(n):
+        if _broken(n) and _fit_refusal(why):
+            warnings.append(f"{run_id} {_cfg_phrase(old['config'])} no longer fits on the new stack "
+                            f"and is refused ({why[-400:]}): its report records it as a named "
+                            f"refusal on regeneration")
+        elif _broken(n):
             failures.append(f"LOUD: {run_id} {_cfg_phrase(old['config'])} ran on the old stack "
                             f"and fails on the new one: {why}")
         elif not _ok(n):

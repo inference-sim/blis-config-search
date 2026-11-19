@@ -23,9 +23,9 @@ def fail(msg, code=1):
 def main(argv):
     args = [a for a in argv if a != "--json"]
     if args[:1] == ["fields"] and args[1:2] == ["--engine"] and len(args) == 3:
-        if args[2] != "vllm":
+        if args[2] not in ("vllm", "sglang"):
             fail(f"fields: no field list for engine {args[2]!r}")
-        print(json.dumps(read("fields-vllm.json")))
+        print(json.dumps(read(f"fields-{args[2]}.json")))
         return
     if args[:2] == ["schema", "validate"] and len(args) == 4:
         doc, path = args[2], args[3]

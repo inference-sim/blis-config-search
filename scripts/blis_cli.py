@@ -11,6 +11,7 @@ Library code: a failure raises BlisCommandError (or DocumentInvalid), never exit
 """
 import json
 import os
+import re
 import subprocess
 
 
@@ -71,7 +72,15 @@ def _field_list_json(blis, engine, path):
         return _json(blis, ["fields", "--engine", engine])
     try:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
+            doc = json.load(f)
+        # `path` is the vLLM list (scripts/fetch_fields.py). Another engine's list sits beside it,
+        # with `.json` replaced by `.<engine>.json`.
+        if isinstance(doc, dict) and (doc.get("engine") or {}).get("kind") not in (None, engine):
+            sibling = re.sub(r"\.json$", "", path) + f".{engine}.json"
+            if os.path.exists(sibling):
+                with open(sibling, encoding="utf-8") as f:
+                    doc = json.load(f)
+        return doc
     except (OSError, ValueError) as e:
         raise BlisCommandError(f"the field list of engine {engine!r} ({path}): {e}") from e
 

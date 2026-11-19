@@ -415,6 +415,12 @@ def test_smoke_verdicts():
             r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
             check(sum(f.startswith("LOUD") for f in r["failures"]) == 3,
                   "a config the new stack refuses is LOUD")
+            fit = ('kernelmodel: x does not fit 79.2 GiB devices at tp=8: one rank\'s weights alone are 80.8 GiB. '
+                   'No KV budget exists')
+            run_blis.run_one = fake(lambda c: _rec(c, 0, rc=1, error=fit))
+            r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
+            check(not r["failures"] and len(r["warnings"]) == 3 and "no longer fits" in r["warnings"][0],
+                  f"a row the new release says does not fit is a warning naming the refusal, not LOUD: {r}")
             run_blis.run_one = fake(lambda c: _rec(c, 0, rc=1, error="field x not found"))
             r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
             check(sum(f.startswith("LOUD") for f in r["failures"]) == 3,

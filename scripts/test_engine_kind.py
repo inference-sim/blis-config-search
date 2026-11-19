@@ -7,6 +7,7 @@ Run: python3 -I scripts/test_engine_kind.py
 import copy
 import json
 import os
+import shutil
 import stat
 import sys
 import tempfile
@@ -112,6 +113,21 @@ class EngineKind(unittest.TestCase):
         self.assertEqual({"configs": 3, "runs": 3}, {k: rep["totals"][k] for k in ("configs", "runs")})
 
 
+class SiblingFieldList(unittest.TestCase):
+    def test_an_sglang_spec_reads_the_sglang_list_beside_the_vllm_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            vllm = os.path.join(d, "fields.json")
+            with open(vllm, "w") as f:
+                with open(os.path.join(HERE, "testdata", "blis-m1", "fields-vllm.json")) as src:
+                    f.write(src.read())
+            self.assertEqual("vllm", blis_cli.fields(BLIS, "vllm", vllm)["engine"]["kind"])
+            with self.assertRaises(blis_cli.BlisCommandError):       # no sglang list beside it yet
+                blis_cli.fields(BLIS, "sglang", vllm)
+            with open(os.path.join(d, "fields.sglang.json"), "w") as f:
+                json.dump(SGLANG_FIELDS, f)
+            self.assertEqual("sglang", blis_cli.fields(BLIS, "sglang", vllm)["engine"]["kind"])
+
+
 def fake_blis(directory, kinds):
     path = os.path.join(directory, "blis")
     with open(path, "w") as f:
@@ -141,11 +157,18 @@ class PendingPin(unittest.TestCase):
             with self.assertRaises(blis_cli.BlisCommandError):
                 blis_cli.registered_kinds(path)
 
-    def test_the_committed_pending_specs_are_pending_on_a_build_without_the_kind(self):
-        self.assertEqual([], check_pending_pin.problems(fake_blis(self.tmp.name, "vllm"), PENDING))
+    def pending_dir(self):
+        """A pending-pin directory holding an sglang spec (the committed one has joined experiments/)."""
+        d = os.path.join(self.tmp.name, "pending")
+        os.mkdir(d)
+        shutil.copy(os.path.join(ROOT, "experiments", "glm-5-h200-sglang-chunked-prefill.yaml"), d)
+        return d
+
+    def test_a_pending_spec_is_pending_on_a_build_without_the_kind(self):
+        self.assertEqual([], check_pending_pin.problems(fake_blis(self.tmp.name, "vllm"), self.pending_dir()))
 
     def test_a_pending_spec_fails_the_day_the_pinned_build_runs_its_kind(self):
-        found = check_pending_pin.problems(fake_blis(self.tmp.name, "sglang, vllm"), PENDING)
+        found = check_pending_pin.problems(fake_blis(self.tmp.name, "sglang, vllm"), self.pending_dir())
         self.assertTrue(found and all("move it from pending-pin/ to experiments/" in p for p in found), found)
 
     def test_a_vllm_spec_is_never_pending(self):

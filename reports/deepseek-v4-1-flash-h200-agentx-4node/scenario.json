@@ -47,31 +47,23 @@
   "model": "deepseek-v4.1-flash",
   "objective": "max output tok/s per accelerator subject to the scenario's SLOs",
   "pinned_stack": {
-    "blis": "v0.17.1",
-    "data": "override",
-    "engine_version": "0.32.0",
+    "blis": "v0.18.1",
+    "data": "embedded",
+    "engine_version": "0.33.0",
     "kernel": "unpinned",
     "resolved": {
       "blis": {
-        "sha256": "62b7810073591748b6d3474f0439f3426bef192202f0bf06f26c7752d9d3011e"
-      },
-      "catalog": {
-        "commit": "f9f3c9327794d543a0915c4deb1259ff9985c753",
-        "describe": "v0.14.1"
-      },
-      "registry": {
-        "commit": "f9f3c9327794d543a0915c4deb1259ff9985c753",
-        "describe": "v0.14.1"
+        "sha256": "a46b166df786bc1b97feaf6604eea02fc7e5020d480cbefc09db148b30dbee50"
       }
     },
-    "router": "v1.0.0-blis.4",
+    "router": "v1.0.0-blis.5.0.20261118163949-601ff6e9d37d",
     "router_configs": {
       "resolved": {
         "module": "github.com/llm-d/llm-d-router",
-        "version": "v1.0.0-blis.4"
+        "version": "v1.0.0-blis.5.0.20261118163949-601ff6e9d37d"
       }
     },
-    "substrate": "v0.14.1"
+    "substrate": "v0.15.1-0.20261118162118-b6748ca9d757"
   },
   "run_id": "deepseek-v4-1-flash-h200-agentx-4node",
   "scope": "cluster; worst instance for TTFT and end-to-end gates",

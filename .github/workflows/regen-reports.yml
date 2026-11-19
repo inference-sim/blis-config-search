@@ -138,6 +138,9 @@ jobs:
               print("every report is already priced by the pinned stack -- nothing to regenerate")
           for p in plan.get("pending", []):
               print(f"::notice::{p['id']} is stale but its regeneration is pending elsewhere: {p['why']}")
+          for p in plan.get("lapsed", []):
+              print(f"::warning::{p['id']} carries a REGENERATION_PENDING marker that no longer holds "
+                    f"(its release is pinned, or it names none); planned as stale. Marker: {p['why']}")
           for o in plan["orphans"]:
               print(f"::warning::{o['id']} has no experiment spec to regenerate from; "
                     f"it keeps its old stack label until handled by hand")
@@ -162,7 +165,7 @@ jobs:
             echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with: { go-version-file: upstream/go.mod, cache-dependency-path: upstream/go.sum }
-      - run: cd upstream && go build -o blis main.go
+      - run: sh scripts/build_blis.sh upstream
       # Belt and braces for a pins.env that reached main without the pin-compat gate (a direct
       # push, an admin merge): hours of runs on specs that do not fit the stack would
       # produce reports that are wrong in ways a reviewer cannot see. Seconds, so always run it.

@@ -17,7 +17,7 @@ runs:
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: upstream/blis
-        key: blis-bin-${{ runner.os }}-${{ runner.arch }}-${{ steps.pin.outputs.sha }}-${{ hashFiles('.github/actions/pinned-blis/action.yml') }}
+        key: blis-bin-${{ runner.os }}-${{ runner.arch }}-${{ steps.pin.outputs.sha }}-${{ hashFiles('.github/actions/pinned-blis/action.yml', 'scripts/build_blis.sh') }}
     - if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       run: |
@@ -32,6 +32,6 @@ runs:
       with: { go-version-file: upstream/go.mod, cache-dependency-path: upstream/go.sum }
     - if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
-      run: cd upstream && go build -o blis main.go
+      run: sh scripts/build_blis.sh upstream
     - shell: bash
       run: chmod +x upstream/blis && upstream/blis --help >/dev/null

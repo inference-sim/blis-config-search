@@ -13,10 +13,13 @@ cd inference-sim
 # The tag is NOT configured immutable upstream, so verify it still resolves to the pinned
 # commit before building; fail loudly if the tag has been moved.
 test "$(git rev-parse HEAD)" = "$BLIS_SHA" || { echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
-go build -o blis main.go
+# Stamp the release tag, or every Result calls the build "unreleased" and the sweeper refuses
+# to write its report to reports/. The script reads the tag from pins.env.
+cd ..
+sh scripts/build_blis.sh inference-sim
 ```
 
-Pass this `./blis` to the validator and the sweeper as `--blis`. Both read the engine's
+Pass this `inference-sim/blis` to the validator and the sweeper as `--blis`. Both read the engine's
 settings from the pinned blis-vllm release's `fields.json`, which `scripts/fetch_fields.py FILE`
 writes and `--fields FILE` names (the simulator prints it itself once it has `blis fields`), the pool-layout keys with `blis schema deployment`,
 and model and chip names with `blis catalog resolve`; the sweeper validates each generated

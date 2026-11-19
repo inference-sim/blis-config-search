@@ -663,6 +663,8 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     concurrency = list(sc["concurrency"])
     slo_ms = slo_limits(sc.get("slo"))
     shared_engine = dict(sc.get("engine") or {})
+    if not fields:
+        run_blis.ask_field_list(blis, catalog, sc)
     engine_version = blis_cli.engine_release(blis, settings.ENGINE_KIND, fields)
     replay = dict(sc.get("replay") or {}) or None
     # The cluster's inter-node fabric, defaulting to IB so a spec that states none is byte-identical.
@@ -892,8 +894,9 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
         "slo_ms": slo_ms,
         # What every ranked figure is (CFG-4, DEV-8): the metric basis and the scope it ranges over.
         # The cluster figures are the Result's measured window. The worst-instance TTFT, end-to-end
-        # and TPOT gates are rebuilt from its profiling-phase rows; the ITL gate is the cluster's,
-        # because the decode-step interval is not per request (inference-sim #2087 gives the rest).
+        # and TPOT gates are rebuilt from its profiling-phase rows, and a P/D run's prefill instances
+        # come from their own measured window (#158). Each instance's interactivity slot holds its
+        # per-request TPOT, because the decode-step interval is not per request (inference-sim #2087).
         "basis": run_blis.BASIS,
         "scope": "cluster; worst instance for TTFT and end-to-end gates",
         "interactivity_floor": {"tok_per_s_per_user": floor_rate_from(slo_ms)},
@@ -906,7 +909,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
         "outcomes": outcome_counts(all_rows),
         "refusals": refusal_groups(all_rows),
         "pinned_stack": _pinned_stack(blis, catalog, registry, engine_version,
-                                      _priced_with_other_data(runs, data_override), router_cfg),
+                                      _priced_with_other_data(runs, data_override), router_cfg, runs),
         "experimental": _priced_with_other_data(runs, data_override),
         "model_arch": (entry or {}).get("arch"),
         "totals": {"configs": sum(s["configs"] for s in sweep_results),
@@ -918,6 +921,11 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                    "configs_refused": refused_configs(all_rows)},
     }
     if not dry_run:
+        # The Results name the binary's own commit, which a binary outside its source tree cannot (#158).
+        ran = blis_pin_warning(report["pinned_stack"])
+        if ran and ran != warn:
+            print(f"WARNING: {ran}\n         Every number in this report is priced by that binary, and "
+                  f"scenario.json records its version and commit.", file=sys.stderr, flush=True)
         # The refusal above covers a requested override. This one covers what the Results say: a
         # report priced with other data, or by an untagged build, is never written to reports/.
         if stage and report["experimental"]:
@@ -1233,8 +1241,9 @@ def resolve_workload_spec(path, doc, stated, dry_run=False):
     """The replay descriptor for a workload named by file.
 
     The corpus digest, the window, the grace period and the context filter come from the file, as
-    they come from the catalog entry for a named workload. The report records the whole document
-    and the file's own sha256, and `_overrides` is empty: the file is the workload.
+    they come from the catalog entry for a named workload. A spec's `benchmark_duration` and
+    `grace_period` override the file's, and recipe_record names each override. The report records
+    the whole document and the file's own sha256.
     """
     stated = dict(stated or {})
     corpus = doc.get("corpus") if isinstance(doc.get("corpus"), dict) else {}
@@ -1260,8 +1269,10 @@ def resolve_workload_spec(path, doc, stated, dry_run=False):
     for key in ("corpus", "corpus_cache"):
         if stated.get(key):
             out[key] = stated[key]
-    if "grace_period" in stated:
-        out["grace_period"] = stated["grace_period"]
+    # A spec's window and grace override the file's; recipe_record names the override (#158).
+    for key in ("benchmark_duration", "grace_period"):
+        if key in stated:
+            out[key] = stated[key]
     if not dry_run and not out.get("corpus"):
         raise SystemExit(
             f"workload_spec {path!r} is a trace REPLAY, so it needs a local corpus file:\n"
@@ -1361,10 +1372,11 @@ def _other_data_reason(runs):
     return "a Result names a build that is not a tagged release"
 
 
-def _pinned_stack(blis, catalog, registry, engine_version, data_override=False, router_cfg=None):
+def _pinned_stack(blis, catalog, registry, engine_version, data_override=False, router_cfg=None, runs=()):
     """What priced these runs: the pins.env refs, the engine release the simulator ran, and the
     commits and binary digest that ran. The catalog and registry are the simulator's embedded data
-    (the substrate release in pins.env) unless the run overrode them."""
+    (the substrate release in pins.env) unless the run overrode them. The binary's own version and
+    commit are what its Results name (`revisions.simulator`), so an off-pin binary is recorded as itself."""
     pins = build_catalog.read_pins()
     out = {"blis": pins.get("BLIS_REF", "unpinned"),
            "kernel": pins.get("KERNEL_REF", "unpinned"),
@@ -1389,6 +1401,20 @@ def _pinned_stack(blis, catalog, registry, engine_version, data_override=False, 
             resolved["blis"]["commit"] = commit
         if desc:
             resolved["blis"]["describe"] = desc
+    ran = next((r["simulator"] for r in runs if r.get("simulator")), None)
+    if ran:
+        version, _, commit = ran.partition("+")
+        b = resolved.setdefault("blis", {})
+        b["version"] = version
+        if commit:
+            clean = commit.removesuffix("-dirty")
+            # The checkout's describe names the tree, not the binary: a stale build in a clean tree, or a
+            # clean build in an edited one, keeps it only when it names the commit the Results name.
+            if b.get("commit") != clean or b.get("describe", "").endswith("-dirty"):
+                b.pop("describe", None)
+            b["commit"] = clean
+            if commit.endswith("-dirty"):
+                b["describe"] = commit
     if resolved:
         out["resolved"] = resolved
     return out
@@ -1703,8 +1729,9 @@ def main(argv=None):
     ap.add_argument("--data-override", action="store_true", dest="data_override",
                     help="EXPERIMENTAL: price with --catalog/--registry instead of the simulator's embedded "
                          "data. The report is marked experimental and may not be written to reports/")
-    ap.add_argument("--fields", help="the engine's field list: the pinned blis-vllm release's fields.json, "
-                                     "until the binary has `blis fields` (default: ask the binary)")
+    ap.add_argument("--fields", help="the engine's field list: the pinned blis-vllm release's fields.json "
+                                     "(scripts/fetch_fields.py). Default: ask the binary (`blis fields --scenario` "
+                                     "on a probe of the spec's model and hardware)")
     ap.add_argument("--routing", default=os.path.join(ROOT, "routing"))
     ap.add_argument("--router-configs", dest="router_configs", default=None,
                     help="developer override: a router checkout whose reference-configs/ replace the "

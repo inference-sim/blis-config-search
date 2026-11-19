@@ -72,7 +72,7 @@ def fake_engine(directory, refuses, min_tp=1, packaging=None):
     real = BLIS
     with open(path, "w") as f:
         f.write(f"#!/bin/sh\n"
-                f"if [ \"$1\" = fields ] && [ \"$2\" = --scenario ]; then\n"
+                f"if [ \"$1\" = fields ] && [ \"$2\" = --scenario ] && grep -q eviction_policy \"$5/$3\"; then\n"
                 f"  if [ {min_tp} -gt \"$(sed -n 's/^ *tp: *//p' \"$5/$3\" | head -1)\" ]; then\n"
                 f"    echo 'Error: the model does not fit at this tp' >&2; exit 1\n  fi\n"
                 + (f"  if grep -q 'gpus_per_node:' \"$5/$3\" && ! grep -q 'gpus_per_node: {packaging}$' \"$5/$3\"; then\n"

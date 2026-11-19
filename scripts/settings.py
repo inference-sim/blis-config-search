@@ -2,7 +2,7 @@
 """The engine settings and pool-layout keys a spec may name, read from the simulator.
 
 Config search keeps no list of settings (CFG-3). The engine's settings are the entries of its
-field list, which `blis fields --engine <kind>` prints at the release the binary runs; the
+field list, which `blis fields --scenario` prints at the release the binary runs; the
 pool-layout keys are the properties of the deployment document's Parallelism, which `blis schema
 deployment` prints (SUB-19). This module turns those two outputs into one Vocabulary that the
 validator and the runner share.
@@ -124,7 +124,7 @@ def vocabulary_from(field_list, deployment_schema, renames=None):
             "`blis schema deployment` has no deployment.Parallelism properties") from e
     engine = field_list["engine"]
     return Vocabulary(parallel, flat, blocks, engine["version"],
-                      f"`blis fields --engine {engine['kind']}` ({engine['kind']} "
+                      f"`blis fields` ({engine['kind']} "
                       f"{engine['version']}) and `blis schema deployment`", status)
 
 

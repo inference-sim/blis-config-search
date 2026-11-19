@@ -248,6 +248,56 @@ def spec(**over):
 # --- the committed fixtures: RFC #21's examples ------------------------------------------------
 
 
+class FieldListProbe(unittest.TestCase):
+    """Without --fields the validator asks the binary on the spec's own model and hardware (#158): a
+    spec the build refuses is a validation error, not a crash."""
+
+    def fresh_blis(self):
+        """The stand-in at a path of its own, so no field list is cached for it yet."""
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d)
+        path = os.path.join(d, "blis")
+        with open(path, "w") as f:
+            f.write(f'#!/bin/sh\nexec {BLIS} "$@"\n')
+        os.chmod(path, 0o755)
+        return path
+
+    def test_an_unknown_chip_is_an_error_the_validator_returns(self):
+        doc = spec()
+        doc["scenario"]["hardware"] = "no-such-chip"
+        errs = V.validate(doc, self.fresh_blis(), ROUTING)
+        self.assertTrue(any("no-such-chip" in e for e in errs), errs)
+
+    def test_a_spec_with_no_hardware_does_not_crash(self):
+        doc = spec()
+        del doc["scenario"]["hardware"]
+        errs = V.validate(doc, self.fresh_blis(), ROUTING)
+        self.assertTrue(any(e.startswith("scenario.hardware") for e in errs), errs)
+
+    def test_a_malformed_engine_block_does_not_crash(self):
+        doc = spec()
+        doc["scenario"]["engine"] = "bad"
+        self.assertTrue(V.validate(doc, self.fresh_blis(), ROUTING))
+
+    def test_a_directory_whose_first_spec_is_refused_still_validates_the_rest(self):
+        import contextlib
+        import io
+        bad, good = spec(name="a-bad"), spec(name="b-good")
+        bad["scenario"]["hardware"] = "no-such-chip"
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d)
+        for doc in (bad, good):
+            with open(os.path.join(d, doc["name"] + ".yaml"), "w") as f:
+                yaml.safe_dump(doc, f)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = V.main([d, "--blis", self.fresh_blis(), "--routing", ROUTING])
+        text = out.getvalue() + err.getvalue()
+        self.assertEqual(1, rc, text)
+        self.assertIn("no-such-chip", text)
+        self.assertIn("b-good", text)
+
+
 class CommittedSpecsValidate(unittest.TestCase):
     """Every spec in experiments/ must validate -- the acceptance criterion from #21."""
 
@@ -1201,6 +1251,18 @@ class WorkloadByFile(unittest.TestCase):
         self.assertEqual(self.GOOD, r["workload_document"])
         self.assertEqual(E.workload_spec_sha256(path), r["workload_spec_sha256"])
         self.assertEqual(64, len(r["workload_spec_sha256"]))
+
+    def test_the_specs_window_overrides_the_files_and_reaches_the_command(self):
+        """`replay.benchmark_duration` beside a workload_spec was dropped, so every replay ran the file's window (#158).
+        BLIS lets the flag win over the file, so the runner passes the spec's value and the report names it."""
+        path = self.write(self.GOOD)
+        r = E.resolve_workload_spec(path, E.load_workload_spec(path),
+                                    {"corpus": "/c/t.jsonl", "benchmark_duration": "300s"}, dry_run=True)
+        self.assertEqual("300s", r["benchmark_duration"])
+        replay = {k: v for k, v in r.items() if k not in E.RECORD_ONLY_REPLAY}
+        cmd = run_blis.build_replay_cmd("/b", None, None, "/sc", "s.yaml", 42, None, {}, replay)
+        self.assertEqual("300s", cmd[cmd.index("--benchmark-duration") + 1])
+        self.assertEqual([900, 300], E.recipe_record(self.GOOD, r)["overrides"]["benchmark_duration_s"])
 
     def test_the_command_passes_the_file_and_the_catalog_is_not_read(self):
         path = self.write(self.GOOD)
@@ -2595,6 +2657,19 @@ class DataOverride(unittest.TestCase):
         finally:
             E.run_blis.run_one = real
 
+    def test_a_sweep_records_and_warns_about_the_binary_its_results_name(self):
+        """The wiring of #158 item 2: an off-pin binary's commit reaches scenario.json's stack and stderr."""
+        import contextlib
+        import io
+        off = "d2a6cc04ab7f38b1cddb662a78ded9831609fed3"
+        err = io.StringIO()
+        with tempfile.TemporaryDirectory() as out, contextlib.redirect_stderr(err):
+            rep = self.sweep(out, data="embedded", released_build=True, simulator=f"v0.18.1-dev+{off}")
+        blis = rep["pinned_stack"]["resolved"]["blis"]
+        self.assertEqual(("v0.18.1-dev", off), (blis["version"], blis["commit"]))
+        if E.build_catalog.read_pins().get("BLIS_SHA") != off:
+            self.assertIn(f"built from {off[:12]}", err.getvalue())
+
     def test_a_development_build_makes_the_report_experimental(self):
         with tempfile.TemporaryDirectory() as out:
             rep = self.sweep(out, data="embedded", released_build=False)
@@ -2761,6 +2836,39 @@ class PinCheck(unittest.TestCase):
             self.assertEqual(40, len(E._blis_source_commit(fake)[1] or ""))
             blis = E._pinned_stack(fake, None, None, "0.32.0")["resolved"]["blis"]
             self.assertTrue(blis.get("sha256") and blis.get("commit"))
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_the_stack_records_the_binary_the_results_name_and_warns_off_pin(self):
+        """A binary outside its source tree is recorded by the version and commit its Results name (#158)."""
+        runs = [{"simulator": None}, {"simulator": "v0.18.1-0.20261118172949-d2a6cc04ab7f+d2a6cc04ab7f38b1cddb662a78ded9831609fed3"}]
+        blis = E._pinned_stack(None, None, None, "0.33.0", runs=runs)["resolved"]["blis"]
+        self.assertEqual("v0.18.1-0.20261118172949-d2a6cc04ab7f", blis["version"])
+        self.assertEqual("d2a6cc04ab7f38b1cddb662a78ded9831609fed3", blis["commit"])
+        w = E.blis_pin_warning(E._pinned_stack(None, None, None, "0.33.0", runs=runs), self.PINS)
+        self.assertIn("d2a6cc04ab7f", w)
+        on_pin = [{"simulator": "v0.14.0+" + self.PINS["BLIS_SHA"]}]
+        self.assertEqual("", E.blis_pin_warning(E._pinned_stack(None, None, None, "0.33.0", runs=on_pin), self.PINS))
+        dirty = [{"simulator": "v0.14.0+" + self.PINS["BLIS_SHA"] + "-dirty"}]
+        self.assertIn("UNCOMMITTED", E.blis_pin_warning(E._pinned_stack(None, None, None, "0.33.0", runs=dirty), self.PINS))
+
+    def test_a_checkout_describe_that_is_not_the_binarys_is_dropped(self):
+        """A stale binary in a clean tree, or a clean build in an edited one: the Results' commit wins,
+        and the checkout's describe does not label it."""
+        import shutil
+        import subprocess
+        d = tempfile.mkdtemp()
+        try:
+            subprocess.run(["git", "init", "-q"], cwd=d, check=True)
+            for name in ("main.go", "blis"):
+                open(os.path.join(d, name), "w").close()
+            subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "x",
+                            "--allow-empty"], cwd=d, check=True)
+            subprocess.run(["git", "tag", "v0.14.0"], cwd=d, check=True)
+            stale = [{"simulator": "v0.12.0+" + "c" * 40}]
+            blis = E._pinned_stack(os.path.join(d, "blis"), None, None, "0.33.0", runs=stale)["resolved"]["blis"]
+            self.assertEqual("c" * 40, blis["commit"])
+            self.assertNotIn("describe", blis)
         finally:
             shutil.rmtree(d, ignore_errors=True)
 

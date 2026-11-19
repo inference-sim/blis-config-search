@@ -261,8 +261,8 @@ and note in a `#` comment that the grid was bounded. Do not silently drop a cont
 
 - **Every knob value is a list.** `tp: [8]`, never `tp: 8`.
 - **An omitted knob takes the vLLM default.** Do not restate defaults.
-- **Knob names are the engine's own** — `engine:` keys are the entries of `blis fields --engine
-  vllm` (vLLM's own config field names), `parallel:` keys are the deployment document's pool
+- **Knob names are the engine's own** — `engine:` keys are the entries of `blis fields --scenario`
+  (vLLM's own config field names), `parallel:` keys are the deployment document's pool
   fields (`blis schema deployment`). Nothing invented.
 - **Every run uses exactly `scenario.gpus`.** For a colocated sweep
   `tp x dp x num-instances == gpus`; for a disaggregated one both pools count together.

@@ -439,6 +439,8 @@ def _check_router(router, where, errs, routing_dir=ROUTING_DIR, router_cfg=None)
 
 def _node_size(sc, blis, catalog=None):
     """The node size a spec's scenario runs on, or None when it cannot be told (reported elsewhere)."""
+    if not isinstance(sc.get("hardware"), str):
+        return None
     try:
         fixed = blis_cli.chip_packaging(blis, sc.get("hardware"), catalog)["gpus_per_node"]
     except blis_cli.BlisCommandError:
@@ -911,6 +913,23 @@ def _sweep_is_colocated(sw):
     return not ({"prefill-instances", "decode-instances", "prefill", "decode"} & set(sw))
 
 
+def _ask_field_list(blis, catalog, spec):
+    """Ask the binary for the field list on a probe of the spec's model and hardware (#158): None when
+    it answers or there is nothing to probe, else the problem, so a spec the build refuses is an
+    error that validate returns, not a crash."""
+    sc = spec.get("scenario") if isinstance(spec, dict) else None
+    if not (isinstance(sc, dict) and all(isinstance(sc.get(k), str) and sc[k] for k in ("model", "hardware"))):
+        return None   # nothing to probe: knob_vocabulary reuses a list already asked, or says why it has none
+    if not isinstance(sc.get("engine") or {}, dict):
+        return None   # validate reports the malformed engine block
+    import run_blis
+    try:
+        run_blis.ask_field_list(blis, catalog, sc)
+    except (blis_cli.BlisCommandError, run_blis.ConfigError) as e:
+        return f"the field list: {e}"
+    return None
+
+
 def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, router_cfg=None):
     """Every error in `spec`, as readable `path: message` strings. Empty means valid.
 
@@ -936,7 +955,11 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
     if kind not in settings.ENGINE_KINDS:
         return [f"scenario.engine_kind: {kind!r} is none of {', '.join(settings.ENGINE_KINDS)}"]
     settings.use_engine(kind)
-    vocab = knob_vocabulary(blis, fields)
+    problem = None if fields else _ask_field_list(blis, catalog, spec)
+    try:
+        vocab = knob_vocabulary(blis, fields)
+    except blis_cli.BlisCommandError as e:
+        return [problem or f"the field list: {e}"]
     pool_offload = blis_cli.supports_pool_offload(blis)
     par_vocab, eng_vocab, source = vocab.parallel, vocab.engine_names(), vocab.source
 
@@ -1005,14 +1028,18 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
         # scenario.engine holds settings every run carries, so its values are SINGLE, not lists.
         # Getting this backwards is easy, and a list here would be written into the scenario
         # verbatim and refused by the engine, so say which way round it goes.
-        for key, val in (sc.get("engine") or {}).items():
+        shared = sc.get("engine") or {}
+        if not isinstance(shared, dict):
+            errs.append(f"scenario.engine: must be a mapping of setting to value, not {shared!r}")
+            shared = {}
+        for key, val in shared.items():
             if _is_list(val) and key not in ENGINE_INT_LISTS:
                 errs.append(f"scenario.engine.{key}: a shared setting takes ONE value, not a "
                             f"list (sweep it under a sweep's `engine:` instead)")
-        _check_knob_names(sc.get("engine") or {}, "scenario.engine", eng_vocab, "engine", errs,
+        _check_knob_names(shared, "scenario.engine", eng_vocab, "engine", errs,
                           source)
         for block, inner in vocab.blocks.items():
-            val = (sc.get("engine") or {}).get(block)
+            val = shared.get(block)
             if isinstance(val, dict):
                 for field in val:
                     if field not in inner:
@@ -1264,8 +1291,8 @@ def main(argv=None):
                     help="the simulator binary whose commands supply setting names and catalog "
                          "identities (default: $BLIS)")
     ap.add_argument("--fields",
-                    help="the engine's field list: the pinned blis-vllm release's fields.json, until the "
-                         "binary has `blis fields` (default: ask the binary)")
+                    help="the engine's field list: the pinned blis-vllm release's fields.json (scripts/fetch_fields.py). "
+                         "Default: ask the binary (`blis fields --scenario` on a probe of the spec's model and hardware)")
     ap.add_argument("--catalog",
                     help="a catalog directory for `blis catalog resolve` (default: the catalog "
                          "the binary embeds)")
@@ -1275,11 +1302,18 @@ def main(argv=None):
     if not paths:
         print(f"no spec files under {args.target}", file=sys.stderr)
         return 1
+    first, _ = load(paths[0])
     if len(paths) == 1:
-        first, _ = load(paths[0])
         if isinstance(first, dict) and settings.spec_engine_kind(first) in settings.ENGINE_KINDS:
             settings.use_engine(settings.spec_engine_kind(first))
     try:
+        if not args.fields:
+            # The first spec whose probe the binary accepts; validate() reports each one it refuses.
+            for path in paths:
+                doc, _ = load(path)
+                if (isinstance(doc, dict) and settings.spec_engine_kind(doc) == settings.ENGINE_KIND
+                        and not _ask_field_list(args.blis, args.catalog, doc)):
+                    break
         vocab = knob_vocabulary(args.blis, args.fields)
     except blis_cli.BlisCommandError as e:
         print(f"validate_experiment: {e}", file=sys.stderr)

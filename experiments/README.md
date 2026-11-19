@@ -135,7 +135,7 @@ whose deployment schema lets a pool state its own offload (blis-substrate#307); 
 | `router.*` | llm-d's EndpointPickerConfig, not an engine key |
 
 The validator reads every name from the simulator it is given with `--blis` (or `$BLIS`):
-engine settings from `blis fields --engine vllm`, the engine's field list at the release that
+engine settings from `blis fields --scenario` (on a probe of the spec's model and hardware), the engine's field list at the release that
 binary runs, and pool-layout keys from `blis schema deployment`. This repository keeps no list of
 settings (CFG-3). A typo fails before any run, and the message suggests the right name. Four
 engine-block names differ from vLLM's (`cache_dtype` for `kv_cache_dtype`, `cudagraph_mode` for

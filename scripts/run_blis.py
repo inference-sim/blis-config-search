@@ -94,6 +94,27 @@ def cluster_node_size(blis, catalog, hardware, stated=None):
     return int(stated), True
 
 
+def ask_field_list(blis, catalog, sc):
+    """The engine's field list from `blis fields --scenario`, on a one-node probe of the spec's model and
+    hardware (#158). Asked once per binary and engine; later calls without --fields reuse it."""
+    def probe():
+        stated = (sc.get("cluster") or {}).get("gpus_per_node")
+        fixed = blis_cli.chip_packaging(blis, sc.get("hardware"), catalog)["gpus_per_node"]
+        engine = dict(engine_defaults(), **(sc.get("engine") or {}))
+        if settings.ENGINE_KIND == "vllm":
+            engine.setdefault("block_size", default_block_size(catalog, sc.get("model"), sc.get("hardware")))
+        node = int(fixed or stated or 1)
+        return scenario_yaml(sc.get("model"), sc.get("hardware"), blis_cli.build_release(blis, settings.ENGINE_KIND),
+                             {"tp": node, "pp": 1, "dp": 1}, engine, "fields-probe",
+                             node_size=node, states_node_size=not fixed)
+    try:
+        return blis_cli.fields(blis, settings.ENGINE_KIND, scenario=probe, catalog=catalog)
+    except blis_cli.BlisCommandError as e:
+        raise blis_cli.BlisCommandError(f"{e}; pass --fields FILE (scripts/fetch_fields.py)"
+                                        + ("" if catalog else ", or --catalog so the probe states the model's "
+                                           "block size")) from e
+
+
 # Cross-node cost resolves from the fabric (a catalog networks/ entry), required once nodes > 1.
 DEFAULT_FABRIC = "ib-400g"   # InfiniBand NDR 400 Gb/s; the standard H100 multi-node interconnect
 # The ONE engine value the runner supplies when a spec omits it. Every other omitted knob is left
@@ -1037,13 +1058,15 @@ _ROW_LATENCY = (("ttft", "ttft_us"), ("e2e", "e2e_us"), ("tpot", "tpot_us"))
 
 
 def measured_instances(doc):
-    """Each instance's measured-window latency figures, rebuilt from the Result's per-request rows.
+    """Each instance's measured-window latency figures, rebuilt from the Result's per-request rows,
+    plus a P/D run's prefill instances from the Result's per-instance measured window (_prefill_instances).
 
     The pinned simulator reports a per-instance block only for the whole run, so the worst-instance
     gate takes the completed non-warm-up requests that finish inside the window, grouped by the instance that served them.
     Only latencies a row carries can be rebuilt (TTFT, end-to-end, TPOT): the decode-step interval
-    is not per request, so the ITL gate stays on the cluster. Remove this when the simulator emits
-    the per-instance measured window (inference-sim #2087). [] when the Result has no rows.
+    is not per request, so the ITL gate stays on the cluster. Remove the rebuild when the simulator emits
+    the per-instance measured window for every instance (inference-sim #2087). [] when the Result has
+    neither rows nor a prefill instance's window.
     """
     by = {}
     end = (doc.get("window") or {}).get("end_us")
@@ -1069,6 +1092,25 @@ def measured_instances(doc):
                 # cluster figure (_MEASURED_KEYS), so the worst-instance gate judges the same quantity.
                 for k in ("mean", "p50", "p90", "p95", "p99"):
                     o[f"itl_{k}_ms"] = o[f"tpot_{k}_ms"]
+        out.append(o)
+    return out + _prefill_instances(doc, set(by))
+
+
+def _prefill_instances(doc, seen):
+    """A P/D run's prefill instances, which no request row names (each row names its decode instance): their
+    user-level measured window, as the Result reports it (inference-sim#2246), in the shape measured_instances gives."""
+    out = []
+    for inst, block in sorted(((_engine_report(doc).get("instances")) or {}).items()):
+        mw = (block or {}).get("measured_window") or {}
+        if inst in seen or mw.get("role") != "prefill" or not mw.get("measured_user_requests"):
+            continue
+        o = {"instance_id": inst, "requests": mw["measured_user_requests"]}
+        for stem, _col in _ROW_LATENCY:
+            for k in ("mean", "p50", "p90", "p95", "p99"):
+                if isinstance(mw.get(f"{stem}_{k}_ms"), (int, float)):
+                    o[f"{stem}_{k}_ms"] = mw[f"{stem}_{k}_ms"]
+                    if stem == "tpot":
+                        o[f"itl_{k}_ms"] = mw[f"tpot_{k}_ms"]
         out.append(o)
     return out
 
@@ -1820,6 +1862,8 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     if seen is not None:
         rec["data"] = seen
         rec["released_build"] = released_build(doc)
+        # The binary's own version and commit ("v0.18.0+<sha>"), which pins.env cannot vouch for (#158).
+        rec["simulator"] = (doc.get("revisions") or {}).get("simulator")
         if not data_override and seen != "embedded" and not error:
             error = ("priced with other data than the simulator release's embedded data "
                      "(the Result's data block does not name catalog and registry source embedded)")
@@ -1871,8 +1915,8 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
 def add_common_args(p):
     p.add_argument("--blis", default="./blis")
     p.add_argument("--fields",
-                   help="the engine's field list: the pinned blis-vllm release's fields.json, until the "
-                        "binary has `blis fields` (default: ask the binary)")
+                   help="the engine's field list: the pinned blis-vllm release's fields.json (scripts/fetch_fields.py). "
+                        "Default: ask the binary (`blis fields --scenario` on a probe of the model and hardware)")
     p.add_argument("--catalog", default=os.environ.get("SUBSTRATE_CATALOG"),
                    help="the catalog/ of a blis-substrate checkout at the pinned release: the runner reads files from it")
     p.add_argument("--registry", default=os.environ.get("SUBSTRATE_REGISTRY"),
@@ -1962,6 +2006,8 @@ def main():
         replay = replay_from_args(args)
     except ValueError as e:
         sys.exit(str(e))
+    if not args.fields:
+        ask_field_list(args.blis, args.catalog, {"model": args.model, "hardware": args.hardware})
     rec = run_one(args.blis, args.catalog, args.registry, args.scenarios, args.model, args.hardware,
                   blis_cli.engine_release(args.blis, settings.ENGINE_KIND, args.fields), args.workload, args.num_requests,
                   args.seed, args.horizon,

@@ -113,7 +113,7 @@ floor, each row's `tok_per_s_per_user` and the Pareto front's x axis are all one
 config cannot pass the gate and fail the ranking: `1000 /` the worst instance's `tpot_<stat>_ms`,
 or with `interactivity_mean` stated the worst instance's (lowest) mean of each request's tok/s. A
 `tpot_mean` cap alone keeps `1000 / tpot_mean_ms`, the reciprocal of the mean TPOT. State them at
-one statistic. A spec that states none keeps the p99 rate, and its Pareto axis is the cluster's `interactivity_mean`;
+one statistic. A spec that states none keeps the p99 rate and the `interactivity_of_mean_tpot` axis;
 a report that states one names it (`interactivity_floor.statistic` and `.of`, `pareto.x_basis`).
 
 The validator refuses a key the registry does not define, naming the statistics it does
@@ -478,7 +478,7 @@ sweeps:
 ```
 
 Every report carries the Pareto front of throughput per GPU against interactivity
-(`interactivity_mean`, the mean of each request's tok/s) in `pareto.json`, for the total and the decode-GPU
+(`interactivity_of_mean_tpot`, 1000 / mean TPOT) in `pareto.json`, for the total and the decode-GPU
 form, points compared exactly (no tolerance; a P/D preference waits for replications with intervals, design DEV-11). `ranking`
 (`scalar` by default, or `pareto`) says which rule picks the finalists and the winner card, and the
 report states it. A candidate the simulator refuses is reported as refused, counted and grouped by

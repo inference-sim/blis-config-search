@@ -27,7 +27,7 @@
   },
   "$defs": {
     "objective": {
-      "description": "How the report ranks. The Pareto front of throughput per GPU against interactivity (interactivity_mean, the mean of each request's tok/s) is always emitted; `ranking` picks which rule heads the report (scalar: most output tok/s per accelerator; pareto: the front's throughput end). Points are compared exactly, one run per arm; there is no tie tolerance.",
+      "description": "How the report ranks. The Pareto front of throughput per GPU against interactivity (1000 / mean TPOT) is always emitted; `ranking` picks which rule heads the report (scalar: most output tok/s per accelerator; pareto: the front's throughput end). Points are compared exactly, one run per arm; there is no tie tolerance.",
       "type": "object",
       "minProperties": 1,
       "additionalProperties": false,

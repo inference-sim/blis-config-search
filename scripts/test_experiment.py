@@ -3627,13 +3627,11 @@ FATAL = ('time="2026-11-11T20:50:44-05:00" level=fatal msg="instance instance_0:
 
 
 def _ran(tps, tpot_ms, itl_p99=1.0, **extra):
-    # a Result whose requests all ran at tpot_ms: its interactivity_mean, the mean of each
-    # request's tok/s, is 1000 / tpot_ms, and so is its interactivity_of_mean_tpot
+    # a Result that states the registry's interactivity of the mean TPOT (1000 / mean TPOT)
     m = {"tokens_per_sec": tps, "itl_p99_ms": itl_p99, "tpot_mean_ms": tpot_ms,
          "interactivity_of_mean_tpot": 1000.0 / tpot_ms}
     m.update(extra)
-    return {"returncode": 0, "error": None, "metrics": m, "metrics_all_instances": [], "cmd": None,
-            "measured": {"metrics": {"interactivity_mean": {"value": 1000.0 / tpot_ms, "samples": 8}}}}
+    return {"returncode": 0, "error": None, "metrics": m, "metrics_all_instances": [], "cmd": None}
 
 
 def _refused(scn="a1b2.yaml"):
@@ -3746,27 +3744,16 @@ class Refusals(unittest.TestCase):
         self.assertTrue(any("1 of 2" in n and "block_size" in n for n in notes), notes)
 
 
-def _measured(**figures):
-    return {"measured": {"metrics": {k: {"value": v, "samples": 8} for k, v in figures.items()}}}
-
-
 class InteractivityAndFigures(unittest.TestCase):
-    def test_the_axis_is_the_mean_of_each_requests_rate(self):
-        """The default x is the registry's interactivity_mean (#185), never 1000 / the mean TPOT."""
-        self.assertEqual("interactivity_mean", PA.X_METRIC)
+    def test_a_result_that_states_the_figure_is_used_as_stated(self):
         self.assertEqual((130.0, "result"), PA.interactivity_of(
-            _measured(interactivity_mean=130.0, interactivity_of_mean_tpot=125.0, tpot_mean_ms=8.0)))
-        rec = {**_ran(100.0, 8.0), **_measured(interactivity_mean=130.0, interactivity_of_mean_tpot=125.0)}
-        self.assertEqual(130.0, E.run_row(rec, {}, "l", "", "s", 8, 8)["interactivity"])
+            {"interactivity_of_mean_tpot": 130.0, "tpot_mean_ms": 8.0}))
 
     def test_a_result_without_the_figure_is_unrated_not_rebuilt_from_tpot(self):
         # DEV-8: a definition is read from the registry, never recomputed from another field
-        self.assertEqual((None, ""), PA.interactivity_of(_measured(tpot_mean_ms=8.0)))
-        self.assertEqual((None, ""), PA.interactivity_of(_measured(interactivity_of_mean_tpot=125.0)))
-        self.assertEqual((None, ""), PA.interactivity_of({"metrics": {"interactivity_mean": 130.0}}),
-                         "only the Result's own figure, as measured.metrics keeps it")
+        self.assertEqual((None, ""), PA.interactivity_of({"tpot_mean_ms": 8.0}))
         self.assertEqual((None, ""), PA.interactivity_of({}))
-        self.assertEqual((None, ""), PA.interactivity_of(_measured(interactivity_mean=0)))
+        self.assertEqual((None, ""), PA.interactivity_of({"interactivity_of_mean_tpot": 0}))
 
     def test_a_row_of_a_result_without_the_figure_is_counted_unrated(self):
         rep = _sweep_with(_pd_and_agg_spec(ranking="pareto"), lambda cfg: {

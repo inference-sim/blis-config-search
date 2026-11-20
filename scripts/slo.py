@@ -19,8 +19,7 @@ outside it is refused too: one the simulator adds needs that one constant extend
 
 The per-user rate (the interactivity floor, each row's tok/s/user and the Pareto axis) is on the
 statistic the tpot caps and interactivity floors state (per_user_of). A spec that states none keeps
-the p99 rate and the interactivity_of_mean_tpot axis it had before, so a committed spec and its
-report do not change.
+the p99 rate; its Pareto axis is the cluster's interactivity_mean (pareto.X_METRIC).
 """
 import re
 

@@ -3,9 +3,9 @@
 
 The axes are the metric registry's, not this repository's (design DEV-8):
 
-  x  interactivity_of_mean_tpot  1000 / mean(TPOT in ms), tokens/s per user
-                                 (InferenceX mean_intvty; not the mean of per-request 1/TPOT, which is
-                                 the registry's interactivity_mean and reads 2 to 27 percent higher)
+  x  interactivity_mean          the mean over requests of each one's tok/s, 1000 / its TPOT in ms
+                                 (formula user_tps). Not interactivity_of_mean_tpot, 1000 / the mean
+                                 TPOT (InferenceX mean_intvty), the harmonic mean, which is lower
   y  total_tokens_per_second_per_gpu            (input + output tokens)/s over ALL the GPUs, or
      output_tokens_per_second_per_decode_gpu    output tokens/s over the decode GPUs
 
@@ -35,7 +35,7 @@ THROUGHPUT_FORMS = {
 }
 # The registry's mean of each request's tok/s (formula user_tps), run_blis.MEAN_RATE.
 MEAN_RATE = "interactivity_mean"
-X_METRIC = "interactivity_of_mean_tpot"
+X_METRIC = MEAN_RATE
 X_FIELD = "interactivity"            # the row field holding X_METRIC
 PER_USER_X = "tok_per_s_per_user"       # the figure pareto.json's `x` names when a spec states one
 # The row field the front reads it from: the rate to 3 decimals, as `interactivity`. The displayed
@@ -51,13 +51,15 @@ def objective_of(spec_objective):
     return out
 
 
-def interactivity_of(metrics):
-    """(tokens/s per user, basis) for a run's flattened measured-window metrics, or (None, "").
+def interactivity_of(rec):
+    """(tokens/s per user, basis) for a run record, or (None, "").
 
-    Only the Result's own registered `interactivity_of_mean_tpot` counts (DEV-8: a definition is read
-    from the registry, never rebuilt from another field). A Result that does not state it, or states a
-    figure that is not a positive number, leaves the run unrated: it is counted, not placed."""
-    v = (metrics or {}).get("interactivity_of_mean_tpot")
+    Only the Result's own registered X_METRIC, as the record keeps it (`measured.metrics`), counts
+    (DEV-8: a definition is read from the registry, never rebuilt from another field). A Result that
+    does not state it, or states a figure that is not a positive number, leaves the run unrated: it is
+    counted, not placed."""
+    entry = (((rec or {}).get("measured") or {}).get("metrics") or {}).get(X_METRIC)
+    v = entry.get("value") if isinstance(entry, dict) else None
     if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
         return float(v), "result"
     return None, ""

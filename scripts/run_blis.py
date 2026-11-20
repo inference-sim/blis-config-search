@@ -106,7 +106,8 @@ def ask_field_list(blis, catalog, sc):
         node = int(fixed or stated or 1)
         return scenario_yaml(sc.get("model"), sc.get("hardware"), blis_cli.build_release(blis, settings.ENGINE_KIND),
                              {"tp": node, "pp": 1, "dp": 1}, engine, "fields-probe",
-                             node_size=node, states_node_size=not fixed)
+                             node_size=node, states_node_size=not fixed,
+                             takes_engine_version=blis_cli.scenario_takes_engine_version(blis))
     try:
         return blis_cli.fields(blis, settings.ENGINE_KIND, scenario=probe, catalog=catalog)
     except blis_cli.BlisCommandError as e:
@@ -971,7 +972,7 @@ BASIS = "measured_window"
 # document states, so it lights up with the pin bump to a simulator that writes version 3 and does
 # nothing before it (test_run_blis.FigureForms). A version this module has not read is refused.
 FIGURE_SCOPE_FROM_SCHEMA = 3
-READ_RESULT_SCHEMAS = (1, 2, 3)      # 1: the fixtures' string "1"; 2: the pinned release; 3: layer 10
+READ_RESULT_SCHEMAS = (1, 2, 3, 4)   # 1: the fixtures' string "1"; 2: the pinned release; 3: layer 10; 4: M3.2 (adds `estimate`; figures as in 3)
 FIGURE_FORM_FIELDS = ("member", "aggregate", "over")
 
 
@@ -1323,8 +1324,15 @@ def _pool_offload_block(off):
     return f"    offload:\n{policy}      tiers:\n        - {{tier: cpu_dram, bytes: {int(off['cpu_bytes'])}}}\n"
 
 
+def _engine_block(engine_version, takes_engine_version):
+    """The scenario's `engine:` block. The version line is written only for a build whose scenario takes
+    one (blis_cli.scenario_takes_engine_version); from M3.2 the build fixes the release (LIF-6)."""
+    version = f'\n  version: "{engine_version}"' if takes_engine_version else ""
+    return f"engine:\n  kind: {settings.ENGINE_KIND}{version}\n"
+
+
 def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router,
-                      node_size, states_node_size):
+                      node_size, states_node_size, takes_engine_version=True):
     """Render a DISAGGREGATED Scenario+Deployment: one pool per role plus `pd_transfer`.
 
     Pools never share a node (blis-vllm places each role on its own nodes and asserts they do
@@ -1356,10 +1364,7 @@ def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, 
     node_size_line = f"\n  gpus_per_node: {node_size}" if states_node_size else ""
     return f"""kind: Scenario
 name: {name}
-engine:
-  kind: {settings.ENGINE_KIND}
-  version: "{engine_version}"
-model: {model}
+{_engine_block(engine_version, takes_engine_version)}model: {model}
 coefficients: [{", ".join(COEFFICIENTS + (["cost-model-offload-tiers"] if any_offload else []))}]
 cluster:
   hardware: {hardware}
@@ -1432,7 +1437,8 @@ def to_vllm_block(eng):
 
 
 def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances=1,
-                  fabric=DEFAULT_FABRIC, router=None, node_size=8, states_node_size=True):
+                  fabric=DEFAULT_FABRIC, router=None, node_size=8, states_node_size=True,
+                  takes_engine_version=True):
     """Render a two-doc Scenario+Deployment YAML (no external yaml dep). Omitted engine keys (e.g.
     quantization when unset) let the checkpoint/engine govern.
 
@@ -1460,7 +1466,7 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
     if pd:
         pd = {**pd, **{r: {**pd[r], "engine": to_vllm_block(pd[r].get("engine"))} for r in PD_ROLES if r in pd}}
         return _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router,
-                                 node_size, states_node_size)
+                                 node_size, states_node_size, takes_engine_version)
     engine = to_vllm_block(engine)
     nodes = pool_nodes(parallel, num_instances, node_size)
     node_size_line = f"\n  gpus_per_node: {node_size}" if states_node_size else ""
@@ -1485,10 +1491,7 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
         coefficients.append("cost-model-offload-tiers")
     return f"""kind: Scenario
 name: {name}
-engine:
-  kind: {settings.ENGINE_KIND}
-  version: "{engine_version}"
-model: {model}
+{_engine_block(engine_version, takes_engine_version)}model: {model}
 coefficients: [{", ".join(coefficients)}]
 cluster:
   hardware: {hardware}{fabric_line}
@@ -1537,7 +1540,8 @@ def write_scenario(blis, scenarios_dir, model, hardware, engine_version, paralle
     path = os.path.join(scenarios_dir, name + ".yaml")
     if not os.path.exists(path):
         body = scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances,
-                             fabric, router, node_size, states_node_size)
+                             fabric, router, node_size, states_node_size,
+                             blis_cli.scenario_takes_engine_version(blis))
         fd, tmp = tempfile.mkstemp(dir=scenarios_dir, prefix=".tmp-", suffix=".yaml")
         try:
             with os.fdopen(fd, "w") as f:

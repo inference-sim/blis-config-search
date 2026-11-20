@@ -915,7 +915,8 @@ def offload_policy_errors(spec, blis, fields=None, catalog=None):
             body = run_blis.scenario_yaml(sc.get("model"), sc.get("hardware"),
                                           blis_cli.engine_release(blis, settings.ENGINE_KIND, fields),
                                           parallel, run_blis.engine_defaults(), "policy-probe",
-                                          node_size=node_size, states_node_size=states_node_size)
+                                          node_size=node_size, states_node_size=states_node_size,
+                                          takes_engine_version=blis_cli.scenario_takes_engine_version(blis))
             line = blis_cli.engine_refusal(blis, body, word="eviction_policy")
             if line:
                 errs.append(f"sweeps[{i}].offload.eviction_policy: the engine refuses {policy!r}: {line}")

@@ -19,7 +19,7 @@ measured window, not defined here:
 
 | Axis | Registry metric | Meaning |
 |---|---|---|
-| x, tokens/s per user | `interactivity_of_mean_tpot` | 1000 / mean TPOT in ms (InferenceX `mean_intvty`), the harmonic mean of the users' rates. Not the mean of each request's tok/s, which is `interactivity_mean` and is higher whenever the rates differ (#187). |
+| x, tokens/s per user | `interactivity_mean` | The mean over requests of each one's tok/s (formula `user_tps`). Not `interactivity_of_mean_tpot`, 1000 / mean TPOT, the harmonic mean, which is lower whenever the rates differ (10 ms and 30 ms TPOT give 66.7 against 50). |
 | y, tokens/s per GPU | `total_tokens_per_second_per_gpu` | (input + output tokens)/s over all GPUs. `throughput: total`, the default. |
 | y, decode form | `output_tokens_per_second_per_decode_gpu` | output tokens/s over the decode GPUs (all GPUs when there is no decode pool). `throughput: decode`. |
 
@@ -29,7 +29,7 @@ instance's `tpot_<stat>_ms`, or with `interactivity_mean` stated the worst insta
 request's tok/s, so the front ranks on the figure the SLO gates on; `pareto.json` names it in `x` and
 `x_basis`. Otherwise x is as above.
 
-The Result's own `interactivity_of_mean_tpot` is the only source (a definition is read from the
+The Result's own `interactivity_mean` is the only source (a definition is read from the
 registry, never rebuilt from another field). A Result that does not state it leaves the run unrated:
 it is counted (`unrated`) and not placed on the front.
 
@@ -157,9 +157,8 @@ tokens/s differ by about 1.5 percent from the old constants.
 - A simulator build whose Result does not state `total_tokens_per_second_per_gpu` (an earlier
   stack head is one; the build `BLIS_SHA` names states it) gives rows without the figure. The front is then empty, the
   `unrated` count says how many runs could not be placed, and the report says so instead of
-  reporting a missed SLO. The decode form and `interactivity_of_mean_tpot` have the same rule
-  (a Result without `interactivity_of_mean_tpot` is unrated; the throughput forms have no fallback).
-- Committed reports were not regenerated here; the regeneration bot does that at the next pin move.
+  reporting a missed SLO. The decode form and `interactivity_mean` have the same rule
+  (a Result without `interactivity_mean` is unrated; the throughput forms have no fallback).
 
 Data and revisions: the metric definitions are the substrate registry's (`contracts/metrics`); the
 noise floor is the accuracy dashboard's limits page; the router files are those the pinned

@@ -139,7 +139,7 @@
   "finalists": [
     {
       "at_c_use": {
-        "interactivity": 33.983,
+        "interactivity": 41.433,
         "itl_p99_ms": 239.309,
         "tok_per_s_per_user": 4.2,
         "tokens_per_sec": 2742.6,
@@ -197,7 +197,7 @@
     },
     {
       "at_c_use": {
-        "interactivity": 34.934,
+        "interactivity": 41.442,
         "itl_p99_ms": 157.633,
         "tok_per_s_per_user": 6.3,
         "tokens_per_sec": 2830.7,
@@ -257,7 +257,7 @@
     },
     {
       "at_c_use": {
-        "interactivity": 53.044,
+        "interactivity": 54.263,
         "itl_p99_ms": 26.052,
         "tok_per_s_per_user": 38.4,
         "tokens_per_sec": 1462.8,
@@ -416,7 +416,7 @@
     },
     {
       "at_c_use": {
-        "interactivity": 39.692,
+        "interactivity": 40.302,
         "itl_p99_ms": 31.516,
         "tok_per_s_per_user": 31.7,
         "tokens_per_sec": 1463.5,
@@ -511,7 +511,7 @@
     },
     {
       "at_c_use": {
-        "interactivity": 53.061,
+        "interactivity": 55.246,
         "itl_p99_ms": 28.84,
         "tok_per_s_per_user": 34.7,
         "tokens_per_sec": 1313.1,
@@ -692,7 +692,7 @@
               "tp": 8
             },
             "disaggregated": true,
-            "interactivity": 39.692,
+            "interactivity": 40.302,
             "label": "6P TP8 + EP / 1D TP16 + EP",
             "status": "front",
             "sweep": "pd-wide-decode",
@@ -715,7 +715,7 @@
               "tp": 8
             },
             "disaggregated": true,
-            "interactivity": 53.044,
+            "interactivity": 54.263,
             "label": "4P/4D TP8 + EP",
             "status": "front",
             "sweep": "pd-ratio",
@@ -738,7 +738,7 @@
               "tp": 8
             },
             "disaggregated": true,
-            "interactivity": 54.914,
+            "interactivity": 55.765,
             "label": "4P/4D TP8 + EP",
             "status": "front",
             "sweep": "pd-ratio",
@@ -764,7 +764,7 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 34.934,
+            "interactivity": 41.442,
             "label": "8x TP8 + EP",
             "status": "front",
             "sweep": "colocated-tuned",
@@ -784,50 +784,12 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 57.988,
+            "interactivity": 60.775,
             "label": "8x TP8 + EP",
             "status": "front",
             "sweep": "colocated-tuned",
             "throughput_per_gpu": 2748.411,
             "variant": "batch tokens 32,768"
-          },
-          {
-            "concurrency": 64,
-            "config": {
-              "concurrency": 64,
-              "dp": 1,
-              "enable_expert_parallel": true,
-              "max_model_len": 262144,
-              "num_instances": 8,
-              "tp": 8
-            },
-            "disaggregated": false,
-            "interactivity": 58.012,
-            "label": "8x TP8 + EP",
-            "status": "front",
-            "sweep": "colocated",
-            "throughput_per_gpu": 2741.936,
-            "variant": ""
-          },
-          {
-            "concurrency": 64,
-            "config": {
-              "concurrency": 64,
-              "dp": 1,
-              "enable_expert_parallel": true,
-              "long_prefill_token_threshold": 0,
-              "max_model_len": 262144,
-              "max_num_batched_tokens": 8192,
-              "num_instances": 8,
-              "tp": 8
-            },
-            "disaggregated": false,
-            "interactivity": 58.012,
-            "label": "8x TP8 + EP",
-            "status": "front",
-            "sweep": "colocated-tuned",
-            "throughput_per_gpu": 2741.936,
-            "variant": ""
           }
         ],
         "points": 22,
@@ -855,7 +817,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 33.983,
+              "interactivity": 41.433,
               "label": "8x TP8 + EP",
               "status": "front",
               "sweep": "colocated",
@@ -873,7 +835,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 58.012,
+              "interactivity": 60.657,
               "label": "8x TP8 + EP",
               "status": "front",
               "sweep": "colocated",
@@ -907,7 +869,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 34.934,
+              "interactivity": 41.442,
               "label": "8x TP8 + EP",
               "status": "front",
               "sweep": "colocated-tuned",
@@ -927,32 +889,12 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 57.988,
+              "interactivity": 60.775,
               "label": "8x TP8 + EP",
               "status": "front",
               "sweep": "colocated-tuned",
               "throughput_per_gpu": 2748.411,
               "variant": "batch tokens 32,768"
-            },
-            {
-              "concurrency": 64,
-              "config": {
-                "concurrency": 64,
-                "dp": 1,
-                "enable_expert_parallel": true,
-                "long_prefill_token_threshold": 0,
-                "max_model_len": 262144,
-                "max_num_batched_tokens": 8192,
-                "num_instances": 8,
-                "tp": 8
-              },
-              "disaggregated": false,
-              "interactivity": 58.012,
-              "label": "8x TP8 + EP",
-              "status": "front",
-              "sweep": "colocated-tuned",
-              "throughput_per_gpu": 2741.936,
-              "variant": ""
             }
           ],
           "points": 12,
@@ -978,7 +920,7 @@
                 "tp": 8
               },
               "disaggregated": true,
-              "interactivity": 53.044,
+              "interactivity": 54.263,
               "label": "4P/4D TP8 + EP",
               "status": "front",
               "sweep": "pd-ratio",
@@ -1001,7 +943,7 @@
                 "tp": 8
               },
               "disaggregated": true,
-              "interactivity": 54.914,
+              "interactivity": 55.765,
               "label": "4P/4D TP8 + EP",
               "status": "front",
               "sweep": "pd-ratio",
@@ -1031,7 +973,7 @@
                 "tp": 8
               },
               "disaggregated": true,
-              "interactivity": 53.044,
+              "interactivity": 54.263,
               "label": "4P/4D TP8 + EP",
               "status": "front",
               "sweep": "pd-ratio",
@@ -1054,7 +996,7 @@
                 "tp": 8
               },
               "disaggregated": true,
-              "interactivity": 54.914,
+              "interactivity": 55.765,
               "label": "4P/4D TP8 + EP",
               "status": "front",
               "sweep": "pd-ratio",
@@ -1098,7 +1040,7 @@
                 "tp": 8
               },
               "disaggregated": true,
-              "interactivity": 39.692,
+              "interactivity": 40.302,
               "label": "6P TP8 + EP / 1D TP16 + EP",
               "status": "front",
               "sweep": "pd-wide-decode",
@@ -1128,7 +1070,7 @@
                 "tp": 8
               },
               "disaggregated": true,
-              "interactivity": 39.692,
+              "interactivity": 40.302,
               "label": "6P TP8 + EP / 1D TP16 + EP",
               "status": "front",
               "sweep": "pd-wide-decode",
@@ -1161,7 +1103,7 @@
                 "tp": 8
               },
               "disaggregated": true,
-              "interactivity": 53.061,
+              "interactivity": 55.246,
               "label": "4P/4D TP8 + EP",
               "status": "front",
               "sweep": "pd-pool-engine",
@@ -1193,7 +1135,7 @@
                 "tp": 8
               },
               "disaggregated": true,
-              "interactivity": 53.001,
+              "interactivity": 55.222,
               "label": "4P/4D TP8 + EP",
               "status": "front",
               "sweep": "pd-pool-engine",
@@ -1218,7 +1160,7 @@
                 "tp": 8
               },
               "disaggregated": true,
-              "interactivity": 53.061,
+              "interactivity": 55.246,
               "label": "4P/4D TP8 + EP",
               "status": "front",
               "sweep": "pd-pool-engine",
@@ -1245,7 +1187,7 @@
       }
     ],
     "throughput": "total",
-    "x": "interactivity_of_mean_tpot",
+    "x": "interactivity_mean",
     "y": {
       "decode": "output_tokens_per_second_per_decode_gpu",
       "total": "total_tokens_per_second_per_gpu"

@@ -1,0 +1,142 @@
+{
+  "basis": "measured_window",
+  "experiment": {
+    "description": "",
+    "name": "muse-spark-open-816b-a42b-h200-agentx-8node-pd",
+    "sweeps": [
+      {
+        "name": "colocated",
+        "narrative": "Eight single-node TP8 instances should lead, since wider dp groups pay cross-node IB all-to-all for little extra batch."
+      },
+      {
+        "name": "colocated-tuned",
+        "narrative": "A bigger token budget with a long-prefill cap should hold ITL to higher load, narrowing what P/D can win."
+      },
+      {
+        "name": "pd-ratio",
+        "narrative": "Decode-heavy ratios should win on AgentX, since cached prefixes leave only a short uncached tail to prefill per turn."
+      },
+      {
+        "name": "pd-always",
+        "narrative": "Splitting every request should trail the threshold arms, because a turn with a cached prefix pays an IB handoff for little prefill."
+      },
+      {
+        "name": "pd-wide-decode",
+        "narrative": "TP16 decode instances should hold ITL at higher load than TP8 ones, trading batch slots for faster steps."
+      },
+      {
+        "name": "pd-pool-engine",
+        "narrative": "A 32k prefill budget should matter on the prefill-light layout and a decode-pool prefill cap on the decode-heavy one."
+      },
+      {
+        "name": "pd-decode-cudagraph",
+        "narrative": "Full graph capture on the decode pool should lower ITL by a few percent, with FULL_DECODE_ONLY matching FULL there."
+      }
+    ]
+  },
+  "gpu_budget": 64,
+  "hardware": "h200",
+  "headroom": 1.0,
+  "interactivity_floor": {},
+  "model": "muse-spark-open-816b-a42b-nvfp4",
+  "objective": "max output tok/s per accelerator subject to the scenario's SLOs",
+  "pinned_stack": {
+    "blis": "v0.17.1",
+    "data": "override",
+    "engine_version": "0.32.0",
+    "kernel": "unpinned",
+    "resolved": {
+      "blis": {
+        "sha256": "62b7810073591748b6d3474f0439f3426bef192202f0bf06f26c7752d9d3011e"
+      },
+      "catalog": {
+        "commit": "f9f3c9327794d543a0915c4deb1259ff9985c753",
+        "describe": "v0.14.1"
+      },
+      "registry": {
+        "commit": "f9f3c9327794d543a0915c4deb1259ff9985c753",
+        "describe": "v0.14.1"
+      }
+    },
+    "router": "v1.0.0-blis.4",
+    "router_configs": {
+      "resolved": {
+        "module": "github.com/llm-d/llm-d-router",
+        "version": "v1.0.0-blis.4"
+      }
+    },
+    "substrate": "v0.14.1"
+  },
+  "run_id": "muse-spark-open-816b-a42b-h200-agentx-8node-pd",
+  "scope": "cluster; worst instance for TTFT and end-to-end gates",
+  "seed": 42,
+  "slos": {},
+  "workload": {
+    "replay": {
+      "benchmark_duration": "3600s",
+      "category": "coding",
+      "corpus": ".corpus/traces.jsonl",
+      "corpus_cache": "/tmp/agx-cache-muse-h200-8node-pd",
+      "corpus_sha256": "29b6a19e751ff5230771519aab755f80a0f43a4ba9cf96b72d3a6a437ec99276",
+      "grace_period": "30s",
+      "max_context_length": "max_model_len",
+      "scenario": "inferencex-agentx-mvp",
+      "thinking": "on",
+      "workload_spec": "/home/runner/_work/blis-config-search/blis-config-search/workloads/agentx-run-recipe.yaml",
+      "workload_spec_relative": "workloads/agentx-run-recipe.yaml",
+      "workload_spec_sha256": "f9ee0a3428b556fbae00a7215c3b7bf76dd6a15cac0b60c63c1f86766b6c991a"
+    },
+    "workload_spec": {
+      "catalog": false,
+      "document": {
+        "benchmark_duration_s": 3600,
+        "category": "coding",
+        "corpus": {
+          "encoding": "jsonl",
+          "format": "weka-trace-v7",
+          "loader": "semianalysis_cc_traces_weka_062126",
+          "sha256": "29b6a19e751ff5230771519aab755f80a0f43a4ba9cf96b72d3a6a437ec99276",
+          "source": {
+            "file": "traces.jsonl",
+            "huggingface": "semianalysisai/cc-traces-weka-062126",
+            "revision": "23f152f6f0f9399a85901b89a6458def0ef16729",
+            "split": "train"
+          }
+        },
+        "grace_period_s": 30,
+        "harness_version": "0.12.0",
+        "max_context_length": "max_model_len",
+        "random_seed": 42,
+        "scenario": "inferencex-agentx-mvp",
+        "system_idle_gap_cap_s": 10,
+        "thinking": "on",
+        "trace_idle_gap_cap_s": 300,
+        "trajectory_start": {
+          "max_ratio": 0.75,
+          "min_ratio": 0.25
+        },
+        "warmup": {
+          "mode": "cache_pressure",
+          "requests_per_lane": 10
+        }
+      },
+      "label": "custom (not in the catalog)",
+      "path": "workloads/agentx-run-recipe.yaml",
+      "recipe": {
+        "differs_from_run": {},
+        "fields": {
+          "benchmark_duration_s": 3600,
+          "corpus.loader": "semianalysis_cc_traces_weka_062126",
+          "grace_period_s": 30,
+          "trace_idle_gap_cap_s": 300,
+          "trajectory_start.max_ratio": 0.75,
+          "trajectory_start.min_ratio": 0.25,
+          "warmup.requests_per_lane": 10
+        },
+        "label": "AgentX run recipe: 300 s idle-gap cap, 10 warm-up requests per lane, trajectory start 0.25 to 0.75, 3600 s window, 30 s grace, corpus semianalysis_cc_traces_weka_062126",
+        "overrides": {}
+      },
+      "sha256": "f9ee0a3428b556fbae00a7215c3b7bf76dd6a15cac0b60c63c1f86766b6c991a"
+    }
+  }
+}

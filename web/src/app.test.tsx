@@ -852,6 +852,8 @@ describe('scenario SLO chips', () => {
   })
   it('names the per-user figure only when the report states one', () => {
     expect(perUserNote('tpot_p90_ms')).toBe('tok/s per user = 1000 / worst-instance tpot_p90_ms')
+    // interactivity_mean is itself the rate (the mean of each request's tok/s), not a TPOT
+    expect(perUserNote('interactivity_mean')).toBe('tok/s per user = worst-instance interactivity_mean')
     expect(perUserNote(undefined)).toBeNull()
   })
 })

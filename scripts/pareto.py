@@ -4,15 +4,16 @@
 The axes are the metric registry's, not this repository's (design DEV-8):
 
   x  interactivity_of_mean_tpot  1000 / mean(TPOT in ms), tokens/s per user
-                                 (InferenceX mean_intvty; not the mean of per-request 1/TPOT, which is
-                                 the registry's interactivity_mean and reads 2 to 27 percent higher)
+                                 (InferenceX mean_intvty), the harmonic mean of the users' rates; not
+                                 the mean of each request's tok/s, the registry's interactivity_mean,
+                                 which is higher whenever the rates differ (#187)
   y  total_tokens_per_second_per_gpu            (input + output tokens)/s over ALL the GPUs, or
      output_tokens_per_second_per_decode_gpu    output tokens/s over the decode GPUs
 
 A spec that states its per-user statistic (scenario.slo: a tpot_<stat> cap or an interactivity_<stat>
-floor, see slo.py) replaces x with each row's tok_per_s_per_user on that statistic, 1000 / the worst
-instance's tpot_<stat>_ms, so the ranking and the SLO gate are one figure; pareto.json then names it
-(`x`, `x_basis`).
+floor, see slo.py) replaces x with each row's tok_per_s_per_user on that statistic (1000 / the worst
+instance's tpot_<stat>_ms, or with interactivity_mean stated the worst instance's interactivity_mean),
+so the ranking and the SLO gate are one figure; pareto.json then names it (`x`, `x_basis`).
 
 Both are higher-is-better, so a point is dominated when another is at least as good on both axes and
 better on one. Only runs that held the scenario's SLOs are points: the SLO gate is a separate
@@ -33,6 +34,8 @@ THROUGHPUT_FORMS = {
     "total": ("total_tokens_per_sec_per_gpu", "total_tokens_per_second_per_gpu"),
     "decode": ("output_tokens_per_sec_per_decode_gpu", "output_tokens_per_second_per_decode_gpu"),
 }
+# The registry's mean of each request's tok/s (formula user_tps), run_blis.MEAN_RATE.
+MEAN_RATE = "interactivity_mean"
 X_METRIC = "interactivity_of_mean_tpot"
 X_FIELD = "interactivity"            # the row field holding X_METRIC
 PER_USER_X = "tok_per_s_per_user"       # the figure pareto.json's `x` names when a spec states one
@@ -126,7 +129,9 @@ def describe(objective, per_user=None):
     """One line saying which ranking and objective a report used; `per_user` is the stated per-user
     basis (run_experiment.per_user_basis), which the front's x is then on."""
     form, metric = THROUGHPUT_FORMS[objective["throughput"]][1], X_METRIC
-    if per_user:
+    if per_user and per_user["of"] == MEAN_RATE:
+        metric = f"tok/s/user (the worst instance's {MEAN_RATE}, the mean of each request's tok/s)"
+    elif per_user:
         metric = f"tok/s/user (1000 / the worst instance's {per_user['of']})"
     if objective["ranking"] == "pareto":
         return (f"Pareto front of {form} against {metric} among runs that held the scenario's SLOs, "

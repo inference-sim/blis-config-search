@@ -477,8 +477,10 @@ def per_user_basis(spec_slo):
     stat, stated = slo.per_user(spec_slo)
     if not stated:
         return None
-    return {"statistic": stat, "of": slo.figure(slo.PER_USER_METRIC, stat),
-            "aggregate": "max", "over": "instance"}
+    of = slo.per_user_of(spec_slo)
+    # A TPOT's worst instance is its max; a rate's (interactivity_mean) is its min.
+    return {"statistic": stat, "of": of,
+            "aggregate": "min" if of == run_blis.MEAN_RATE else "max", "over": "instance"}
 
 
 def servable(rec, slo_ms, gpus=None):
@@ -514,10 +516,10 @@ def servable(rec, slo_ms, gpus=None):
         if missing or value is None:
             return False, f"{g['key']} SLO declared but not measured"
         if g["kind"] == "floor":
-            rate = 1000.0 / value if value else 0.0
+            rate = value if g.get("rate") else (1000.0 / value if value else 0.0)
             if rate < g["limit"]:
                 return False, (f"{g['key']} {rate:.1f} tok/s/user < {g['limit']:g} tok/s/user "
-                               f"({g['figure']} {value:.1f} ms)")
+                               + ("(worst instance)" if g.get("rate") else f"({g['figure']} {value:.1f} ms)"))
         elif value > g["limit"]:
             return False, f"{g['key']} {value:.1f} ms > {g['limit']:g} ms"
     return True, None
@@ -530,7 +532,7 @@ def run_row(rec, cand, label, variant, sweep_name, concurrency, gpus, slo_ms=Non
     m = rec.get("metrics") or {}
     tps = m.get("tokens_per_sec")
     stat, stated = slo.per_user(spec_slo)
-    pu, _basis, _itl = run_blis.per_user_rate(rec, stat)
+    pu, _basis, _itl = run_blis.per_user_rate(rec, stat, slo.per_user_of(spec_slo) if stated else None)
     worst, missing = run_blis.worst_itl_p99(rec)
     # Recorded on the basis `servable` JUDGES on, with the aggregate kept beside it as for ITL: a
     # row showing a passing aggregate next to an infeasible verdict is unreadable.
@@ -946,7 +948,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
         # What every ranked figure is (CFG-4, DEV-8): the metric basis and the scope it ranges over.
         # The cluster figures are the Result's measured window. The worst-instance TTFT, end-to-end
         # and TPOT gates are rebuilt from its profiling-phase rows, and a P/D run's prefill instances
-        # come from their own measured window (#158). Each instance's interactivity slot holds its
+        # come from their own measured window (#158). Each instance's legacy itl_* slot holds its
         # per-request TPOT, because the decode-step interval is not per request (inference-sim #2087).
         "basis": run_blis.BASIS,
         # Restated only for a spec that states another key, so a committed report keeps its bytes.

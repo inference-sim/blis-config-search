@@ -725,11 +725,33 @@ def worst_itl_p99(run):
     return worst_metric(run, "itl_p99_ms")
 
 
-def per_user_rate(run, stat=None):
+# The registry's mean interactivity (formula user_tps): the mean over requests of each one's tok/s,
+# 1000 / tpot_ms per request. Not interactivity_of_mean_tpot, 1000 / the mean TPOT, which is lower.
+MEAN_RATE = "interactivity_mean"
+
+
+def worst_rate(run, figure):
+    """`worst_figure` for a per-user RATE (MEAN_RATE): the MIN over the cluster figure and every
+    instance's, since a rate is higher-is-better. An instance without the figure is skipped.
+    Returns (worst, missing_everywhere)."""
+    vals = []
+    measured = (run.get("measured") or {}).get("metrics")
+    v = _figure((measured or {}).get(figure)) if isinstance(measured, dict) else None
+    if v is not None:
+        vals.append(float(v))
+    for inst in (run.get("metrics_all_instances") or []):
+        iv = inst.get(figure) if isinstance(inst, dict) else None
+        if isinstance(iv, (int, float)) and not isinstance(iv, bool):
+            vals.append(float(iv))
+    return (min(vals), False) if vals else (None, True)
+
+
+def per_user_rate(run, stat=None, of=None):
     """THE per-user token rate for a recorded run -- the one definition the search, the report's
     feasibility test and the displayed number all use (namasl review #2).
 
-    The rate is 1000 / the worst p99 time per output token. TPOT is per request and per TOKEN, so what
+    By default the rate is 1000 / the worst p99 time per output token: the users' rate at p99 from
+    the slow end, since 1000 / x is monotonic. TPOT is per request and per TOKEN, so what
     speculation gains is already in it: there is no acceptance factor to apply (the engine's decode-step
     interval, which was per step and needed one, is no longer the gate). The basis is the WORST
     INSTANCE, not the aggregate, because that is what the floor promises every user. Scoring the
@@ -737,11 +759,16 @@ def per_user_rate(run, stat=None):
     to be shown at 101.9 tok/s/user and simultaneously marked infeasible at 31.8 ms.
 
     `stat` is the statistic the spec states the rate at (slo.per_user): None or p99 is the worst p99
-    above; any other is 1000 / the worst tpot_<stat>_ms (worst_figure).
+    above; any other is 1000 / the worst tpot_<stat>_ms (worst_figure). `of` = MEAN_RATE (a spec
+    stating interactivity_mean, slo.per_user_of) is the worst instance's mean of each request's
+    tok/s instead (worst_rate), and tpot_used is then None.
 
     Returns (rate_or_None, basis, tpot_used); basis is always "" (a direct rate), kept so callers need
     no change.
     """
+    if of == MEAN_RATE:
+        rate, missing = worst_rate(run, MEAN_RATE)
+        return (None, "", None) if missing or not rate else (rate, "", None)
     tpot, missing = (worst_itl_p99(run) if stat in (None, "p99")
                      else worst_figure(run, f"tpot_{stat}_ms"))
     if missing or not tpot:
@@ -970,7 +997,7 @@ def figure_form_problems(doc):
         return []
     bad = []
     measured = doc.get("metrics") if isinstance(doc.get("metrics"), dict) else {}
-    for name in sorted(set(_MEASURED_KEYS.values())):
+    for name in sorted(set(_MEASURED_KEYS.values()) | {MEAN_RATE}):
         entry = measured.get(name)
         if not isinstance(entry, dict):
             continue
@@ -1001,8 +1028,8 @@ _MEASURED_KEYS = {"tokens_per_sec": "output_tok_s", "responses_per_sec": "reques
                   # ((E2E - TTFT) / (tokens - 1) of each request, a per-TOKEN figure that already holds
                   # what speculation gains), not the engine's decode-step interval, which is per STEP
                   # (DEV-8, #92). The legacy `itl_*` slots keep their names for the ledgers and the pages
-                  # and now hold the same TPOT values; the registry's pooled `itl_*` is a different
-                  # population (all inter-token gaps) the pinned simulator does not compute.
+                  # and now hold the same TPOT values; the registry's pooled `itl_*` (all inter-token
+                  # gaps), kept only in measured.metrics, is a different population and is never read.
                   "tpot_mean_ms": "tpot_mean_ms", "tpot_p50_ms": "tpot_p50_ms", "tpot_p90_ms": "tpot_p90_ms",
                   "tpot_p95_ms": "tpot_p95_ms", "tpot_p99_ms": "tpot_p99_ms",
                   "itl_mean_ms": "tpot_mean_ms", "itl_p90_ms": "tpot_p90_ms",
@@ -1010,7 +1037,7 @@ _MEASURED_KEYS = {"tokens_per_sec": "output_tok_s", "responses_per_sec": "reques
                   "preemption_count": "preemptions",
                   # The registry's per-GPU rates and the interactivity of the mean TPOT: the figures the
                   # Pareto objective is stated in (pareto.py). A Result that lacks one leaves the slot
-                  # empty; interactivity is then derived from tpot_mean_ms (pareto.interactivity_of).
+                  # empty and the row unrated (pareto.interactivity_of rebuilds nothing).
                   "total_tokens_per_sec_per_gpu": "total_tokens_per_second_per_gpu",
                   "output_tokens_per_sec_per_decode_gpu": "output_tokens_per_second_per_decode_gpu",
                   "interactivity_of_mean_tpot": "interactivity_of_mean_tpot"}
@@ -1085,7 +1112,8 @@ def measured_instances(doc):
 
     The pinned simulator reports a per-instance block only for the whole run, so the worst-instance
     gate takes the completed non-warm-up requests that finish inside the window, grouped by the instance that served them.
-    Only latencies a row carries can be rebuilt (TTFT, end-to-end, TPOT), at INSTANCE_STATS; each
+    Only latencies a row carries can be rebuilt (TTFT, end-to-end, TPOT), at INSTANCE_STATS, plus
+    MEAN_RATE, the mean of each request's 1000 / tpot_ms; each
     instance's legacy itl_* slots hold its TPOT, as the cluster's do, so the itl_p99 gate judges TPOT too. Remove the rebuild when the simulator emits
     the per-instance measured window for every instance (inference-sim #2087). [] when the Result has
     neither rows nor a prefill instance's window.
@@ -1114,6 +1142,12 @@ def measured_instances(doc):
                 # cluster figure (_MEASURED_KEYS), so the worst-instance gate judges the same quantity.
                 for k in INSTANCE_STATS:
                     o[f"itl_{k}_ms"] = o[f"tpot_{k}_ms"]
+        # The mean of each request's tok/s, as the cluster's MEAN_RATE: requests with a positive
+        # TPOT (one of zero has no rate), summed in sorted order.
+        rates = sorted(1e6 / r["tpot_us"] for r in by[inst]
+                       if isinstance(r.get("tpot_us"), (int, float)) and r["tpot_us"] > 0)
+        if rates:
+            o[MEAN_RATE] = sum(rates) / len(rates)
         out.append(o)
     return out + _prefill_instances(doc, set(by))
 
@@ -1133,6 +1167,8 @@ def _prefill_instances(doc, seen):
                     o[f"{stem}_{k}_ms"] = mw[f"{stem}_{k}_ms"]
                     if stem == "tpot":
                         o[f"itl_{k}_ms"] = mw[f"tpot_{k}_ms"]
+        if isinstance(mw.get(MEAN_RATE), (int, float)) and not isinstance(mw.get(MEAN_RATE), bool):
+            o[MEAN_RATE] = mw[MEAN_RATE]
         out.append(o)
     return out
 

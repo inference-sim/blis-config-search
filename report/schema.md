@@ -95,10 +95,8 @@ Assembled in `scripts/explore_data.py`. Knobs the engine doesn't vary come throu
 `route: "default"`, `mtp: 0`) and the explorer automatically hides single-value dimensions.
 
 `id, src, conc, tp, dp, ni, gpus, series, route, pd, mtp, mnbt, mns, a2a, epw,`
-`pu (per-user tok/s: authoritative tok_per_s_per_user if present; else 1000/ITL-p99 when one step`
-`   == one token (mtp==0) -- on the p99 basis, or the per-user statistic the spec states, the basis of the floor + pareto; else null, never a step rate),`
-`pu_is_step_estimate (True = under MTP with no authoritative field, so pu is null not a wrong number),`
-`cl (=tokens_per_sec), itl (=mean ITL ms), ttft (=ttft_p99_ms),`
+`pu (per-user tok/s: the row's tok_per_s_per_user, on the basis of the floor + pareto; null when unmeasured),`
+`cl (=tokens_per_sec), itl (=itl_p99_ms, the worst instance's TPOT p99), ttft (=ttft_p99_ms),`
 `hit (prefix hit or null), to (timed out), drop (unservable), p95 (=e2e_p95_ms),`
 `ok (met completion+floor+SLOs; absent SLO metric = violation), status, viol[] (reasons when not ok)`
 
@@ -109,9 +107,12 @@ profiling window after warm-up, at the **cluster** scope. Every latency gate (TT
 TPOT, at the statistic its `scenario.slo` key names) is also judged on the worst instance, rebuilt
 from the measured window's per-request rows (`phase == "profile"`, grouped by the instance that
 served them, percentile by linear interpolation). The `itl_p99` gate reads TPOT, the per-request
-time per output token; `tok_per_s_per_user` is 1000 over the worst instance's TPOT at the
-per-user statistic, p99 unless the spec states another, which `interactivity_floor.statistic`
-and `.of` then name. Whole-run figures include warm-up and drain and are never ranked on. The
+time per output token. A user's rate is 1000 over that request's TPOT in ms, and
+`tok_per_s_per_user` is the worst instance's rate at the per-user statistic: at a percentile, 1000
+over its TPOT at that percentile (p99 unless the spec states another), which is the users' rate at
+the matching percentile from the slow end; with `interactivity_mean` stated, its mean of each
+request's tok/s (the registry's `interactivity_mean`), not 1000 over the mean TPOT, which is lower.
+`interactivity_floor.statistic` and `.of` name a stated statistic. Whole-run figures include warm-up and drain and are never ranked on. The
 report states this in `scenario.json` (`basis`, `scope`) and in its meta line. A ledger that mixes
 records with and without a basis is flagged, not rendered as one comparison.
 
@@ -125,11 +126,15 @@ A record keeps the run's inputs and outputs as written. The fields added with th
 | `measured.metrics` | the Result's top-level `metrics`, verbatim, each `{value, samples}`, under BLIS's names (`interactivity_mean`, `interactivity_p50`, `itl_*`, `ttft_p50_ms`, `e2e_p50_ms`, ...) |
 | `measured.metric_defs` | the Result's `metric_defs`, verbatim, when the document has them; absent otherwise |
 | `measured.window` | the Result's measured window: start, end, duration, requests |
-| `measured.instances` | per-instance TTFT, end-to-end and TPOT figures for the window, rebuilt from the per-request rows until the simulator emits them (inference-sim #2087) |
+| `measured.instances` | per-instance TTFT, end-to-end and TPOT figures for the window, and `interactivity_mean` (the mean of each request's 1000 / TPOT in ms), rebuilt from the per-request rows until the simulator emits them (inference-sim #2087) |
 | `whole_run` | the whole-run cluster aggregate, raw data only; nothing ranks or displays it |
 | `config_key` | the hash of `config` with `concurrency` removed: the records of one configuration across loads share it |
 
 `config_hash` is unchanged: the hash of the whole `config`, so one run at one load. `measured` is
 absent, not empty, when the Result has no top-level `metrics`. BLIS's `interactivity_p90` is
-`1000 / itl_p90`, the slow tail of the per-user distribution (the benchmark client's per-user p10),
-not its p90.
+`1000 / tpot_p90` (the record's `tpot_p90_ms`, TPOT computed per request), the slow tail of the
+per-user distribution (the benchmark client's per-user p10), not its p90. One record:
+`interactivity_p90` 104.2155 = 1000 / 9.5955 `tpot_p90_ms`. The registry's `itl_*`, as
+`measured.metrics` keeps it, is a different, pooled figure (every gap between output tokens), not
+TPOT; the legacy `itl_*` slots of `metrics` and `measured.instances` hold TPOT. BLIS's `interactivity_mean` is the mean over requests of each one's tok/s (formula
+`user_tps`), and `interactivity_of_mean_tpot` is `1000 / tpot_mean`, which is lower.

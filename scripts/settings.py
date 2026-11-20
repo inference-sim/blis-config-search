@@ -62,6 +62,7 @@ ENGINE_BLOCK_NAMES = {
     "speculative.kv_cache_dtype": "config:speculative_config.kv_cache_dtype",
     "speculative.draft_sample_method": "config:speculative_config.draft_sample_method",
     "speculative.rejection_sample_method": "config:speculative_config.rejection_sample_method",
+    "speculative.synthetic_acceptance_length": "config:speculative_config.synthetic_acceptance_length",
     "speculative.enable_adaptive_verification":
         "config:speculative_config.enable_adaptive_verification",
 }

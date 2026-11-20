@@ -159,6 +159,7 @@ whose deployment schema lets a pool state its own offload (blis-substrate#307); 
 | `engine.max_model_len`, `quantization` | `model_config.*` |
 | `engine.all2all_backend` | `parallel_config.all2all_backend` |
 | `engine.speculative.{method, num_spec_tokens, draft_model}` | `speculative_config.{method, num_speculative_tokens, model}` |
+| `engine.speculative.{kv_cache_dtype, draft_sample_method, rejection_sample_method, synthetic_acceptance_length, enable_adaptive_verification}` | `speculative_config.<same name>` |
 | `num-instances`, `prefill-instances`, `decode-instances` | `blis run` replica-count flags, not engine keys |
 | `router.*` | llm-d's EndpointPickerConfig, not an engine key |
 
@@ -263,15 +264,22 @@ engine:
 ```
 
 `speculative` is also nested and needs **both** `method` and `num_spec_tokens`; acceptance comes
-from the registry, not a knob. It carries seven fields at this pin (it held two before v0.14.0),
-and `method`, `num_spec_tokens` and `draft_model` change a run. The sampling fields
-(`draft_sample_method`, `rejection_sample_method`, `enable_adaptive_verification`,
-`kv_cache_dtype`) are recorded as the launch gave them and never re-price acceptance, so the
-validator refuses a sweep over any of them. `draft_model` names a separate drafter checkpoint by
-its catalog name. The validator refuses one the catalog does not resolve, and one that is not a
-drafter of the scenario's model in both directions: the model lists it under `drafters:` and it
-names the model under `targets:`. Leave it out to draft with the graph's own speculator.
-`num_spec_tokens: 0` is the drafting-off control, one arm whatever drafters the grid lists.
+from the registry, not a knob. It carries the engine's native fields (`blis fields`; eight at the
+current engine), and `method`, `num_spec_tokens` and `draft_model` change a run. The other fields
+(`draft_sample_method`, `rejection_sample_method`, `synthetic_acceptance_length`,
+`enable_adaptive_verification`, `kv_cache_dtype`) stay nested in the run's engine block; the
+validator refuses a sweep over one the field list marks inert. A field stated in `scenario.engine`
+and others swept under a sweep's `engine.speculative` merge field by field. `draft_model` names a
+separate drafter checkpoint by its catalog name. The validator refuses one the catalog does not
+resolve, and one that is not a drafter of the scenario's model in both directions: the model lists
+it under `drafters:` and it names the model under `targets:`. Leave it out to draft with the
+graph's own speculator. `num_spec_tokens: 0` is the drafting-off control, one arm whatever drafters
+and native fields the grid lists.
+
+Each ledger row records where every engine setting came from as `engine_origin`, a tree shaped
+like `deployment.engine` with one origin per leaf: `sweep`, `scenario` (`scenario.engine`),
+`catalog` (a `method` the model's graph declared) or `runner` (`max_model_len`, `block_size`).
+A nested block keeps each field's own origin.
 
 ### Not every accepted knob is a lever
 

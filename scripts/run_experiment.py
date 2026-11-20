@@ -87,10 +87,11 @@ def grid(knob_lists):
 def _engine_candidates(engine):
     """Expand a sweep's `engine:` block, including its nested blocks.
 
-    `speculative` FLATTENS, because run_blis takes drafting as two flat candidate keys and folds
-    them back into the nested block itself:
+    `speculative` FLATTENS its method, depth and drafter, because run_blis takes those as flat
+    candidate keys and folds them back into the nested block itself:
     `speculative: {method: [dspark], num_spec_tokens: [1,3,5]}` -> three candidates carrying
-    speculative_method + num_speculative_tokens.
+    speculative_method + num_speculative_tokens. Its other native fields stay NESTED, as below:
+    `speculative: {..., kv_cache_dtype: [fp8]}` adds `speculative: {kv_cache_dtype: fp8}`.
 
     The other nested blocks (`eplb`, `dbo`, `engram_config`) stay NESTED: the runner passes them
     through to the scenario as sub-blocks, so each combination of their inner fields becomes one
@@ -107,15 +108,66 @@ def _engine_candidates(engine):
         combos = grid(fields)
         out = [{**base, block: combo} for base in out for combo in combos]
     if spec:
+        legacy = {SPEC_TO_CANDIDATE[k]: v for k, v in spec.items() if k in SPEC_TO_CANDIDATE}
+        native = {k: v for k, v in spec.items() if k not in SPEC_TO_CANDIDATE}
         spec_combos = []
-        for combo in grid({SPEC_TO_CANDIDATE.get(k, k): v for k, v in spec.items()}):
-            # K=0 is the drafting-off control: one arm, with no drafter named, however many
-            # methods and drafters the grid crosses it with.
-            if combo.get("num_speculative_tokens") == 0:
-                combo = {"num_speculative_tokens": 0}
-            if combo not in spec_combos:
-                spec_combos.append(combo)
+        for flat in grid(legacy):
+            for inner in grid(native):
+                combo = {**flat, **({"speculative": inner} if inner else {})}
+                # K=0 is the drafting-off control: one arm, with no drafter named, however many
+                # methods, drafters and native fields the grid crosses it with.
+                if combo.get("num_speculative_tokens") == 0:
+                    combo = {"num_speculative_tokens": 0}
+                if combo not in spec_combos:
+                    spec_combos.append(combo)
         out = [{**b, **s} for b in out for s in spec_combos]
+    return out
+
+
+def merge_nested(base, over):
+    """`over` laid on `base`, a nested block merged field by field rather than replaced whole."""
+    out = dict(base)
+    for key, value in over.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = merge_nested(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def leaf_paths(tree, prefix=()):
+    """The path of every non-mapping value of a nested settings mapping."""
+    out = set()
+    for key, value in (tree or {}).items():
+        if isinstance(value, dict):
+            out |= leaf_paths(value, prefix + (key,))
+        else:
+            out.add(prefix + (key,))
+    return out
+
+
+def engine_origin(engine, fixed, swept, path=()):
+    """Where each leaf of a run's engine settings came from, in the shape of `engine`.
+
+    `sweep`: the sweep's engine block (`swept` holds its leaf paths); `scenario`: the spec's
+    scenario.engine (`fixed`); `catalog`: the speculator the model's graph declares, filled in
+    when the candidate drafts without naming a method; `runner`: a value the runner states
+    (max_model_len, block_size). Recursion keeps each nested field's own origin, so a block
+    that mixes fixed and swept fields records both.
+    """
+    out = {}
+    for key, value in engine.items():
+        here = path + (key,)
+        if isinstance(value, dict):
+            out[key] = engine_origin(value, fixed, swept, here)
+        elif here in swept:
+            out[key] = "sweep"
+        elif here in fixed:
+            out[key] = "scenario"
+        elif here == ("speculative", "method"):
+            out[key] = "catalog"
+        else:
+            out[key] = "runner"
     return out
 
 
@@ -731,6 +783,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     # A key other than the legacy p99 caps: each record then names the figures this spec gates on.
     restated = any(k not in slo.LEGACY and k != slo.THROUGHPUT for k in slo_ms)
     shared_engine = dict(sc.get("engine") or {})
+    fixed_paths = leaf_paths(shared_engine)
     if not fields:
         run_blis.ask_field_list(blis, catalog, sc)
     engine_version = blis_cli.engine_release(blis, settings.ENGINE_KIND, fields)
@@ -815,6 +868,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                   f"= {len(kept) * len(concurrency)} runs "
                   f"({len(dropped)} combos dropped off budget)")
         rows, sweep_dropped = [], []
+        swept_paths = leaf_paths(sweep.get("engine"))
         for tot in sorted({t for _c, t in dropped}):
             sweep_dropped.append({"gpus": tot, "reason":
                                   f"uses {tot} GPUs, not the scenario's {gpus}",
@@ -840,7 +894,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
             label = label_of(resolved)
             variant = variant_of(cand, router_desc, baseline)
             for c in concurrency:
-                cfg = {**shared_engine, **resolved, "concurrency": c}
+                cfg = {**merge_nested(shared_engine, resolved), "concurrency": c}
                 # Only a drafting candidate needs them; adding them elsewhere would change a
                 # non-drafting run's command line for no reason.
                 if cfg.get("speculative_method"):
@@ -877,6 +931,9 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
             # it: build_gallery reads `finalist.config.tp` / `.num_instances` for the winner
             # card, and showed "tp 0, 0 instances" without it.
             row["config"] = _jsonable(cfg)
+            engine = (rec.get("deployment") or {}).get("engine")
+            if engine:
+                row["engine_origin"] = engine_origin(engine, fixed_paths, swept_paths)
             row["servable"] = ok
             if "in_flight_at_cutoff" in rec:
                 row["in_flight_at_cutoff"] = rec["in_flight_at_cutoff"]

@@ -104,9 +104,8 @@ def ask_field_list(blis, catalog, sc):
         if settings.ENGINE_KIND == "vllm":
             engine.setdefault("block_size", default_block_size(catalog, sc.get("model"), sc.get("hardware")))
         node = int(fixed or stated or 1)
-        return scenario_yaml(sc.get("model"), sc.get("hardware"), blis_cli.build_release(blis, settings.ENGINE_KIND),
-                             {"tp": node, "pp": 1, "dp": 1}, engine, "fields-probe",
-                             node_size=node, states_node_size=not fixed)
+        return scenario_yaml(sc.get("model"), sc.get("hardware"), {"tp": node, "pp": 1, "dp": 1}, engine,
+                             "fields-probe", node_size=node, states_node_size=not fixed)
     try:
         return blis_cli.fields(blis, settings.ENGINE_KIND, scenario=probe, catalog=catalog)
     except blis_cli.BlisCommandError as e:
@@ -971,7 +970,7 @@ BASIS = "measured_window"
 # document states, so it lights up with the pin bump to a simulator that writes version 3 and does
 # nothing before it (test_run_blis.FigureForms). A version this module has not read is refused.
 FIGURE_SCOPE_FROM_SCHEMA = 3
-READ_RESULT_SCHEMAS = (1, 2, 3)      # 1: the fixtures' string "1"; 2: the pinned release; 3: layer 10
+READ_RESULT_SCHEMAS = (1, 2, 3, 4)   # 1: the fixtures' string "1"; 2: the pinned release; 3: layer 10; 4: M3.2 (adds `estimate`; figures as in 3)
 FIGURE_FORM_FIELDS = ("member", "aggregate", "over")
 
 
@@ -1323,7 +1322,7 @@ def _pool_offload_block(off):
     return f"    offload:\n{policy}      tiers:\n        - {{tier: cpu_dram, bytes: {int(off['cpu_bytes'])}}}\n"
 
 
-def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router,
+def _pd_scenario_yaml(model, hardware, pd, name, block, fabric, router,
                       node_size, states_node_size):
     """Render a DISAGGREGATED Scenario+Deployment: one pool per role plus `pd_transfer`.
 
@@ -1358,7 +1357,6 @@ def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, 
 name: {name}
 engine:
   kind: {settings.ENGINE_KIND}
-  version: "{engine_version}"
 model: {model}
 coefficients: [{", ".join(COEFFICIENTS + (["cost-model-offload-tiers"] if any_offload else []))}]
 cluster:
@@ -1431,7 +1429,7 @@ def to_vllm_block(eng):
     return out
 
 
-def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances=1,
+def scenario_yaml(model, hardware, parallel, engine, name, num_instances=1,
                   fabric=DEFAULT_FABRIC, router=None, node_size=8, states_node_size=True):
     """Render a two-doc Scenario+Deployment YAML (no external yaml dep). Omitted engine keys (e.g.
     quantization when unset) let the checkpoint/engine govern.
@@ -1459,7 +1457,7 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
     pd = (parallel or {}).get("pd")
     if pd:
         pd = {**pd, **{r: {**pd[r], "engine": to_vllm_block(pd[r].get("engine"))} for r in PD_ROLES if r in pd}}
-        return _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router,
+        return _pd_scenario_yaml(model, hardware, pd, name, block, fabric, router,
                                  node_size, states_node_size)
     engine = to_vllm_block(engine)
     nodes = pool_nodes(parallel, num_instances, node_size)
@@ -1487,7 +1485,6 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
 name: {name}
 engine:
   kind: {settings.ENGINE_KIND}
-  version: "{engine_version}"
 model: {model}
 coefficients: [{", ".join(coefficients)}]
 cluster:
@@ -1536,7 +1533,7 @@ def write_scenario(blis, scenarios_dir, model, hardware, engine_version, paralle
     os.makedirs(scenarios_dir, exist_ok=True)
     path = os.path.join(scenarios_dir, name + ".yaml")
     if not os.path.exists(path):
-        body = scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances,
+        body = scenario_yaml(model, hardware, parallel, engine, name, num_instances,
                              fabric, router, node_size, states_node_size)
         fd, tmp = tempfile.mkstemp(dir=scenarios_dir, prefix=".tmp-", suffix=".yaml")
         try:

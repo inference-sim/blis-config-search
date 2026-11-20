@@ -187,7 +187,7 @@ class PerPoolOffload(unittest.TestCase):
     def scenario(self, config, pool_offload=True):
         base = {"prefill_instances": 1, "decode_instances": 1, "prefill_tp": 8, "decode_tp": 8}
         parallel, engine, cli, router = run_blis.classify_config({**base, **config}, self.vocab, 8, pool_offload)
-        return run_blis.scenario_yaml("qwen3-14b", "h100", "0.33.0", parallel, engine, "x", node_size=8)
+        return run_blis.scenario_yaml("qwen3-14b", "h100", parallel, engine, "x", node_size=8)
 
     def pool(self, text, role):
         return text.split(f"  - role: {role}\n")[1].split("\n  - role:")[0].split("\npd_transfer:")[0]
@@ -281,7 +281,7 @@ class PerPoolOffload(unittest.TestCase):
         parallel, engine, cli, router = run_blis.classify_config(base, vocab, 8, blis_cli.supports_pool_offload(real))
         for role in run_blis.PD_ROLES:       # run_one states the block size before it renders
             parallel["pd"][role]["engine"].setdefault("block_size", 64)
-        text = run_blis.scenario_yaml("qwen3-14b", "h100", blis_cli.engine_release(real, "vllm", fields), parallel, engine,
+        text = run_blis.scenario_yaml("qwen3-14b", "h100", parallel, engine,
                                       "x", node_size=8)
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, "x.yaml"), "w") as f:
@@ -309,7 +309,7 @@ class ArmsDiffer(unittest.TestCase):
         for size in (0, 2**39):
             parallel, engine, cli, router = run_blis.classify_config(
                 {"tp": 4, "offload_cpu_bytes": size, "offload_eviction_policy": "lru"}, vocab)
-            texts[size] = run_blis.scenario_yaml("llama-3.1-70b-instruct", "h200", "0.33.0", parallel, engine, "x")
+            texts[size] = run_blis.scenario_yaml("llama-3.1-70b-instruct", "h200", parallel, engine, "x")
         self.assertNotIn("offload", texts[0])
         self.assertNotIn("cost-model-offload-tiers", texts[0])
         self.assertIn("tiers:\n    - {tier: cpu_dram, bytes: 549755813888}", texts[2**39])

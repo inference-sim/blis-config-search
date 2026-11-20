@@ -395,7 +395,7 @@ def _scenario(run_dir, exp, dep, unset=None):
             # a generated override arm lives in the report; a stock arm (no overrides) in routing/
             rel = local if os.path.exists(os.path.join(ROOT, local)) else os.path.join("routing", os.path.basename(rc))
             shown = {"router_config": "__ROUTER__"}
-        text = run_blis.scenario_yaml(model, hw, ev, json.loads(json.dumps(dep["parallel"])),
+        text = run_blis.scenario_yaml(model, hw, json.loads(json.dumps(dep["parallel"])),
                                       dict(dep["engine"]), name[:-5], dep["num_instances"],
                                       fabric, shown or None, node_size, states_node_size)
         if shown:

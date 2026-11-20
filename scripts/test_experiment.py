@@ -2892,7 +2892,7 @@ class PdRunner(unittest.TestCase):
 
     def test_scenario_yaml_renders_two_pools_and_pd_transfer(self):
         par, eng, cli, _router = run_blis.classify_config(self.cfg(), V.knob_vocabulary(BLIS))
-        doc = run_blis.scenario_yaml("kimi-k2.5", "h200", "0.29.0", par, eng, "x",
+        doc = run_blis.scenario_yaml("kimi-k2.5", "h200", par, eng, "x",
                                      cli["num_instances"])
         self.assertIn("role: prefill", doc)
         self.assertIn("role: decode", doc)
@@ -2909,7 +2909,7 @@ class PdRunner(unittest.TestCase):
     def test_colocated_scenario_is_unchanged(self):
         """The P/D path must not alter the colocated rendering every committed report used."""
         par, eng, _cli, _r = run_blis.classify_config({"tp": 8, "num_instances": 2}, V.knob_vocabulary(BLIS))
-        doc = run_blis.scenario_yaml("glm-5.3-flash", "h100", "0.29.0", par, eng, "x", 2)
+        doc = run_blis.scenario_yaml("glm-5.3-flash", "h100", par, eng, "x", 2)
         self.assertIn("role: colocated", doc)
         self.assertNotIn("pd_transfer", doc)
 

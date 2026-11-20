@@ -530,6 +530,25 @@ def test_workflow_wiring():
         (st.get("with") or {}).get("ref") == "${{ needs.plan.outputs.sha }}" for st in d.get("steps") or [])]
     check(sorted(swept) == ["build", "merge", "regen"] and "github.event.inputs.base || github.ref" in regen,
           "every regen job sweeps the base's pins, not the dispatch ref's")
+    # The REGEN_RUNS_ON runner (the ARC image, deploy/openshift/arc/) ships no gh CLI: a job there
+    # that calls gh fails with exit 127 (#183, the merge job's shard download).
+    import re
+    big = [j for j, d in jobs.items() if "vars.REGEN_RUNS_ON" in str(d.get("runs-on"))]
+    check(sorted(big) == ["build", "merge", "regen"], "the heavy jobs run on REGEN_RUNS_ON")
+    for j in big:
+        for st in jobs[j].get("steps") or []:
+            check(not re.search(r"(^|[\s;|&(])gh\s", st.get("run") or ""),
+                  f"regen-reports.yml job {j} step {st.get('name') or st.get('uses')!r} calls gh, "
+                  "which the REGEN_RUNS_ON runner image does not have")
+    msteps = jobs["merge"]["steps"]
+    dl = next((st for st in msteps if st.get("name") == "Download every shard's ledger"), {})
+    check(dl.get("uses", "").startswith("actions/download-artifact@")
+          and dl.get("with", {}).get("pattern") == "regen-${{ matrix.report.id }}--shard-*"
+          and dl.get("with", {}).get("path") == "${{ runner.temp }}/shards",
+          "merge downloads its shards by pattern, one regen-<id>--shard-<i>/ directory each")
+    shard_dir = '"$RUNNER_TEMP/shards/regen-$ID--shard-$i/runs.jsonl"'
+    check(sum(shard_dir in (st.get("run") or "") for st in msteps) == 2,
+          "merge checks, then assembles, every shard's ledger from the directory the pattern made")
 
 
 PINS_NEW = {"BLIS_REF": "v2.0.0", "BLIS_SHA": "b" * 40, "ROUTER_REF": "r2", "SUBSTRATE_REF": "s2"}

@@ -250,7 +250,6 @@ jobs:
     name: merge ${{ matrix.report.id }}
     permissions:
       contents: read
-      actions: read            # download this run's shard artifacts
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with: { ref: "${{ needs.plan.outputs.sha }}" }
@@ -275,19 +274,28 @@ jobs:
           key: replay-corpus-${{ steps.stack.outputs.substrate_ref }}
       - name: Fetch the pinned engine field list
         run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
+      # download-artifact, not gh: the REGEN_RUNS_ON runner (the ARC image) has no gh CLI (#183).
+      # A pattern puts each artifact in its own regen-<id>--shard-<i>/ directory. Only a lone
+      # match is flattened, and a merge has two shards or more, so that means a shard is missing,
+      # and the check below fails on it.
       - name: Download every shard's ledger
-        env: { GH_TOKEN: "${{ github.token }}", ID: "${{ matrix.report.id }}", N: "${{ matrix.report.shards }}" }
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: regen-${{ matrix.report.id }}--shard-*
+          path: ${{ runner.temp }}/shards
+      - name: Check that every shard's ledger arrived
+        env: { ID: "${{ matrix.report.id }}", N: "${{ matrix.report.shards }}" }
         run: |
           set -euo pipefail
           for i in $(seq 0 $((N - 1))); do
-            gh run download "$GITHUB_RUN_ID" --name "regen-$ID--shard-$i" --dir "$RUNNER_TEMP/shards/$i"
-            test -s "$RUNNER_TEMP/shards/$i/runs.jsonl"
+            test -s "$RUNNER_TEMP/shards/regen-$ID--shard-$i/runs.jsonl" || {
+              echo "::error::shard $i of $N of $ID has no runs.jsonl (did its regen job fail?)"; exit 1; }
           done
       - name: Assemble ${{ matrix.report.id }} from its shards
         env: { ID: "${{ matrix.report.id }}", N: "${{ matrix.report.shards }}" }
         run: |
           set -euo pipefail
-          from=(); for i in $(seq 0 $((N - 1))); do from+=(--runs-from "$RUNNER_TEMP/shards/$i/runs.jsonl"); done
+          from=(); for i in $(seq 0 $((N - 1))); do from+=(--runs-from "$RUNNER_TEMP/shards/regen-$ID--shard-$i/runs.jsonl"); done
           python3 -I scripts/blis_pin.py regen "$ID" "${from[@]}" \
             --blis .build/blis --catalog blis-substrate/catalog --registry blis-substrate/registry \
             --fields "$RUNNER_TEMP/fields.json" --out "$RUNNER_TEMP/regen"

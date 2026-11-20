@@ -112,7 +112,10 @@ time per output token. A user's rate is 1000 over that request's TPOT in ms, and
 over its TPOT at that percentile (p99 unless the spec states another), which is the users' rate at
 the matching percentile from the slow end; with `interactivity_mean` stated, its mean of each
 request's tok/s (the registry's `interactivity_mean`), not 1000 over the mean TPOT, which is lower.
-`interactivity_floor.statistic` and `.of` name a stated statistic. Whole-run figures include warm-up and drain and are never ranked on. The
+`interactivity_floor.statistic` and `.of` name a stated statistic. A spec that states none takes the
+Pareto x axis and each row's `interactivity` from the Result's `interactivity_mean` (the mean of each
+request's tok/s, `pareto.x_basis.of`), not `interactivity_of_mean_tpot`; a spec whose only per-user
+statistic is a `tpot_<stat>` cap keeps `1000 / tpot_<stat>_ms`, labelled so in `pareto.x_basis`. Whole-run figures include warm-up and drain and are never ranked on. The
 report states this in `scenario.json` (`basis`, `scope`) and in its meta line. A ledger that mixes
 records with and without a basis is flagged, not rendered as one comparison.
 

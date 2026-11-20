@@ -3,10 +3,9 @@
 
 The axes are the metric registry's, not this repository's (design DEV-8):
 
-  x  interactivity_of_mean_tpot  1000 / mean(TPOT in ms), tokens/s per user
-                                 (InferenceX mean_intvty), the harmonic mean of the users' rates; not
-                                 the mean of each request's tok/s, the registry's interactivity_mean,
-                                 which is higher whenever the rates differ (#187)
+  x  interactivity_mean          the mean of each request's tok/s (formula user_tps), tokens/s per user;
+                                 not 1000 / the mean TPOT (interactivity_of_mean_tpot), the harmonic
+                                 mean of the users' rates, which is lower whenever the rates differ
   y  total_tokens_per_second_per_gpu            (input + output tokens)/s over ALL the GPUs, or
      output_tokens_per_second_per_decode_gpu    output tokens/s over the decode GPUs
 
@@ -28,15 +27,17 @@ tolerance displaces anything here: the front is the exact non-dominated set, and
 carries no interval. The P/D preference arrives with the replications (M3).
 """
 
+import run_blis
+
 RANKINGS = ("scalar", "pareto")
 # throughput form -> (row field, registry metric)
 THROUGHPUT_FORMS = {
     "total": ("total_tokens_per_sec_per_gpu", "total_tokens_per_second_per_gpu"),
     "decode": ("output_tokens_per_sec_per_decode_gpu", "output_tokens_per_second_per_decode_gpu"),
 }
-# The registry's mean of each request's tok/s (formula user_tps), run_blis.MEAN_RATE.
-MEAN_RATE = "interactivity_mean"
-X_METRIC = "interactivity_of_mean_tpot"
+# The registry's mean of each request's tok/s (formula user_tps).
+MEAN_RATE = run_blis.MEAN_RATE
+X_METRIC = MEAN_RATE
 X_FIELD = "interactivity"            # the row field holding X_METRIC
 PER_USER_X = "tok_per_s_per_user"       # the figure pareto.json's `x` names when a spec states one
 # The row field the front reads it from: the rate to 3 decimals, as `interactivity`. The displayed
@@ -52,14 +53,16 @@ def objective_of(spec_objective):
     return out
 
 
-def interactivity_of(metrics):
-    """(tokens/s per user, basis) for a run's flattened measured-window metrics, or (None, "").
+def interactivity_of(rec):
+    """(tokens/s per user, basis) for a run record, or (None, "").
 
-    Only the Result's own registered `interactivity_of_mean_tpot` counts (DEV-8: a definition is read
-    from the registry, never rebuilt from another field). A Result that does not state it, or states a
+    Only the Result's own registered `interactivity_mean`, in the record's measured.metrics, counts
+    (DEV-8: a definition is read from the registry, never rebuilt from another field, and
+    interactivity_of_mean_tpot is another figure). A Result that does not state it, or states a
     figure that is not a positive number, leaves the run unrated: it is counted, not placed."""
-    v = (metrics or {}).get("interactivity_of_mean_tpot")
-    if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+    measured = ((rec or {}).get("measured") or {}).get("metrics")
+    v = run_blis._figure(measured.get(MEAN_RATE)) if isinstance(measured, dict) else None
+    if v is not None and v > 0:
         return float(v), "result"
     return None, ""
 

@@ -538,7 +538,7 @@ def run_row(rec, cand, label, variant, sweep_name, concurrency, gpus, slo_ms=Non
     # Recorded on the basis `servable` JUDGES on, with the aggregate kept beside it as for ITL: a
     # row showing a passing aggregate next to an infeasible verdict is unreadable.
     worst_ttft, ttft_missing = run_blis.worst_metric(rec, "ttft_p99_ms")
-    inter, inter_basis = pareto.interactivity_of(m)
+    inter, inter_basis = pareto.interactivity_of(rec)
     acc = (rec.get("deployment") or {}).get("acceptance")
     return {
         "sweep": sweep_name, "label": label, "variant": variant,

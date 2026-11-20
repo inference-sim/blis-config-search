@@ -3705,11 +3705,11 @@ FATAL = ('time="2026-11-11T20:50:44-05:00" level=fatal msg="instance instance_0:
 
 
 def _ran(tps, tpot_ms, itl_p99=1.0, **extra):
-    # a Result that states the registry's interactivity of the mean TPOT (1000 / mean TPOT)
-    m = {"tokens_per_sec": tps, "itl_p99_ms": itl_p99, "tpot_mean_ms": tpot_ms,
-         "interactivity_of_mean_tpot": 1000.0 / tpot_ms}
+    # a Result that states the registry's mean of each request's tok/s, here every request at tpot_ms
+    m = {"tokens_per_sec": tps, "itl_p99_ms": itl_p99, "tpot_mean_ms": tpot_ms}
     m.update(extra)
-    return {"returncode": 0, "error": None, "metrics": m, "metrics_all_instances": [], "cmd": None}
+    return {"returncode": 0, "error": None, "metrics": m, "metrics_all_instances": [], "cmd": None,
+            "measured": {"metrics": {"interactivity_mean": {"value": 1000.0 / tpot_ms, "samples": 8}}}}
 
 
 def _refused(scn="a1b2.yaml"):
@@ -3823,21 +3823,30 @@ class Refusals(unittest.TestCase):
 
 
 class InteractivityAndFigures(unittest.TestCase):
+    @staticmethod
+    def rec_with(**figures):
+        return {"metrics": {"tpot_mean_ms": 8.0},
+                "measured": {"metrics": {k: {"value": v, "samples": 3} for k, v in figures.items()}}}
+
     def test_a_result_that_states_the_figure_is_used_as_stated(self):
-        self.assertEqual((130.0, "result"), PA.interactivity_of(
-            {"interactivity_of_mean_tpot": 130.0, "tpot_mean_ms": 8.0}))
+        self.assertEqual((130.0, "result"), PA.interactivity_of(self.rec_with(
+            interactivity_mean=130.0, interactivity_of_mean_tpot=125.0)))
 
     def test_a_result_without_the_figure_is_unrated_not_rebuilt_from_tpot(self):
         # DEV-8: a definition is read from the registry, never recomputed from another field
-        self.assertEqual((None, ""), PA.interactivity_of({"tpot_mean_ms": 8.0}))
+        self.assertEqual((None, ""), PA.interactivity_of({"metrics": {"tpot_mean_ms": 8.0}}))
         self.assertEqual((None, ""), PA.interactivity_of({}))
-        self.assertEqual((None, ""), PA.interactivity_of({"interactivity_of_mean_tpot": 0}))
+        self.assertEqual((None, ""), PA.interactivity_of(self.rec_with(interactivity_mean=0)))
+        self.assertEqual((None, ""), PA.interactivity_of(self.rec_with(interactivity_of_mean_tpot=125.0)),
+                         "the harmonic mean of the rates is never the axis (#187)")
+        self.assertEqual((None, ""), PA.interactivity_of(
+            {"metrics": {"interactivity_mean": 130.0, "interactivity_of_mean_tpot": 125.0}}))
 
     def test_a_row_of_a_result_without_the_figure_is_counted_unrated(self):
         rep = _sweep_with(_pd_and_agg_spec(ranking="pareto"), lambda cfg: {
             "returncode": 0, "error": None, "cmd": None, "metrics_all_instances": [],
             "metrics": {"tokens_per_sec": 100.0, "itl_p99_ms": 1.0, "tpot_mean_ms": 8.0,
-                        "total_tokens_per_sec_per_gpu": 480.0}})
+                        "interactivity_of_mean_tpot": 125.0, "total_tokens_per_sec_per_gpu": 480.0}})
         self.assertIsNone(rep["best_overall"])
         self.assertEqual(rep["totals"]["servable"], rep["pareto"]["overall"]["total"]["unrated"])
 
@@ -3858,6 +3867,56 @@ class InteractivityAndFigures(unittest.TestCase):
         self.assertEqual(480.0, row["total_tokens_per_sec_per_gpu"])
         self.assertFalse(row["disaggregated"])
         self.assertTrue(rep["sweeps"][0]["rows"][0]["disaggregated"])
+
+
+class DefaultInteractivityAxis(unittest.TestCase):
+    """#187: a spec that states no per-user statistic is ranked and shown on the registry's
+    interactivity_mean, the mean of each request's tok/s, not on 1000 / the mean TPOT."""
+
+    @staticmethod
+    def rec(tpots_ms):
+        return InteractivityMeanFloor().rec(InteractivityMeanFloor.doc(tpots_ms))
+
+    @staticmethod
+    def row(rec, spec_slo=None, y=100.0):
+        slo_ms = E.slo_limits(spec_slo or {"itl_p99": "20ms"})
+        return {**E.run_row(rec, {}, "l", "", "s", 8, 8, slo_ms, spec_slo or {"itl_p99": "20ms"}),
+                "servable": True, "total_tokens_per_sec_per_gpu": y}
+
+    def test_acceptance_users_at_10_and_30_ms_see_66_7_not_50(self):
+        rec = self.rec((10.0, 30.0))
+        self.assertEqual(66.667, self.row(rec)["interactivity"])
+        self.assertEqual(66.667, round(rec["measured"]["metrics"]["interactivity_mean"]["value"], 3),
+                         "the row is the Result's own interactivity_mean")
+        self.assertEqual(50.0, rec["measured"]["metrics"]["interactivity_of_mean_tpot"]["value"])
+
+    def test_the_default_axis_is_named_interactivity_mean(self):
+        obj = PA.objective_of({"ranking": "pareto"})
+        self.assertEqual("interactivity_mean", PA.X_METRIC)
+        self.assertEqual("interactivity_mean", E.pareto_report([], [], obj)["x"])
+        self.assertIn("interactivity_mean", PA.describe(obj))
+        self.assertNotIn("interactivity_of_mean_tpot", PA.describe(obj))
+
+    def test_the_front_orders_users_on_the_mean_of_their_rates(self):
+        """Same throughput, the same 1000 / mean TPOT (50), different spread: only the mean of the
+        rates tells them apart, so the spread one dominates."""
+        spread, even = self.row(self.rec((10.0, 30.0))), self.row(self.rec((20.0, 20.0)))
+        spread["label"], even["label"] = "spread", "even"
+        self.assertEqual((66.667, 50.0), (spread["interactivity"], even["interactivity"]))
+        front = E.pareto_report([], [spread, even], PA.objective_of({"ranking": "pareto"}))["overall"]["total"]
+        self.assertEqual([("spread", 66.667)], [(m["label"], m["interactivity"]) for m in front["members"]])
+
+    def test_a_tpot_cap_alone_keeps_one_thousand_over_that_statistic_and_says_so(self):
+        slo = {"tpot_p90": "40ms"}
+        rec = self.rec((10.0, 30.0))
+        row = self.row(rec, slo)
+        basis = E.per_user_basis(slo)
+        self.assertEqual("tpot_p90_ms", basis["of"])
+        rep = E.pareto_report([], [{**row, "label": "a"}], PA.objective_of({"ranking": "pareto"}), basis)
+        self.assertEqual(("tok_per_s_per_user", "tpot_p90_ms"), (rep["x"], rep["x_basis"]["of"]))
+        member = rep["overall"]["total"]["members"][0]
+        self.assertEqual(round(1000.0 / run_blis._percentile([10.0, 30.0], 90), 3), member["interactivity"])
+        self.assertEqual(66.667, row["interactivity"], "the row's own figure is still the mean of rates")
 
 
 def _row(label, x, y, pd=False, servable=True, c=1, sweep="s", decode_y=None):

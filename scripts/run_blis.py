@@ -273,7 +273,8 @@ def classify_config(config, vocab, node_size=None, pool_offload=False):
         elif k in vocab.parallel:
             parallel[k] = v
         elif k in vocab.engine_names():
-            engine[k] = v
+            # A block is copied: the runner fills its fields (speculative.method) per run.
+            engine[k] = dict(v) if isinstance(v, dict) else v
         elif k in SCENARIO_SPECULATIVE:
             spec[k] = v
         elif k in SPECULATIVE_CLI:
@@ -307,17 +308,24 @@ def classify_config(config, vocab, node_size=None, pool_offload=False):
             # `method` defaults to the speculator the model's own graph declares; naming it here
             # would hardcode one model's drafter (deepseek-v4.1-flash is dspark, glm-5.2 is mtp).
             method = spec.get("speculative_method")
-            engine["speculative"] = ({"method": method, "num_spec_tokens": k} if method
-                                     else {"num_spec_tokens": k})
+            # The three flat keys fold INTO the nested block, over what it already states: the
+            # block's other native fields (kv_cache_dtype, rejection_sample_method, ...) stay.
+            block = dict(engine.get("speculative") or {})
+            block["num_spec_tokens"] = k
+            if method:
+                block["method"] = method
             # A separate drafter checkpoint, by catalog name; absent means the in-graph speculator.
             if spec.get("speculative_draft_model"):
-                engine["speculative"]["draft_model"] = spec["speculative_draft_model"]
+                block["draft_model"] = spec["speculative_draft_model"]
+            engine["speculative"] = block
         else:
             named = [n for n in ("speculative_method", "speculative_draft_model") if spec.get(n)]
             if named:
                 raise ConfigError(
                     f"{named[0]} with num_speculative_tokens 0 (or unset): drafting 0 tokens is "
                     f"speculative decoding OFF, so naming a drafter would record one that never ran")
+            # Drafting off: a nested block's fields would be recorded for a drafter that never ran.
+            engine.pop("speculative", None)
     rc = router.get("router_config")
     if rc is not None and not os.path.exists(rc):
         # Fail here rather than let BLIS fail per-run: a typo'd EPP path would otherwise cost a
@@ -1402,6 +1410,7 @@ VLLM_BLOCK_MOVES = (
     ("speculative.kv_cache_dtype", "speculative_config.kv_cache_dtype"),
     ("speculative.draft_sample_method", "speculative_config.draft_sample_method"),
     ("speculative.rejection_sample_method", "speculative_config.rejection_sample_method"),
+    ("speculative.synthetic_acceptance_length", "speculative_config.synthetic_acceptance_length"),
     ("speculative.enable_adaptive_verification", "speculative_config.enable_adaptive_verification"),
 )
 

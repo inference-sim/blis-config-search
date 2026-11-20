@@ -1,0 +1,100 @@
+{
+  "explore_prose": [
+    "Every run in this experiment is in the explorer below: filter by outcome to see which settings held the SLOs, or by setting to compare one sweep against another.",
+    "Each sweep's hypothesis was written before the runs, and is quoted beside that sweep's measured result below."
+  ],
+  "hero": [
+    {
+      "h": "What was tested",
+      "html": "52 configurations over 7 sweeps (pipeline-topology, batch-caps, kv-capacity, moe-collective, prefix-cache, prefill-chunking, cudagraph), each at 5 load levels, every run on exactly 8 GPUs."
+    },
+    {
+      "h": "What was found",
+      "html": "<strong>1x TP4xPP2 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)</strong>, from the <em>kv-capacity</em> sweep, reached 20.16 tok/s/accelerator (161.3 tok/s across the fleet) at concurrency 8 while holding the scenario's SLOs. 25 runs were refused and are not counted as misses: 2 configurations (10 runs): scenario: engine vllm 0.32.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (3.55 GiB KV cache is needed, which is larger than the available KV cache memory (0.37 GiB). Based on the available memory, the estimated maximum model length is 12144. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72); 1 configuration (5 runs): scenario: engine vllm 0.32.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (1.21 GiB KV cache is needed, which is larger than the available KV cache memory (0.16 GiB). Based on the available memory, the estimated maximum model length is 10592. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72); 1 configuration (5 runs): scenario: engine vllm 0.32.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.42 GiB KV cache is needed, which is larger than the available KV cache memory (0.16 GiB). Based on the available memory, the estimated maximum model length is 5280. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72); 1 more reason. Ranking: max output tok/s per accelerator subject to the scenario's SLOs."
+    },
+    {
+      "h": "What to run",
+      "html": "1x TP4xPP2 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8) at concurrency 8. 68 of 260 runs held the SLOs.",
+      "run": true
+    }
+  ],
+  "meta": [
+    "BLIS discrete-event simulation",
+    "Experiment Spec (RFC #21)",
+    "deterministic sweep \u2014 no LLM in the measurement path",
+    "seed 42",
+    "basis: measured window",
+    "scope: cluster; worst instance for TTFT and end-to-end gates"
+  ],
+  "recommendation_num": 9,
+  "recommendation_prose": [
+    "The table below lists the measured operating points. Headline ranking: max output tok/s per accelerator subject to the scenario's SLOs. The Pareto front of every sweep is in pareto.json."
+  ],
+  "sections": [
+    {
+      "caption_note": "6 configurations, 30 runs.",
+      "num": 2,
+      "prose": [
+        "TP8 should peak highest, since each pipeline stage adds a boundary hop to every decode step.",
+        "Measured: best was <strong>1x TP4xPP2 + EP</strong> at 12.64 tok/s/accelerator (concurrency 8)."
+      ],
+      "title": "Sweep: pipeline-topology"
+    },
+    {
+      "caption_note": "16 configurations, 80 runs.",
+      "num": 3,
+      "prose": [
+        "A seq cap of 8 should bind on TP8 at 16+ lanes, while a small token budget trades throughput for tail ITL on both shapes.",
+        "Measured: best was <strong>1x TP4xPP2 + EP (max seqs 16 \u00b7 batch tokens 4,096)</strong> at 13.35 tok/s/accelerator (concurrency 8)."
+      ],
+      "title": "Sweep: batch-caps"
+    },
+    {
+      "caption_note": "12 configurations, 60 runs.",
+      "num": 4,
+      "prose": [
+        "fp8 KV should matter most on TP8, where 0.95 leaves almost no KV room, and substitute for memory on the pp shapes.",
+        "Measured: best was <strong>1x TP4xPP2 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)</strong> at 20.16 tok/s/accelerator (concurrency 8)."
+      ],
+      "title": "Sweep: kv-capacity"
+    },
+    {
+      "caption_note": "8 configurations, 40 runs.",
+      "num": 5,
+      "prose": [
+        "DeepEP low-latency should win at small decode batches on both shapes, and matter more at EP width 8 than 4.",
+        "Measured: best was <strong>1x TP4xPP2 + EP</strong> at 12.64 tok/s/accelerator (concurrency 8)."
+      ],
+      "title": "Sweep: moe-collective"
+    },
+    {
+      "caption_note": "3 configurations, 15 runs.",
+      "num": 6,
+      "prose": [
+        "Turning the prefix cache off should collapse throughput on every shape, since AgentX re-sends a growing shared context.",
+        "Measured: best was <strong>1x TP4xPP2 + EP</strong> at 11.73 tok/s/accelerator (concurrency 8)."
+      ],
+      "title": "Sweep: prefix-cache"
+    },
+    {
+      "caption_note": "4 configurations, 20 runs.",
+      "num": 7,
+      "prose": [
+        "Capping long prefills should trade a little peak throughput for a much lower ITL p99 at saturation.",
+        "Measured: best was <strong>1x TP4xPP2 + EP (prefill chunk 8,192)</strong> at 12.64 tok/s/accelerator (concurrency 8)."
+      ],
+      "title": "Sweep: prefill-chunking"
+    },
+    {
+      "caption_note": "3 configurations, 15 runs.",
+      "num": 8,
+      "prose": [
+        "FULL-family capture should beat the PIECEWISE default by a few percent, and NONE should collapse.",
+        "Measured: best was <strong>1x TP8 + EP (graph capture full)</strong> at 8.92 tok/s/accelerator (concurrency 4)."
+      ],
+      "title": "Sweep: cudagraph"
+    }
+  ],
+  "standfirst": "A deterministic sweep over custom (not in the catalog) (AgentX run recipe: 300 s idle-gap cap, 10 warm-up requests per lane, trajectory start 0.25 to 0.75, 3600 s window, 30 s grace, corpus semianalysis_cc_traces_weka_062126) traffic, comparing 7 designs on one GPU budget.",
+  "title": "muse-spark-open-816b-a42b-nvfp4 on 8x h100: muse-spark-open-816b-a42b-h100-agentx-8gpu"
+}

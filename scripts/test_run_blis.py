@@ -1389,6 +1389,78 @@ class FigureForms(unittest.TestCase):
         self.assertNotIn("itl_p99_ms", run_blis.FEASIBILITY_AGGREGATE["metrics"])
 
 
+class ServerSeries(unittest.TestCase):
+    """`scenario.replay.server_series_interval_s` asks the simulator for per-engine diagnostic series.
+    Collecting them must move nothing that is ranked."""
+
+    REPLAY = {"scenario": "inferencex-agentx-mvp", "corpus": "/c/traces.jsonl",
+              "corpus_sha256": "abc123", "benchmark_duration": "900s"}
+    SERIES = {"interval_s": 5.0, "origin": "simulated_time_zero",
+              "engines": [{"id": "instance_0", "bins": 2, "kv_cache_usage": [0.1, 0.4],
+                           "generation_tokens": [10, 30]}]}
+
+    def run_one(self, interval, with_series):
+        doc = json.loads(RESULT_DOC)
+        if with_series:
+            doc["reports"]["engine"]["cluster"]["server_series"] = self.SERIES
+        seen = []
+        real = run_blis.subprocess.run
+
+        class Done:
+            returncode, stderr = 0, ""
+            stdout = json.dumps(doc)
+
+        def fake(cmd, **k):
+            if cmd[1:2] in (["run"], ["replay"]):
+                seen.append(cmd)
+                return Done()
+            return real(cmd, **k)
+        replay = dict(self.REPLAY)
+        if interval is not None:
+            replay["server_series_interval_s"] = interval
+        run_blis.subprocess.run = fake
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                rec = run_blis.run_one(FIXTURE_BLIS, None, "/reg", d, "m", "h100", "0.32.0", None, None, 0,
+                                       None, {"tp": 8, "concurrency": 4}, replay=replay,
+                                       gpus_per_node=8)
+        finally:
+            run_blis.subprocess.run = real
+        self.assertTrue(seen, rec.get("error"))
+        return rec, seen[0]
+
+    def test_the_flag_is_passed_only_when_the_spec_states_an_interval(self):
+        off = run_blis.build_replay_cmd("/b", None, None, "/sc", "s.yaml", 0, None, {}, self.REPLAY)
+        self.assertNotIn("--server-series-interval-s", off)
+        for interval in (0.5, 5, 60):
+            on = run_blis.build_replay_cmd("/b", None, None, "/sc", "s.yaml", 0, None, {},
+                                           dict(self.REPLAY, server_series_interval_s=interval))
+            self.assertEqual(str(interval), on[on.index("--server-series-interval-s") + 1])
+
+    def test_the_record_keeps_the_series_beside_the_figures_not_in_them(self):
+        rec, _ = self.run_one(5, True)
+        self.assertEqual(self.SERIES, rec["server_series"])
+        self.assertNotIn("server_series", json.dumps(rec["metrics"]))
+        self.assertNotIn("server_series", json.dumps(rec["measured"]))
+        self.assertNotIn("server_series", json.dumps(rec["whole_run"]))
+
+    def test_no_series_is_recorded_when_none_was_asked_for(self):
+        rec, cmd = self.run_one(None, False)
+        self.assertNotIn("server_series", rec)
+        self.assertNotIn("--server-series-interval-s", cmd)
+
+    def test_collecting_the_series_does_not_change_scoring(self):
+        plain, _ = self.run_one(None, False)
+        series, _ = self.run_one(5, True)
+        self.assertIsNone(plain["error"])
+        self.assertIsNone(series["error"])
+        for key in ("metrics", "metrics_all_instances", "measured", "whole_run", "basis", "error",
+                    "returncode", "feasibility_aggregate"):
+            self.assertEqual(plain[key], series[key], key)
+        self.assertEqual(run_blis.outcome_of(plain), run_blis.outcome_of(series))
+        self.assertEqual({"server_series"}, set(series) - set(plain))
+
+
 class FailureLine(unittest.TestCase):
     def test_panic_message_beats_its_stack_frames(self):
         err = ("time=x level=info msg=start\npanic: engine build: no pool\n\ngoroutine 1 [running]:\n"

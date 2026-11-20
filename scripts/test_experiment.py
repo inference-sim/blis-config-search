@@ -459,6 +459,15 @@ class SchemaAgreesWithValidator(unittest.TestCase):
 
         walk(self.schema, "<root>")
 
+    def test_the_schema_agrees_with_the_validator_on_the_series_interval(self):
+        doc = spec()
+        for good in (0.5, 5):
+            doc["scenario"]["replay"] = {"server_series_interval_s": good}
+            self.assertEqual([], self.errors(doc), good)
+        for bad in (0, -1, "5", True, None):
+            doc["scenario"]["replay"] = {"server_series_interval_s": bad}
+            self.assertNotEqual([], self.errors(doc), bad)
+
     def test_every_shipped_spec_passes_the_published_schema(self):
         """The harmful direction. Each of these validates, so each must also satisfy the schema
         a contributor's editor reads -- otherwise the editor contradicts the authority."""
@@ -1265,6 +1274,27 @@ class WorkloadByFile(unittest.TestCase):
         cmd = run_blis.build_replay_cmd("/b", None, None, "/sc", "s.yaml", 42, None, {}, replay)
         self.assertEqual("300s", cmd[cmd.index("--benchmark-duration") + 1])
         self.assertEqual([900, 300], E.recipe_record(self.GOOD, r)["overrides"]["benchmark_duration_s"])
+
+    def test_a_series_interval_reaches_the_command_from_a_workload_file(self):
+        path = self.write(self.GOOD)
+        r = E.resolve_workload_spec(path, E.load_workload_spec(path),
+                                    {"corpus": "/c/t.jsonl", "server_series_interval_s": 5}, dry_run=True)
+        self.assertEqual(5, r["server_series_interval_s"])
+        replay = {k: v for k, v in r.items() if k not in E.RECORD_ONLY_REPLAY}
+        cmd = run_blis.build_replay_cmd("/b", None, None, "/sc", "s.yaml", 42, None, {}, replay)
+        self.assertEqual("5", cmd[cmd.index("--server-series-interval-s") + 1])
+        quiet = E.resolve_workload_spec(path, E.load_workload_spec(path), {"corpus": "/c/t.jsonl"},
+                                        dry_run=True)
+        self.assertNotIn("server_series_interval_s", quiet)
+
+    def test_a_series_interval_must_be_a_positive_number(self):
+        for good in (0.5, 5):
+            self.assertEqual([], V.replay_errors({"replay": {"server_series_interval_s": good}}), good)
+        self.assertEqual([], V.replay_errors({"replay": {"corpus": ".corpus/t.jsonl"}}))
+        for bad in (0, -1, "5", True, None):
+            errs = V.replay_errors({"replay": {"server_series_interval_s": bad}})
+            self.assertEqual(1, len(errs), bad)
+            self.assertIn("server_series_interval_s", errs[0])
 
     def test_the_command_passes_the_file_and_the_catalog_is_not_read(self):
         path = self.write(self.GOOD)

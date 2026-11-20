@@ -1360,6 +1360,8 @@ def resolve_workload_spec(path, doc, stated, dry_run=False):
     for key in ("corpus", "corpus_cache"):
         if stated.get(key):
             out[key] = stated[key]
+    if stated.get("server_series_interval_s") is not None:
+        out["server_series_interval_s"] = stated["server_series_interval_s"]
     # A spec's window and grace override the file's; recipe_record names the override (#158).
     for key in ("benchmark_duration", "grace_period"):
         if key in stated:

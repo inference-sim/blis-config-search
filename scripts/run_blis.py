@@ -1638,6 +1638,8 @@ def build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed
             cmd += ["--format", "yaml"]
     if replay.get("corpus_cache"):
         cmd += ["--corpus-cache", replay["corpus_cache"]]
+    if replay.get("server_series_interval_s") is not None:
+        cmd += ["--server-series-interval-s", str(replay["server_series_interval_s"])]
     if seed is not None:
         cmd += ["--seed", str(seed)]
     cmd += _cli_args(cli)
@@ -1967,6 +1969,9 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
         whole = (_engine_report(doc).get("cluster") or {}).get("whole_run")
         if whole:
             rec["whole_run"] = whole
+        series = (_engine_report(doc).get("cluster") or {}).get("server_series")
+        if series:
+            rec["server_series"] = series
     return rec
 
 

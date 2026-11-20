@@ -594,6 +594,18 @@ def workload_errors(sc, blis=None, root=ROOT):
     return []
 
 
+def replay_errors(sc):
+    """`scenario.replay.server_series_interval_s`, when stated: a number of seconds above zero."""
+    rep = sc.get("replay")
+    if not isinstance(rep, dict) or "server_series_interval_s" not in rep:
+        return []
+    v = rep["server_series_interval_s"]
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not v > 0:
+        return ["scenario.replay.server_series_interval_s: must be a number of seconds above 0; "
+                "leave it out to collect no series"]
+    return []
+
+
 def cluster_errors(sc, blis=None, catalog=None):
     """`scenario.cluster` structure: a mapping of `fabric` (a non-empty string) and
     `gpus_per_node` (a positive integer).
@@ -995,6 +1007,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
         # Present AND real: a name the catalog does not define cannot run anywhere.
         errs.extend(scenario_identity_errors(sc, blis, catalog))
         errs.extend(cluster_errors(sc, blis, catalog))
+        errs.extend(replay_errors(sc))
         gpus = sc.get("gpus")
         if not isinstance(gpus, int) or isinstance(gpus, bool) or gpus < 1:
             errs.append("scenario.gpus: required positive integer -- the budget EVERY run uses")

@@ -77,9 +77,9 @@ class EngineKind(unittest.TestCase):
             {"tp": 8, "chunked_prefill_size": 2048, "kv_cache_dtype": "fp8"}, vocab)
         self.assertNotIn("max_model_len", engine)
         self.assertEqual({"chunked_prefill_size": 2048, "kv_cache_dtype": "fp8"}, engine)
-        body = run_blis.scenario_yaml("glm-5", "h200", "0.5.23", parallel, engine, "x", node_size=8)
+        body = run_blis.scenario_yaml("glm-5", "h200", parallel, engine, "x", node_size=8)
         self.assertIn("kind: sglang", body)
-        self.assertIn('version: "0.5.23"', body)
+        self.assertNotIn("version", body)
         self.assertIn("kv_cache_dtype: \"fp8\"", body)          # vLLM would have said kv_cache_dtype too; cache_dtype below
         self.assertNotIn("block_size", body)
         settings.use_engine("vllm")

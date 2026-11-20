@@ -16,3 +16,7 @@ from the commits the M1 branches pin:
 
 Only tests read this directory. Scripts take the real binary with `--blis`. Delete the
 directory, and the tests' references to it, once a pinned build has the commands.
+
+From M3.2 a scenario names no `engine.version` (design LIF-6): the build fixes the release. The stand-in's
+`scenario.schema.json` drops `version` from `scenario.Engine` and its `fields` refuses a scenario that names one
+("field version not found in type scenario.Engine"), as the M3.2 build does.

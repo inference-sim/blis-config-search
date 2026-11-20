@@ -912,11 +912,9 @@ def offload_policy_errors(spec, blis, fields=None, catalog=None):
         tp = max([t for t in tps if isinstance(t, int) and not isinstance(t, bool)] or [1]) if _is_list(tps) else 1
         for policy in dict.fromkeys(p for p in block["eviction_policy"] if isinstance(p, str)):
             parallel = {"tp": tp, "pp": 1, "dp": 1, "offload": {"cpu_bytes": 2**30, "eviction_policy": policy}}
-            body = run_blis.scenario_yaml(sc.get("model"), sc.get("hardware"),
-                                          blis_cli.engine_release(blis, settings.ENGINE_KIND, fields),
-                                          parallel, run_blis.engine_defaults(), "policy-probe",
-                                          node_size=node_size, states_node_size=states_node_size,
-                                          takes_engine_version=blis_cli.scenario_takes_engine_version(blis))
+            body = run_blis.scenario_yaml(sc.get("model"), sc.get("hardware"), parallel,
+                                          run_blis.engine_defaults(), "policy-probe",
+                                          node_size=node_size, states_node_size=states_node_size)
             line = blis_cli.engine_refusal(blis, body, word="eviction_policy")
             if line:
                 errs.append(f"sweeps[{i}].offload.eviction_policy: the engine refuses {policy!r}: {line}")

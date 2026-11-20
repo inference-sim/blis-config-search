@@ -66,8 +66,7 @@ def _field_list_json(blis, engine, path, scenario, catalog=None):
     `blis fields --scenario` prints for the scenario text `scenario()` returns, built over `catalog`."""
     if not path:
         # Without a spec's scenario, one that names only the engine; a build that needs a model refuses it.
-        text = scenario() if scenario else _engine_probe(
-            engine, build_release(blis, engine) if scenario_takes_engine_version(blis) else None)
+        text = scenario() if scenario else _engine_probe(engine)
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, "fields-probe.yaml"), "w", encoding="utf-8") as f:
                 f.write(text)
@@ -118,55 +117,6 @@ def fields(blis, engine, path=None, scenario=None, catalog=None):
                 raise BlisCommandError(f"`blis fields` for engine {engine}: malformed entry {row!r}")
         return doc
     return _cached(_key(blis, "fields", engine, path), load)
-
-
-def scenario_takes_engine_version(blis):
-    """Whether a scenario of this build may name `engine.version`, read from `blis schema scenario`.
-
-    A build before M3.2 requires it; from M3.2 the build fixes the engine release (LIF-6) and a scenario
-    that names one is refused ("field version not found in type scenario.Engine"). Asked once per binary."""
-    def load():
-        defs = schema(blis, "scenario").get("$defs") or {}
-        engine = defs.get("scenario.Engine")
-        if not isinstance(engine, dict):
-            raise BlisCommandError("`blis schema scenario` defines no scenario.Engine, so the scenario's "
-                                   "engine block cannot be written")
-        return "version" in (engine.get("properties") or {})
-    return _cached(_key(blis, "scenario_takes_engine_version"), load)
-
-
-def build_release(blis, engine):
-    """The upstream release of `engine` this build runs. A build whose scenario names a version says it in
-    the refusal of a scenario naming another: `names engine vllm 0; this build runs vllm 0.33.0, ...`.
-    A build that takes none prints it with the field list, or in the first words of any refusal: `engine
-    vllm 0.34.0+0fda86a35419: ...`. It lets config search write the probe scenario `blis fields` needs
-    before it has the field list."""
-    def load():
-        takes = scenario_takes_engine_version(blis)
-        text = _engine_probe(engine, "0" if takes else None)
-        with tempfile.TemporaryDirectory() as d:
-            with open(os.path.join(d, "release-probe.yaml"), "w", encoding="utf-8") as f:
-                f.write(text)
-            pr = _run(blis, ["fields", "--scenario", "release-probe.yaml", "--scenarios", d], 120)
-        said = (pr.stderr or "") + "\n" + (pr.stdout or "")
-        if takes:
-            m = re.search(rf'names engine {re.escape(engine)} 0; this build runs {re.escape(engine)} (\S+?),', said)
-            release = m.group(1) if m else None
-        else:
-            release = None
-            if pr.returncode == 0:
-                try:
-                    release = (json.loads(pr.stdout).get("engine") or {}).get("version")
-                except (ValueError, AttributeError):
-                    pass
-            if not release:
-                m = re.search(rf'\bengine {re.escape(engine)} (\S+?): ', said)
-                release = m.group(1) if m else None
-        if not release:
-            raise BlisCommandError(f"`blis fields` did not say which {engine} release the build runs: "
-                                   + _stderr(pr))
-        return release
-    return _cached(_key(blis, "build_release", engine), load)
 
 
 def engine_release(blis, engine, fields_path=None):
@@ -264,7 +214,6 @@ _PROBE = """kind: Scenario
 name: kind-probe
 engine:
   kind: kind-probe
-  version: "0"
 model: kind-probe
 cluster:
   hardware: kind-probe
@@ -278,12 +227,9 @@ pools:
 """
 
 
-def _engine_probe(engine, version):
-    """The probe scenario naming `engine`; `version` None writes no engine.version line (a build that takes none)."""
-    text = _PROBE.replace("kind: kind-probe", f"kind: {engine}", 1)
-    if version is None:
-        return text.replace('  version: "0"\n', "", 1)
-    return text.replace('version: "0"', f'version: "{version}"', 1)
+def _engine_probe(engine):
+    """A scenario naming only the engine. It states no version: the build fixes the release (LIF-6)."""
+    return _PROBE.replace("kind: kind-probe", f"kind: {engine}", 1)
 
 
 def registered_kinds(blis):

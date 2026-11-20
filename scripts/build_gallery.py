@@ -126,10 +126,13 @@ def validate_and_project(run_dir):
     if floor.get("tok_per_s_per_user") is not None:
         floor_str = f"{floor['tok_per_s_per_user']:g} tok/s/user"
         if floor.get("itl_p99_ms_max") is not None:
-            floor_str += f" (ITL p99 ≤ {floor['itl_p99_ms_max']:g} ms)"
+            # The legacy itl_p99 slot holds TPOT (run_blis._MEASURED_KEYS), so name it TPOT.
+            floor_str += f" (TPOT p99 ≤ {floor['itl_p99_ms_max']:g} ms)"
         elif floor.get("of"):
-            # A spec that states the per-user statistic: say which figure the rate is on (DEV-8).
-            floor_str += f" (1000 / worst-instance {floor['of']})"
+            # A spec that states the per-user statistic: say which figure the rate is on (DEV-8); a
+            # rate (interactivity_mean) is the figure itself, a TPOT is 1000 over it.
+            rate = str(floor["of"]).startswith("interactivity_")
+            floor_str += f" ({'' if rate else '1000 / '}worst-instance {floor['of']})"
 
     # A ledger mixing seeds or stacks is not one comparison; say so on the card.
     split = report_py.provenance_split(runs)

@@ -42,7 +42,7 @@ cares that this skill wrote one.
 | hardware | one GPU type per experiment |
 | workload | one per experiment — a shape preset or a replay scenario |
 | GPU budget | `scenario.gpus`; **every** run uses exactly this many |
-| SLO | at minimum `itl_p99` (20ms == 50 tok/s/user); a target at another statistic is stated there, e.g. `tpot_p90: 25ms`, `ttft_p95: 2s`, `interactivity_p90: 40` (experiments/README.md, SLOs) |
+| SLO | at minimum `itl_p99`, the alias of `tpot_p99` (20ms == 50 tok/s/user at p99, the slow tail); a target at another statistic is stated there, e.g. `tpot_p90: 25ms`, `ttft_p95: 2s`, `interactivity_p90: 40`, or `interactivity_mean: 60`, the mean of each request's tok/s (experiments/README.md, SLOs) |
 | run budget | how many BLIS runs the campaign may spend — **the single input that decides how deep the spec can go** |
 
 Ask only for what is genuinely missing, and infer what the catalog can tell you. The model,

@@ -104,13 +104,15 @@ cluster figure and every instance's):
 | key | meaning |
 |---|---|
 | `<metric>_<stat>: 25ms` | a cap on the Result's `<metric>_<stat>_ms`, for `ttft`, `e2e` or `tpot` at a statistic the simulator's metric registry defines (`blis metrics`) and the per-instance figures are rebuilt at (mean, p50, p90, p95, p99; `run_blis.INSTANCE_STATS`): `tpot_p90`, `ttft_p95`, `e2e_mean`, ... Needs a unit and a positive value. |
-| `interactivity_<stat>: 40` | a floor in tok/s/user: `1000 / tpot_<stat>_ms >= 40`, at any statistic `tpot` has. The key is defined by that figure: `interactivity_mean` is 1000 / the mean TPOT (the registry's `interactivity_of_mean_tpot`), not the registry's `interactivity_mean`, a mean of per-request rates; the report names the figure (`of: tpot_mean_ms`) |
+| `interactivity_<stat>: 40` | a floor in tok/s/user, a user's rate being 1000 over that request's TPOT in ms. `interactivity_pNN`: `1000 / tpot_pNN_ms >= 40`, the users' rate at NN from the slow end (`1000 / x` is monotonic, so `interactivity_p50` is exactly the median user's), at any percentile `tpot` has. `interactivity_mean`: the mean of each request's tok/s `>= 40` (the registry's `interactivity_mean`), not 1000 / the mean TPOT (`interactivity_of_mean_tpot`), which is the harmonic mean and lower whenever the rates differ. The report names the figure (`of: tpot_p90_ms`, `of: interactivity_mean`) |
 | `itl_p99: 20ms` | the alias of `tpot_p99` (the slot it reads holds TPOT) |
 | `throughput_per_gpu: 500` | a floor on output tok/s per accelerator |
 
 The `tpot` caps and `interactivity` floors state the **per-user statistic**: the interactivity
-floor, each row's `tok_per_s_per_user` and the Pareto front's x axis are all `1000 /` the worst
-instance's `tpot_<stat>_ms`, so a config cannot pass the gate and fail the ranking. State them at
+floor, each row's `tok_per_s_per_user` and the Pareto front's x axis are all one figure, so a
+config cannot pass the gate and fail the ranking: `1000 /` the worst instance's `tpot_<stat>_ms`,
+or with `interactivity_mean` stated the worst instance's (lowest) mean of each request's tok/s. A
+`tpot_mean` cap alone keeps `1000 / tpot_mean_ms`, the reciprocal of the mean TPOT. State them at
 one statistic. A spec that states none keeps the p99 rate and the `interactivity_of_mean_tpot` axis;
 a report that states one names it (`interactivity_floor.statistic` and `.of`, `pareto.x_basis`).
 

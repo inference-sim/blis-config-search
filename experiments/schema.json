@@ -144,14 +144,14 @@
       "minProperties": 1,
       "additionalProperties": false,
       "properties": {
-        "itl_p99": { "$ref": "#/$defs/duration", "description": "The alias of tpot_p99: p99 time per output token cap, e.g. 20ms. The interactivity floor: 20ms == 50 tok/s/user." },
+        "itl_p99": { "$ref": "#/$defs/duration", "description": "The alias of tpot_p99: p99 time per output token cap, e.g. 20ms. The interactivity floor at p99: 20ms == 50 tok/s/user for all but the slowest 1% of requests." },
         "ttft_p99": { "$ref": "#/$defs/duration", "description": "p99 time-to-first-token cap, e.g. 5s." },
         "e2e_p99": { "$ref": "#/$defs/duration", "description": "p99 end-to-end request latency cap." },
         "throughput_per_gpu": { "type": "number", "exclusiveMinimum": 0, "description": "Floor on output tok/s per accelerator, e.g. 500." }
       },
       "patternProperties": {
         "^(?!interactivity_)[a-z][a-z0-9_]*_(mean|p[0-9]{1,2})$": { "$ref": "#/$defs/duration", "description": "A cap on <metric>_<stat>, a latency at a statistic the Result reports (tpot_p90, ttft_p95, e2e_mean), e.g. 25ms. A tpot cap also sets the per-user rate's statistic." },
-        "^interactivity_(mean|p[0-9]{1,2})$": { "type": "number", "exclusiveMinimum": 0, "description": "A floor in tok/s/user: 1000 / tpot_<stat>_ms on the worst instance must reach it, e.g. interactivity_p90: 40. Sets the per-user rate's statistic." }
+        "^interactivity_(mean|p[0-9]{1,2})$": { "type": "number", "exclusiveMinimum": 0, "description": "A floor in tok/s/user on the worst instance, a user's rate being 1000 / that request's tpot_ms. interactivity_pNN: 1000 / tpot_pNN_ms must reach it (the users' rate at NN from the slow end), e.g. interactivity_p90: 40. interactivity_mean: the mean of each request's tok/s must reach it (the registry's interactivity_mean, not 1000 / the mean TPOT). Sets the per-user rate's statistic." }
       }
     },
     "duration": {

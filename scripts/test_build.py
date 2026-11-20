@@ -101,6 +101,26 @@ def test_winner_mismatch_raises_not_falls_back():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_card_floor_names_the_per_user_figure():
+    print("test_card_floor_names_the_per_user_figure")
+    # #185: the legacy itl_p99 slot holds TPOT, and interactivity_mean is itself the rate, not a TPOT.
+    tmp = tempfile.mkdtemp()
+    try:
+        rd = os.path.join(tmp, "qwen3-14b-h100-chatbot-0005")
+        _mk_run_dir(rd, "qwen3-14b-h100-chatbot-0005")
+        _, row = bg.validate_and_project(rd)
+        check(row["floor"] == "50 tok/s/user (TPOT p99 ≤ 20 ms)", f"legacy floor names TPOT (got {row['floor']!r})")
+        for of, want in (("interactivity_mean", "60 tok/s/user (worst-instance interactivity_mean)"),
+                         ("tpot_p90_ms", "60 tok/s/user (1000 / worst-instance tpot_p90_ms)")):
+            sc = json.load(open(os.path.join(rd, "scenario.json")))
+            sc["interactivity_floor"] = {"tok_per_s_per_user": 60, "of": of}
+            json.dump(sc, open(os.path.join(rd, "scenario.json"), "w"))
+            _, row = bg.validate_and_project(rd)
+            check(row["floor"] == want, f"floor on {of} reads {want!r} (got {row['floor']!r})")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_gallery_renders_no_standalone_html():
     print("test_gallery_renders_no_standalone_html")
     # The SPA is the only report surface now (#69): the gallery copies the SPA's data files and
@@ -1026,6 +1046,7 @@ if __name__ == "__main__":
     test_released_build_check_names_unstamped_rows()
     test_winner_with_a_knob_variant()
     test_winner_mismatch_raises_not_falls_back()
+    test_card_floor_names_the_per_user_figure()
     test_gallery_renders_no_standalone_html()
     test_build_refuses_to_wipe_reports()
     test_validation()

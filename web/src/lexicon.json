@@ -26,7 +26,7 @@
       "label": "tok/s per user",
       "unit": "tok/s",
       "digits": 1,
-      "help": "Output tokens per second a single session sees: the interactivity each caller feels. 1000 over the worst instance's TPOT at the per-user statistic, p99 unless the spec states another; the same basis as the interactivity floor."
+      "help": "Output tokens per second a single session sees: the interactivity each caller feels, 1000 over that request's TPOT in ms. At a percentile, 1000 over the worst instance's TPOT at it (p99 unless the spec states another), the users' rate at that percentile from the slow end; with interactivity_mean stated, the worst instance's mean of each request's tok/s, not 1000 over the mean TPOT. The same basis as the interactivity floor."
     },
     "cl": {
       "label": "tok/s fleet",
@@ -44,7 +44,7 @@
       "label": "TPOT p99",
       "unit": "ms",
       "digits": 2,
-      "help": "Time per output token (p99), a.k.a. inter-token latency (ITL): the gap between output tokens. Lower feels snappier."
+      "help": "Time per output token (p99): each request's (latency - TTFT) / (output tokens - 1), on the worst instance. Kept under the legacy name itl_p99_ms; it is not the registry's ITL, which pools every gap between output tokens. Lower feels snappier."
     },
     "ttft": {
       "label": "TTFT p99",
@@ -79,7 +79,7 @@
     "al": {
       "label": "acceptance length",
       "unit": "tokens/step",
-      "help": "Mean tokens accepted per verification step (AL), from the registry's measured acceptance profile. Under drafting one step emits AL tokens, so the per-user rate is AL x 1000 / ITL p99 rather than 1000 / ITL p99."
+      "help": "Mean tokens accepted per verification step (AL), from the registry's measured acceptance profile. Under drafting one step emits AL tokens; TPOT is per token, so the per-user rate already holds that gain and takes no AL factor."
     }
   },
   "facets": {

@@ -219,7 +219,8 @@ def _feasible(run, floor, slos):
     if m.get("dropped_unservable"):
         viol.append(f"dropped_unservable = {m['dropped_unservable']}")
     # The interactivity floor is a per-TOKEN promise, and the rate tested is 1000 over the worst instance's
-    # time per output token at the floor's statistic (p99 unless the floor states one; run_blis.per_user_rate),
+    # time per output token at the floor's statistic (p99 unless the floor states one), or the worst
+    # instance's mean of each request's tok/s when the floor is on interactivity_mean (run_blis.per_user_rate),
     # the one definition the display and the sweeper's `servable` also use. TPOT is per token and already holds what speculation gains, so no acceptance
     # factor enters; this replaces the engine's per-step interval, which needed one.
     itl_max = _floor_itl_p99_max(floor)
@@ -227,13 +228,16 @@ def _feasible(run, floor, slos):
         # The spec's own statement wins, so a floor written without one cannot be re-judged on p99.
         stated, said = slo.per_user(slos)
         stat = stated if said else ((floor or {}).get("statistic") or slo.DEFAULT_STAT)
-        rate, basis, itl = run_blis.per_user_rate(run, stat)
+        of = slo.per_user_of(slos) if said else (floor or {}).get("of")
+        rate, basis, itl = run_blis.per_user_rate(run, stat, of)
         floor_rate = _floor_rate(floor)
         if rate is None:
-            viol.append(f"{'itl_p99_ms' if stat == slo.DEFAULT_STAT else slo.figure('tpot', stat)} "
-                        f"missing (cannot verify interactivity floor)")
+            what = (of if of == run_blis.MEAN_RATE
+                    else 'itl_p99_ms' if stat == slo.DEFAULT_STAT else slo.figure('tpot', stat))
+            viol.append(f"{what} missing (cannot verify interactivity floor)")
         elif rate < floor_rate:
-            viol.append(f"tok_per_s_per_user = {rate:.1f} < {floor_rate:g} (tpot {stat} {itl:.1f} ms)")
+            viol.append(f"tok_per_s_per_user = {rate:.1f} < {floor_rate:g} "
+                        + (f"(worst-instance {of})" if itl is None else f"(tpot {stat} {itl:.1f} ms)"))
     slos = dict(slos or {})
     # Experiment specs write throughput_per_gpu as a floor, not a cap.
     tput = _as_num(slos.pop("throughput_per_gpu", None))
@@ -249,11 +253,13 @@ def _feasible(run, floor, slos):
             continue
         g = slo.parse(k) or {}
         if g.get("kind") == "floor":
-            val, missing = run_blis.worst_figure(run, g["figure"])
+            val, missing = slo.worst(run, g)
             if missing or not val:
                 viol.append(f"{g['figure']} missing (cannot verify SLO {k} >= {cap:g})")
-            elif 1000.0 / val < cap:
-                viol.append(f"{k} = {1000.0 / val:.1f} < {cap:g}")
+                continue
+            rate = val if g.get("rate") else 1000.0 / val
+            if rate < cap:
+                viol.append(f"{k} = {rate:.1f} < {cap:g}")
             continue
         # A legacy slot is read as it always was; a Result figure (tpot_p90_ms) from the Result.
         legacy = k in {f"{key}_ms" for key in slo.LEGACY} or not str(k).endswith("_ms")
@@ -265,12 +271,13 @@ def _feasible(run, floor, slos):
     return (len(viol) == 0, viol)
 
 
-def _per_user_rate(run, mtp=0, stat=None):
+def _per_user_rate(run, mtp=0, stat=None, of=None):
     """Per-user token rate for display, through the ONE definition in run_blis.per_user_rate --
     the same one _feasible judges on, so a row can no longer be displayed above the floor while
     being marked infeasible (namasl review #2).
 
-    The rate is 1000 over the worst-instance time per output token at `stat` (p99 when None), drafting
+    The rate is 1000 over the worst-instance time per output token at `stat` (p99 when None), or the
+    worst instance's mean of each request's tok/s when `of` is run_blis.MEAN_RATE, drafting
     or not (no acceptance factor: TPOT is per token). `mtp` is accepted for call-site compatibility but the depth is read from the run itself.
 
     There is deliberately NO short-circuit on a `metrics.tok_per_s_per_user` field. An earlier
@@ -281,7 +288,7 @@ def _per_user_rate(run, mtp=0, stat=None):
     closed. One definition means one definition (susiejojo review #1).
 
     Returns (pu_or_None, basis); basis is always "" (a direct rate), kept so callers need no change."""
-    pu, basis, _itl = run_blis.per_user_rate(run, stat)
+    pu, basis, _itl = run_blis.per_user_rate(run, stat, of)
     return (round(pu, 2) if pu is not None else None), basis
 
 

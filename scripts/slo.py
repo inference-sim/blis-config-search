@@ -4,10 +4,11 @@
   <metric>_<stat>: 25ms    a cap on the worst instance's `<metric>_<stat>_ms` (tpot_p90, ttft_p95,
                            e2e_mean, ...): any statistic the metric registry defines for a metric
                            whose per-instance figures the record carries
-  interactivity_<stat>: R  a floor in tok/s/user: the worst instance's 1000 / tpot_<stat>_ms >= R.
-                           A spec key, defined by its tpot figure: interactivity_mean is 1000 / the
-                           mean TPOT (the registry's interactivity_of_mean_tpot), not the registry's
-                           interactivity_mean, and a report names the figure (`of: tpot_mean_ms`)
+  interactivity_<stat>: R  a floor in tok/s/user, a user's rate being 1000 / that request's tpot_ms.
+                           interactivity_mean: the worst instance's mean of each request's tok/s
+                           >= R (the registry's interactivity_mean; not 1000 / the mean TPOT, which
+                           is lower). interactivity_pNN: the worst instance's 1000 / tpot_pNN_ms >= R,
+                           the users' rate at NN from the slow end. A report names the figure (`of`)
   throughput_per_gpu: N    a floor on output tok/s per accelerator
   itl_p99: 20ms            kept as the alias of tpot_p99 (#126: the slot it reads holds TPOT)
 
@@ -17,8 +18,9 @@ never computed here. The worst-instance figures are rebuilt at run_blis.INSTANCE
 outside it is refused too: one the simulator adds needs that one constant extended.
 
 The per-user rate (the interactivity floor, each row's tok/s/user and the Pareto axis) is on the
-statistic the tpot caps and interactivity floors state. A spec that states none keeps the p99 rate and
-the interactivity_of_mean_tpot axis it had before, so a committed spec and its report do not change.
+statistic the tpot caps and interactivity floors state (per_user_of). A spec that states none keeps
+the p99 rate and the interactivity_of_mean_tpot axis it had before, so a committed spec and its
+report do not change.
 """
 import re
 
@@ -46,7 +48,8 @@ def figure(metric, stat):
 
 def parse(key):
     """{kind, key, metric, stat, figure} for one SLO key, or None when it has no meaning here.
-    kind is "throughput", "cap" or "floor"; a floor's figure is the TPOT it is 1000 over."""
+    kind is "throughput", "cap" or "floor"; a floor's figure is the TPOT it is 1000 over, or, with
+    `rate` set (interactivity_mean), the rate itself."""
     if key == THROUGHPUT:
         return {"kind": "throughput", "key": key}
     m = KEY_RE.match(str(key))
@@ -54,6 +57,10 @@ def parse(key):
         return None
     metric, stat = m.group("metric"), m.group("stat")
     if metric == FLOOR_METRIC:
+        # The mean is a mean of rates, a figure of its own; a percentile is 1000 over TPOT's.
+        if stat == "mean":
+            return {"kind": "floor", "key": key, "metric": PER_USER_METRIC, "stat": stat,
+                    "figure": run_blis.MEAN_RATE, "rate": True}
         return {"kind": "floor", "key": key, "metric": PER_USER_METRIC, "stat": stat,
                 "figure": figure(PER_USER_METRIC, stat)}
     target = ALIASES.get(key)
@@ -87,8 +94,9 @@ def key_errors(slo, registry, parse_duration_ms):
             continue
         if g["kind"] == "floor":
             if g["figure"] not in registry:
-                errs.append(f"{where}: the metric registry has no {g['figure']}, which this floor is "
-                            f"1000 over; {PER_USER_METRIC} is recorded at "
+                what = "which this floor is on" if g.get("rate") else "which this floor is 1000 over"
+                errs.append(f"{where}: the metric registry has no {g['figure']}, {what}; "
+                            f"{PER_USER_METRIC} is recorded at "
                             f"{', '.join(_registry_stats(registry, PER_USER_METRIC)) or 'no statistic'}")
             elif g["stat"] not in run_blis.INSTANCE_STATS:
                 errs.append(f"{where}: the worst instance is judged at {', '.join(run_blis.INSTANCE_STATS)}, "
@@ -134,6 +142,14 @@ def per_user(slo):
     return (stated[0], True) if stated else (DEFAULT_STAT, False)
 
 
+def per_user_of(slo):
+    """The figure the per-user rate is on: MEAN_RATE when the spec states interactivity_mean, else
+    tpot_<stat>_ms at per_user's statistic (1000 over it is the rate)."""
+    if any((parse(k) or {}).get("rate") for k in (slo or {})):
+        return run_blis.MEAN_RATE
+    return figure(PER_USER_METRIC, per_user(slo)[0])
+
+
 def gates(slo_ms):
     """The SLO's gates in the order a run is judged: throughput, the per-user gates, then the other
     caps by metric (ttft, e2e) and statistic. Each is parse()'s dict plus `limit`."""
@@ -166,7 +182,10 @@ def floor_rate(slo_ms):
 
 def worst(run, g):
     """(worst, missing) of a gate's figure on a run. A legacy key reads the slot it always read
-    (worst_metric over the flat record); every other key reads the Result's own figure."""
+    (worst_metric over the flat record); a rate (interactivity_mean) its lowest value; every other
+    key the Result's own figure."""
+    if g.get("rate"):
+        return run_blis.worst_rate(run, g["figure"])
     if g["key"] in LEGACY:
         return run_blis.worst_metric(run, "itl_p99_ms" if g["key"] == "itl_p99" else f"{g['key']}_ms")
     return run_blis.worst_figure(run, g["figure"])

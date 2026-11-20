@@ -25,8 +25,9 @@ measured window, not defined here:
 
 A spec that states its per-user statistic (a `tpot_<stat>` cap or an `interactivity_<stat>` floor,
 see experiments/README.md, SLOs) replaces x with each row's `tok_per_s_per_user`, 1000 / the worst
-instance's `tpot_<stat>_ms`, so the front ranks on the figure the SLO gates on; `pareto.json` names it
-in `x` and `x_basis`. Otherwise x is as above.
+instance's `tpot_<stat>_ms`, or with `interactivity_mean` stated the worst instance's mean of each
+request's tok/s, so the front ranks on the figure the SLO gates on; `pareto.json` names it in `x` and
+`x_basis`. Otherwise x is as above.
 
 The Result's own `interactivity_of_mean_tpot` is the only source (a definition is read from the
 registry, never rebuilt from another field). A Result that does not state it leaves the run unrated:

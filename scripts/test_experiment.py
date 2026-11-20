@@ -2308,10 +2308,10 @@ class SloAtAnyStatistic(unittest.TestCase):
         self.assertEqual(50.0, E.floor_rate_from(E.slo_limits({"interactivity_p90": 40, "tpot_p90": "20ms"})),
                          "the tightest per-user gate is the floor")
 
-    def test_a_floor_at_any_tpot_statistic_is_1000_over_that_tpot(self):
-        """interactivity_<stat> is a spec key defined by its tpot figure (#171 point 2): interactivity_mean
-        is 1000 / tpot_mean_ms, the typical user, whatever the registry's own interactivity_mean is."""
-        for stat in ("mean", "p50", "p99"):
+    def test_a_floor_at_any_tpot_percentile_is_1000_over_that_tpot(self):
+        """interactivity_pNN is 1000 / tpot_pNN_ms (#171 point 2), the users' rate at NN from the slow
+        end; interactivity_mean is the mean of the rates instead (InteractivityMeanFloor, #185)."""
+        for stat in ("p50", "p99"):
             with self.subTest(stat=stat):
                 key, fig = f"interactivity_{stat}", f"tpot_{stat}_ms"
                 self.assertEqual([], self.errs({key: 40}))
@@ -2542,6 +2542,167 @@ class SloReviewCases(unittest.TestCase):
         self.assertEqual("cluster; worst instance for TTFT and end-to-end gates",
                          E.run_experiment(spec(), BLIS, None, None, "/nonexistent", dry_run=True,
                                           verbose=False)["scope"])
+
+
+class InteractivityMeanFloor(unittest.TestCase):
+    """#185: interactivity_mean is the mean over requests of each one's tok/s (1000 / its TPOT in ms),
+    the registry's interactivity_mean, not 1000 / the mean TPOT, on the worst instance."""
+
+    @staticmethod
+    def doc(tpots_ms=(10.0, 30.0), instance="instance_0"):
+        """A Result whose one instance served one request at each TPOT; the cluster figures are the
+        same requests' (interactivity_of_mean_tpot is 1000 / their mean TPOT)."""
+        rates = [1000.0 / t for t in tpots_ms]
+        mean = sum(tpots_ms) / len(tpots_ms)
+        n = len(tpots_ms)
+        rows = [{"id": f"request_{i}", "fate": "completed", "phase": "profile", "instance": instance,
+                 "arrival_us": 0, "ttft_us": 100_000, "e2e_us": 100_000 + t * 1000 * 99,
+                 "tpot_us": t * 1000} for i, t in enumerate(tpots_ms)]
+        m = {"output_tok_s": 200.0, "request_throughput": 1.0,
+             "tpot_mean_ms": mean, "tpot_p50_ms": sorted(tpots_ms)[n // 2] if n % 2 else mean,
+             "tpot_p90_ms": run_blis._percentile(tpots_ms, 90), "tpot_p99_ms": run_blis._percentile(tpots_ms, 99),
+             "interactivity_mean": sum(rates) / n, "interactivity_of_mean_tpot": 1000.0 / mean}
+        return {"kind": "Result", "schema_version": "1",
+                "window": {"start_us": 0, "end_us": 10**9, "duration_s": 1000.0, "requests": n},
+                "requests": {"generated": n, "completed": n},
+                "metrics": {k: {"value": v, "samples": n} for k, v in m.items()},
+                "request_rows": rows}
+
+    def rec(self, doc=None):
+        """The run record run_blis.run_one writes for the Result `doc`."""
+        doc = doc or self.doc()
+        return {"returncode": 0, "error": None, "deployment": {},
+                "metrics": run_blis._flatten_result(doc), "measured": run_blis.measured_record(doc),
+                "metrics_all_instances": run_blis.measured_instances(doc)}
+
+    def test_acceptance_two_requests_at_10_and_30_ms(self):
+        rec = self.rec()
+        self.assertAlmostEqual(200.0 / 3, rec["metrics_all_instances"][0]["interactivity_mean"])
+        held, missed = E.slo_limits({"interactivity_mean": 60}), E.slo_limits({"interactivity_mean": 70})
+        self.assertEqual((True, None), E.servable(rec, held), "66.7 >= 60, though 1000 / 20 ms is 50")
+        ok, why = E.servable(rec, missed)
+        self.assertFalse(ok)
+        self.assertIn("interactivity_mean 66.7 tok/s/user < 70 tok/s/user", why)
+        row = E.run_row(rec, {}, "l", "", "s", 8, 8, held, {"interactivity_mean": 60})
+        self.assertEqual(66.7, row["tok_per_s_per_user"])
+        self.assertEqual(66.667, row["per_user_rate"], "the Pareto axis is the same mean of rates")
+        self.assertAlmostEqual(200.0 / 3, row["interactivity_mean"], msg="the gate's figure, as compared")
+        self.assertEqual({"statistic": "mean", "of": "interactivity_mean", "aggregate": "min",
+                          "over": "instance"}, E.per_user_basis({"interactivity_mean": 60}))
+
+    def test_the_floor_reads_the_worst_instance_not_the_cluster(self):
+        doc = self.doc()
+        doc["request_rows"] += [{**r, "id": r["id"] + "b", "instance": "instance_1", "tpot_us": 40_000}
+                                for r in doc["request_rows"]]
+        rec = self.rec(doc)
+        self.assertEqual([200.0 / 3, 25.0], [i["interactivity_mean"] for i in rec["metrics_all_instances"]])
+        self.assertEqual((25.0, False), run_blis.worst_rate(rec, "interactivity_mean"))
+        self.assertFalse(E.servable(rec, {"interactivity_mean": 60.0})[0], "instance_1 averages 25 tok/s")
+        self.assertEqual(25.0, E.run_row(rec, {}, "l", "", "s", 8, 8, {"interactivity_mean": 60.0},
+                                         {"interactivity_mean": 60})["tok_per_s_per_user"])
+
+    def test_a_request_with_no_positive_tpot_has_no_rate(self):
+        """As the simulator's own figure: a TPOT of zero gives no rate, so it leaves the mean."""
+        doc = self.doc()
+        doc["request_rows"].append({**doc["request_rows"][0], "id": "request_9", "tpot_us": 0})
+        doc["request_rows"].append({**doc["request_rows"][0], "id": "request_10", "tpot_us": None})
+        self.assertAlmostEqual(200.0 / 3, run_blis.measured_instances(doc)[0]["interactivity_mean"])
+        doc["request_rows"] = [r for r in doc["request_rows"] if not r["tpot_us"]]
+        self.assertNotIn("interactivity_mean", run_blis.measured_instances(doc)[0])
+
+    def test_a_prefill_instance_states_it_only_when_the_result_does(self):
+        doc = self.doc()
+        mw = {"role": "prefill", "measured_user_requests": 2, "tpot_mean_ms": 20.0}
+        doc["reports"] = {"engine": {"instances": {"prefill_0": {"measured_window": dict(mw)},
+                                                   "prefill_1": {"measured_window": {**mw, "interactivity_mean": 41.0}}}}}
+        by = {i["instance_id"]: i for i in run_blis.measured_instances(doc)}
+        self.assertNotIn("interactivity_mean", by["prefill_0"], "never derived from its mean TPOT")
+        self.assertEqual(41.0, by["prefill_1"]["interactivity_mean"])
+        self.assertEqual((41.0, False), run_blis.worst_rate(self.rec(doc), "interactivity_mean"))
+
+    def test_the_percentile_floors_are_unchanged(self):
+        rec = self.rec()
+        for key, fig in (("interactivity_p50", "tpot_p50_ms"), ("interactivity_p90", "tpot_p90_ms")):
+            with self.subTest(key=key):
+                worst = run_blis.worst_figure(rec, fig)[0]
+                at = 1000.0 / worst
+                self.assertTrue(E.servable(rec, {key: at})[0])
+                self.assertFalse(E.servable(rec, {key: at + 0.01})[0])
+                self.assertEqual({"statistic": key[-3:], "of": fig, "aggregate": "max", "over": "instance"},
+                                 E.per_user_basis({key: 40}))
+                self.assertAlmostEqual(at, E.run_row(rec, {}, "l", "", "s", 8, 8, {key: 1.0},
+                                                     {key: 1})["per_user_rate"], places=3)
+
+    def test_a_tpot_mean_cap_still_gates_and_rates_on_tpot_mean(self):
+        """A cap is on TPOT, so tpot_mean is still the mean TPOT, and its rate is 1000 over it, named."""
+        rec = self.rec()
+        self.assertTrue(E.servable(rec, {"tpot_mean": 20.0})[0])
+        self.assertFalse(E.servable(rec, {"tpot_mean": 19.9})[0])
+        self.assertEqual("tpot_mean_ms", E.per_user_basis({"tpot_mean": "20ms"})["of"])
+        self.assertEqual(50.0, E.run_row(rec, {}, "l", "", "s", 8, 8, {"tpot_mean": 20.0},
+                                         {"tpot_mean": "20ms"})["tok_per_s_per_user"])
+        both = {"tpot_mean": "20ms", "interactivity_mean": 60}
+        self.assertEqual("interactivity_mean", E.per_user_basis(both)["of"], "the stated rate wins")
+        self.assertEqual(66.7, E.run_row(rec, {}, "l", "", "s", 8, 8, E.slo_limits(both), both)["tok_per_s_per_user"])
+
+    def test_the_report_and_the_sweeper_agree(self):
+        import report as rep
+        rec = self.rec()
+        for floor in (60, 70):
+            slo = {"interactivity_mean": floor}
+            fl = {"tok_per_s_per_user": float(floor), **E.per_user_basis(slo)}
+            with self.subTest(floor=floor):
+                ok = E.servable(rec, E.slo_limits(slo))[0]
+                self.assertEqual(floor == 60, ok)
+                for f in (fl, {}):
+                    self.assertEqual(ok, rep._feasible(rec, f, slo)[0], f)
+                self.assertEqual(66.67, rep._per_user_rate(rec, stat="mean", of="interactivity_mean")[0])
+        self.assertIn("worst-instance interactivity_mean",
+                      " ".join(rep._feasible(rec, {"tok_per_s_per_user": 70.0, "statistic": "mean",
+                                                   "of": "interactivity_mean"}, {"interactivity_mean": 70})[1]))
+
+    def test_a_report_on_it_names_the_mean_of_rates(self):
+        doc = spec()
+        doc["scenario"]["slo"] = {"interactivity_mean": 60}
+        rec = self.rec()
+
+        def fake_run_one(*a, **kw):
+            cfg = dict(kw.get("config") or a[11])
+            return {**copy.deepcopy(rec), "cmd": None, "config": cfg, "concurrency": cfg["concurrency"]}
+
+        import build_gallery
+        import explore_data
+        real = E.run_blis.run_one
+        E.run_blis.run_one = fake_run_one
+        try:
+            with tempfile.TemporaryDirectory() as out:
+                report = E.run_experiment(doc, BLIS, "/c", "/r", out, verbose=False)
+                d = os.path.join(out, doc["name"])
+                with open(os.path.join(d, "scenario.json"), encoding="utf-8") as f:
+                    scen = json.load(f)
+                card = build_gallery.validate_and_project(d)[1]
+                explore = explore_data.build(d)
+        finally:
+            E.run_blis.run_one = real
+        rows = [r for s in report["sweeps"] for r in s["rows"]]
+        self.assertTrue(rows and all(r["servable"] and r["tok_per_s_per_user"] == 66.7 for r in rows))
+        self.assertEqual({"tok_per_s_per_user": 60.0, "statistic": "mean", "of": "interactivity_mean",
+                          "aggregate": "min", "over": "instance"}, scen["interactivity_floor"])
+        self.assertEqual(("tok_per_s_per_user", scen["interactivity_floor"]["of"]),
+                         (report["pareto"]["x"], report["pareto"]["x_basis"]["of"]))
+        self.assertEqual("60 tok/s/user (worst-instance interactivity_mean)", card["floor"])
+        self.assertEqual("interactivity_mean", explore["per_user_of"])
+
+    def test_it_validates_and_names_its_figure(self):
+        doc = spec()
+        doc["scenario"]["slo"] = {"interactivity_mean": 60}
+        self.assertEqual([], [e for e in V.validate(doc, BLIS, ROUTING) if "slo" in e])
+        self.assertEqual("interactivity_mean", SLO.parse("interactivity_mean")["figure"])
+        self.assertEqual("tpot_p90_ms", SLO.parse("interactivity_p90")["figure"])
+        basis = E.per_user_basis({"interactivity_mean": 60})
+        self.assertEqual("tok/s/user (the worst instance's interactivity_mean, the mean of each request's tok/s)",
+                         PA.describe(PA.objective_of({"ranking": "pareto"}), basis).split(" against ")[1]
+                         .split(" among")[0])
 
 
 class CommittedReportsKeepTheirSloVerdicts(unittest.TestCase):
@@ -3435,6 +3596,27 @@ class ReportSchemaDoc(unittest.TestCase):
         self.assertNotIn("mean inter-token latency", text, "schema.md still says mean ITL for pu")
         self.assertNotIn("1000 / mean itl", text, "schema.md still says 1000/mean ITL for pu")
         self.assertNotIn("1000/mean-itl", text, "schema.md still says 1000/mean-ITL for pu")
+
+    def test_each_formula_names_the_figure_the_registry_defines(self):
+        """#133: every "`<metric>` is `1000 / <figure>`" in schema.md names the figure the metric
+        registry defines the metric over ("1000 over the <stat> of <metric> in milliseconds")."""
+        import re
+        import report
+        with open(os.path.join(report.REPORT_DIR, "schema.md"), encoding="utf-8") as f:
+            text = f.read()
+        registry = blis_cli.metric_registry(BLIS)
+        said = re.findall(r"`(\w+)` is\s+`1000 / (\w+)`", text)
+        self.assertIn("interactivity_p90", [m for m, _ in said])
+        for metric, fig in said:
+            with self.subTest(metric=metric):
+                desc = registry[metric]["description"]
+                m = re.match(r"1000 over the (\w+) of (\w+) in milliseconds\b", desc)
+                self.assertIsNotNone(m, desc)
+                stat, base = m.groups()
+                self.assertIn(fig, (f"{base}_{stat}", f"{base}_{stat}_ms"), f"the registry says: {desc}")
+        quoted = re.search(r"`interactivity_p90` ([0-9.]+) = 1000 / ([0-9.]+) `tpot_p90_ms`", text)
+        self.assertIsNotNone(quoted, "the example record is quoted")
+        self.assertAlmostEqual(float(quoted.group(1)), 1000 / float(quoted.group(2)), places=3)
 
 
 # --- refusals, the Pareto front, router knobs, simulator switches ------------------------------

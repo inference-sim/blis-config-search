@@ -22,8 +22,10 @@ const sloLabel = (k: string) => {
 }
 /** An interactivity key is a floor in tok/s/user (at least); every other latency key is a cap. */
 export const sloBound = (k: string) => (k.startsWith('interactivity_') ? '≥' : '≤')
-/** What every tok/s-per-user figure on the page is, when the spec states its statistic (DEV-8). */
-export const perUserNote = (of?: string) => (of ? `tok/s per user = 1000 / worst-instance ${of}` : null)
+/** What every tok/s-per-user figure on the page is, when the spec states its statistic (DEV-8): a rate
+ *  figure (interactivity_mean, the mean of each request's tok/s) is the rate, a TPOT is 1000 over it. */
+export const perUserNote = (of?: string) =>
+  of ? `tok/s per user = ${of.startsWith('interactivity_') ? '' : '1000 / '}worst-instance ${of}` : null
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
 
 export async function loadExplore(runId: string): Promise<ExploreData> {

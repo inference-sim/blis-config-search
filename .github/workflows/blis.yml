@@ -1,10 +1,11 @@
 name: blis
 
-# The shared BLIS checks (design §13.2, §13.4), called from blis-substrate by commit (X21):
-# the pull-request checks (description, commit policy, workflow lint,
-# version literals, documentation references, cited issues, quarantine, the generated
-# AGENTS.md section and pull-request template, the selected-version lint) and the nightly checks
-# (cited issues stay open, X28). v0.14.1 moved the merge-queue check into the pull-request one.
+# The shared BLIS pull-request checks (design §13.2), called from blis-substrate by commit (X21):
+# workflow lint, version literals, documentation references, the generated AGENTS.md section and
+# pull-request template, the selected-version lint. There is no scheduled run: CI checks product
+# correctness only, and an edit of the pull request's title or body starts no run (M3.2 row 22).
+# The pinned commit still has the description, commit-policy and cited-issue steps; the pin moves
+# to the substrate release whose shared-pr-checks.yml has dropped them.
 #
 # The commit is blis-substrate release v0.14.1 (f9f3c93), the release pins.env's SUBSTRATE_REF
 # names; it moves with that pin. v0.14.1's description check accepts a dependency pin written as
@@ -12,17 +13,13 @@ name: blis
 
 on:
   pull_request:
-    types: [opened, edited, synchronize, reopened]
-  schedule:
-    - cron: "17 5 * * *"
-  workflow_dispatch:
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
 
 jobs:
   pr:
-    if: github.event_name == 'pull_request'
     uses: inference-sim/blis-substrate/.github/workflows/shared-pr-checks.yml@f9f3c9327794d543a0915c4deb1259ff9985c753
     permissions:
       contents: read
@@ -31,14 +28,3 @@ jobs:
     with:
       repo: blis-config-search
       substrate-ref: f9f3c9327794d543a0915c4deb1259ff9985c753
-
-  nightly:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    uses: inference-sim/blis-substrate/.github/workflows/shared-nightly.yml@f9f3c9327794d543a0915c4deb1259ff9985c753
-    permissions:
-      contents: read
-      issues: read
-    with:
-      substrate-ref: f9f3c9327794d543a0915c4deb1259ff9985c753
-    secrets:
-      INTERNAL_NAME_PATTERNS: ${{ secrets.INTERNAL_NAME_PATTERNS }}

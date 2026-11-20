@@ -755,7 +755,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
 
     # Which simulator is about to price this sweep. Only the CI workflows verified BLIS_SHA, so a
     # contributor sweeping locally against an off-pin binary got real-looking numbers with no
-    # warning anywhere in the output (#23). Warned, not refused: see blis_pin_warning.
+    # warning anywhere in the output. Warned, not refused: see blis_pin_warning.
     # Skipped on a dry run, which prices nothing.
     if not dry_run:
         warn = _blis_pin_warning(blis, catalog, registry)
@@ -1518,7 +1518,7 @@ def blis_pin_warning(stack, pins=None):
 
     Compares the SOURCE commit, never the binary digest: one tag builds to different bytes per
     toolchain. A warning, not a refusal, so a local sweep can still test an unreleased simulator;
-    CI refuses outright by checking BLIS_SHA on clone (#23).
+    CI refuses outright by checking BLIS_SHA on clone.
     """
     blis = ((stack or {}).get("resolved") or {}).get("blis") or {}
     want = (pins if pins is not None else build_catalog.read_pins()).get("BLIS_SHA")

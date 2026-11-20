@@ -546,7 +546,7 @@ def test_pins_are_the_single_source_of_the_sim_version():
     check("$BLIS_SHA" in exp_wf, "run-experiment.yml should verify BLIS_SHA from pins.env")
     check(sha not in exp_wf, "run-experiment.yml hard-codes the sha; read it from pins.env")
 
-    # ...and the SWEEPER must check it too, not just CI. The gap this closes (#23): only the
+    # ...and the SWEEPER must check it too, not just CI. The gap this closes: only the
     # workflows verified BLIS_SHA, so `grep BLIS_SHA scripts/run_experiment.py` came back empty
     # and a contributor sweeping locally against an off-pin binary got real-looking numbers with
     # nothing in the output to say so. CI still refuses outright (it verifies on clone, above);
@@ -744,6 +744,21 @@ def test_workflows_sane():
           "the preview comment waits for the Pages build (and may read its status)")
     check("github.event.pull_request.number" in str(pdoc["concurrency"]["group"]),
           "pages runs are grouped per PR, so batch PRs don't cancel each other's previews")
+
+    # CI checks product correctness only: an edit of a pull request's title or body starts no run,
+    # and no workflow reads that text or runs on a schedule of the shared process checks. Only
+    # ci-retarget.yml listens for `edited`, and it does nothing unless the base changed.
+    wfd = os.path.join(ROOT, ".github", "workflows")
+    for fn in sorted(os.listdir(wfd)):
+        wdoc = _yaml.safe_load(open(os.path.join(wfd, fn)))
+        pr_types = ((wdoc.get(True) or {}).get("pull_request") or {}).get("types") or []
+        check(("edited" in pr_types) == (fn == "ci-retarget.yml"), f"{fn}: only ci-retarget.yml runs on an edit")
+        check("pull_request.body" not in open(os.path.join(wfd, fn)).read(), f"{fn} reads no pull request text")
+    blis_wf = _yaml.safe_load(open(os.path.join(wfd, "blis.yml")))
+    check("schedule" not in blis_wf[True] and "nightly" not in blis_wf["jobs"],
+          "blis.yml has no scheduled nightly job")
+    check("github.event.changes.base" in _yaml.safe_load(open(os.path.join(wfd, "ci-retarget.yml")))["jobs"][
+          "dispatch-checks"]["if"], "ci-retarget.yml acts only on a change of base")
 
     # The deterministic sweeper needs no approval gate (no LLM in the path), but it must still
     # never write to main or publish: its only output is a bot PR.

@@ -182,15 +182,16 @@ def _floor_itl_p99_max(floor):
 _SPEC_DURATION = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(us|ms|s)$")
 
 
-def _spec_slo_caps(slos, floor_set):
+def _spec_slo_caps(slos, floor_set, floor_of=None):
     """Experiment-spec SLO keys (`itl_p99: '20ms'`) as the `<metric>_ms` caps checked here: a legacy
     key keyed by the slot it reads, any other cap by its Result figure (tpot_p90_ms), an interactivity
     floor as its tok/s/user. A per-user gate is already enforced as the interactivity floor when one
-    is set."""
+    is set, except a tpot cap beside a floor on run_blis.MEAN_RATE, which that floor does not cover."""
     out = {}
     for k, cap in slos.items():
         g = slo.parse(k) or {}
-        if floor_set and g.get("metric") == slo.PER_USER_METRIC:
+        if (floor_set and g.get("metric") == slo.PER_USER_METRIC
+                and (floor_of != run_blis.MEAN_RATE or g.get("rate"))):
             continue
         if g.get("kind") == "floor":
             out[k] = _as_num(cap)
@@ -248,7 +249,8 @@ def _feasible(run, floor, slos):
             viol.append(f"throughput_per_gpu missing (cannot verify SLO >= {tput:g})")
         elif tps / gpus < tput:
             viol.append(f"throughput_per_gpu = {tps / gpus:.1f} < {tput:g}")
-    for k, cap in _spec_slo_caps(slos, itl_max is not None).items():
+    floor_of = (slo.per_user_of(slos) if slo.per_user(slos)[1] else (floor or {}).get("of"))
+    for k, cap in _spec_slo_caps(slos, itl_max is not None, floor_of).items():
         if cap is None:
             continue
         g = slo.parse(k) or {}

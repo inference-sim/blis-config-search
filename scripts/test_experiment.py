@@ -2671,6 +2671,27 @@ class InteractivityMeanFloor(unittest.TestCase):
         self.assertEqual("interactivity_mean", E.per_user_basis(both)["of"], "the stated rate wins")
         self.assertEqual(66.7, E.run_row(rec, {}, "l", "", "s", 8, 8, E.slo_limits(both), both)["tok_per_s_per_user"])
 
+    def test_with_both_stated_the_floor_is_the_rate_floor_and_the_cap_stays_a_cap(self):
+        """kalantar's #186 review case: 1000 / a tpot_mean cap is not a bound on the mean of rates, so
+        the recorded floor is the interactivity_mean floor, and the cap is still judged as a cap."""
+        import report as rep
+        rec = self.rec()
+        slo = {"tpot_mean": "19ms", "interactivity_mean": 40}
+        slo_ms = E.slo_limits(slo)
+        self.assertEqual(40.0, E.floor_rate_from(slo_ms), "not 1000 / 19 ms, which is on the mean TPOT")
+        self.assertEqual((False, "tpot_mean 20.0 ms > 19 ms"), E.servable(rec, slo_ms))
+        floor = {"tok_per_s_per_user": E.floor_rate_from(slo_ms), **E.per_user_basis(slo)}
+        for fl in (floor, {}):
+            with self.subTest(floor=bool(fl)):
+                ok, viol = rep._feasible(rec, fl, slo)
+                self.assertFalse(ok, "the report refuses what the sweeper refuses")
+                self.assertTrue(any("tpot_mean_ms" in v for v in viol), viol)
+        self.assertEqual((True, []), rep._feasible(rec, floor, {"tpot_mean": "20ms", "interactivity_mean": 40}))
+        self.assertEqual(50.0, E.floor_rate_from(E.slo_limits({"tpot_p90": "20ms", "interactivity_p90": 40})),
+                         "at a percentile both are on one figure, so the tightest still wins")
+        self.assertEqual({"tok_per_s_per_user": 40.0, "statistic": "mean", "of": "interactivity_mean",
+                          "aggregate": "min", "over": "instance"}, floor, "the floor the card prints is the stated 40")
+
     def test_the_report_and_the_sweeper_agree(self):
         import report as rep
         rec = self.rec()

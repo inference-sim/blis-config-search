@@ -171,12 +171,13 @@ def gates(slo_ms):
 
 def floor_rate(slo_ms):
     """The per-user rate the per-user gates require (tok/s/user), or None: the tightest of each
-    tpot cap's 1000 / cap and each interactivity floor."""
-    rates = []
-    for g in gates(slo_ms):
-        if g.get("metric") != PER_USER_METRIC or not g["limit"]:
-            continue
-        rates.append(1000.0 / g["limit"] if g["kind"] == "cap" else float(g["limit"]))
+    tpot cap's 1000 / cap and each interactivity floor. With interactivity_mean stated the rate is
+    the mean of rates, which 1000 / a tpot_mean cap does not bound, so only that floor counts and the
+    cap stays a cap."""
+    per_user = [g for g in gates(slo_ms) if g.get("metric") == PER_USER_METRIC and g["limit"]]
+    if any(g.get("rate") for g in per_user):
+        per_user = [g for g in per_user if g.get("rate")]
+    rates = [1000.0 / g["limit"] if g["kind"] == "cap" else float(g["limit"]) for g in per_user]
     return max(rates) if rates else None
 
 

@@ -1347,7 +1347,7 @@ class FigureForms(unittest.TestCase):
         return d
 
     def test_the_versions_read_and_the_one_the_scope_check_starts_at(self):
-        self.assertEqual(run_blis.READ_RESULT_SCHEMAS, (1, 2, 3))
+        self.assertEqual(run_blis.READ_RESULT_SCHEMAS, (1, 2, 3, 4))
         self.assertEqual(run_blis.FIGURE_SCOPE_FROM_SCHEMA, 3)
 
     def test_version_2_and_earlier_carry_no_scope_and_are_read_as_cluster_figures(self):
@@ -1375,9 +1375,18 @@ class FigureForms(unittest.TestCase):
         d["schema_version"] = 2
         self.assertEqual(run_blis.figure_form_problems(d), [])
 
+    def test_a_version_4_result_is_read_as_a_version_3_one(self):
+        """Version 4 (M3.2) adds the estimate block and an optional interval per figure; a figure is still
+        {value, samples, scope}, and the scope check starts at 3 and holds for 4."""
+        d = self.doc(4)
+        d["estimate"] = {"replications": 1}
+        self.assertEqual(run_blis.figure_form_problems(d), [])
+        self.assertEqual(run_blis.parse_metrics(json.dumps(d))["tokens_per_sec"], 106.83)
+        self.assertEqual(len(run_blis.figure_form_problems(self.doc(4, ttft_p99_ms={"scope": "pool"}))), 1)
+
     def test_a_version_this_runner_has_not_read_is_refused(self):
-        self.assertEqual(run_blis.figure_form_problems(self.doc(4)),
-                         ["Result schema_version 4 is not one this runner reads (1, 2, 3)"])
+        self.assertEqual(run_blis.figure_form_problems(self.doc(5)),
+                         ["Result schema_version 5 is not one this runner reads (1, 2, 3, 4)"])
 
     def test_the_feasibility_aggregate_is_stated_as_max_over_instances(self):
         self.assertEqual(run_blis.FEASIBILITY_AGGREGATE["aggregate"], "max")

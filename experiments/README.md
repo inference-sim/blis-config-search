@@ -545,6 +545,32 @@ both. So the schema can be looser than the validator only in the three classes i
 out of reach — it can never be *stricter*, which is the case that would have your editor
 red-underline a spec CI accepts.
 
+## Splitting a large grid into bounded specs
+
+`--shard I/N` slices the full expansion, so it still expands every point. For a grid too large to
+expand at all, `scripts/shard_experiment.py` cuts the spec instead:
+
+```bash
+python3 -I scripts/shard_experiment.py experiments/<name>.yaml --max-runs 64            # the plan
+python3 -I scripts/shard_experiment.py experiments/<name>.yaml --max-runs 64 --index 3 --out /tmp/<name>-shard-03.yaml
+```
+
+Each shard is a spec of one sweep, with every declared load and each independent axis cut to a
+contiguous slice, holding at most `--max-runs` runs (configurations x loads). Taken together the
+shards' runs are the parent's runs, as a multiset: nothing is priced, ranked or filtered, and GPU
+budget refusals stay the runner's.
+
+The grid is not purely Cartesian (a speculative K of 0 collapses its method and drafter, a 0-byte
+offload tier takes no policy), so the plan asks the runner's own expansion, on one-point probes,
+which axes expand together, and never cuts those: every shard carries each such group whole. The
+plan costs the probes, not the grid. A `--max-runs` too small to hold one group is refused, naming
+it. A coupling that only appears among three or more axes is not seen by the probes; the shard's
+expansion is checked against the plan's count when it is written, and a mismatch is refused.
+
+A shard has its own name (`<name>-shard-<i>`), so it writes its own `reports/` directory, and it
+ranks only its own slice: a finished shard is not the whole grid's best. Merge shards by feeding
+their `runs.jsonl` to `--runs-from`.
+
 ## What the sweeper writes
 
 `reports/<name>/` — the same run-directory format the rest of the repo reads:

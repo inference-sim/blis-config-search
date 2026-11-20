@@ -1,0 +1,29 @@
+name: CI on retarget
+
+# A retarget (a change of a pull request's base, as when the next pull request of a stack moves to
+# main) is an `edited` event, and checks.yml does not run on `edited`. It still has to run against the
+# new base, because scripts/ci_scope.py picks its jobs from the files changed since the base. This
+# workflow dispatches checks.yml on the head branch with the new base commit. An edit of the title or
+# body does nothing here.
+#
+# A pull request from a fork cannot be dispatched on (the branch is not in this repository, and the
+# token is read-only): push a commit, or close and reopen the pull request, to run the checks.
+on:
+  pull_request:
+    types: [edited]
+
+permissions:
+  actions: write
+
+jobs:
+  dispatch-checks:
+    if: ${{ github.event.changes.base && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch checks.yml on the head branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: gh workflow run checks.yml --repo "$GITHUB_REPOSITORY" --ref "$HEAD_REF" -f base="$BASE_SHA"

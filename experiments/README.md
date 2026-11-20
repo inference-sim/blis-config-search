@@ -477,8 +477,9 @@ sweeps:
   simulator: {pd_transfer_contention: [false, true]}    # disaggregated sweeps only
 ```
 
-Every report carries the Pareto front of throughput per GPU against interactivity
-(`interactivity_of_mean_tpot`, 1000 / mean TPOT) in `pareto.json`, for the total and the decode-GPU
+Every report carries the Pareto front of throughput per GPU against interactivity in `pareto.json`:
+`interactivity_of_mean_tpot` (1000 / mean TPOT, the harmonic mean of the users' rates) unless the
+spec states a per-user statistic, and then each row's `tok_per_s_per_user` on it (SLOs above), for the total and the decode-GPU
 form, points compared exactly (no tolerance; a P/D preference waits for replications with intervals, design DEV-11). `ranking`
 (`scalar` by default, or `pareto`) says which rule picks the finalists and the winner card, and the
 report states it. A candidate the simulator refuses is reported as refused, counted and grouped by

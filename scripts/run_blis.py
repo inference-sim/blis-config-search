@@ -1037,7 +1037,7 @@ _MEASURED_KEYS = {"tokens_per_sec": "output_tok_s", "responses_per_sec": "reques
                   "preemption_count": "preemptions",
                   # The registry's per-GPU rates and the interactivity of the mean TPOT: the figures the
                   # Pareto objective is stated in (pareto.py). A Result that lacks one leaves the slot
-                  # empty; interactivity is then derived from tpot_mean_ms (pareto.interactivity_of).
+                  # empty and the row unrated (pareto.interactivity_of rebuilds nothing).
                   "total_tokens_per_sec_per_gpu": "total_tokens_per_second_per_gpu",
                   "output_tokens_per_sec_per_decode_gpu": "output_tokens_per_second_per_decode_gpu",
                   "interactivity_of_mean_tpot": "interactivity_of_mean_tpot"}

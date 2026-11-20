@@ -4,8 +4,9 @@
 The axes are the metric registry's, not this repository's (design DEV-8):
 
   x  interactivity_of_mean_tpot  1000 / mean(TPOT in ms), tokens/s per user
-                                 (InferenceX mean_intvty; not the mean of per-request 1/TPOT, which is
-                                 the registry's interactivity_mean and reads 2 to 27 percent higher)
+                                 (InferenceX mean_intvty), the harmonic mean of the users' rates; not
+                                 the mean of each request's tok/s, the registry's interactivity_mean,
+                                 which is higher whenever the rates differ (#187)
   y  total_tokens_per_second_per_gpu            (input + output tokens)/s over ALL the GPUs, or
      output_tokens_per_second_per_decode_gpu    output tokens/s over the decode GPUs
 

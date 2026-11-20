@@ -19,7 +19,7 @@ measured window, not defined here:
 
 | Axis | Registry metric | Meaning |
 |---|---|---|
-| x, tokens/s per user | `interactivity_of_mean_tpot` | 1000 / mean TPOT in ms (InferenceX `mean_intvty`). Not the mean of per-request 1/TPOT, which is `interactivity_mean` and reads 2 to 27 percent higher. |
+| x, tokens/s per user | `interactivity_of_mean_tpot` | 1000 / mean TPOT in ms (InferenceX `mean_intvty`), the harmonic mean of the users' rates. Not the mean of each request's tok/s, which is `interactivity_mean` and is higher whenever the rates differ (#187). |
 | y, tokens/s per GPU | `total_tokens_per_second_per_gpu` | (input + output tokens)/s over all GPUs. `throughput: total`, the default. |
 | y, decode form | `output_tokens_per_second_per_decode_gpu` | output tokens/s over the decode GPUs (all GPUs when there is no decode pool). `throughput: decode`. |
 

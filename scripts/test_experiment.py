@@ -2614,21 +2614,27 @@ class InteractivityMeanFloor(unittest.TestCase):
         """No request with a positive TPOT and no cluster figure: the floor is not measured, so it fails
         in the sweeper and the report alike, and the row has no rate."""
         import report as rep
-        doc = self.doc()
-        del doc["metrics"]["interactivity_mean"]
-        for r in doc["request_rows"]:
+        zero = self.doc()
+        for r in zero["request_rows"]:
             r["tpot_us"] = 0
-        rec = self.rec(doc)
-        self.assertEqual((None, True), run_blis.worst_rate(rec, "interactivity_mean"))
+        no_rows = self.doc()
+        del no_rows["request_rows"]
         slo = {"interactivity_mean": 60}
-        self.assertEqual((False, "interactivity_mean SLO declared but not measured"),
-                         E.servable(rec, E.slo_limits(slo)))
-        self.assertIsNone(E.run_row(rec, {}, "l", "", "s", 8, 8, E.slo_limits(slo), slo)["tok_per_s_per_user"])
         floor = {"tok_per_s_per_user": 60.0, **E.per_user_basis(slo)}
-        ok, viol = rep._feasible(rec, floor, slo)
-        self.assertFalse(ok)
-        self.assertIn("interactivity_mean missing (cannot verify interactivity floor)", viol)
-        self.assertFalse(rep._feasible(rec, {}, slo)[0], "with no floor block, the key alone still fails")
+        for case, doc in (("every TPOT zero", zero), ("no request rows", no_rows)):
+            with self.subTest(case=case):
+                del doc["metrics"]["interactivity_mean"]
+                rec = self.rec(doc)
+                self.assertTrue(rec["metrics"]["tokens_per_sec"], "a successful run with metrics")
+                self.assertFalse(any("interactivity_mean" in i for i in rec["metrics_all_instances"]))
+                self.assertEqual((None, True), run_blis.worst_rate(rec, "interactivity_mean"))
+                self.assertEqual((False, "interactivity_mean SLO declared but not measured"),
+                                 E.servable(rec, E.slo_limits(slo)))
+                self.assertIsNone(E.run_row(rec, {}, "l", "", "s", 8, 8, E.slo_limits(slo), slo)["tok_per_s_per_user"])
+                ok, viol = rep._feasible(rec, floor, slo)
+                self.assertFalse(ok)
+                self.assertIn("interactivity_mean missing (cannot verify interactivity floor)", viol)
+                self.assertFalse(rep._feasible(rec, {}, slo)[0], "with no floor block, the key alone still fails")
 
     def test_a_prefill_instance_states_it_only_when_the_result_does(self):
         doc = self.doc()

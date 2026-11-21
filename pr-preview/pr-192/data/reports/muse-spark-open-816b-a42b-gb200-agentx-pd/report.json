@@ -1,0 +1,116 @@
+{
+  "explore_prose": [
+    "Every run in this experiment is in the explorer below: filter by outcome to see which settings held the SLOs, or by setting to compare one sweep against another.",
+    "Each sweep's hypothesis was written before the runs, and is quoted beside that sweep's measured result below."
+  ],
+  "hero": [
+    {
+      "h": "What was tested",
+      "html": "66 configurations over 9 sweeps (colocated, colocated-tuned, pd-ratio, pd-always, pd-wide-decode, pd-wide-prefill, pd-pool-engine, pd-decode-cudagraph, routing), each at 4 load levels, every run on exactly 72 GPUs."
+    },
+    {
+      "h": "What was found",
+      "html": "<strong>9x TP8 + EP (batch tokens 32,768)</strong>, from the <em>colocated-tuned</em> sweep, reached 22.55 tok/s/accelerator (1623.5 tok/s across the fleet) at concurrency 512 while holding the scenario's SLOs."
+    },
+    {
+      "h": "What to run",
+      "html": "9x TP8 + EP (batch tokens 32,768) at concurrency 512. 264 of 264 runs held the SLOs.",
+      "run": true
+    }
+  ],
+  "meta": [
+    "BLIS discrete-event simulation",
+    "Experiment Spec (RFC #21)",
+    "deterministic sweep \u2014 no LLM in the measurement path",
+    "seed 42"
+  ],
+  "recommendation_num": 11,
+  "recommendation_prose": [
+    "The table below ranks the measured operating points by output tok/s per accelerator, the objective this experiment selects on, among runs that held the scenario's SLOs."
+  ],
+  "sections": [
+    {
+      "caption_note": "5 configurations, 20 runs.",
+      "num": 2,
+      "prose": [
+        "Nine TP8 instances should lead the colocated shapes, since wider dp groups paid hundreds of ms of ITL on the 64-GPU rack.",
+        "Measured: best was <strong>9x TP8 + EP</strong> at 21.84 tok/s/accelerator (concurrency 512)."
+      ],
+      "title": "Sweep: colocated"
+    },
+    {
+      "caption_note": "8 configurations, 32 runs.",
+      "num": 3,
+      "prose": [
+        "A bigger token budget with a long-prefill cap should hold ITL to higher load, narrowing what P/D can win.",
+        "Measured: best was <strong>9x TP8 + EP (batch tokens 32,768)</strong> at 22.55 tok/s/accelerator (concurrency 512)."
+      ],
+      "title": "Sweep: colocated-tuned"
+    },
+    {
+      "caption_note": "20 configurations, 80 runs.",
+      "num": 4,
+      "prose": [
+        "Decode-heavy ratios should win on AgentX, since cached prefixes leave only a short uncached tail to prefill per turn.",
+        "Measured: best was <strong>3P/6D TP8 + EP</strong> at 19.21 tok/s/accelerator (concurrency 128)."
+      ],
+      "title": "Sweep: pd-ratio"
+    },
+    {
+      "caption_note": "5 configurations, 20 runs.",
+      "num": 5,
+      "prose": [
+        "Splitting every request should trail the threshold arms, because a turn with a cached prefix pays a handoff for little prefill.",
+        "Measured: best was <strong>3P/6D TP8 + EP</strong> at 18.94 tok/s/accelerator (concurrency 128)."
+      ],
+      "title": "Sweep: pd-always"
+    },
+    {
+      "caption_note": "6 configurations, 24 runs.",
+      "num": 6,
+      "prose": [
+        "TP16 decode instances should hold ITL at higher load than TP8 ones, trading batch slots for faster steps.",
+        "Measured: best was <strong>5P TP8 + EP / 2D TP16 + EP</strong> at 17.82 tok/s/accelerator (concurrency 256)."
+      ],
+      "title": "Sweep: pd-wide-decode"
+    },
+    {
+      "caption_note": "6 configurations, 24 runs.",
+      "num": 7,
+      "prose": [
+        "TP16 prefill instances should cut TTFT on long cold turns but cost decode slots, so they should lose on ITL-bound load.",
+        "Measured: best was <strong>1P TP16 + EP / 7D TP8 + EP</strong> at 19.26 tok/s/accelerator (concurrency 128)."
+      ],
+      "title": "Sweep: pd-wide-prefill"
+    },
+    {
+      "caption_note": "8 configurations, 32 runs.",
+      "num": 8,
+      "prose": [
+        "A 32k prefill budget should matter on the prefill-light layout and a decode-pool prefill cap on the decode-heavy one.",
+        "Measured: best was <strong>4P/5D TP8 + EP</strong> at 18.89 tok/s/accelerator (concurrency 128)."
+      ],
+      "title": "Sweep: pd-pool-engine"
+    },
+    {
+      "caption_note": "2 configurations, 8 runs.",
+      "num": 9,
+      "prose": [
+        "Full graph capture on the decode pool should lower ITL by a few percent, with FULL_DECODE_ONLY matching FULL there.",
+        "Measured: best was <strong>3P/6D TP8 + EP</strong> at 19.42 tok/s/accelerator (concurrency 128)."
+      ],
+      "title": "Sweep: pd-decode-cudagraph"
+    },
+    {
+      "caption_note": "6 configurations, 24 runs.",
+      "num": 10,
+      "prose": [
+        "Prefix affinity should beat load-only scorers, and by more across nine instances than three.",
+        "Measured: best was <strong>9x TP8 + EP</strong> at 21.28 tok/s/accelerator (concurrency 256)."
+      ],
+      "title": "Sweep: routing"
+    }
+  ],
+  "standfirst": "A deterministic sweep over inferencex-agentx-mvp traffic, comparing 9 designs on one GPU budget.",
+  "title": "muse-spark-open-816b-a42b-nvfp4 on 72x gb200-nvl72: muse-spark-open-816b-a42b-gb200-agentx-pd"
+}

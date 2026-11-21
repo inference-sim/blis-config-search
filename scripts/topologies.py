@@ -44,6 +44,7 @@ KNOB_NAMES = {"offload_cpu_bytes": "CPU KV tier", "offload_eviction_policy": "ti
               "cuda_graph_max_bs_decode": "decode graph cap", "attention_backend": "attention backend",
               "pd_transfer_contention": "handoff contention", "num_speculative_tokens": "draft tokens", "speculative_method": "drafter",
               "speculative_draft_model": "drafter checkpoint",
+              "speculative": "speculative decoding",
               "router_config": "routing", "routing_policy": "routing",
               "routing_scorers": "scorers",
               "max_num_batched_tokens": "batch tokens", "max_num_seqs": "max seqs",

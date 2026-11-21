@@ -134,6 +134,14 @@ simulator and the row says so. A spec for an engine kind the pinned simulator do
 yet lives in `experiments/pending-pin/`, where the checks do not run it; `scripts/check_pending_pin.py`
 fails once the pinned build registers the kind, which is the cue to move the spec to `experiments/`.
 
+Speculative decoding is stated per engine. vLLM's is the nested `speculative` block above; SGLang's
+is flat settings under the engine's own `speculative_*` names, which `blis fields` lists. The
+runner's `num_speculative_tokens`, `speculative_method` and `speculative_draft_model` keys are
+vLLM's, and a SGLang candidate carrying one is refused with the engine's names. A flat setting
+keeps its own origin in `engine_origin`. At the pinned release the field list marks every SGLang
+`speculative_*` setting not modelled and the engine refuses a run that enables drafting, so such a
+sweep does not run yet.
+
 ## The CPU KV tier
 
 A sweep may state `offload: {cpu_bytes: [0, 512GiB], eviction_policy: [lru]}` for a colocated pool: a

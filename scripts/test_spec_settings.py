@@ -231,5 +231,59 @@ class PoolVariantLabels(unittest.TestCase):
         self.assertEqual("decode max seqs 128", E.variant_of(b, "x", base))
 
 
+class NestedSpeculativeLabels(unittest.TestCase):
+    def test_arms_that_differ_only_in_a_native_speculative_field_are_told_apart(self):
+        cands = [c for c in E._engine_candidates(SWEEP["engine"]) if c["num_speculative_tokens"] == 3]
+        base = E.sweep_baseline(cands)
+        labels = sorted(E.variant_of(c, "x", base) for c in cands)
+        self.assertEqual(2, len(set(labels)), labels)
+        self.assertEqual(1, sum("speculative decoding" in lab for lab in labels), labels)
+
+    def test_a_flat_grid_has_no_speculative_block_to_label(self):
+        cands = E._engine_candidates({"speculative": {"method": ["dspark"], "num_spec_tokens": [1, 3]}})
+        base = E.sweep_baseline(cands)
+        self.assertEqual(["3 draft tokens"], [E.variant_of(c, "x", base) for c in cands
+                                              if c["num_speculative_tokens"] == 3])
+
+
+class SglangSpeculativeSettings(unittest.TestCase):
+    """SGLang states drafting as flat, engine-named settings, not as vLLM's nested block."""
+
+    def setUp(self):
+        self.addCleanup(settings.use_engine, "vllm")
+        settings.use_engine("sglang")
+        self.vocab = settings.Vocabulary(
+            parallel={"tp", "pp", "dp"}, flat={"chunked_prefill_size", "speculative_algorithm",
+                                              "speculative_num_steps"},
+            blocks={}, release="0.5.23", source="a test field list")
+
+    def test_the_runners_own_drafting_keys_are_refused_for_sglang_with_the_engines_names(self):
+        for key, value in (("num_speculative_tokens", 3), ("speculative_method", "mtp"),
+                           ("speculative_draft_model", "x")):
+            with self.subTest(key=key):
+                with self.assertRaises(run_blis.ConfigError) as cm:
+                    run_blis.classify_config({"tp": 8, key: value}, self.vocab)
+                self.assertIn(key, str(cm.exception))
+                self.assertIn("speculative_algorithm", str(cm.exception))
+                self.assertIn("speculative_num_steps", str(cm.exception))
+
+    def test_the_same_keys_still_fold_into_the_nested_block_for_vllm(self):
+        settings.use_engine("vllm")
+        vocab = settings.vocabulary(BLIS)
+        engine = run_blis.classify_config({"tp": 8, "num_speculative_tokens": 3,
+                                           "speculative_method": "dspark"}, vocab)[1]
+        self.assertEqual({"method": "dspark", "num_spec_tokens": 3}, engine["speculative"])
+
+    def test_flat_speculative_settings_keep_their_own_origin(self):
+        shared = {"speculative_algorithm": "EAGLE", "chunked_prefill_size": 512}
+        cand = {"speculative_num_steps": 3}
+        engine = run_blis.classify_config({"tp": 8, **cand}, self.vocab)[1]
+        self.assertEqual(3, engine["speculative_num_steps"])
+        origin = E.engine_origin(E.merge_nested(shared, engine), {(k,) for k in shared},
+                                 {("speculative_num_steps",)})
+        self.assertEqual({"speculative_algorithm": "scenario", "chunked_prefill_size": "scenario",
+                          "speculative_num_steps": "sweep"}, origin)
+
+
 if __name__ == "__main__":
     unittest.main()

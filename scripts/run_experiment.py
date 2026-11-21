@@ -419,6 +419,8 @@ def label_of(cand):
 # list is checked against run_blis.SCENARIO_ENGINE by test_experiment.py so it cannot fall behind
 # the runner again.
 VARIANT_KEYS = ("num_speculative_tokens", "speculative_method", "speculative_draft_model",
+                # the drafter's other native fields (dict-valued; described by _nested_phrase)
+                "speculative",
                 "router_config",
                 # simulator switches
                 "pd_transfer_contention",

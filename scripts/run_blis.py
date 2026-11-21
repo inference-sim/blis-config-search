@@ -291,6 +291,15 @@ def classify_config(config, vocab, node_size=None, pool_offload=False):
             # A block is copied: the runner fills its fields (speculative.method) per run.
             engine[k] = dict(v) if isinstance(v, dict) else v
         elif k in SCENARIO_SPECULATIVE:
+            if settings.ENGINE_KIND != "vllm":
+                # These three keys fold into vLLM's nested `speculative` block, which no other engine
+                # takes; folding them would hand SGLang a block it refuses, one run at a time.
+                own = sorted(n for n in vocab.engine_names() if n.startswith("speculative_"))
+                raise ConfigError(
+                    f"{k!r}: the runner's drafting keys are vLLM's; a {settings.ENGINE_KIND} sweep states "
+                    f"drafting in the engine's own settings ("
+                    f"{', '.join(own) if own else 'none are listed by ' + vocab.source}), "
+                    f"each as the engine names it")
             spec[k] = v
         elif k in SPECULATIVE_CLI:
             cli[k] = v

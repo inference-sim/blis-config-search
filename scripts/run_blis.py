@@ -656,6 +656,27 @@ def load_workload_shape(catalog, workload):
     return out
 
 
+PUBLIC_ACCEPTANCE_SETS = frozenset({"inferencex-golden-al"})
+NON_PUBLIC_SET = "internal registry set"
+
+
+def public_set(name, source):
+    """(name, source) of an acceptance set as a published report may state them."""
+    if not name or name in PUBLIC_ACCEPTANCE_SETS:
+        return name, source
+    return NON_PUBLIC_SET, None
+
+
+def public_acceptance(acc):
+    """The acceptance record as a published report may state it: a set outside PUBLIC_ACCEPTANCE_SETS
+    is named only by NON_PUBLIC_SET, with no source, and no field repeats its name. The rung stays."""
+    name = acc.get("profile_set")
+    if not name or name in PUBLIC_ACCEPTANCE_SETS or name == NON_PUBLIC_SET:
+        return acc
+    out = {k: (v.replace(name, NON_PUBLIC_SET) if isinstance(v, str) else v) for k, v in acc.items()}
+    return {**out, "profile_set": NON_PUBLIC_SET, "source": None}
+
+
 def acceptance_record(doc):
     """The acceptance a drafting run was priced with, as the pinned simulator's Result records it,
     or None when the run did not speculate.
@@ -673,7 +694,7 @@ def acceptance_record(doc):
     entry = acc.get("entry") or {}
     prop = next((p for p in ((doc.get("input") or {}).get("workload_properties") or [])
                  if isinstance(p, dict) and p.get("name") == "speculative_acceptance"), {})
-    return {"acceptance_length": acc.get("length"), "acceptance_rate": acc.get("rate"),
+    return public_acceptance({"acceptance_length": acc.get("length"), "acceptance_rate": acc.get("rate"),
             "source_layer": acc.get("source_layer"),
             "profile_set": entry.get("set") or None, "profile_key": entry.get("key") or None,
             "source": entry.get("source") or None, "profile_method": entry.get("method") or None,
@@ -682,7 +703,7 @@ def acceptance_record(doc):
             "fallback_from": entry.get("fallback_from") or None,
             "step": entry.get("step") or prop.get("step") or None,
             "differed": entry.get("differed") or prop.get("differed") or [],
-            "k_rule": entry.get("k_rule") or prop.get("k_rule") or None}
+            "k_rule": entry.get("k_rule") or prop.get("k_rule") or None})
 
 
 def draft_depth(run):

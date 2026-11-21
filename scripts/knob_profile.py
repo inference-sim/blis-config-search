@@ -42,6 +42,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 SIBLINGS = os.path.abspath(os.path.join(ROOT, os.pardir))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 import blis_cli                           # noqa: E402
+import run_blis                           # noqa: E402
 import build_catalog                      # noqa: E402
 import catalog_drafters                   # noqa: E402
 
@@ -155,9 +156,10 @@ def workload_facts(catalog, workload):
 def _entry(lookup, k):
     """One acceptance entry from `blis acceptance`'s JSON: the rung is the simulator's own step."""
     step = lookup.get("step")
+    name, source = run_blis.public_set(lookup.get("set"), lookup.get("source"))
     return {"num_spec_tokens": k, "acceptance_length": lookup.get("acceptance_length"),
             "rung": step, "borrowed": step != "exact", "differed": lookup.get("differed") or [],
-            "k_rule": lookup.get("k_rule"), "set": lookup.get("set"), "source": lookup.get("source"),
+            "k_rule": lookup.get("k_rule"), "set": name, "source": source,
             "measured_on": lookup.get("measured_on")}
 
 
@@ -210,9 +212,11 @@ def drafter_facts(catalog, registry, model, wl, blis=None, hardware=None, engine
                 out.append(row)
                 continue
         if found:
+            shown = [run_blis.public_set(p["set"], p.get("source")) for p in found]
             row.update(applies=True, depths=sorted({p["num_spec_tokens"] for p in found}),
-                       acceptance=[{**p, "rung": "exact_key", "borrowed": False} for p in found])
-            sets = sorted({f"{p['set']} ({p.get('source') or 'no source recorded'})" for p in found})
+                       acceptance=[{**p, "set": n, "source": src, "rung": "exact_key", "borrowed": False}
+                                   for p, (n, src) in zip(found, shown)])
+            sets = sorted({f"{n} ({src or 'no source recorded'})" for n, src in shown})
             row["why"] = (f"{d['method']} drafter; exact acceptance key at K {row['depths']} for {sel}, "
                           f"from {', '.join(sets)}{note}")
         else:

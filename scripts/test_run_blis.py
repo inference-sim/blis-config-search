@@ -1300,6 +1300,23 @@ class AcceptanceFromTheResult(unittest.TestCase):
     def test_a_run_without_drafting_records_none(self):
         self.assertIsNone(run_blis.acceptance_record({"reports": {"engine": {"cluster": {}}}}))
 
+    def test_a_non_public_set_is_recorded_by_a_neutral_label_and_keeps_its_rung(self):
+        """A report can be published: the record never carries a non-public set's name or source."""
+        secret = "acme-private-sweeps"
+        entry = {**self.ACC["entry"], "set": secret, "source": "acme private measurements",
+                 "copied_from": f"{secret}/m/dspark", "step": "same_drafter_other_k"}
+        a = run_blis.acceptance_record(
+            {"reports": {"engine": {"cluster": {"acceptance": {**self.ACC, "entry": entry}}}}})
+        self.assertNotIn("acme", json.dumps(a))
+        self.assertEqual(run_blis.NON_PUBLIC_SET, a["profile_set"])
+        self.assertEqual("same_drafter_other_k", a["step"])
+        self.assertEqual(2.9, a["acceptance_length"])
+
+    def test_a_public_set_keeps_its_name_and_source(self):
+        a = run_blis.acceptance_record(self.doc())
+        self.assertEqual(("inferencex-golden-al", "https://example.org/curve.yaml"),
+                         (a["profile_set"], a["source"]))
+
 
 class GeneratedScenario(unittest.TestCase):
     def test_names_the_engine_by_kind_and_no_version(self):

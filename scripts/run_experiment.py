@@ -1696,6 +1696,7 @@ def acceptance_lines(sweeps):
             if not acc or key in seen:
                 continue
             seen.add(key)
+            acc = run_blis.public_acceptance(acc)
             step = acc.get("step")
             how = ("rung not recorded" if not step else "exact" if step == "exact" else
                    f"BORROWED, rung {step}"

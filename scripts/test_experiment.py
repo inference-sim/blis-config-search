@@ -1935,7 +1935,7 @@ class DrafterProfile(unittest.TestCase):
         self.assertTrue(d["t-eagle3"]["applies"])
         self.assertEqual([2], d["t-eagle3"]["depths"])
         a = d["t-eagle3"]["acceptance"][0]
-        self.assertEqual(("exact_key", "golden", "https://example.org/a.yaml"),
+        self.assertEqual(("exact_key", "internal registry set", None),
                          (a["rung"], a["set"], a["source"]),
                          "read from a checkout the rung is only the key found, not the simulator's step")
         self.assertFalse(d["speculator"]["applies"], "its only profile is thinking off")
@@ -2023,6 +2023,14 @@ class DrafterArms(unittest.TestCase):
         self.assertEqual({"m-flash": {"method": ["dflash"], "draft_model": ["m-flash"], "num_spec_tokens": [1]},
                           "m-spark": {"method": ["dspark"], "draft_model": ["m-spark"], "num_spec_tokens": [7]}},
                          arms)
+
+    def test_a_non_public_set_is_not_named_in_the_profile_a_spec_author_copies_from(self):
+        got = self.K.drafter_facts(self.cat, self.reg, self.MODEL, self.WL)
+        self.assertNotIn("golden", json.dumps(got))
+        self.assertIn("internal registry set", json.dumps(got))
+        table = {"m-spark|dspark|7": self.hit("same_drafter_other_settings", set="golden", source="golden measurements")}
+        got = self.K.drafter_facts(self.cat, self.reg, self.MODEL, self.WL, blis=self.blis(table), hardware="b200")
+        self.assertNotIn("golden", json.dumps(got))
 
     def test_the_in_graph_arm_names_no_draft_model(self):
         with open(os.path.join(self.reg, "acceptance", "graph.yaml"), "w") as f:
@@ -2132,8 +2140,8 @@ class AcceptanceInTheReport(unittest.TestCase):
     """The report states the acceptance every drafting arm was priced with, and says when it is borrowed."""
 
     def row(self, variant, step, label="eng", **more):
-        acc = {"acceptance_length": 2.5, "step": step, "profile_set": "golden",
-               "source": "https://example.org/a.yaml", "differed": more.pop("differed", []), **more}
+        acc = {"acceptance_length": 2.5, "step": step, "profile_set": more.pop("profile_set", "inferencex-golden-al"),
+               "source": more.pop("source", "https://example.org/a.yaml"), "differed": more.pop("differed", []), **more}
         return {"sweep": "s", "label": label, "variant": variant, "concurrency": 8,
                 **({"acceptance": acc} if step is not None else {})}
 
@@ -2143,7 +2151,7 @@ class AcceptanceInTheReport(unittest.TestCase):
     def test_a_borrowed_arm_is_marked_with_its_rung_and_what_differed(self):
         out = self.lines([self.row("K=3 dspark", "same_drafter_other_k", k_rule="interpolated", differed=["engine"])])
         self.assertEqual(1, len(out))
-        for part in ("K=3 dspark", "BORROWED", "same_drafter_other_k", "interpolated", "engine", "golden",
+        for part in ("K=3 dspark", "BORROWED", "same_drafter_other_k", "interpolated", "engine", "inferencex-golden-al",
                      "https://example.org/a.yaml"):
             self.assertIn(part, out[0])
 
@@ -2158,6 +2166,26 @@ class AcceptanceInTheReport(unittest.TestCase):
 
     def test_two_arms_of_one_sweep_are_two_lines(self):
         self.assertEqual(2, len(self.lines([self.row("K=3 dspark", "exact"), self.row("K=7 dspark", "exact")])))
+
+    def test_a_non_public_set_is_shown_by_a_neutral_label_with_its_rung(self):
+        """A published report never carries a non-public set's name or source, even from a stored row."""
+        out = self.lines([self.row("K=3 dspark", "same_drafter_other_k", profile_set="acme-private-sweeps",
+                                   source="acme private measurements")])
+        self.assertNotIn("acme", out[0].lower())
+        self.assertIn("internal registry set", out[0])
+        self.assertIn("same_drafter_other_k", out[0])
+        self.assertIn("BORROWED", out[0])
+
+    def test_no_section_of_the_report_names_a_non_public_set(self):
+        rep = {"name": "n", "description": "", "scenario": {"model": "m", "gpus": 8, "hardware": "b200",
+                                                            "workload": "w", "concurrency": [1], "seed": 1},
+               "totals": {"configs": 1, "runs": 1, "servable": 0}, "best_overall": None, "basis": "b",
+               "scope": "s", "sweeps": [{"name": "s", "configs": 1, "runs": 1, "narrative": "",
+                                         "rows": [self.row("K=3 dspark", "exact", profile_set="acme-private-sweeps",
+                                                           source="acme private measurements")]}]}
+        sections = [x for x in E._report_json(rep)["sections"] if x["title"] == "Drafting acceptance"]
+        self.assertEqual(1, len(sections))
+        self.assertNotIn("acme", json.dumps(sections).lower())
 
     def test_a_grid_with_no_drafting_has_no_acceptance_lines(self):
         self.assertEqual([], self.lines([self.row("K=0", None)]))

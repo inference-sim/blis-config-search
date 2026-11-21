@@ -41,6 +41,7 @@ except ImportError:
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 SIBLINGS = os.path.abspath(os.path.join(ROOT, os.pardir))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
+import blis_cli                           # noqa: E402
 import build_catalog                      # noqa: E402
 import catalog_drafters                   # noqa: E402
 
@@ -151,14 +152,28 @@ def workload_facts(catalog, workload):
     return {"kind": "shape", "shape": shape or None, "prefix_reuse": False}
 
 
-def drafter_facts(catalog, registry, model, wl):
+def _entry(lookup, k):
+    """One acceptance entry from `blis acceptance`'s JSON: the rung is the simulator's own step."""
+    step = lookup.get("step")
+    return {"num_spec_tokens": k, "acceptance_length": lookup.get("acceptance_length"),
+            "rung": step, "borrowed": step != "exact", "differed": lookup.get("differed") or [],
+            "k_rule": lookup.get("k_rule"), "set": lookup.get("set"), "source": lookup.get("source"),
+            "measured_on": lookup.get("measured_on")}
+
+
+def drafter_facts(catalog, registry, model, wl, blis=None, hardware=None, engine="vllm"):
     """Each drafter of `model` with whether drafting applies on this workload, and why.
 
-    TEMPORARY (inference-sim/inference-sim#2141): read from the checkout through catalog_drafters,
-    which sees only exact-key profiles. A drafter with none may still borrow one at run time;
-    that is the simulator's lookup, and the run's Result records it.
+    With `blis` that has `blis acceptance`, a drafter applies when the simulator resolves an
+    acceptance for it and the rung is the simulator's step (a borrowed one is flagged). Without it
+    (TEMPORARY, inference-sim/inference-sim#2141) the checkout is read through catalog_drafters,
+    which sees only exact-key profiles, and the rung is labelled exact_key: the key found, not the
+    step the simulator would report.
     """
     category, thinking = wl.get("category"), wl.get("thinking")
+    sel = (f"category {category}, thinking {thinking}" if category or thinking
+           else "any category and thinking mode (this workload states none; a drafting run "
+                "must state them)")
     out = []
     for d in catalog_drafters.drafters(catalog, model):
         row = {**d, "applies": False, "depths": [], "acceptance": []}
@@ -170,25 +185,88 @@ def drafter_facts(catalog, registry, model, wl):
                                                 category, thinking)
         cap = d.get("max_spec_tokens") or 0
         found = [p for p in found if p["num_spec_tokens"] and (not cap or p["num_spec_tokens"] <= cap)]
-        sel = (f"category {category}, thinking {thinking}" if category or thinking
-               else "any category and thinking mode (this workload states none; a drafting run "
-                    "must state them)")
+        ks = sorted({p["num_spec_tokens"] for p in found}) or ([cap] if cap else [])
+        note = ""
+        if blis and category and thinking and ks:
+            try:
+                got = [(k, *blis_cli.acceptance(blis, model, d["draft_model"], d["method"], k, category,
+                                                thinking, hardware, engine, catalog, registry))
+                       for k in ks]
+            except blis_cli.CommandMissing:
+                note = ("; this simulator build has no `blis acceptance`, so the rung is only the key "
+                        "found in the checkout and a borrowed profile is not seen")
+            else:
+                ok = [_entry(lk, k) for k, lk, _ in got if lk]
+                if ok:
+                    row.update(applies=True, depths=[e["num_spec_tokens"] for e in ok], acceptance=ok)
+                    row["why"] = f"{d['method']} drafter; the simulator resolves, for {sel}: " + "; ".join(
+                        f"K={e['num_spec_tokens']} AL {e['acceptance_length']} via {e['rung']}"
+                        + (" (BORROWED" + (f"; differs in {', '.join(e['differed'])}" if e["differed"] else "")
+                           + (f"; {e['k_rule']}" if e["k_rule"] else "") + ")" if e["borrowed"] else "")
+                        + f" from {e['set']}" for e in ok)
+                else:
+                    row["why"] = (f"{d['method']} drafter, but the simulator resolves no acceptance for "
+                                  f"{sel}: {got[0][2]}")
+                out.append(row)
+                continue
         if found:
             row.update(applies=True, depths=sorted({p["num_spec_tokens"] for p in found}),
-                       acceptance=[{**p, "rung": "exact"} for p in found])
+                       acceptance=[{**p, "rung": "exact_key", "borrowed": False} for p in found])
             sets = sorted({f"{p['set']} ({p.get('source') or 'no source recorded'})" for p in found})
-            row["why"] = (f"{d['method']} drafter; exact acceptance at K {row['depths']} for {sel}, "
-                          f"from {', '.join(sets)}")
+            row["why"] = (f"{d['method']} drafter; exact acceptance key at K {row['depths']} for {sel}, "
+                          f"from {', '.join(sets)}{note}")
         else:
             row["why"] = (f"{d['method']} drafter, but no acceptance profile has its exact key at "
                           f"{sel}; the simulator's lookup may borrow one at run time (D8), which "
-                          f"this script cannot ask until inference-sim/inference-sim#2141, so a "
-                          f"drafting arm for it is unconfirmed here")
+                          f"this script could not ask, so a drafting arm for it is unconfirmed here"
+                          f"{note}")
         out.append(row)
     return out
 
 
-def profile(model, hardware, workload, catalog, registry=None):
+def drafting_arms(drafts):
+    """One arm per usable drafter: its method, checkpoint and depths kept together.
+
+    The in-graph speculator names no draft_model. A sweep crosses its lists, so each arm is its own sweep.
+    """
+    arms = []
+    for d in drafts:
+        if not d["applies"]:
+            continue
+        spec = {"method": [d["method"]]}
+        if d["draft_model"]:
+            spec["draft_model"] = [d["draft_model"]]
+        spec["num_spec_tokens"] = list(d["depths"])
+        arms.append({"drafter": d["name"], "speculative": spec})
+    return arms
+
+
+def speculative_knob(drafts, model=None):
+    """The `speculative` knob row: the per-drafter arms when any applies, else why not."""
+    why = "; ".join(f"{d['name']}: {d['why']}" for d in drafts)
+    arms = drafting_arms(drafts)
+    if arms:
+        by = {d["name"]: d for d in drafts}
+        values = []
+        for a in arms:
+            sp = a["speculative"]
+            rungs = sorted({e["rung"] for e in by[a["drafter"]]["acceptance"]})
+            values.append(f"{a['drafter']}: method: {sp['method']}"
+                          + (f", draft_model: {sp['draft_model']}" if "draft_model" in sp
+                             else " (in-graph: no draft_model)")
+                          + f", num_spec_tokens: {sp['num_spec_tokens']}; acceptance via {', '.join(rungs)}")
+        values += ["keep num_spec_tokens 0 as the control, once per sweep",
+                   "one sweep per drafter: a sweep crosses its lists, so a checkpoint, its method and its "
+                   "depths belong together"]
+        return {"knob": "speculative", "applies": True, "values": values, "why": why, "arms": arms}
+    if drafts:
+        return {"knob": "speculative", "applies": False, "values": [], "why": why, "arms": []}
+    return {"knob": "speculative", "applies": False, "values": [], "arms": [],
+            "why": f"{model} has no drafter: its graph declares no speculator and no catalog entry "
+                   f"drafts for it, so every drafting run is refused"}
+
+
+def profile(model, hardware, workload, catalog, registry=None, blis=None, engine="vllm"):
     """The per-knob verdict for this combination: applies, legal values here, and why."""
     cat = build_catalog.build(os.path.join(catalog, os.pardir))
     row = next((m for m in cat.get("models", []) if m.get("name") == model), None)
@@ -265,23 +343,9 @@ def profile(model, hardware, workload, catalog, registry=None):
 
     # --- drafting --------------------------------------------------------------------------
     # One arm per drafter: the graph's own speculator and each separate drafter entry, applicable
-    # when a measured acceptance profile has its exact key at this workload's selectors (D8).
-    drafts = drafter_facts(catalog, registry, model, wl)
-    usable = [d for d in drafts if d["applies"]]
-    if usable:
-        add("speculative", True,
-            [f"method: [{', '.join(sorted({d['method'] for d in usable}))}]",
-             *([f"draft_model: [{', '.join(d['draft_model'] for d in usable if d['draft_model'])}]"]
-               if any(d["draft_model"] for d in usable) else []),
-             f"num_spec_tokens: {sorted({k for d in usable for k in d['depths']})}",
-             "keep num_spec_tokens 0 as the control"],
-            "; ".join(f"{d['name']}: {d['why']}" for d in drafts))
-    elif drafts:
-        add("speculative", False, [], "; ".join(f"{d['name']}: {d['why']}" for d in drafts))
-    else:
-        add("speculative", False, [],
-            f"{model} has no drafter: its graph declares no speculator and no catalog entry "
-            f"drafts for it, so every drafting run is refused")
+    # when the simulator resolves an acceptance at this workload's selectors (D8).
+    drafts = drafter_facts(catalog, registry, model, wl, blis, hardware, engine)
+    knobs.append(speculative_knob(drafts, model))
 
     # --- sliding window --------------------------------------------------------------------
     if g.get("sliding_window") and g.get("architecture") == "DeepseekV41ForCausalLM":
@@ -332,11 +396,15 @@ def main(argv=None):
     ap.add_argument("--catalog", default=os.path.join(SIBLINGS, "blis-substrate", "catalog"))
     ap.add_argument("--registry", default=None,
                     help="the registry/ next to --catalog (default: the catalog's sibling registry/)")
+    ap.add_argument("--blis", default=os.environ.get("BLIS"),
+                    help="the simulator binary: asked `blis acceptance` for each drafter's rung "
+                         "(default $BLIS; without one the rung is only the key found in the checkout)")
+    ap.add_argument("--engine", default="vllm", help="the engine the acceptance is looked up for")
     ap.add_argument("--json", action="store_true", dest="as_json")
     args = ap.parse_args(argv)
 
     registry = args.registry or os.path.join(args.catalog, os.pardir, "registry")
-    p = profile(args.model, args.hardware, args.workload, args.catalog, registry)
+    p = profile(args.model, args.hardware, args.workload, args.catalog, registry, args.blis, args.engine)
     if args.as_json:
         print(json.dumps(p, indent=2, sort_keys=True))
         return 0
@@ -357,8 +425,12 @@ def main(argv=None):
         print(f"  drafter : {d['name']} ({d['kind']}, {d.get('method')}): "
               f"{'drafting applies' if d['applies'] else 'drafting not confirmed'}")
         for a in d["acceptance"]:
-            print(f"      K={a['num_spec_tokens']} AL={a['acceptance_length']} rung={a['rung']} "
-                  f"set={a['set']} source={a.get('source') or '-'}")
+            print(f"      K={a['num_spec_tokens']} AL={a['acceptance_length']} rung={a['rung']}"
+                  f"{' BORROWED' if a.get('borrowed') else ''} set={a['set']} "
+                  f"source={a.get('source') or '-'}")
+            if a.get("differed") or a.get("k_rule"):
+                print(f"          differs in: {', '.join(a.get('differed') or []) or '-'}"
+                      f"{'; ' + a['k_rule'] if a.get('k_rule') else ''}")
     print()
     yes = [k for k in p["knobs"] if k["applies"]]
     no = [k for k in p["knobs"] if not k["applies"]]

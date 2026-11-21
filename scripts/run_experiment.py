@@ -1682,6 +1682,34 @@ def unplaceable_sentence(report):
             f"ran them does not emit. Re-run with a build that does, or rank with `objective.ranking: scalar`.")
 
 
+def acceptance_lines(sweeps):
+    """One line per drafting arm: the acceptance its runs were priced with and where it came from.
+
+    An arm is a label and variant within a sweep; its load levels share one acceptance. A rung
+    other than exact is marked BORROWED, with the key fields that differed and the K rule.
+    """
+    seen, out = set(), []
+    for s in sweeps:
+        for r in s["rows"]:
+            acc = r.get("acceptance")
+            key = (s["name"], r.get("label"), r.get("variant", ""))
+            if not acc or key in seen:
+                continue
+            seen.add(key)
+            step = acc.get("step")
+            how = ("rung not recorded" if not step else "exact" if step == "exact" else
+                   f"BORROWED, rung {step}"
+                   + (f", differs in {', '.join(acc['differed'])}" if acc.get("differed") else "")
+                   + (f", K rule {acc['k_rule']}" if acc.get("k_rule") else "")
+                   + (f", measured on {acc['measured_on']}" if acc.get("measured_on") else ""))
+            out.append(f"{s['name']}: {r.get('label')}"
+                       + (f" ({r['variant']})" if r.get("variant") else "")
+                       + f" used acceptance length {acc.get('acceptance_length')} ({how}) from "
+                       f"{acc.get('profile_set') or 'an unnamed set'}"
+                       + (f", {acc['source']}" if acc.get("source") else ""))
+    return out
+
+
 def _report_json(report):
     """The narrative seam report.py renders, assembled MECHANICALLY from the spec + the results.
 
@@ -1765,6 +1793,16 @@ def _report_json(report):
         sections.append({"num": num, "title": f"Sweep: {s['name']}",
                          "prose": prose,
                          "caption_note": f"{s['configs']} configurations, {s['runs']} runs."})
+        num += 1
+    lines = acceptance_lines(report["sweeps"])
+    if lines:
+        sections.append({"num": num, "title": "Drafting acceptance",
+                         "prose": ["Each drafting arm was priced with the acceptance the simulator "
+                                   "resolved for it. BORROWED marks a profile measured under other "
+                                   "settings than the run's, so that arm's gain is only as good as "
+                                   "the borrowing; arms with no drafting (K=0) are not listed.",
+                                   *lines],
+                         "caption_note": f"{len(lines)} drafting arm{'s' if len(lines) != 1 else ''}."})
         num += 1
     return {
         "title": f"{sc['model']} on {sc['gpus']}x {sc['hardware']}: {report['name']}",

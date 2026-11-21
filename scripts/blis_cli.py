@@ -20,6 +20,10 @@ class BlisCommandError(RuntimeError):
     """A command could not run, failed, or printed something other than its documented shape."""
 
 
+class CommandMissing(BlisCommandError):
+    """This build of the simulator has no such command."""
+
+
 class DocumentInvalid(ValueError):
     """`blis schema validate` refused a document. The message is the validator's own."""
 
@@ -152,6 +156,31 @@ def supports_pool_offload(blis):
     deployment, so a disaggregated deployment cannot give only some pools a CPU tier."""
     pool = (schema(blis, "deployment").get("$defs") or {}).get("deployment.Pool") or {}
     return "offload" in (pool.get("properties") or {})
+
+
+def acceptance(blis, model, drafter, method, k, category, thinking, hardware=None, engine=None,
+               catalog=None, registry=None):
+    """(lookup, reason): `blis acceptance`, the acceptance the simulator would price this arm with.
+
+    lookup is its JSON (acceptance_length, step, differed, k_rule, set, source), or None with the
+    simulator's refusal in `reason`. drafter is None for the model's own in-graph speculator.
+    CommandMissing when the build predates the command.
+    """
+    args = ["acceptance", "--model", model, "--method", method, "--num-spec-tokens", str(k),
+            "--category", category, "--thinking", thinking, "--json"]
+    for flag, val in (("--drafter", drafter), ("--hardware", hardware), ("--engine", engine),
+                      ("--catalog", catalog), ("--registry", registry)):
+        if val:
+            args += [flag, val]
+    pr = _run(blis, args, 120)
+    if pr.returncode != 0:
+        if "unknown command" in (pr.stderr or ""):
+            raise CommandMissing(f"`{blis}` has no `acceptance` command")
+        return None, _stderr(pr).removeprefix("Error: ")
+    try:
+        return json.loads(pr.stdout), ""
+    except ValueError as e:
+        raise BlisCommandError(f"`blis acceptance --json` printed no JSON: {e}") from e
 
 
 def resolve(blis, model=None, chip=None, catalog=None):

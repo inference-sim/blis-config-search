@@ -1935,14 +1935,241 @@ class DrafterProfile(unittest.TestCase):
         self.assertTrue(d["t-eagle3"]["applies"])
         self.assertEqual([2], d["t-eagle3"]["depths"])
         a = d["t-eagle3"]["acceptance"][0]
-        self.assertEqual(("exact", "golden", "https://example.org/a.yaml"),
-                         (a["rung"], a["set"], a["source"]))
+        self.assertEqual(("exact_key", "golden", "https://example.org/a.yaml"),
+                         (a["rung"], a["set"], a["source"]),
+                         "read from a checkout the rung is only the key found, not the simulator's step")
         self.assertFalse(d["speculator"]["applies"], "its only profile is thinking off")
 
     def test_the_selectors_pick_the_profile(self):
         d = self.facts("off")
         self.assertTrue(d["speculator"]["applies"])
         self.assertFalse(d["t-eagle3"]["applies"])
+
+
+FAKE_ACCEPTANCE = """#!/usr/bin/env python3
+import json, os, sys
+here = os.path.dirname(os.path.abspath(__file__))
+a = sys.argv[1:]
+with open(os.path.join(here, "calls.log"), "a") as f:
+    f.write(" ".join(a) + "\\n")
+if a[:1] != ["acceptance"]:
+    sys.stderr.write('Error: unknown command "%s" for "blis"\\n' % a[0]); sys.exit(1)
+get = lambda flag: a[a.index(flag) + 1] if flag in a else ""
+key = "%s|%s|%s" % (get("--drafter"), get("--method"), get("--num-spec-tokens"))
+table = json.load(open(os.path.join(here, "table.json")))
+got = table.get(key)
+if got is None or "refuse" in got:
+    sys.stderr.write("Error: acceptance: " + (got or {}).get("refuse", "no profile") + "\\n"); sys.exit(1)
+print(json.dumps(got))
+"""
+
+
+class DrafterArms(unittest.TestCase):
+    """Each drafter is its own arm -- method, checkpoint and depths kept together -- and its rung is
+    the simulator's, when the build can be asked (`blis acceptance`)."""
+
+    MODEL = "m"
+    LINKS = {"m": {"drafters": ["speculator", "m-flash", "m-spark", "m-nope"], "speculator": "mtp", "k": 3},
+             "m-flash": {"targets": ["m"], "speculator": "dflash", "k": 1},
+             "m-spark": {"targets": ["m"], "speculator": "dspark", "k": 7},
+             "m-nope": {"targets": ["m"], "speculator": "eagle3", "k": 2}}
+    WL = {"kind": "replay", "category": "coding", "thinking": "on"}
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        import knob_profile
+        self.K = knob_profile
+        self.dir = tempfile.TemporaryDirectory()
+        root = self.dir.name
+        self.cat = _drafter_catalog(os.path.join(root, "catalog"), self.LINKS)
+        self.reg = os.path.join(root, "registry")
+        os.makedirs(os.path.join(self.reg, "acceptance"))
+        prof = lambda drafter, method, k, al: {
+            "model": "m", **({"drafter": drafter} if drafter else {}), "speculative_method": method,
+            "num_spec_tokens": k, "thinking": "on", "category": "coding", "acceptance_length": al,
+            "provenance": {"source": f"https://example.org/{method}.yaml"}}
+        with open(os.path.join(self.reg, "acceptance", "golden.yaml"), "w") as f:
+            yaml.safe_dump({"kind": "AcceptanceProfileSet", "name": "golden", "profiles": [
+                prof("m-flash", "dflash", 1, 1.85), prof("m-spark", "dspark", 7, 2.72)]}, f)
+        self.bin = os.path.join(root, "bin")
+        os.makedirs(self.bin)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def blis(self, table, script=FAKE_ACCEPTANCE):
+        path = os.path.join(self.bin, "blis")
+        with open(path, "w") as f:
+            f.write(script)
+        os.chmod(path, 0o755)
+        with open(os.path.join(self.bin, "table.json"), "w") as f:
+            json.dump(table, f)
+        return path
+
+    def calls(self):
+        with open(os.path.join(self.bin, "calls.log")) as f:
+            return f.read().splitlines()
+
+    def facts(self, blis=None):
+        return {d["name"]: d for d in self.K.drafter_facts(self.cat, self.reg, self.MODEL, self.WL,
+                                                          blis=blis, hardware="b200")}
+
+    def hit(self, step, al=2.0, **more):
+        return {"acceptance_length": al, "step": step, "differed": [], "set": "golden",
+                "source": "https://example.org/x.yaml", "profile": "m/x", **more}
+
+    def test_a_drafter_with_exact_profiles_and_one_without_are_two_arms_not_one_union(self):
+        arms = {a["drafter"]: a["speculative"] for a in self.K.drafting_arms(list(self.facts().values()))}
+        self.assertEqual({"m-flash": {"method": ["dflash"], "draft_model": ["m-flash"], "num_spec_tokens": [1]},
+                          "m-spark": {"method": ["dspark"], "draft_model": ["m-spark"], "num_spec_tokens": [7]}},
+                         arms)
+
+    def test_the_in_graph_arm_names_no_draft_model(self):
+        with open(os.path.join(self.reg, "acceptance", "graph.yaml"), "w") as f:
+            yaml.safe_dump({"kind": "AcceptanceProfileSet", "name": "g", "profiles": [
+                {"model": "m", "speculative_method": "mtp", "num_spec_tokens": 2, "thinking": "on",
+                 "category": "coding", "acceptance_length": 1.9, "provenance": {"source": "s"}}]}, f)
+        arms = {a["drafter"]: a["speculative"] for a in self.K.drafting_arms(list(self.facts().values()))}
+        self.assertEqual({"method": ["mtp"], "num_spec_tokens": [2]}, arms["speculator"])
+        self.assertEqual(3, len(arms))
+
+    def test_the_knob_row_lists_each_drafter_with_its_own_values(self):
+        row = self.K.speculative_knob(list(self.facts().values()))
+        self.assertTrue(row["applies"])
+        self.assertEqual(2, len(row["arms"]))
+        lines = [v for v in row["values"] if "m-flash" in v or "m-spark" in v]
+        self.assertEqual(2, len(lines), row["values"])
+        self.assertFalse(any("dflash" in v and "dspark" in v for v in row["values"]),
+                         "no line may pair one drafter's method with another's depth or checkpoint")
+        self.assertIn("one sweep per drafter", " ".join(row["values"]))
+
+    def test_the_rung_is_the_simulators_not_the_key_found(self):
+        blis = self.blis({"m-flash|dflash|1": self.hit("same_drafter_other_settings", 1.85,
+                                                       differed=["draft_sampler", "engine"]),
+                          "m-spark|dspark|7": self.hit("exact", 2.72),
+                          "|mtp|3": self.hit("same_drafter_other_k", 2.3, k_rule="interpolated"),
+                          "m-nope|eagle3|2": {"refuse": "no profile for m-nope"}})
+        d = self.facts(blis)
+        flash = d["m-flash"]["acceptance"][0]
+        self.assertEqual(("same_drafter_other_settings", True, ["draft_sampler", "engine"]),
+                         (flash["rung"], flash["borrowed"], flash["differed"]))
+        self.assertEqual(("exact", False), (d["m-spark"]["acceptance"][0]["rung"],
+                                            d["m-spark"]["acceptance"][0]["borrowed"]))
+        self.assertTrue(all(d[n]["applies"] for n in ("m-flash", "m-spark", "speculator")))
+
+    def test_a_drafter_with_no_exact_profile_applies_when_the_simulator_borrows_one(self):
+        blis = self.blis({"|mtp|3": self.hit("same_drafter_other_k", 2.3, k_rule="interpolated")})
+        g = self.facts(blis)["speculator"]
+        self.assertTrue(g["applies"])
+        self.assertEqual([3], g["depths"])
+        self.assertEqual(("same_drafter_other_k", True), (g["acceptance"][0]["rung"], g["acceptance"][0]["borrowed"]))
+        self.assertIn("BORROWED", g["why"])
+
+    def test_a_drafter_whose_lookup_is_refused_does_not_apply_and_says_why(self):
+        n = self.facts(self.blis({}))["m-nope"]
+        self.assertFalse(n["applies"])
+        self.assertIn("no profile", n["why"])
+
+    def test_the_lookup_states_the_workload_engine_and_chip(self):
+        self.facts(self.blis({"m-spark|dspark|7": self.hit("exact")}))
+        got = [c for c in self.calls() if "--drafter m-spark" in c][0]
+        for part in ("--model m ", "--method dspark", "--num-spec-tokens 7", "--category coding",
+                     "--thinking on", "--engine vllm", "--hardware b200"):
+            self.assertIn(part, got + " ")
+        speculator = [c for c in self.calls() if "--method mtp" in c][0]
+        self.assertNotIn("--drafter", speculator, "the in-graph speculator is asked with no drafter")
+
+    def test_a_build_without_the_command_falls_back_and_says_so(self):
+        old = self.blis({}, script="#!/bin/sh\necho 'Error: unknown command \"acceptance\" for \"blis\"' >&2\nexit 1\n")
+        d = self.facts(old)
+        self.assertEqual("exact_key", d["m-flash"]["acceptance"][0]["rung"])
+        self.assertTrue(d["m-flash"]["applies"])
+        self.assertIn("no `blis acceptance`", d["m-flash"]["why"])
+
+
+class DrafterMatchesItsSweep(unittest.TestCase):
+    """A sweep crosses method, draft_model and num_spec_tokens, so a checkpoint is paired with its
+    own method and a depth it declares, or the sweep is refused (one sweep per drafter)."""
+
+    FLASH, SPARK = "qwen2.5-7b-instruct", "muse-spark-open-dspark"
+    LINKS = {"qwen3-14b": {"drafters": ["speculator", "qwen2.5-7b-instruct", "muse-spark-open-dspark"],
+                           "speculator": "mtp"},
+             "qwen2.5-7b-instruct": {"targets": ["qwen3-14b"], "speculator": "dflash", "k": 1},
+             "muse-spark-open-dspark": {"targets": ["qwen3-14b"], "speculator": "dspark", "k": 7}}
+
+    def setUp(self):
+        self.env = os.environ.pop("SUBSTRATE_CATALOG", None)
+        self.dir = tempfile.TemporaryDirectory()
+        self.cat = _drafter_catalog(self.dir.name, self.LINKS)
+
+    def tearDown(self):
+        self.dir.cleanup()
+        if self.env is not None:
+            os.environ["SUBSTRATE_CATALOG"] = self.env
+
+    def errs(self, **speculative):
+        sw = {"name": "s", "num-instances": [2], "parallel": {"tp": [8]},
+              "engine": {"speculative": speculative}}
+        return V.validate(spec(sweeps=[sw]), BLIS, ROUTING, self.cat)
+
+    def test_a_drafter_with_its_own_method_and_depth_passes(self):
+        self.assertEqual([], self.errs(method=["dspark"], draft_model=[self.SPARK], num_spec_tokens=[0, 3, 7]))
+
+    def test_another_drafters_method_is_refused(self):
+        errs = self.errs(method=["dflash", "dspark"], draft_model=[self.SPARK], num_spec_tokens=[7])
+        self.assertTrue(any("dflash" in e and self.SPARK in e and "one sweep per drafter" in e for e in errs), errs)
+
+    def test_two_drafters_with_different_methods_are_refused(self):
+        errs = self.errs(method=["dspark"], draft_model=[self.SPARK, self.FLASH], num_spec_tokens=[1])
+        self.assertTrue(any(self.FLASH in e and "dspark" in e for e in errs), errs)
+
+    def test_a_depth_above_the_drafters_own_is_refused(self):
+        errs = self.errs(method=["dflash"], draft_model=[self.FLASH], num_spec_tokens=[1, 7])
+        self.assertTrue(any(self.FLASH in e and "7" in e and "declares" in e for e in errs), errs)
+
+
+class AcceptanceInTheReport(unittest.TestCase):
+    """The report states the acceptance every drafting arm was priced with, and says when it is borrowed."""
+
+    def row(self, variant, step, label="eng", **more):
+        acc = {"acceptance_length": 2.5, "step": step, "profile_set": "golden",
+               "source": "https://example.org/a.yaml", "differed": more.pop("differed", []), **more}
+        return {"sweep": "s", "label": label, "variant": variant, "concurrency": 8,
+                **({"acceptance": acc} if step is not None else {})}
+
+    def lines(self, rows):
+        return E.acceptance_lines([{"name": "s", "rows": rows}])
+
+    def test_a_borrowed_arm_is_marked_with_its_rung_and_what_differed(self):
+        out = self.lines([self.row("K=3 dspark", "same_drafter_other_k", k_rule="interpolated", differed=["engine"])])
+        self.assertEqual(1, len(out))
+        for part in ("K=3 dspark", "BORROWED", "same_drafter_other_k", "interpolated", "engine", "golden",
+                     "https://example.org/a.yaml"):
+            self.assertIn(part, out[0])
+
+    def test_an_exact_arm_is_not_marked_borrowed(self):
+        out = self.lines([self.row("K=7 dspark", "exact")])
+        self.assertIn("exact", out[0])
+        self.assertNotIn("BORROWED", out[0])
+        self.assertIn("2.5", out[0])
+
+    def test_an_arm_is_listed_once_across_its_load_levels(self):
+        self.assertEqual(1, len(self.lines([self.row("K=7 dspark", "exact")] * 4)))
+
+    def test_two_arms_of_one_sweep_are_two_lines(self):
+        self.assertEqual(2, len(self.lines([self.row("K=3 dspark", "exact"), self.row("K=7 dspark", "exact")])))
+
+    def test_a_grid_with_no_drafting_has_no_acceptance_lines(self):
+        self.assertEqual([], self.lines([self.row("K=0", None)]))
+
+    def test_the_report_json_carries_the_section(self):
+        rep = {"name": "n", "description": "", "scenario": {"model": "m", "gpus": 8, "hardware": "b200",
+                                                            "workload": "w", "concurrency": [1], "seed": 1},
+               "totals": {"configs": 1, "runs": 1, "servable": 0}, "best_overall": None, "basis": "b",
+               "scope": "s", "sweeps": [{"name": "s", "configs": 1, "runs": 1, "narrative": "",
+                                         "rows": [self.row("K=3 dspark", "other_drafter")]}]}
+        titles = [x["title"] for x in E._report_json(rep)["sections"]]
+        self.assertIn("Drafting acceptance", titles)
 
 
 class DraftingControlArm(unittest.TestCase):

@@ -1263,6 +1263,26 @@ def draft_model_errors(engine, where, model, blis, catalog=None):
                         f"{', '.join(known) or 'none'})")
         elif not d["linked"]:
             errs.append(f"{at}: {name!r} is not a drafter of {model}: {d['why']}")
+        else:
+            errs.extend(_drafter_pairing_errors(spec, at, name, d))
+    return errs
+
+
+def _drafter_pairing_errors(spec, at, name, d):
+    """A sweep crosses method x draft_model x num_spec_tokens, so a checkpoint must be paired with
+    its own method and only depths it declares: one sweep per drafter."""
+    errs = []
+    methods = spec.get("method")
+    stray = sorted({m for m in methods if m != d["method"]}) if isinstance(methods, list) else []
+    if stray:
+        errs.append(f"{at}: {name!r} drafts with method {d['method']}, but the sweep also states "
+                    f"{', '.join(map(str, stray))} (one sweep per drafter: a sweep crosses its lists)")
+    depths = spec.get("num_spec_tokens")
+    cap = d.get("max_spec_tokens") or 0
+    over = sorted(k for k in depths if isinstance(k, int) and k > cap) if isinstance(depths, list) and cap else []
+    if over:
+        errs.append(f"{at}: {name!r} declares at most K={cap} in the catalog, but the sweep states "
+                    f"{', '.join(map(str, over))} (one sweep per drafter)")
     return errs
 
 

@@ -177,7 +177,8 @@ byte-identical.
 comes from the registry, not a knob. `draft_model: [<catalog drafter>]` selects a separate drafter
 checkpoint, which the validator checks is a drafter of the model in both directions. Leave it out
 for the graph's own speculator. K=0 is the drafting-off control, one arm however many drafters the
-grid lists.
+grid lists. Give each drafter its own sweep: a sweep crosses `method`, `draft_model` and
+`num_spec_tokens`, and a checkpoint belongs with its own method and depths.
 
 Valid methods: `ngram`, `medusa`, `mlp_speculator`, `draft_model`, `suffix`, `eagle`, `eagle3`,
 `dflash`, `ngram_gpu`, `dspark`, plus the 27 MTP names. **But the method is the model's**, read

@@ -553,6 +553,19 @@ the scenario's SLOs, breaking ties on fleet tok/s then the lighter load. A run t
 can never win, however fast it is, and a declared SLO that wasn't measured counts as a miss rather
 than a silent pass.
 
+### A durable journal of attempts
+
+`run_experiment.py --checkpoint-runs JOURNAL.jsonl` also appends every attempt BLIS ran to
+`JOURNAL.jsonl` as it finishes, flushed and fsynced: passed, refused by the simulator or the runner,
+and incomplete (overloaded, timed out, crashed). One JSON object per line, the same record
+`runs.jsonl` holds for that run plus its `sweep`. An interrupted search keeps every attempt that
+finished. The file is only ever appended to, so an existing journal is never truncated, and it sits
+outside the report directory, so the report and `runs.jsonl` are byte for byte what they are without
+the flag. It is not a resume command: use `--runs-from` on ledgers for that. Only finished attempts are
+journaled. A router file that cannot be materialized is never attempted and stays a `dropped` entry
+of the report. A run taken from `--runs-from` is not an attempt and is not journaled. `--dry-run` runs
+nothing and writes no journal.
+
 ## When the pinned simulator moves
 
 Every report is a function of its spec **and** the pins, so a pin bump makes every committed

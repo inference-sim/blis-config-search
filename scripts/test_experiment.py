@@ -14,6 +14,7 @@ import subprocess
 from unittest import mock
 import json
 import os
+import pathlib
 import sys
 import tempfile
 import unittest
@@ -4452,6 +4453,127 @@ class OmittedEngineKnobs(unittest.TestCase):
         _par, eng, _cli, _router = run_blis.classify_config(
             {"tp": 8, "max_num_seqs": 64, "max_model_len": 4096}, settings.vocabulary(BLIS), 8)
         self.assertEqual({"max_model_len": 4096, "max_num_seqs": 64}, eng)
+
+
+class AttemptJournal(unittest.TestCase):
+    """--checkpoint-runs: every attempt BLIS ran is on disk the moment it finishes, whatever its outcome."""
+
+    LOADS = [1, 2, 4]
+
+    def doc(self):
+        return spec(scenario={**spec()["scenario"], "concurrency": self.LOADS})
+
+    @staticmethod
+    def outcome(cfg):
+        """A passed run at c=1, a runner refusal at c=2, an overloaded run at c=4."""
+        c = cfg["concurrency"]
+        if c == 1:
+            return _ran(10.0, 10.0)
+        if c == 2:
+            return {"returncode": None, "error": "unsupported config: not modelled", "metrics": {},
+                    "metrics_all_instances": [], "cmd": None}
+        return {**_ran(10.0, 10.0), "error": "incomplete: 3 requests still running"}
+
+    def run_sweep(self, out, journal=None, fail_after=None, dry_run=False, max_parallel=1, **kw):
+        calls = []
+
+        def fake_run_one(*a, **k):
+            cfg = dict(k.get("config") or a[11])
+            if fail_after is not None and len(calls) == fail_after:
+                raise KeyboardInterrupt
+            calls.append(cfg["concurrency"])
+            return {**self.outcome(cfg), "config": cfg, "concurrency": cfg["concurrency"],
+                    "config_hash": run_blis._config_hash(cfg)}
+
+        real = E.run_blis.run_one
+        E.run_blis.run_one = fake_run_one
+        try:
+            return E.run_experiment(self.doc(), BLIS, "/c", "/r", out, verbose=False, dry_run=dry_run,
+                                    checkpoint_runs=journal, max_parallel=max_parallel, **kw)
+        finally:
+            E.run_blis.run_one = real
+
+    @staticmethod
+    def lines(path):
+        return [json.loads(line) for line in pathlib.Path(path).read_text().splitlines()]
+
+    def test_an_interrupted_search_loses_no_finished_attempt(self):
+        with tempfile.TemporaryDirectory() as t:
+            journal = os.path.join(t, "j", "attempts.jsonl")
+            with self.assertRaises(KeyboardInterrupt):
+                self.run_sweep(os.path.join(t, "out"), journal, fail_after=2)
+            got = self.lines(journal)
+            self.assertEqual([1, 2], [r["concurrency"] for r in got])
+            self.assertEqual(["s", "s"], [r["sweep"] for r in got])
+            self.assertFalse(os.path.exists(os.path.join(t, "out", "t", "runs.jsonl")),
+                             "nothing else was written: the journal is all an interrupted search leaves")
+
+    def test_passed_refused_and_incomplete_attempts_are_all_kept(self):
+        with tempfile.TemporaryDirectory() as t:
+            journal = os.path.join(t, "attempts.jsonl")
+            self.run_sweep(os.path.join(t, "out"), journal)
+            got = self.lines(journal)
+        self.assertEqual(self.LOADS, [r["concurrency"] for r in got])
+        self.assertIsNone(got[0]["error"])
+        self.assertTrue(got[1]["error"].startswith("unsupported config:"))
+        self.assertTrue(got[2]["error"].startswith("incomplete:"))
+
+    def test_each_attempt_is_on_disk_before_the_next_is_fsynced(self):
+        with tempfile.TemporaryDirectory() as t:
+            journal = os.path.join(t, "attempts.jsonl")
+            on_disk = []
+            real = os.fsync
+
+            def spy(fd):
+                on_disk.append(len(pathlib.Path(journal).read_text().splitlines()))
+                real(fd)
+            with mock.patch.object(E.os, "fsync", spy):
+                self.run_sweep(os.path.join(t, "out"), journal)
+        self.assertTrue({1, 2, 3} <= set(on_disk), on_disk)
+
+    def test_an_existing_journal_is_appended_to_never_truncated(self):
+        with tempfile.TemporaryDirectory() as t:
+            journal = os.path.join(t, "attempts.jsonl")
+            with open(journal, "w") as f:
+                f.write('{"earlier": "attempt"}\n')
+            self.run_sweep(os.path.join(t, "out"), journal)
+            got = self.lines(journal)
+        self.assertEqual({"earlier": "attempt"}, got[0])
+        self.assertEqual(self.LOADS, [r["concurrency"] for r in got[1:]])
+
+    def test_the_standard_artifacts_are_the_same_with_and_without_a_journal(self):
+        def artifacts(name, **kw):
+            with tempfile.TemporaryDirectory() as t:
+                self.run_sweep(os.path.join(t, "out"), **{k: (os.path.join(t, v) if k == "journal" else v)
+                                                          for k, v in kw.items()})
+                d = os.path.join(t, "out", "t")
+                return {f: pathlib.Path(d, f).read_text() for f in sorted(os.listdir(d))
+                        if f != "scenarios"}
+        plain = artifacts("plain")
+        for parallel in (1, 3):
+            self.assertEqual(plain, artifacts("j", journal="a.jsonl", max_parallel=parallel))
+
+    def test_parallel_runs_journal_the_same_attempts(self):
+        with tempfile.TemporaryDirectory() as t:
+            one, three = os.path.join(t, "one.jsonl"), os.path.join(t, "three.jsonl")
+            self.run_sweep(os.path.join(t, "a"), one)
+            self.run_sweep(os.path.join(t, "b"), three, max_parallel=3)
+            key = lambda r: json.dumps(r, sort_keys=True)
+            self.assertEqual(sorted(map(key, self.lines(one))), sorted(map(key, self.lines(three))))
+
+    def test_omitted_and_dry_runs_write_no_journal(self):
+        with tempfile.TemporaryDirectory() as t:
+            self.run_sweep(os.path.join(t, "out"))
+            self.run_sweep(os.path.join(t, "dry"), os.path.join(t, "dry.jsonl"), dry_run=True)
+            self.assertEqual(["out"], sorted(os.listdir(t)))
+
+    def test_a_run_taken_from_a_ledger_is_not_an_attempt(self):
+        with tempfile.TemporaryDirectory() as t:
+            self.run_sweep(os.path.join(t, "a"))
+            recorded = E.load_recorded([os.path.join(t, "a", "t", "runs.jsonl")])
+            journal = os.path.join(t, "attempts.jsonl")
+            self.run_sweep(os.path.join(t, "b"), journal, recorded=recorded)
+            self.assertEqual([], self.lines(journal))
 
 
 def main():

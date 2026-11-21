@@ -124,15 +124,8 @@ def _engine_candidates(engine):
     return out
 
 
-def merge_nested(base, over):
-    """`over` laid on `base`, a nested block merged field by field rather than replaced whole."""
-    out = dict(base)
-    for key, value in over.items():
-        if isinstance(value, dict) and isinstance(out.get(key), dict):
-            out[key] = merge_nested(out[key], value)
-        else:
-            out[key] = value
-    return out
+# One definition, in the runner that also merges a pool's block over the shared one.
+merge_nested = run_blis.merge_nested
 
 
 def leaf_paths(tree, prefix=()):
@@ -168,6 +161,28 @@ def engine_origin(engine, fixed, swept, path=()):
             out[key] = "catalog"
         else:
             out[key] = "runner"
+    return out
+
+
+def row_origins(rec, fixed, swept, sweep=None):
+    """The provenance trees a run record adds to its row.
+
+    `engine_origin` follows the deployment's shared engine. A disaggregated record also gets
+    `pool_engine_origin`, one tree per role in the shape of that pool's own engine: the pool
+    engines are the shared one with the role's `prefill:`/`decode:` engine block laid on it, so a
+    leaf the sweep states for one pool alone is `sweep` there and nowhere else.
+    """
+    dep = (rec or {}).get("deployment") or {}
+    out = {}
+    if dep.get("engine"):
+        out["engine_origin"] = engine_origin(dep["engine"], fixed, swept)
+    pools = {}
+    for role, pool in (((dep.get("parallel") or {}).get("pd")) or {}).items():
+        if role in run_blis.PD_ROLES and (pool or {}).get("engine"):
+            own = leaf_paths(((sweep or {}).get(role) or {}).get("engine"))
+            pools[role] = engine_origin(pool["engine"], fixed, set(swept) | own)
+    if pools:
+        out["pool_engine_origin"] = pools
     return out
 
 
@@ -222,7 +237,8 @@ def expand_sweep(sweep, gpus):
                         base.update({_flag("decode", k): v for k, v in dc.items()})
                         base["prefill_instances"] = pi
                         base["decode_instances"] = di
-                        for pfe, dce, pfo, dco in itertools.product(grid(pf_eng), grid(dc_eng), pf_off, dc_off):
+                        for pfe, dce, pfo, dco in itertools.product(_engine_candidates(pf_eng),
+                                                                    _engine_candidates(dc_eng), pf_off, dc_off):
                             cfg = dict(base)
                             cfg.update({_flag("prefill", k): v for k, v in pfe.items()})
                             cfg.update({_flag("decode", k): v for k, v in dce.items()})
@@ -440,6 +456,20 @@ VARIANT_KEYS = ("num_speculative_tokens", "speculative_method", "speculative_dra
                 "disable_radix_cache", "cuda_graph_max_bs_decode", "attention_backend")
 
 
+# The engine settings a disaggregated sweep may state for one pool, as `prefill_<knob>`/`decode_<knob>`
+# candidate keys: every variant key that is an engine setting rather than a runner or router switch.
+_POOL_ENGINE_VARIANT = tuple(k for k in VARIANT_KEYS if not k.startswith(
+    ("num_speculative", "speculative_", "router_", "pd_transfer", "offload_", "prefill_", "decode_")))
+
+
+def _variant_keys(cands):
+    """VARIANT_KEYS, then the per-pool spellings of the engine settings that these candidates carry."""
+    pool = sorted({k for c in cands for k in c
+                   if k.partition("_")[0] in run_blis.PD_ROLES
+                   and k.partition("_")[2] in _POOL_ENGINE_VARIANT})
+    return VARIANT_KEYS + tuple(pool)
+
+
 def variant_of(cand, router_desc, baseline):
     """How this candidate differs from its sweep's baseline, spelled out in words.
 
@@ -447,12 +477,18 @@ def variant_of(cand, router_desc, baseline):
     default, so in a sweep where every arm sets fp8 the variant says what actually varies.
     """
     parts = []
-    for key in VARIANT_KEYS:
+    for key in _variant_keys([cand]):
         if key not in cand:
             continue
         if baseline.get(key) == cand[key]:
             continue
-        if key == "router_config":
+        role, _, knob = key.partition("_")
+        if role in run_blis.PD_ROLES and knob in _POOL_ENGINE_VARIANT:
+            # A pool's own setting: the pool, then the phrase the shared setting would get.
+            inner = (_nested_phrase(knob, cand[key], baseline.get(key) or {}) if isinstance(cand[key], dict)
+                     else topologies.knob_phrase(knob, cand[key]))
+            parts.append(f"{role} {inner}")
+        elif key == "router_config":
             parts.append(f"{router_desc} routing")
         elif key == "speculative_method":
             continue                        # named by the draft-token phrase below
@@ -488,7 +524,7 @@ def _nested_phrase(block, value, baseline):
 def sweep_baseline(cands):
     """The most common value of each variant knob across a sweep -- its implicit baseline."""
     base = {}
-    for key in VARIANT_KEYS:
+    for key in _variant_keys(cands):
         values = [c[key] for c in cands if key in c]
         if not values:
             continue
@@ -931,9 +967,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
             # it: build_gallery reads `finalist.config.tp` / `.num_instances` for the winner
             # card, and showed "tp 0, 0 instances" without it.
             row["config"] = _jsonable(cfg)
-            engine = (rec.get("deployment") or {}).get("engine")
-            if engine:
-                row["engine_origin"] = engine_origin(engine, fixed_paths, swept_paths)
+            row.update(row_origins(rec, fixed_paths, swept_paths, sweep))
             row["servable"] = ok
             if "in_flight_at_cutoff" in rec:
                 row["in_flight_at_cutoff"] = rec["in_flight_at_cutoff"]

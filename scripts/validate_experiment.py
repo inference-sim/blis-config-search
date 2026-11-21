@@ -1135,6 +1135,10 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
             _check_knob_names(block.get("parallel") or {}, f"{where}.{role}.parallel", par_vocab,
                               "parallel", errs, source)
             _check_engine(block.get("engine") or {}, f"{where}.{role}.engine", vocab, errs)
+            if "speculative" in (block.get("engine") or {}):
+                errs.append(f"{where}.{role}.engine.speculative: drafting is one configuration per run, "
+                            f"not per pool -- the engine refuses pools that disagree on the draft width "
+                            f"or the method, so state `speculative` once in the sweep's `engine` block")
 
         errs.extend(simulator_errors(sw, where))
         router = sw.get("router")

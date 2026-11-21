@@ -243,6 +243,21 @@ class ConfigError(ValueError):
 SCENARIO_OFFLOAD = frozenset({"offload_cpu_bytes", "offload_eviction_policy"})
 
 
+def merge_nested(base, over):
+    """`over` laid on `base`, a nested block merged field by field rather than replaced whole.
+
+    A block neither side overrides is shared with `base`, not copied (resolve_pd relies on that for
+    `speculative`: the method the runner fills in later reaches both pools).
+    """
+    out = dict(base)
+    for key, value in over.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = merge_nested(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
 def classify_config(config, vocab, node_size=None, pool_offload=False):
     """Split a candidate into (parallel, engine, cli, router); raise ConfigError on unknown keys.
 
@@ -296,7 +311,8 @@ def classify_config(config, vocab, node_size=None, pool_offload=False):
         elif role in PD_ROLES and knob in vocab.parallel:
             pd_parallel[role][knob] = v
         elif role in PD_ROLES and (knob in vocab.engine_names() or k in PD_SPECULATIVE):
-            pd_engine[role][knob] = v
+            # A nested block is copied, as the shared one is: resolve_pd merges it field by field.
+            pd_engine[role][knob] = dict(v) if isinstance(v, dict) else v
         else:
             raise ConfigError(
                 f"{k!r}: unknown key: not a pool-layout key or engine setting in {vocab.source}, "
@@ -424,7 +440,9 @@ def resolve_pd(cli, pd_parallel, pd_engine, base_parallel, base_engine, node_siz
     # Checked BEFORE the pools are built: a per-role drafting key must not reach a pool's engine
     # block, where it would be written into the scenario as a field no engine accepts.
     for role in PD_ROLES:
-        bad = sorted(k for k in pd_engine[role] if k in SCENARIO_SPECULATIVE)
+        # `speculative` is the nested native block (its method, depth and drafter arrive as the
+        # flat keys above): it is one configuration per run in either spelling.
+        bad = sorted(k for k in pd_engine[role] if k in SCENARIO_SPECULATIVE or k == "speculative")
         if bad:
             raise ConfigError(
                 f"{role}_{bad[0]}: drafting is one configuration per run, not per pool -- BLIS "
@@ -447,10 +465,10 @@ def resolve_pd(cli, pd_parallel, pd_engine, base_parallel, base_engine, node_siz
     out = {}
     for role, instances in (("prefill", pi), ("decode", di)):
         par = {**{k: v for k, v in base_parallel.items() if k != "pd"}, **pd_parallel[role]}
-        eng = dict(base_engine)
         # The shared `speculative` block is already folded into base_engine; a per-role override
-        # of it is refused below (one draft width per run), so only flat keys merge here.
-        eng.update(pd_engine[role])
+        # of it is refused above (one draft width per run). Every other nested block (`eplb`,
+        # `dbo`, ...) merges field by field, as the scenario's block and a sweep's do.
+        eng = merge_nested(base_engine, pd_engine[role])
         # pp>1 is priced from kernel v0.5.0 on each side of a disaggregated run too; see the
         # colocated site in classify_config for what moved and what still refuses.
         fp = footprint_gpus(par)

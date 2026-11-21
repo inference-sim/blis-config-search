@@ -110,5 +110,126 @@ class RecursiveProvenance(unittest.TestCase):
                          "every leaf of the engine has an origin, at the depth it sits")
 
 
+PD_SWEEP = {"name": "d", "prefill-instances": [1], "decode-instances": [1],
+            "engine": {"speculative": {"method": ["dspark"], "num_spec_tokens": [3]}},
+            "prefill": {"parallel": {"tp": [4]},
+                        "engine": {"max_num_seqs": [32],
+                                   "eplb": {"enable_eplb": [True], "window_size": [100, 200]}}},
+            "decode": {"parallel": {"tp": [4]}, "engine": {"max_num_seqs": [64, 128]}}}
+
+
+def pd_classify(cand, shared=None):
+    """The parallel dict classify_config returns for a disaggregated candidate over the scenario's engine."""
+    return run_blis.classify_config(run_config(shared or {}, cand), settings.vocabulary(BLIS))[0]
+
+
+class PoolEngineBlocks(unittest.TestCase):
+    """A disaggregated sweep's per-pool engine block is expanded and merged like the shared one."""
+
+    def test_a_pool_engine_block_expands_to_one_candidate_per_combination(self):
+        kept, dropped = E.expand_sweep(PD_SWEEP, 8)
+        self.assertEqual([], dropped)
+        eplbs = sorted((c["prefill_eplb"] for c in kept), key=lambda b: b["window_size"])
+        self.assertEqual([{"enable_eplb": True, "window_size": 100},
+                          {"enable_eplb": True, "window_size": 200}], [eplbs[0], eplbs[-1]])
+        self.assertEqual(4, len(kept), "2 prefill windows x 2 decode batch sizes, on the one drafting arm")
+        self.assertTrue(all(isinstance(c["prefill_eplb"], dict) for c in kept))
+
+    def test_a_pool_block_merges_field_wise_onto_the_scenarios_block(self):
+        shared = {"eplb": {"enable_eplb": True, "num_redundant_experts": 8}}
+        cand = {"tp": 4, "prefill_instances": 1, "decode_instances": 1, "prefill_tp": 4, "decode_tp": 4,
+                "prefill_eplb": {"window_size": 100}}
+        before = copy.deepcopy(shared)
+        pd = pd_classify(cand, shared)["pd"]
+        self.assertEqual({"enable_eplb": True, "num_redundant_experts": 8, "window_size": 100},
+                         pd["prefill"]["engine"]["eplb"])
+        self.assertEqual(shared["eplb"], pd["decode"]["engine"]["eplb"], "the other pool keeps the scenario's block")
+        self.assertEqual(before, shared)
+
+    def test_drafting_is_one_configuration_per_run_in_every_spelling(self):
+        base = {"tp": 4, "prefill_instances": 1, "decode_instances": 1, "prefill_tp": 4, "decode_tp": 4}
+        for key, value in (("prefill_speculative", {"kv_cache_dtype": "fp8"}),
+                           ("decode_speculative", {"method": "dspark", "num_spec_tokens": 3}),
+                           ("prefill_num_speculative_tokens", 3),
+                           ("decode_speculative_method", "dspark")):
+            with self.subTest(key):
+                with self.assertRaises(run_blis.ConfigError) as e:
+                    pd_classify({**base, key: value})
+                self.assertIn("one configuration per run", str(e.exception))
+
+    def test_the_validator_refuses_a_pool_that_states_drafting(self):
+        import test_engine_kind as K
+        import validate_experiment as V
+        spec = {"name": "t", "scenario": {"model": "qwen3-14b", "hardware": "h100", "workload": "chatbot",
+                                          "cluster": {"gpus_per_node": 8}, "gpus": 8, "concurrency": [4]},
+                "sweeps": [copy.deepcopy(PD_SWEEP)]}
+        spec["sweeps"][0]["engine"] = {"max_num_seqs": [64]}
+        self.assertFalse([e for e in V.validate(copy.deepcopy(spec), BLIS, K.ROUTING, None, None)
+                          if "speculative" in e])
+        spec["sweeps"][0]["decode"]["engine"] = {"speculative": {"kv_cache_dtype": ["fp8"]}}
+        errs = V.validate(copy.deepcopy(spec), BLIS, K.ROUTING, None, None)
+        self.assertTrue(any("decode.engine.speculative" in e and "one configuration per run" in e
+                            for e in errs), errs)
+
+
+class PoolProvenance(unittest.TestCase):
+    ENGINE = {"max_model_len": 32768, "max_num_seqs": 16, "block_size": 64,
+              "speculative": {"method": "mtp", "num_spec_tokens": 3}}
+    PREFILL = {**ENGINE, "max_num_seqs": 32, "eplb": {"enable_eplb": True, "window_size": 100}}
+    DECODE = {**ENGINE, "max_num_seqs": 64}
+    REC = {"deployment": {"engine": ENGINE, "parallel": {"pd": {"prefill": {"engine": PREFILL},
+                                                                  "decode": {"engine": DECODE}}}}}
+    SWEEP = {"engine": {"speculative": {"num_spec_tokens": [3]}},
+             "prefill": {"engine": {"max_num_seqs": [32], "eplb": {"window_size": [100]}}},
+             "decode": {"engine": {"max_num_seqs": [64]}}}
+    FIXED = {("max_num_seqs",), ("eplb", "enable_eplb")}
+
+    def origins(self, rec=None, sweep=None):
+        sweep = sweep or self.SWEEP
+        return E.row_origins(rec or self.REC, self.FIXED, E.leaf_paths(sweep.get("engine")), sweep)
+
+    def test_each_pool_records_the_origin_of_its_own_leaves(self):
+        got = self.origins()["pool_engine_origin"]
+        self.assertEqual({"max_model_len": "runner", "max_num_seqs": "sweep", "block_size": "runner",
+                          "speculative": {"method": "catalog", "num_spec_tokens": "sweep"},
+                          "eplb": {"enable_eplb": "scenario", "window_size": "sweep"}}, got["prefill"])
+        self.assertEqual("sweep", got["decode"]["max_num_seqs"])
+        self.assertNotIn("eplb", got["decode"])
+
+    def test_a_pool_is_not_credited_with_the_other_pools_sweep(self):
+        sweep = {**self.SWEEP, "decode": {}}
+        got = self.origins(sweep=sweep)["pool_engine_origin"]
+        self.assertEqual("sweep", got["prefill"]["max_num_seqs"])
+        self.assertEqual("scenario", got["decode"]["max_num_seqs"],
+                         "the decode pool's batch size was fixed by the scenario, whatever the prefill pool swept")
+
+    def test_the_shared_origin_is_unchanged_and_a_colocated_row_has_no_pool_tree(self):
+        self.assertEqual(E.engine_origin(self.ENGINE, self.FIXED, E.leaf_paths(self.SWEEP["engine"])),
+                         self.origins()["engine_origin"])
+        colocated = {"deployment": {"engine": self.ENGINE, "parallel": {"tp": 8}}}
+        self.assertEqual({"engine_origin"}, set(E.row_origins(colocated, self.FIXED, set(), {})))
+        self.assertEqual({}, E.row_origins({"deployment": None}, self.FIXED, set(), {}))
+
+    def test_pool_origins_round_trip_at_every_depth(self):
+        origins = self.origins()
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "a.json")
+            E._dump(path, origins)
+            with open(path, encoding="utf-8") as f:
+                parsed = json.load(f)
+        self.assertEqual(origins, parsed)
+        for role, engine in (("prefill", self.PREFILL), ("decode", self.DECODE)):
+            self.assertEqual(E.leaf_paths(engine), E.leaf_paths(parsed["pool_engine_origin"][role]))
+
+
+class PoolVariantLabels(unittest.TestCase):
+    def test_arms_that_differ_only_in_a_pools_engine_setting_are_told_apart(self):
+        a = {"prefill_tp": 4, "decode_tp": 4, "prefill_max_num_seqs": 32, "decode_max_num_seqs": 64}
+        b = {**a, "decode_max_num_seqs": 128}
+        base = E.sweep_baseline([a, a, b])
+        self.assertEqual("", E.variant_of(a, "x", base))
+        self.assertEqual("decode max seqs 128", E.variant_of(b, "x", base))
+
+
 if __name__ == "__main__":
     unittest.main()

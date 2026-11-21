@@ -281,6 +281,11 @@ like `deployment.engine` with one origin per leaf: `sweep`, `scenario` (`scenari
 `catalog` (a `method` the model's graph declared) or `runner` (`max_model_len`, `block_size`).
 A nested block keeps each field's own origin.
 
+A disaggregated row also records `pool_engine_origin`, `{prefill: ..., decode: ...}`, each a tree
+shaped like that pool's own engine block. A pool is credited only with the values its own
+`prefill:` / `decode:` engine block swept or stated, never with the other pool's. `engine_origin`
+keeps describing the engine both pools share, and a colocated row has no `pool_engine_origin`.
+
 ### Not every accepted knob is a lever
 
 A knob can be accepted and still measure byte-identical — `enable_prefix_caching` does on every
@@ -528,6 +533,9 @@ BLIS imposes real constraints on P/D, all checked before any run:
 - The two pools must **agree** on `dp` (one replica factor applies to both), `block_size` (a
   handoff moves whole KV blocks), and KV cache format.
 - Drafting is **one configuration per run**, not per pool.
+- A pool's `engine:` block merges field by field over the shared engine, so a nested block such
+  as `compilation` keeps the fields the pool does not state. `speculative` (or a runner-level
+  drafting knob) in a pool block is refused with that reason.
 - A prefill pool needs a decode pool, and vice versa; a colocated pool can't sit beside either.
 - Pools never share a node, so a P/D run always spans ≥ 2 nodes and prices its handoff over
   `scenario.cluster.fabric` (default `ib-400g`).

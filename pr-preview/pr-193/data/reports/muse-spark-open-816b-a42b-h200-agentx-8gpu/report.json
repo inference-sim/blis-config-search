@@ -1,0 +1,91 @@
+{
+  "explore_prose": [
+    "Every run in this experiment is in the explorer below: filter by outcome to see which settings held the SLOs, or by setting to compare one sweep against another.",
+    "Each sweep's hypothesis was written before the runs, and is quoted beside that sweep's measured result below."
+  ],
+  "hero": [
+    {
+      "h": "What was tested",
+      "html": "26 configurations over 6 sweeps (topology-pp, batch-caps, kv-capacity, moe-collective, prefill-chunking, cudagraph), each at 5 load levels, every run on exactly 8 GPUs."
+    },
+    {
+      "h": "What was found",
+      "html": "<strong>1x TP8 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)</strong>, from the <em>kv-capacity</em> sweep, reached 82.18 tok/s/accelerator (657.5 tok/s across the fleet) at concurrency 32 while holding the scenario's SLOs. Ranking: max output tok/s per accelerator subject to the scenario's SLOs."
+    },
+    {
+      "h": "What to run",
+      "html": "1x TP8 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8) at concurrency 32. 94 of 130 runs held the SLOs.",
+      "run": true
+    }
+  ],
+  "meta": [
+    "BLIS discrete-event simulation",
+    "Experiment Spec (RFC #21)",
+    "deterministic sweep \u2014 no LLM in the measurement path",
+    "seed 42",
+    "basis: measured window",
+    "scope: cluster; worst instance for TTFT and end-to-end gates"
+  ],
+  "recommendation_num": 8,
+  "recommendation_prose": [
+    "The table below lists the measured operating points. Headline ranking: max output tok/s per accelerator subject to the scenario's SLOs. The Pareto front of every sweep is in pareto.json."
+  ],
+  "sections": [
+    {
+      "caption_note": "3 configurations, 15 runs.",
+      "num": 2,
+      "prose": [
+        "TP8 should peak highest, since every pipeline stage adds a boundary hop to each decode step.",
+        "Measured: best was <strong>1x TP8 + EP</strong> at 46.07 tok/s/accelerator (concurrency 16)."
+      ],
+      "title": "Sweep: topology-pp"
+    },
+    {
+      "caption_note": "8 configurations, 40 runs.",
+      "num": 3,
+      "prose": [
+        "A seq cap of 8 should bind on TP8, where one attention rank sees every lane.",
+        "Measured: best was <strong>1x TP8 + EP (max seqs 16 \u00b7 batch tokens 16,384)</strong> at 46 tok/s/accelerator (concurrency 16)."
+      ],
+      "title": "Sweep: batch-caps"
+    },
+    {
+      "caption_note": "4 configurations, 20 runs.",
+      "num": 4,
+      "prose": [
+        "fp8 KV and higher memory utilization should substitute on TP8.",
+        "Measured: best was <strong>1x TP8 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)</strong> at 82.18 tok/s/accelerator (concurrency 32)."
+      ],
+      "title": "Sweep: kv-capacity"
+    },
+    {
+      "caption_note": "4 configurations, 20 runs.",
+      "num": 5,
+      "prose": [
+        "DeepEP low-latency should win on TP8.",
+        "Measured: best was <strong>1x TP8 + EP</strong> at 46.07 tok/s/accelerator (concurrency 16)."
+      ],
+      "title": "Sweep: moe-collective"
+    },
+    {
+      "caption_note": "4 configurations, 20 runs.",
+      "num": 6,
+      "prose": [
+        "Capping long prefills should trade a little peak throughput for a much lower ITL p99 at saturation.",
+        "Measured: best was <strong>1x TP8 + EP (prefill chunk 8,192)</strong> at 46.07 tok/s/accelerator (concurrency 16)."
+      ],
+      "title": "Sweep: prefill-chunking"
+    },
+    {
+      "caption_note": "3 configurations, 15 runs.",
+      "num": 7,
+      "prose": [
+        "FULL-family capture should beat the PIECEWISE default by a few percent, and NONE should collapse.",
+        "Measured: best was <strong>1x TP8 + EP (graph capture full+piecewise)</strong> at 46.07 tok/s/accelerator (concurrency 16)."
+      ],
+      "title": "Sweep: cudagraph"
+    }
+  ],
+  "standfirst": "A deterministic sweep over custom (not in the catalog) (AgentX run recipe: 300 s idle-gap cap, 10 warm-up requests per lane, trajectory start 0.25 to 0.75, 3600 s window, 30 s grace, corpus semianalysis_cc_traces_weka_062126) traffic, comparing 6 designs on one GPU budget.",
+  "title": "muse-spark-open-816b-a42b-nvfp4 on 8x h200: muse-spark-open-816b-a42b-h200-agentx-8gpu"
+}

@@ -1,0 +1,460 @@
+{
+  "basis": "measured_window",
+  "best_overall": {
+    "concurrency": 16,
+    "config": {
+      "chunked_prefill_size": 8192,
+      "concurrency": 16,
+      "context_length": 202752,
+      "dp": 1,
+      "mem_fraction_static": 0.85,
+      "num_instances": 1,
+      "pp": 1,
+      "tp": 8
+    },
+    "disaggregated": false,
+    "gpus": 8,
+    "interactivity": 38.18,
+    "interactivity_basis": "result",
+    "itl_p99_ms": 28.53,
+    "itl_p99_ms_aggregate": 28.529704424126205,
+    "label": "1x TP8",
+    "outcome": "served",
+    "output_tokens_per_sec_per_decode_gpu": null,
+    "preemption_count": 0,
+    "servable": true,
+    "sweep": "chunk-size",
+    "tok_per_s_per_user": 35.1,
+    "tokens_per_sec": 555.5,
+    "tokens_per_sec_per_gpu": 69.44,
+    "total_tokens_per_sec_per_gpu": 531.527,
+    "ttft_p99_ms": 6174.2,
+    "ttft_p99_ms_aggregate": 6174.157619999997,
+    "variant": "chunk size 8192"
+  },
+  "description": "",
+  "experimental": false,
+  "interactivity_floor": {
+    "tok_per_s_per_user": null
+  },
+  "model_arch": "MoE",
+  "name": "glm-5-h200-sglang-chunked-prefill",
+  "objective": "max output tok/s per accelerator subject to the scenario's SLOs",
+  "outcomes": {
+    "served": 6
+  },
+  "pareto": {
+    "interval": null,
+    "overall": {
+      "decode": {
+        "members": [],
+        "points": 0,
+        "unrated": 6
+      },
+      "total": {
+        "members": [
+          {
+            "concurrency": 16,
+            "config": {
+              "chunked_prefill_size": 8192,
+              "concurrency": 16,
+              "context_length": 202752,
+              "dp": 1,
+              "mem_fraction_static": 0.85,
+              "num_instances": 1,
+              "pp": 1,
+              "tp": 8
+            },
+            "disaggregated": false,
+            "interactivity": 38.18,
+            "label": "1x TP8",
+            "status": "front",
+            "sweep": "chunk-size",
+            "throughput_per_gpu": 531.527,
+            "variant": "chunk size 8192"
+          },
+          {
+            "concurrency": 8,
+            "config": {
+              "chunked_prefill_size": 8192,
+              "concurrency": 8,
+              "context_length": 202752,
+              "dp": 1,
+              "mem_fraction_static": 0.85,
+              "num_instances": 1,
+              "pp": 1,
+              "tp": 8
+            },
+            "disaggregated": false,
+            "interactivity": 52.717,
+            "label": "1x TP8",
+            "status": "front",
+            "sweep": "chunk-size",
+            "throughput_per_gpu": 387.977,
+            "variant": "chunk size 8192"
+          }
+        ],
+        "points": 6,
+        "unrated": 0
+      }
+    },
+    "sweeps": [
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 6
+        },
+        "name": "chunk-size",
+        "total": {
+          "members": [
+            {
+              "concurrency": 16,
+              "config": {
+                "chunked_prefill_size": 8192,
+                "concurrency": 16,
+                "context_length": 202752,
+                "dp": 1,
+                "mem_fraction_static": 0.85,
+                "num_instances": 1,
+                "pp": 1,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 38.18,
+              "label": "1x TP8",
+              "status": "front",
+              "sweep": "chunk-size",
+              "throughput_per_gpu": 531.527,
+              "variant": "chunk size 8192"
+            },
+            {
+              "concurrency": 8,
+              "config": {
+                "chunked_prefill_size": 8192,
+                "concurrency": 8,
+                "context_length": 202752,
+                "dp": 1,
+                "mem_fraction_static": 0.85,
+                "num_instances": 1,
+                "pp": 1,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 52.717,
+              "label": "1x TP8",
+              "status": "front",
+              "sweep": "chunk-size",
+              "throughput_per_gpu": 387.977,
+              "variant": "chunk size 8192"
+            }
+          ],
+          "points": 6,
+          "unrated": 0
+        }
+      }
+    ],
+    "throughput": "total",
+    "x": "interactivity_of_mean_tpot",
+    "y": {
+      "decode": "output_tokens_per_second_per_decode_gpu",
+      "total": "total_tokens_per_second_per_gpu"
+    }
+  },
+  "pinned_stack": {
+    "blis": "v0.18.1",
+    "data": "embedded",
+    "engine_version": "0.5.23",
+    "kernel": "unpinned",
+    "resolved": {
+      "blis": {
+        "commit": "dfa898752ccbacc8d0ecab8e434fc9c4c7373587",
+        "describe": "v0.18.1",
+        "sha256": "a46b166df786bc1b97feaf6604eea02fc7e5020d480cbefc09db148b30dbee50"
+      }
+    },
+    "router": "v1.0.0-blis.5.0.20261118163949-601ff6e9d37d",
+    "router_configs": {
+      "resolved": {
+        "module": "github.com/llm-d/llm-d-router",
+        "version": "v1.0.0-blis.5.0.20261118163949-601ff6e9d37d"
+      }
+    },
+    "substrate": "v0.15.1-0.20261118162118-b6748ca9d757"
+  },
+  "ranking": {
+    "throughput": "total",
+    "used": "scalar"
+  },
+  "refusals": [],
+  "scenario": {
+    "cluster": {
+      "gpus_per_node": 8
+    },
+    "concurrency": [
+      8,
+      16
+    ],
+    "engine": {
+      "context_length": 202752,
+      "mem_fraction_static": 0.85
+    },
+    "engine_version": "0.5.23",
+    "gpus": 8,
+    "hardware": "h200",
+    "model": "glm-5",
+    "replay": null,
+    "seed": 42,
+    "slo": {},
+    "workload": "multidoc",
+    "workload_spec": null
+  },
+  "scope": "cluster; worst instance for TTFT and end-to-end gates",
+  "slo_ms": {},
+  "sweeps": [
+    {
+      "best": {
+        "concurrency": 16,
+        "config": {
+          "chunked_prefill_size": 8192,
+          "concurrency": 16,
+          "context_length": 202752,
+          "dp": 1,
+          "mem_fraction_static": 0.85,
+          "num_instances": 1,
+          "pp": 1,
+          "tp": 8
+        },
+        "disaggregated": false,
+        "gpus": 8,
+        "interactivity": 38.18,
+        "interactivity_basis": "result",
+        "itl_p99_ms": 28.53,
+        "itl_p99_ms_aggregate": 28.529704424126205,
+        "label": "1x TP8",
+        "outcome": "served",
+        "output_tokens_per_sec_per_decode_gpu": null,
+        "preemption_count": 0,
+        "servable": true,
+        "sweep": "chunk-size",
+        "tok_per_s_per_user": 35.1,
+        "tokens_per_sec": 555.5,
+        "tokens_per_sec_per_gpu": 69.44,
+        "total_tokens_per_sec_per_gpu": 531.527,
+        "ttft_p99_ms": 6174.2,
+        "ttft_p99_ms_aggregate": 6174.157619999997,
+        "variant": "chunk size 8192"
+      },
+      "configs": 3,
+      "dropped": [],
+      "name": "chunk-size",
+      "narrative": "Smaller prefill chunks should cost both tail inter-token latency and time-to-first-token, as each prompt then needs more passes.",
+      "outcomes": {
+        "served": 6
+      },
+      "refusals": [],
+      "rows": [
+        {
+          "concurrency": 8,
+          "config": {
+            "chunked_prefill_size": 512,
+            "concurrency": 8,
+            "context_length": 202752,
+            "dp": 1,
+            "mem_fraction_static": 0.85,
+            "num_instances": 1,
+            "pp": 1,
+            "tp": 8
+          },
+          "disaggregated": false,
+          "gpus": 8,
+          "interactivity": 45.57,
+          "interactivity_basis": "result",
+          "itl_p99_ms": 24.358,
+          "itl_p99_ms_aggregate": 24.357890337677382,
+          "label": "1x TP8",
+          "outcome": "served",
+          "output_tokens_per_sec_per_decode_gpu": null,
+          "preemption_count": 0,
+          "servable": true,
+          "sweep": "chunk-size",
+          "tok_per_s_per_user": 41.1,
+          "tokens_per_sec": 340.0,
+          "tokens_per_sec_per_gpu": 42.5,
+          "total_tokens_per_sec_per_gpu": 329.046,
+          "ttft_p99_ms": 7646.8,
+          "ttft_p99_ms_aggregate": 7646.784309999993,
+          "variant": ""
+        },
+        {
+          "concurrency": 16,
+          "config": {
+            "chunked_prefill_size": 512,
+            "concurrency": 16,
+            "context_length": 202752,
+            "dp": 1,
+            "mem_fraction_static": 0.85,
+            "num_instances": 1,
+            "pp": 1,
+            "tp": 8
+          },
+          "disaggregated": false,
+          "gpus": 8,
+          "interactivity": 31.032,
+          "interactivity_basis": "result",
+          "itl_p99_ms": 38.018,
+          "itl_p99_ms_aggregate": 38.01777746089745,
+          "label": "1x TP8",
+          "outcome": "served",
+          "output_tokens_per_sec_per_decode_gpu": null,
+          "preemption_count": 0,
+          "servable": true,
+          "sweep": "chunk-size",
+          "tok_per_s_per_user": 26.3,
+          "tokens_per_sec": 445.9,
+          "tokens_per_sec_per_gpu": 55.74,
+          "total_tokens_per_sec_per_gpu": 426.675,
+          "ttft_p99_ms": 16251.1,
+          "ttft_p99_ms_aggregate": 16251.102579999993,
+          "variant": ""
+        },
+        {
+          "concurrency": 8,
+          "config": {
+            "chunked_prefill_size": 2048,
+            "concurrency": 8,
+            "context_length": 202752,
+            "dp": 1,
+            "mem_fraction_static": 0.85,
+            "num_instances": 1,
+            "pp": 1,
+            "tp": 8
+          },
+          "disaggregated": false,
+          "gpus": 8,
+          "interactivity": 51.182,
+          "interactivity_basis": "result",
+          "itl_p99_ms": 20.725,
+          "itl_p99_ms_aggregate": 20.725235286996813,
+          "label": "1x TP8",
+          "outcome": "served",
+          "output_tokens_per_sec_per_decode_gpu": null,
+          "preemption_count": 0,
+          "servable": true,
+          "sweep": "chunk-size",
+          "tok_per_s_per_user": 48.3,
+          "tokens_per_sec": 387.8,
+          "tokens_per_sec_per_gpu": 48.47,
+          "total_tokens_per_sec_per_gpu": 375.279,
+          "ttft_p99_ms": 3914.8,
+          "ttft_p99_ms_aggregate": 3914.788899999997,
+          "variant": "chunk size 2048"
+        },
+        {
+          "concurrency": 16,
+          "config": {
+            "chunked_prefill_size": 2048,
+            "concurrency": 16,
+            "context_length": 202752,
+            "dp": 1,
+            "mem_fraction_static": 0.85,
+            "num_instances": 1,
+            "pp": 1,
+            "tp": 8
+          },
+          "disaggregated": false,
+          "gpus": 8,
+          "interactivity": 36.564,
+          "interactivity_basis": "result",
+          "itl_p99_ms": 30.375,
+          "itl_p99_ms_aggregate": 30.375138789217736,
+          "label": "1x TP8",
+          "outcome": "served",
+          "output_tokens_per_sec_per_decode_gpu": null,
+          "preemption_count": 0,
+          "servable": true,
+          "sweep": "chunk-size",
+          "tok_per_s_per_user": 32.9,
+          "tokens_per_sec": 530.8,
+          "tokens_per_sec_per_gpu": 66.35,
+          "total_tokens_per_sec_per_gpu": 507.848,
+          "ttft_p99_ms": 8178.1,
+          "ttft_p99_ms_aggregate": 8178.053779999996,
+          "variant": "chunk size 2048"
+        },
+        {
+          "concurrency": 8,
+          "config": {
+            "chunked_prefill_size": 8192,
+            "concurrency": 8,
+            "context_length": 202752,
+            "dp": 1,
+            "mem_fraction_static": 0.85,
+            "num_instances": 1,
+            "pp": 1,
+            "tp": 8
+          },
+          "disaggregated": false,
+          "gpus": 8,
+          "interactivity": 52.717,
+          "interactivity_basis": "result",
+          "itl_p99_ms": 19.819,
+          "itl_p99_ms_aggregate": 19.818686871149538,
+          "label": "1x TP8",
+          "outcome": "served",
+          "output_tokens_per_sec_per_decode_gpu": null,
+          "preemption_count": 0,
+          "servable": true,
+          "sweep": "chunk-size",
+          "tok_per_s_per_user": 50.5,
+          "tokens_per_sec": 400.9,
+          "tokens_per_sec_per_gpu": 50.11,
+          "total_tokens_per_sec_per_gpu": 387.977,
+          "ttft_p99_ms": 3137.9,
+          "ttft_p99_ms_aggregate": 3137.949349999999,
+          "variant": "chunk size 8192"
+        },
+        {
+          "concurrency": 16,
+          "config": {
+            "chunked_prefill_size": 8192,
+            "concurrency": 16,
+            "context_length": 202752,
+            "dp": 1,
+            "mem_fraction_static": 0.85,
+            "num_instances": 1,
+            "pp": 1,
+            "tp": 8
+          },
+          "disaggregated": false,
+          "gpus": 8,
+          "interactivity": 38.18,
+          "interactivity_basis": "result",
+          "itl_p99_ms": 28.53,
+          "itl_p99_ms_aggregate": 28.529704424126205,
+          "label": "1x TP8",
+          "outcome": "served",
+          "output_tokens_per_sec_per_decode_gpu": null,
+          "preemption_count": 0,
+          "servable": true,
+          "sweep": "chunk-size",
+          "tok_per_s_per_user": 35.1,
+          "tokens_per_sec": 555.5,
+          "tokens_per_sec_per_gpu": 69.44,
+          "total_tokens_per_sec_per_gpu": 531.527,
+          "ttft_p99_ms": 6174.2,
+          "ttft_p99_ms_aggregate": 6174.157619999997,
+          "variant": "chunk size 8192"
+        }
+      ],
+      "runs": 6
+    }
+  ],
+  "totals": {
+    "configs": 3,
+    "configs_refused": 0,
+    "refused": 0,
+    "runs": 6,
+    "servable": 6
+  }
+}

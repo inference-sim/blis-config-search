@@ -1,0 +1,33 @@
+name: glm-5-h200-sglang-chunked-prefill
+scenario:
+  model: glm-5
+  engine_kind: sglang
+  hardware: h200
+  cluster:
+    gpus_per_node: 8
+  workload: multidoc
+  gpus: 8
+  engine:
+    mem_fraction_static: 0.85
+    context_length: 202752
+  concurrency:
+  - 8
+  - 16
+sweeps:
+- name: chunk-size
+  narrative: Smaller prefill chunks should cost both tail inter-token latency and
+    time-to-first-token, as each prompt then needs more passes.
+  num-instances:
+  - 1
+  parallel:
+    tp:
+    - 8
+    dp:
+    - 1
+    pp:
+    - 1
+  engine:
+    chunked_prefill_size:
+    - 512
+    - 2048
+    - 8192

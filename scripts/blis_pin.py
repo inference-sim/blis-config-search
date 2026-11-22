@@ -520,13 +520,16 @@ _FIT_REFUSALS = ("No available memory for the cache blocks", "No KV budget exist
 # Cases the pinned stack refuses and that are a known fault of the kernel's memory model, not of the
 # report. Each entry is strict: the case must still be refused with this signature, and smoke FAILS
 # when it no longer is, so an entry cannot outlive the fault. The report prints it as a known kernel
-# issue, never as a pass. `config` is a subset match on the ledger row's config.
+# issue, never as a pass. `config` is a subset match on the ledger row's config, and `absent` lists
+# keys the row must not set (a knob that changes what the memory model counts makes it another case).
 KNOWN_KERNEL_ISSUES = (
     {"report": "deepseek-v4-1-flash-b200-agentx-4node",
      "config": {"tp": 4, "dp": 1, "num_instances": 8, "enable_expert_parallel": True},
+     "absent": ("max_num_batched_tokens",),
      "signature": "per-rank fixed occupancy",
      "reason": "the kernel's CUDA-graph term is 127.75 GiB per rank against a 4.0 GiB activation peak (the "
-               "same shape fits an H200, and tp8 fits this B200), so the 210.4 GiB occupancy is an over-count "
+               "same shape fits an H200, tp8 fits this B200, and the same tp4 shape fits once "
+               "max_num_batched_tokens is set), so the 210.4 GiB occupancy is an over-count "
                "in the memory family; a deferred item for that family's owner, not a property of this report"},
 )
 
@@ -556,7 +559,8 @@ def _non_binding(run_id, knob, cfg):
 
 def _known_issue(run_id, cfg):
     for k in KNOWN_KERNEL_ISSUES:
-        if k["report"] == run_id and all(cfg.get(a) == b for a, b in k["config"].items()):
+        if (k["report"] == run_id and all(cfg.get(a) == b for a, b in k["config"].items())
+                and not any(a in cfg for a in k.get("absent", ()))):
             return k
     return None
 

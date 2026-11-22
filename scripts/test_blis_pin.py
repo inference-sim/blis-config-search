@@ -467,8 +467,12 @@ def test_smoke_verdicts():
                                  {"tp": 4, "dp": 1, "num_instances": 8, "enable_expert_parallel": True,
                                   "concurrency": 64}) is not None
                   and B._known_issue("deepseek-v4-1-flash-b200-agentx-4node", {"tp": 8, "dp": 1, "num_instances": 4,
-                                                                               "enable_expert_parallel": True}) is None,
-                  "the committed entry matches the tp4 ep4 8-instance case at any concurrency and not tp8")
+                                                                               "enable_expert_parallel": True}) is None
+                  and B._known_issue("deepseek-v4-1-flash-b200-agentx-4node",
+                                     {"tp": 4, "dp": 1, "num_instances": 8, "enable_expert_parallel": True,
+                                      "max_num_batched_tokens": 2048}) is None,
+                  "the committed entry matches the tp4 ep4 8-instance default case at any concurrency, not tp8 "
+                  "and not the same shape with max_num_batched_tokens set (that one fits)")
             # A known non-binding knob is strict too: identical numbers are a note, the knob moving
             # or the entry matching no picked pair fails the job, and other knobs stay SILENT.
             saved_nb = B.KNOWN_NON_BINDING_KNOBS

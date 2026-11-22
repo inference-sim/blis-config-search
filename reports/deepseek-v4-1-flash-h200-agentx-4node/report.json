@@ -10,11 +10,11 @@
     },
     {
       "h": "What was found",
-      "html": "<strong>4x TP8 + EP (5 draft tokens)</strong>, from the <em>drafting</em> sweep, reached 102.65 tok/s/accelerator (3284.8 tok/s across the fleet) at concurrency 96 while holding the scenario's SLOs. Ranking: max output tok/s per accelerator subject to the scenario's SLOs."
+      "html": "<strong>8x TP4 + EP (5 draft tokens)</strong>, from the <em>drafting</em> sweep, reached 103.04 tok/s/accelerator (3297.2 tok/s across the fleet) at concurrency 96 while holding the scenario's SLOs. Ranking: max output tok/s per accelerator subject to the scenario's SLOs."
     },
     {
       "h": "What to run",
-      "html": "4x TP8 + EP (5 draft tokens) at concurrency 96. 71 of 249 runs held the SLOs.",
+      "html": "8x TP4 + EP (5 draft tokens) at concurrency 96. 81 of 249 runs held the SLOs.",
       "run": true
     }
   ],
@@ -36,7 +36,7 @@
       "num": 2,
       "prose": [
         "Wide tp8 instances should win at the SLO, and EP should pay more as dp spreads 128 experts over more ranks.",
-        "Measured: best was <strong>4x TP8</strong> at 38.12 tok/s/accelerator (concurrency 32)."
+        "Measured: best was <strong>4x TP8 + EP</strong> at 62.35 tok/s/accelerator (concurrency 64)."
       ],
       "title": "Sweep: topology-ep"
     },
@@ -45,7 +45,7 @@
       "num": 3,
       "prose": [
         "max_num_seqs 16 should bind on 4 instances but not 8, while a larger token budget lifts both until ITL breaks.",
-        "Measured: best was <strong>4x TP8 + EP (batch tokens 32,768)</strong> at 89.69 tok/s/accelerator (concurrency 96)."
+        "Measured: best was <strong>8x TP4 + EP (batch tokens 16,384)</strong> at 90.14 tok/s/accelerator (concurrency 96)."
       ],
       "title": "Sweep: batch-caps"
     },
@@ -54,7 +54,7 @@
       "num": 4,
       "prose": [
         "Capping long prefills should cut ITL p99 enough to push the SLO knee past 96 lanes, at a small cost in raw throughput.",
-        "Measured: best was <strong>4x TP8 + EP (prefill chunk 4,096)</strong> at 38.01 tok/s/accelerator (concurrency 32)."
+        "Measured: best was <strong>4x TP8 + EP (prefill chunk 4,096)</strong> at 38.02 tok/s/accelerator (concurrency 32)."
       ],
       "title": "Sweep: prefill-chunking"
     },
@@ -63,7 +63,7 @@
       "num": 5,
       "prose": [
         "DeepEP low-latency should win at EP width 4-8 and lose to high-throughput at width 32, where dispatch volume dominates.",
-        "Measured: best was <strong>8x TP4 + EP</strong> at 61.91 tok/s/accelerator (concurrency 64)."
+        "Measured: best was <strong>4x TP8 + EP</strong> at 62.35 tok/s/accelerator (concurrency 64)."
       ],
       "title": "Sweep: moe-collective"
     },
@@ -72,7 +72,7 @@
       "num": 6,
       "prose": [
         "dspark should raise tok/s/GPU at K 3-5 but lift ITL p99 toward the 20ms SLO, so the best K may differ between shapes.",
-        "Measured: best was <strong>4x TP8 + EP (5 draft tokens)</strong> at 102.65 tok/s/accelerator (concurrency 96)."
+        "Measured: best was <strong>8x TP4 + EP (5 draft tokens)</strong> at 103.04 tok/s/accelerator (concurrency 96)."
       ],
       "title": "Sweep: drafting"
     },
@@ -81,7 +81,7 @@
       "num": 7,
       "prose": [
         "prefix-affinity with caching on should win, and the routing spread should widen from 4 to 8 instances.",
-        "Measured: best was <strong>8x TP4 + EP (prefix-affinity routing)</strong> at 61.4 tok/s/accelerator (concurrency 64)."
+        "Measured: best was <strong>4x TP8 + EP (prefix-affinity routing)</strong> at 38.05 tok/s/accelerator (concurrency 32)."
       ],
       "title": "Sweep: routing-prefix-cache"
     },
@@ -90,7 +90,7 @@
       "num": 8,
       "prose": [
         "gmu 0.95 should lift the KV-starved tp4 shapes noticeably and leave tp8 flat.",
-        "Measured: best was <strong>8x TP4 + EP</strong> at 61.91 tok/s/accelerator (concurrency 64)."
+        "Measured: best was <strong>4x TP8 + EP</strong> at 62.35 tok/s/accelerator (concurrency 64)."
       ],
       "title": "Sweep: kv-headroom"
     },
@@ -99,7 +99,7 @@
       "num": 9,
       "prose": [
         "FULL and FULL_AND_PIECEWISE should edge out the PIECEWISE default by a few percent, and NONE should collapse.",
-        "Measured: best was <strong>4x TP8 + EP (graph capture full)</strong> at 62.32 tok/s/accelerator (concurrency 64)."
+        "Measured: best was <strong>4x TP8 + EP (graph capture full+piecewise)</strong> at 62.35 tok/s/accelerator (concurrency 64)."
       ],
       "title": "Sweep: cudagraph"
     }

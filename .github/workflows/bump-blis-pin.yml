@@ -117,7 +117,11 @@ jobs:
         run: |
           set -euo pipefail
           set -a; . ./pins.env; set +a
-          git clone --branch "$BLIS_REF" --depth 1 https://github.com/inference-sim/inference-sim.git upstream
+          # BLIS_REF is a commit (the M3.2 stack head) or a release tag; a tag peels to its commit on checkout.
+          git init -q upstream
+          git -C upstream remote add origin https://github.com/inference-sim/inference-sim.git
+          git -C upstream fetch -q --depth 1 origin "$BLIS_REF"
+          git -C upstream checkout -q FETCH_HEAD
           test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
             echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
 

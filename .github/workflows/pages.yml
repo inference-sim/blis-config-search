@@ -68,13 +68,12 @@ jobs:
       - run: pip install --require-hashes -r requirements.txt
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with: { node-version: "22", cache: npm, cache-dependency-path: web/package-lock.json }
-      - name: Clone the pinned substrate release
+      - name: Check out the pinned substrate/
         # build_catalog.py reads its catalog/ and registry/ (the data the simulator embeds) from
-        # ../blis-substrate; without it the Submit pickers and spec-sheets are empty.
+        # ../inference-sim/substrate; without it the Submit pickers and spec-sheets are empty.
         run: |
           set -euo pipefail
-          set -a; . ./pins.env; set +a
-          sh scripts/clone_pinned.sh "$SUBSTRATE_REF" https://github.com/inference-sim/blis-substrate.git ../blis-substrate
+          sh scripts/clone_stack.sh ../inference-sim
       - name: Build + stage data, then build the SPA
         working-directory: web
         run: |

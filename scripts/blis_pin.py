@@ -54,6 +54,7 @@ UPSTREAM = "inference-sim/inference-sim"
 TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 # The keys whose VALUE says which stack priced a report. A comment-only edit to pins.env moves
 # none of them and must not queue hours of sweeps.
+IN_TREE = "in-tree"  # the `substrate` label of a stack with no SUBSTRATE_REF (M3.2 on)
 STACK_KEYS = ("BLIS_REF", "BLIS_SHA", "SUBSTRATE_REF", "VLLM_REF", "SGLANG_REF", "ROUTER_REF")
 # A batch is one PR. Small enough to review the numbers, large enough not to open a PR per report.
 MAX_BATCH = 4
@@ -151,7 +152,9 @@ def bump(tag, sha=None, go_mod=None, release_name=None, pins_path=PINS):
     The catalog and registry need no pin of their own: the release embeds them (CFG-1)."""
     pins = read_pins(pins_path)
     old_ref = pins.get("BLIS_REF")
-    if not newer(tag, old_ref):
+    # A commit pin (the M3.2 stack head, before its release tag exists) is moved to a release by
+    # naming the tag; between two tags the new one must be later.
+    if not semver(tag) or (semver(old_ref) and not newer(tag, old_ref)):
         raise SystemExit(f"{tag} is not newer than the pinned {old_ref}; nothing to bump")
     sha = sha or resolve_tag_sha(tag)
     if go_mod is None:
@@ -196,7 +199,8 @@ def is_current(scen_dir, pins=None):
     """Whether the report in `scen_dir` was priced by the stack pins.env names now.
 
     A report records the pins that priced it in scenario.json's `pinned_stack` (run_experiment's
-    _pinned_stack): `blis` is BLIS_REF, `router` ROUTER_REF and `substrate` SUBSTRATE_REF, and
+    _pinned_stack): `blis` is BLIS_REF, `router` ROUTER_REF and `substrate` SUBSTRATE_REF (absent
+    from M3.2, when the substrate is a directory of inference-sim: the label is "in-tree"), and
     `resolved.blis.commit`, when the binary's build info carried it, the commit it was built from.
     All three labels must match, and the commit too when it is recorded. VLLM_REF has no label of
     its own: BLIS_SHA determines it (pins.env's derived block). A label that is missing is not a
@@ -204,7 +208,7 @@ def is_current(scen_dir, pins=None):
     pins = pins if pins is not None else read_pins()
     st = (_load_json(os.path.join(scen_dir, "scenario.json"), {}) or {}).get("pinned_stack") or {}
     want = {"blis": pins.get("BLIS_REF"), "router": pins.get("ROUTER_REF"),
-            "substrate": pins.get("SUBSTRATE_REF")}
+            "substrate": pins.get("SUBSTRATE_REF") or IN_TREE}
     if any(not v or st.get(k) != v for k, v in want.items()):
         return False
     commit = ((st.get("resolved") or {}).get("blis") or {}).get("commit")

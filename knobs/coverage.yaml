@@ -14,12 +14,8 @@ knobs:
     reason: "one model per experiment (experiments/README.md); a second model is a second experiment"
   scenario:coefficients[]:
     reason: "the coefficient sets belong to the simulator release (CFG-1), not to a search"
-  scenario:engine_version:
-    reason: "derived from the engine kind's release"
   scenario:engine.kind:
     sweep: "scenario.engine_kind (one engine per experiment)"
-  scenario:engine.version:
-    reason: "derived from the engine kind's release"
   scenario:cluster.hardware:
     reason: "one hardware type per experiment (experiments/README.md); compare chips with two experiments"
   scenario:cluster.nodes:

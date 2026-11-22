@@ -1567,7 +1567,7 @@ def _pinned_stack(blis, catalog, registry, engine_version, data_override=False, 
     out = {"blis": pins.get("BLIS_REF", "unpinned"),
            "kernel": pins.get("KERNEL_REF", "unpinned"),
            "router": pins.get("ROUTER_REF", "unpinned"),
-           "substrate": pins.get("SUBSTRATE_REF", "unpinned"),
+           "substrate": pins.get("SUBSTRATE_REF", "in-tree"),  # M3.2: a directory of inference-sim
            "engine_version": engine_version,
            "data": "override" if data_override else "embedded"}
     # The router's reference configs a spec may use: where they were read from.

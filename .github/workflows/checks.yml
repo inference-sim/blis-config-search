@@ -135,21 +135,30 @@ jobs:
           for spec in experiments/*.yaml; do
             python3 -I scripts/run_experiment.py "$spec" --dry-run --blis upstream/blis --fields "$RUNNER_TEMP/fields.json"
           done
-      # What run-experiment does after a spec merges, for every SGLang spec: the real sweep, written to
-      # reports/ of this throwaway checkout (the sweeper refuses a report not priced by a tagged release's
-      # embedded data, so an unstamped build fails here and not on main), then the ledger is checked for it.
-      - name: Sweep each SGLang spec as run-experiment does (the binary must be the stamped release)
+      # What run-experiment does after a spec merges, for every SGLang spec: the real sweep, then the ledger is
+      # checked for it. When BLIS_REF is a release tag the binary is stamped as that release, so the sweep is
+      # written to reports/ of this throwaway checkout (the sweeper refuses a report not priced by a tagged
+      # release's embedded data, so an unstamped build fails here and not on main) and check_released_build.py
+      # proves it. While BLIS_REF is the M3.2 stack head (pins.env) the build is unreleased by construction, so
+      # the sweep is written outside reports/ and the released-build check waits for the release tag.
+      - name: Sweep each SGLang spec as run-experiment does (a tagged pin must be the stamped release)
         if: steps.scope.outputs.experiments == 'true'
         run: |
           set -euo pipefail
           set -a; . ./pins.env; set +a
-          sh scripts/clone_pinned.sh "$SUBSTRATE_REF" https://github.com/inference-sim/blis-substrate.git blis-substrate
+          sh scripts/clone_stack.sh "$RUNNER_TEMP/inference-sim"
+          out=reports/
+          if ! echo "$BLIS_REF" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then out="$RUNNER_TEMP/sweep"; fi
           for spec in experiments/*.yaml; do
             grep -Eq '^[[:space:]]+engine_kind:[[:space:]]*sglang' "$spec" || continue
             python3 -I scripts/run_experiment.py "$spec" --blis upstream/blis \
-              --catalog blis-substrate/catalog --registry blis-substrate/registry \
-              --fields "$RUNNER_TEMP/fields.json" --out reports/ --timeout 600 --max-parallel 4
-            python3 -I scripts/check_released_build.py "reports/$(basename "$spec" .yaml)"
+              --catalog "$RUNNER_TEMP/inference-sim/substrate/catalog" --registry "$RUNNER_TEMP/inference-sim/substrate/registry" \
+              --fields "$RUNNER_TEMP/fields.json" --out "$out" --timeout 600 --max-parallel 4
+            if [ "$out" = reports/ ]; then
+              python3 -I scripts/check_released_build.py "reports/$(basename "$spec" .yaml)"
+            else
+              echo "BLIS_REF is a commit, not a release tag: the released-build check waits for the tag"
+            fi
           done
 
   web:

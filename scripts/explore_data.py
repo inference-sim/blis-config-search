@@ -186,8 +186,9 @@ def defaults(run_dir, keys):
 
 GH = "https://github.com/inference-sim"
 _PINS = build_catalog.read_pins()
-# The catalog/ of a blis-substrate checkout at the pinned release (workload descriptors are read from it).
-CATALOG_DIR = os.environ.get("SUBSTRATE_CATALOG") or os.path.join(ROOT, os.pardir, "blis-substrate", "catalog")
+# The catalog/ the pinned simulator embeds (workload descriptors are read from it): the substrate/ directory
+# of an inference-sim checkout at BLIS_SHA (M3.2 on; scripts/clone_stack.sh makes one).
+CATALOG_DIR = os.environ.get("SUBSTRATE_CATALOG") or os.path.join(ROOT, os.pardir, "inference-sim", "substrate", "catalog")
 
 
 def _clone(repo, ref, commit, dest, *then):
@@ -195,7 +196,11 @@ def _clone(repo, ref, commit, dest, *then):
 
     One && chain, not `exit`: the script is pasted into an interactive shell, which must stay open.
     """
-    steps = [f"git clone --branch {ref} --depth 1 {GH}/{repo}.git {dest}"]
+    if re.fullmatch(r"[0-9a-f]{40}", ref or ""):    # a commit pin (an unreleased stack): git cannot clone a sha by name
+        steps = [f"git init -q {dest}", f"git -C {dest} remote add origin {GH}/{repo}.git",
+                 f"git -C {dest} fetch -q --depth 1 origin {ref}", f"git -C {dest} checkout -q FETCH_HEAD"]
+    else:
+        steps = [f"git clone --branch {ref} --depth 1 {GH}/{repo}.git {dest}"]
     if commit:
         steps.append(f'{{ test "$(git -C {dest} rev-parse HEAD)" = {commit} || '
                      f'{{ echo "{dest}: {ref} moved off {commit[:8]}, stopping" >&2; false; }}; }}')
@@ -237,7 +242,11 @@ def setup(exp, run_dir=None):
     sh += _clone("inference-sim", ps["blis"], commit("blis"), "inference-sim",
                  "(cd inference-sim && go build -o blis main.go)", 'export PATH="$PWD/inference-sim:$PATH"')
     sh.append("")
-    if ps.get("substrate"):
+    if ps.get("substrate") == "in-tree":
+        # M3.2 on: the substrate is a directory of inference-sim, so the checkout above holds the data
+        sh += ['export SUBSTRATE_CATALOG="$PWD/inference-sim/substrate/catalog"',
+               'export SUBSTRATE_REGISTRY="$PWD/inference-sim/substrate/registry"', ""]
+    elif ps.get("substrate"):
         # the simulator prices with the data embedded in this release (CFG-1); the checkout is only
         # where the scripts read catalog and registry files from
         sh += _clone("blis-substrate", ps["substrate"], None, "blis-substrate",
@@ -279,7 +288,7 @@ def setup(exp, run_dir=None):
             stack.append({"name": name, "repo": repo, "ref": ref, "commit": None})
     # a fresh checkout sweeps at today's pins.env, whose simulator fixes the engine release
     then = (ps["blis"], ps.get("substrate"))
-    now = (_PINS.get("BLIS_REF"), _PINS.get("SUBSTRATE_REF"))
+    now = (_PINS.get("BLIS_REF"), _PINS.get("SUBSTRATE_REF") or "in-tree")
     return {"stack": stack, "script": "\n".join(sh) + "\n", "sweep": "\n".join(sweep) + "\n",
             "pins_moved": then != now,
             "runs": (exp.get("totals") or {}).get("runs"), "hours": _wall_hours(run_dir) if run_dir else None}

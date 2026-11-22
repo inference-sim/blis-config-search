@@ -19,7 +19,7 @@ makes the step testable without GitHub.
 Download-then-verify-then-rename, so an interrupted transfer can never masquerade as the corpus.
 A spec whose workload is a generated shape needs nothing and exits 0 without touching the network.
 
-  python3 -I scripts/fetch_corpus.py experiments/<name>.yaml --catalog ../blis-substrate/catalog
+  python3 -I scripts/fetch_corpus.py experiments/<name>.yaml --catalog ../inference-sim/substrate/catalog
 """
 import argparse, hashlib, os, sys, urllib.request
 

@@ -3061,11 +3061,17 @@ class CommittedReportsKeepTheirSloVerdicts(unittest.TestCase):
                 with open(runs_path, encoding="utf-8") as f:
                     recs = [json.loads(ln) for ln in f]
                 self.assertEqual(len(rows), len(recs))
+                # A report written at the older default (the x axis 1000 / mean TPOT) keeps that
+                # `interactivity` until the regeneration the pin move queues rewrites it; only that
+                # one figure is on another basis, so every other field is still checked.
+                fields = self.FIELDS
+                if (exp.get("pareto") or {}).get("x") == "interactivity_of_mean_tpot":
+                    fields = tuple(k for k in fields if k != "interactivity")
                 for row, rec in zip(rows, recs):
                     ok, why = E.servable(rec, slo_ms, gpus)
                     got = {**E.run_row(rec, {}, "", "", "", 0, gpus, slo_ms, sc.get("slo")),
                            "servable": ok, "not_servable_because": why}
-                    self.assertEqual({k: row.get(k) for k in self.FIELDS}, {k: got.get(k) for k in self.FIELDS})
+                    self.assertEqual({k: row.get(k) for k in fields}, {k: got.get(k) for k in fields})
                 self.assertEqual(exp["interactivity_floor"],
                                  {"tok_per_s_per_user": E.floor_rate_from(slo_ms)})
 

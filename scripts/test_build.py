@@ -9,6 +9,7 @@ repo is absent.
 """
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -299,48 +300,55 @@ def test_catalog_workload_kinds():
         shutil.rmtree(tmp)
 
 
-def test_fetch_fields_resolves_a_pseudo_version_to_its_commit():
-    """go.mod names an unreleased blis-vllm commit by a pseudo-version, which is no git ref; the fields
-    file is fetched at the commit its last twelve hex digits name. A tag is fetched as itself."""
-    print("test_fetch_fields_resolves_a_pseudo_version_to_its_commit")
+def test_fetch_fields_reads_both_engines_at_the_pinned_commit():
+    """Since M3.2 the engine field lists are files of inference-sim at BLIS_SHA (engines/vllm and
+    engines/sglang); there is no engine pin of its own."""
+    print("test_fetch_fields_reads_both_engines_at_the_pinned_commit")
     sys.path.insert(0, os.path.join(ROOT, "scripts"))
     import fetch_fields
-    check(fetch_fields.fields_ref("v0.32.1-0.20261111132033-96ea750e3a62") == "96ea750e3a62", "pseudo-version")
-    check(fetch_fields.fields_ref("v0.32.0-blis.2") == "v0.32.0-blis.2", "a tag is itself")
-    check(fetch_fields.fields_ref("v0.13.0") == "v0.13.0", "a release is itself")
+    sha = "0" * 40
+    check(fetch_fields.fields_url(sha, "engines/vllm/fields.json")
+          == f"https://raw.githubusercontent.com/inference-sim/inference-sim/{sha}/engines/vllm/fields.json", "url")
+    check([k for k, _, _ in fetch_fields.ENGINES] == ["vllm", "sglang"], "both engines")
+    check(re.fullmatch(r"[0-9a-f]{40}", fetch_fields.pinned_sha()) is not None, "BLIS_SHA is a commit")
 
 
-def test_clone_pinned_clones_a_tag_or_the_commit_a_pseudo_version_names():
-    """The workflows clone blis-substrate at SUBSTRATE_REF, which is a tag or, while a stack is open, a
-    Go pseudo-version (no git ref). scripts/clone_pinned.sh handles both and refuses a ref that is not at
-    the pin."""
-    print("test_clone_pinned_clones_a_tag_or_the_commit_a_pseudo_version_names")
+def test_clone_stack_fetches_the_pinned_commit_sparsely():
+    """scripts/clone_stack.sh fetches BLIS_SHA (a commit, not a ref) with only substrate/catalog and
+    substrate/registry checked out, and refuses a checkout that is not the pinned commit."""
+    print("test_clone_stack_fetches_the_pinned_commit_sparsely")
     import subprocess
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "src")
         def git(*a, cwd=src):
             return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
-                                   "-c", "tag.gpgsign=false", *a], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
-        os.makedirs(src)
+                                   *a], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
+        os.makedirs(os.path.join(src, "substrate", "catalog"))
+        os.makedirs(os.path.join(src, "substrate", "registry"))
+        os.makedirs(os.path.join(src, "sim"))
         git("init", "-q", "-b", "main")
-        for i in range(2):
-            open(os.path.join(src, "f"), "w").write(str(i))
-            git("add", "f"); git("commit", "-qm", f"c{i}")
-            if i == 0:
-                git("tag", "v1.2.3")
-        first = git("rev-parse", "HEAD~1")
-        def clone(ref, dest):
-            return subprocess.run(["sh", os.path.join(ROOT, "scripts", "clone_pinned.sh"), ref, "file://" + src,
-                                   os.path.join(tmp, dest)], capture_output=True, text=True)
-        r = clone("v1.2.3", "tag")
-        check(r.returncode == 0 and git("rev-parse", "HEAD", cwd=os.path.join(tmp, "tag")) == first, "a tag is cloned by name")
-        pseudo = f"v1.2.4-0.20261111044143-{first[:12]}"
-        r = clone(pseudo, "pseudo")
-        check(r.returncode == 0 and git("rev-parse", "HEAD", cwd=os.path.join(tmp, "pseudo")) == first,
-              f"a pseudo-version is cloned at its commit: {r.stderr}")
-        check(clone("v9.9.9", "missing").returncode != 0, "a tag the repository lacks is refused")
-        check(clone("v1.2.4-0.20261111044143-" + "0" * 12, "nocommit").returncode != 0, "a commit it lacks is refused")
+        for rel in ("substrate/catalog/a", "substrate/registry/b", "sim/c"):
+            open(os.path.join(src, rel), "w").write("x")
+        git("add", "."); git("commit", "-qm", "c0")
+        sha = git("rev-parse", "HEAD")
+        git("config", "uploadpack.allowAnySHA1InWant", "true")
+        script = open(os.path.join(ROOT, "scripts", "clone_stack.sh")).read()
+        # point the script at the local repository and a pin file naming its commit
+        fake = os.path.join(tmp, "repo")
+        os.makedirs(os.path.join(fake, "scripts"))
+        open(os.path.join(fake, "pins.env"), "w").write(f"BLIS_REF={sha}\nBLIS_SHA={sha}\n")
+        script = script.replace("https://github.com/inference-sim/inference-sim.git", "file://" + src)
+        open(os.path.join(fake, "scripts", "clone_stack.sh"), "w").write(script)
+        dest = os.path.join(tmp, "out")
+        r = subprocess.run(["sh", os.path.join(fake, "scripts", "clone_stack.sh"), dest], capture_output=True, text=True)
+        check(r.returncode == 0, f"clone_stack: {r.stderr}")
+        check(os.path.exists(os.path.join(dest, "substrate", "catalog", "a")), "catalog checked out")
+        check(not os.path.exists(os.path.join(dest, "sim", "c")), "the rest of the tree is not")
+        open(os.path.join(fake, "pins.env"), "w").write(f"BLIS_REF={sha}\nBLIS_SHA={'1' * 40}\n")
+        r = subprocess.run(["sh", os.path.join(fake, "scripts", "clone_stack.sh"), os.path.join(tmp, "bad")],
+                           capture_output=True, text=True)
+        check(r.returncode != 0, "a checkout that is not the pinned commit is refused")
 
 
 def test_derived_pins_match_gomod():
@@ -451,8 +459,10 @@ def test_displayed_stack_survives_a_fresh_clone():
     # BLIS is the root; the rest are what it resolves to, never peers of it
     check(stack["root"]["name"] == "inference-sim",
           "the simulator binary is the root dependency, not one of several peers")
-    check("blis-substrate" in [d["name"] for d in stack["deps"]],
-          "the substrate's cost model prices every run; it must appear in the stack")
+    # The substrate has a row only while pins.env pins it (before M3.2); after, it is a directory of
+    # inference-sim and the root row stands for it.
+    check(("blis-substrate" in [d["name"] for d in stack["deps"]]) == bool(pins.get("SUBSTRATE_REF")),
+          "the substrate has a row exactly when pins.env pins it separately")
 
 
 def test_pins_are_the_single_source_of_the_sim_version():
@@ -528,7 +538,7 @@ def test_pins_are_the_single_source_of_the_sim_version():
     # SETUP.md documents the same pin a human would clone
     with open(os.path.join(ROOT, "SETUP.md")) as f:
         setup = f.read()
-    check(". ./pins.env" in setup and '--branch "$BLIS_REF"' in setup and '"$BLIS_SHA"' in setup,
+    check(". ./pins.env" in setup and 'fetch -q --depth 1 origin "$BLIS_REF"' in setup and '"$BLIS_SHA"' in setup,
           "SETUP.md should clone and verify what pins.env pins, by sourcing it")
     check(ref not in setup and sha not in setup,
           "SETUP.md should not copy the pinned release or commit (X23): pins.env is the one place")
@@ -537,8 +547,7 @@ def test_pins_are_the_single_source_of_the_sim_version():
     with open(os.path.join(ROOT, ".github", "workflows", "run-experiment.yml")) as f:
         exp_wf = f.read()
     check(". ./pins.env" in exp_wf, "run-experiment.yml should source pins.env")
-    for key in ("BLIS_REF", "SUBSTRATE_REF"):
-        check(f'"${key}"' in exp_wf, f"run-experiment.yml should take {key} from pins.env")
+    check('"$BLIS_REF"' in exp_wf, "run-experiment.yml should take BLIS_REF from pins.env")
     check(f"--branch {ref} " not in exp_wf,
           "run-experiment.yml hard-codes the sim ref; source it from pins.env instead")
     # It must CHECK the sha, by reading it from pins.env -- a literal sha here would be a second
@@ -622,7 +631,8 @@ def test_pins_name_no_independent_catalog_or_registry():
     pins = bc.read_pins()
     check("CATALOG_REF" not in pins and "REGISTRY_REF" not in pins,
           "pins.env pins a catalog or registry apart from the release that embeds them")
-    check(bool(pins.get("SUBSTRATE_REF")), "pins.env has no SUBSTRATE_REF to read catalog files from")
+    check(not any(pins.get(k) for k in ("SUBSTRATE_REF", "VLLM_REF", "SGLANG_REF")),
+          "the substrate and the engines are directories of inference-sim (M3.2): pins.env pins none of them")
     wf = os.path.join(ROOT, ".github", "workflows")
     for fn in sorted(os.listdir(wf)):
         with open(os.path.join(wf, fn)) as f:
@@ -985,7 +995,7 @@ def test_explore_data():
               "reproducing the sweep runs the report's own spec into repro/, not over reports/")
         check(explore_data.setup({}) is None, "a ledger with no pinned_stack ships no setup")
         pins = explore_data._PINS
-        now = {"blis": pins["BLIS_REF"], "substrate": pins["SUBSTRATE_REF"]}
+        now = {"blis": pins["BLIS_REF"], "substrate": pins.get("SUBSTRATE_REF", "in-tree")}
         check(not explore_data.setup({"pinned_stack": now})["pins_moved"]
               and explore_data.setup({"pinned_stack": dict(now, blis="v0.0.1")})["pins_moved"],
               "the sweep tab says when today's pins would sweep a different stack than the report's")
@@ -1007,7 +1017,8 @@ def test_explore_data():
 def test_build_script_stamps_the_pinned_release_tag():
     """The simulator calls a build released only when the linker stamps cmd.buildRelease with a release
     tag; an unstamped build makes every Result "unreleased", and the sweeper refuses its report. The
-    build script must stamp the tag pins.env names, whatever it is."""
+    build script stamps the tag pins.env names. While pins.env names a commit (an open stack) there is
+    no tag, none is invented, and the build is plain; anything else is refused."""
     print("test_build_script_stamps_the_pinned_release_tag")
     import subprocess
     tmp = tempfile.mkdtemp()
@@ -1020,16 +1031,31 @@ def test_build_script_stamps_the_pinned_release_tag():
         os.chmod(fake, 0o755)
         log = os.path.join(tmp, "log")
         env = dict(os.environ, PATH=bindir + os.pathsep + os.environ["PATH"], FAKE_GO_LOG=log)
-        r = subprocess.run(["sh", os.path.join(ROOT, "scripts", "build_blis.sh"), up], env=env,
-                           capture_output=True, text=True)
+        repo = os.path.join(tmp, "repo")
+        os.makedirs(os.path.join(repo, "scripts"))
+        shutil.copy(os.path.join(ROOT, "scripts", "build_blis.sh"), os.path.join(repo, "scripts"))
+
+        def build(ref):
+            with open(os.path.join(repo, "pins.env"), "w") as f:
+                f.write(f"BLIS_REF={ref}\n")
+            if os.path.exists(log):
+                os.remove(log)
+            return subprocess.run(["sh", os.path.join(repo, "scripts", "build_blis.sh"), up], env=env,
+                                  capture_output=True, text=True)
+
+        r = build("v1.2.3")
         check(r.returncode == 0, f"build_blis.sh runs the build: {r.stderr}")
         with open(log) as f:
             where, args = f.read().splitlines()
-        ref = bc.read_pins()["BLIS_REF"]
         check(os.path.realpath(where) == os.path.realpath(up), "the build runs inside the simulator checkout")
-        check(f"-X github.com/inference-sim/inference-sim/cmd.buildRelease={ref}" in args,
-              f"the build stamps pins.env's BLIS_REF {ref}: {args}")
+        check("-X github.com/inference-sim/inference-sim/cmd.buildRelease=v1.2.3" in args,
+              f"the build stamps pins.env's BLIS_REF: {args}")
         check(args.endswith("-o blis main.go"), f"the binary is DIR/blis: {args}")
+        r = build("a" * 40)
+        check(r.returncode == 0 and "unreleased" in r.stderr, f"a commit pin builds, and says it is unreleased: {r.stderr}")
+        with open(log) as f:
+            check("buildRelease" not in f.read(), "no release tag is invented for a commit")
+        check(build("main").returncode != 0, "a branch name is neither a tag nor a commit: refused")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1069,8 +1095,8 @@ if __name__ == "__main__":
     test_explore_data()
     test_catalog_workload_kinds()
     test_pins_are_the_single_source_of_the_sim_version()
-    test_fetch_fields_resolves_a_pseudo_version_to_its_commit()
-    test_clone_pinned_clones_a_tag_or_the_commit_a_pseudo_version_names()
+    test_fetch_fields_reads_both_engines_at_the_pinned_commit()
+    test_clone_stack_fetches_the_pinned_commit_sparsely()
     test_derived_pins_match_gomod()
     test_displayed_stack_survives_a_fresh_clone()
     test_pins_name_no_independent_catalog_or_registry()

@@ -40,13 +40,13 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 JOBS = ("python", "experiments", "web", "pages")
 
 # Roots whose import closure (plus the root itself) is what a job reads from scripts/.
-# fetch_fields.py and clone_pinned.sh are run as commands, not imported, so they are named.
+# fetch_fields.py and clone_stack.sh are run as commands, not imported, so they are named.
 CLOSURE_ROOTS = {
     "experiments": ("validate_experiment.py", "run_experiment.py", "fetch_fields.py", "knob_profile.py",
-                    "knob_table.py", "check_pending_pin.py", "check_released_build.py", "clone_pinned.sh",
+                    "knob_table.py", "check_pending_pin.py", "check_released_build.py", "clone_stack.sh",
                     "build_blis.sh"),
     "web": ("build_gallery.py",),
-    "smoke": ("blis_pin.py", "fetch_fields.py", "clone_pinned.sh"),
+    "smoke": ("blis_pin.py", "fetch_fields.py", "clone_stack.sh"),
 }
 
 # Paths no job reads. Everything else must be claimed by a rule below or it selects every job.

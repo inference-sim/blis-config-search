@@ -44,6 +44,12 @@ require (
 replace github.com/llm-d/llm-d-router => github.com/inference-sim/llm-d-router v1.0.0-blis.2
 """
 
+# M3.2 on: the substrate and engines are directories of inference-sim; only the router fork is a module.
+GO_MOD_M32 = """module github.com/inference-sim/inference-sim
+
+replace github.com/llm-d/llm-d-router => github.com/inference-sim/llm-d-router v1.0.0-blis.5.0.20261121014725-cb8d93fcb0fa
+"""
+
 
 def test_version_ordering():
     print("test_version_ordering")
@@ -143,7 +149,7 @@ def test_setup_md_sources_the_pins():
     with open(os.path.join(B.ROOT, "SETUP.md")) as f:
         setup = f.read()
     pins = B.read_pins()
-    check(". ./pins.env" in setup and '--branch "$BLIS_REF"' in setup
+    check(". ./pins.env" in setup and 'fetch -q --depth 1 origin "$BLIS_REF"' in setup
           and '"$(git rev-parse HEAD)" = "$BLIS_SHA"' in setup,
           "the clone recipe sources pins.env and uses $BLIS_REF and $BLIS_SHA")
     check(pins["BLIS_REF"] not in setup and pins["BLIS_SHA"] not in setup,
@@ -158,28 +164,23 @@ def test_bump_end_to_end_on_copies():
         pins = os.path.join(tmp, "pins.env")
         shutil.copy(B.PINS, pins)
         cur = B.read_pins(pins)
-        if not B.semver(cur["BLIS_REF"]):
-            # A draft pins a branch commit; the bot orders only release tags, so start the copy
-            # from one.
-            with open(pins) as f:
-                text = B.rewrite_pins(f.read(), {"BLIS_REF": "v0.15.0"})
-            with open(pins, "w") as f:
-                f.write(text)
-            cur = B.read_pins(pins)
+        # The copy of pins.env may pin a commit (the M3.2 stack head): a bump moves it to the first
+        # release tag, and from then on to later ones.
         setup_before = open(os.path.join(B.ROOT, "SETUP.md"), "rb").read()
-        moved = B.bump("v99.0.0", sha="e" * 40, go_mod=GO_MOD, release_name="v99.0.0: big", pins_path=pins)
+        moved = B.bump("v99.0.0", sha="e" * 40, go_mod=GO_MOD_M32, release_name="v99.0.0: big", pins_path=pins)
         after = B.read_pins(pins)
         check(after["BLIS_REF"] == "v99.0.0" and after["BLIS_SHA"] == "e" * 40, "pin moved")
-        check(after["SUBSTRATE_REF"] == "v0.11.0", "SUBSTRATE_REF follows the release's go.mod")
-        check(after["VLLM_REF"] == "v0.32.0-blis.2" and after["ROUTER_REF"] == "v1.0.0-blis.2",
-              "every derived pin follows the release's go.mod")
+        check(after["ROUTER_REF"] == "v1.0.0-blis.5.0.20261121014725-cb8d93fcb0fa",
+              "the router pin follows the release's go.mod")
+        check("SUBSTRATE_REF" not in after and "VLLM_REF" not in after,
+              "the substrate and the engines are in-tree: no pin of their own")
         check("CATALOG_REF" not in after and "REGISTRY_REF" not in after,
               "the catalog and registry are embedded in the release: no pin of their own")
         check(set(moved) >= {"BLIS_REF", "BLIS_SHA"}, f"bump reports what moved: {moved}")
         check(open(os.path.join(B.ROOT, "SETUP.md"), "rb").read() == setup_before,
               "a bump leaves SETUP.md alone: it sources pins.env and holds no version")
         try:
-            B.bump(cur["BLIS_REF"], sha="e" * 40, go_mod=GO_MOD, pins_path=pins)
+            B.bump(after["BLIS_REF"], sha="e" * 40, go_mod=GO_MOD_M32, pins_path=pins)
             check(False, "bumping to a tag that is not newer must refuse")
         except SystemExit:
             check(True, "")
@@ -453,9 +454,9 @@ def test_workflow_wiring():
           "a pushed branch with no PR (a failed create) is resumed, not skipped forever")
     check("github.event.before" in regen and "fetch-depth: 0" in regen,
           "pins are compared across the whole push: a rebase-merged pin PR ends in its fixes")
-    check("../blis-substrate" not in regen and "--catalog blis-substrate/catalog" in regen
+    check("../blis-substrate" not in regen and "--catalog inference-sim/substrate/catalog" in regen
           and "--data-override" not in regen,
-          "regen clones the substrate inside the checkout, so ledger cmds stay relative, and "
+          "regen checks out inference-sim's substrate/ inside the checkout, so ledger cmds stay relative, and "
           "prices with the simulator's embedded data")
     check('paths: ["pins.env"]' in regen and "branches: [main]" in regen,
           "regeneration triggers on a pins.env change reaching main")

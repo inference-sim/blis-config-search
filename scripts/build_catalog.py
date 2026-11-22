@@ -407,8 +407,10 @@ def build(substrate):
     # claim the new simulator priced runs it never saw. So the reports get asked first: each
     # scenario.json records the `pinned_stack.blis` that actually priced it.
     pins = read_pins()
+    # From M3.2 the substrate is the substrate/ directory of an inference-sim checkout: describe that.
+    root = os.path.dirname(os.path.abspath(substrate)) if os.path.basename(os.path.abspath(substrate)) == "substrate" else substrate
     versions = {
-        "blis-substrate": _git_describe(substrate),
+        "blis-substrate": _git_describe(root),
         "inference-sim": _priced_by(pins),
     }
     return {"models": models, "hardware": hardware, "workloads": workloads,

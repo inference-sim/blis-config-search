@@ -1,5 +1,5 @@
 name: pinned-blis
-description: The simulator binary at pins.env's BLIS_SHA, at upstream/blis. Built once per commit and cached.
+description: The simulator binary at pins.env's BLIS_SHA (the M3.2 stack head, then its release tag), at upstream/blis. Built once per commit and cached.
 runs:
   using: composite
   steps:
@@ -9,10 +9,15 @@ runs:
         set -euo pipefail
         set -a; . ./pins.env; set +a
         echo "sha=$BLIS_SHA" >> "$GITHUB_OUTPUT"
-        # A tag or branch can move; refuse it even when the binary is cached.
-        url=https://github.com/inference-sim/inference-sim.git
-        now="$(git ls-remote "$url" "refs/heads/$BLIS_REF" "refs/tags/$BLIS_REF^{}" "refs/tags/$BLIS_REF" | awk '{print $1}' | head -2 | tail -1)"
-        [ "$now" = "$BLIS_SHA" ] || { echo "::error::$BLIS_REF no longer resolves to $BLIS_SHA" >&2; exit 1; }
+        if echo "$BLIS_REF" | grep -Eq '^[0-9a-f]{40}$'; then
+          # The M3.2 stack head is pinned by its commit, which names fixed content: it is BLIS_SHA itself.
+          [ "$BLIS_REF" = "$BLIS_SHA" ] || { echo "::error::BLIS_REF is a commit, so BLIS_SHA must be the same commit" >&2; exit 1; }
+        else
+          # A tag or branch can move; refuse it even when the binary is cached.
+          url=https://github.com/inference-sim/inference-sim.git
+          now="$(git ls-remote "$url" "refs/heads/$BLIS_REF" "refs/tags/$BLIS_REF^{}" "refs/tags/$BLIS_REF" | awk '{print $1}' | head -2 | tail -1)"
+          [ "$now" = "$BLIS_SHA" ] || { echo "::error::$BLIS_REF no longer resolves to $BLIS_SHA" >&2; exit 1; }
+        fi
     - id: cache
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
@@ -24,7 +29,11 @@ runs:
         set -euo pipefail
         set -a; . ./pins.env; set +a
         rm -rf upstream
-        git clone --branch "$BLIS_REF" --depth 1 https://github.com/inference-sim/inference-sim.git upstream
+        # A commit or a release tag, fetched by name (a tag peels to its commit on checkout).
+        git init -q upstream
+        git -C upstream remote add origin https://github.com/inference-sim/inference-sim.git
+        git -C upstream fetch -q --depth 1 origin "$BLIS_REF"
+        git -C upstream checkout -q FETCH_HEAD
         test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
           echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
     - if: steps.cache.outputs.cache-hit != 'true'

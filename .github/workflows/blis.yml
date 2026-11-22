@@ -7,8 +7,9 @@ name: blis
 # The pinned commit still has the description, commit-policy and cited-issue steps; the pin moves
 # to the substrate release whose shared-pr-checks.yml has dropped them.
 #
-# The commit is blis-substrate release v0.14.1 (f9f3c93), the release pins.env's SUBSTRATE_REF
-# names; it moves with that pin. v0.14.1's description check accepts a dependency pin written as
+# The commit is blis-substrate release v0.14.1 (f9f3c93). Since M3.2 the substrate is in-tree in
+# inference-sim and pins.env has no SUBSTRATE_REF, so this commit moves by hand until the shared
+# check is published from the M3.2 tag. v0.14.1's description check accepts a dependency pin written as
 # a release tag ("owner/repo at vX.Y.Z <hash>"), the form the pin-bump PR body uses.
 
 on:

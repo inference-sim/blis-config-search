@@ -427,7 +427,7 @@ def test_smoke_verdicts():
                 rec["released_build"] = False
                 return rec
             run_blis.run_one = fake(unreleased)
-            r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root, pin_ref="3e8fb1d24106c001f4eb46ce96cb219b7125675e")
+            r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root, pin_ref="0fb85a76192eb1cb3f55aadc42d3f24876385c0c")
             check(not r["failures"] and sum("is a commit" in w for w in r["warnings"]) == 1,
                   f"an unreleased binary at a commit pin is one warning per report, not a failure per row: {r}")
             r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root, pin_ref="v0.19.0")

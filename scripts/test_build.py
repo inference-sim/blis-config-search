@@ -755,14 +755,17 @@ def test_workflows_sane():
     check("github.event.pull_request.number" in str(pdoc["concurrency"]["group"]),
           "pages runs are grouped per PR, so batch PRs don't cancel each other's previews")
 
-    # CI checks product correctness only: an edit of a pull request's title or body starts no run,
-    # and no workflow reads that text or runs on a schedule of the shared process checks. Only
-    # ci-retarget.yml listens for `edited`, and it does nothing unless the base changed.
+    # CI checks product correctness only: an edit of a pull request's title or body starts no run
+    # of checks.yml, pin-compat.yml or the others (#140, #141), and nothing runs on a schedule of
+    # the shared process checks. Two workflows listen for `edited`: ci-retarget.yml, which does
+    # nothing unless the base changed, and blis.yml, because the pinned shared check still reads the
+    # pull request's title and body (a text check must see a text edit).
     wfd = os.path.join(ROOT, ".github", "workflows")
     for fn in sorted(os.listdir(wfd)):
         wdoc = _yaml.safe_load(open(os.path.join(wfd, fn)))
         pr_types = ((wdoc.get(True) or {}).get("pull_request") or {}).get("types") or []
-        check(("edited" in pr_types) == (fn == "ci-retarget.yml"), f"{fn}: only ci-retarget.yml runs on an edit")
+        check(("edited" in pr_types) == (fn in ("ci-retarget.yml", "blis.yml")),
+              f"{fn}: only ci-retarget.yml and blis.yml run on an edit")
         check("pull_request.body" not in open(os.path.join(wfd, fn)).read(), f"{fn} reads no pull request text")
     blis_wf = _yaml.safe_load(open(os.path.join(wfd, "blis.yml")))
     check("schedule" not in blis_wf[True] and "nightly" not in blis_wf["jobs"],

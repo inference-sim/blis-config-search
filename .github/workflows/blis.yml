@@ -3,9 +3,12 @@ name: blis
 # The shared BLIS pull-request checks (design §13.2), called from blis-substrate by commit (X21):
 # workflow lint, version literals, documentation references, the generated AGENTS.md section and
 # pull-request template, the selected-version lint. There is no scheduled run: CI checks product
-# correctness only, and an edit of the pull request's title or body starts no run (M3.2 row 22).
-# The pinned commit still has the description, commit-policy and cited-issue steps; the pin moves
-# to the substrate release whose shared-pr-checks.yml has dropped them.
+# correctness only (M3.2 row 22).
+# The pinned commit still has the description, commit-policy and cited-issue steps, which read the
+# pull request's title and body, so this workflow runs on `edited` (#141: a text check must see a
+# text edit). It is its own workflow, so an edit starts nothing in checks.yml or pin-compat.yml.
+# The pin moves to the substrate release whose shared-pr-checks.yml has dropped those steps; the
+# `edited` type goes with them.
 #
 # The commit is blis-substrate release v0.14.1 (f9f3c93). Since M3.2 the substrate is in-tree in
 # inference-sim and pins.env has no SUBSTRATE_REF, so this commit moves by hand until the shared
@@ -14,7 +17,7 @@ name: blis
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, edited, synchronize, reopened]
 
 permissions:
   contents: read

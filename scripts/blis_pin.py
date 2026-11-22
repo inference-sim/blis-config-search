@@ -517,6 +517,50 @@ _FIT_REFUSALS = ("No available memory for the cache blocks", "No KV budget exist
                  "To serve at least one request with the model's max seq len")
 
 
+# Cases the pinned stack refuses and that are a known fault of the kernel's memory model, not of the
+# report. Each entry is strict: the case must still be refused with this signature, and smoke FAILS
+# when it no longer is, so an entry cannot outlive the fault. The report prints it as a known kernel
+# issue, never as a pass. `config` is a subset match on the ledger row's config.
+KNOWN_KERNEL_ISSUES = (
+    {"report": "deepseek-v4-1-flash-b200-agentx-4node",
+     "config": {"tp": 4, "dp": 1, "num_instances": 8, "enable_expert_parallel": True},
+     "signature": "per-rank fixed occupancy",
+     "reason": "the kernel's CUDA-graph term is 127.75 GiB per rank against a 4.0 GiB activation peak (the "
+               "same shape fits an H200, and tp8 fits this B200), so the 210.4 GiB occupancy is an over-count "
+               "in the memory family; a deferred item for that family's owner, not a property of this report"},
+)
+
+
+# Knobs whose swept value cannot bind at the row the smoke picked, so the new stack measuring the
+# pair identically is the correct behaviour and not a knob gone inert (SILENT). Strict like the list
+# above: the pair must still measure identically, and the entry must still match a pair smoke
+# picks; either failing fails the job, so the entry cannot outlive the fact. `config` is a subset
+# match on the knob row's config. This does not touch the SILENT rule for any other knob or row.
+KNOWN_NON_BINDING_KNOBS = (
+    {"report": "muse-spark-open-816b-a42b-gb200-agentx-rack", "knob": "max_num_seqs",
+     "config": {"tp": 8, "num_instances": 8, "concurrency": 128},
+     "reason": "128 session lanes is the most requests that can be in flight in the whole rack (the "
+               "ledger's cutoff snapshot shows 15 running), so no one of the 8 instances reaches "
+               "max_num_seqs=32 and the cap cannot bind there; the old stack's 0.8% is below what a cap "
+               "that does not bind explains. The cap does bind at 512 lanes, where the ledger shows up to 14%; "
+               "a per-instance peak is not recorded in the report"},
+)
+
+
+def _non_binding(run_id, knob, cfg):
+    for k in KNOWN_NON_BINDING_KNOBS:
+        if k["report"] == run_id and k["knob"] == knob and all(cfg.get(a) == b for a, b in k["config"].items()):
+            return k
+    return None
+
+
+def _known_issue(run_id, cfg):
+    for k in KNOWN_KERNEL_ISSUES:
+        if k["report"] == run_id and all(cfg.get(a) == b for a, b in k["config"].items()):
+            return k
+    return None
+
+
 def _fit_refusal(why):
     return any(m in why for m in _FIT_REFUSALS) or ("does not fit" in why and "devices" in why)
 
@@ -706,6 +750,7 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
 
     checks, failures, warnings = [], [], []
     unreleased_noted = False
+    known_issues = []
     for key, old in sorted(todo.items()):
         n = new[key]
         why = (n.get("error") or (n.get("stderr_tail") or "")[-300:]).strip()
@@ -726,7 +771,17 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
                 failures.append(f"LOUD: {run_id} {_cfg_phrase(old['config'])} ran on a binary that is not a tagged "
                                 f"release (its Result says data.build is unreleased): the build must be "
                                 f"stamped with the release tag (scripts/build_blis.sh)")
-        if _broken(n) and _fit_refusal(why):
+        known = _known_issue(run_id, old["config"])
+        if known is not None:
+            if _broken(n) and known["signature"] in why:
+                known_issues.append(f"{run_id} {_cfg_phrase(old['config'])} is refused ({known['signature']}): "
+                                    f"{known['reason']}")
+            else:
+                failures.append(f"LOUD: {run_id} {_cfg_phrase(old['config'])} is listed in KNOWN_KERNEL_ISSUES "
+                                f"but is no longer refused for '{known['signature']}'"
+                                + (f" ({why[-200:]})" if why else "")
+                                + ": remove its entry from scripts/blis_pin.py")
+        elif _broken(n) and _fit_refusal(why):
             warnings.append(f"{run_id} {_cfg_phrase(old['config'])} no longer fits on the new stack "
                             f"and is refused ({why[-400:]}): its report records it as a named "
                             f"refusal on regeneration")
@@ -736,18 +791,35 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
         elif not _ok(n):
             warnings.append(f"{run_id} {_cfg_phrase(old['config'])} still runs but no longer "
                             f"completes cleanly ({why}): expect its report to move on regeneration")
+    non_binding, matched = [], set()
     for p in pairs:
         if p["row"] is None or not p["moved"]:
             continue
         b = new[json.dumps(p["base"]["config"], sort_keys=True)]
         k = new[json.dumps(p["row"]["config"], sort_keys=True)]
+        listed = _non_binding(run_id, p["knob"], p["row"]["config"])
+        if listed is not None:
+            matched.add(id(listed))
         if _ok(b) and _ok(k) and _same_measurement(b, k):
+            if listed is not None:
+                non_binding.append(f"{run_id} `{p['knob']}` {_cfg_phrase(p['row']['config'])} measures identically "
+                                   f"to its baseline: {listed['reason']}")
+                continue
             failures.append(
                 f"SILENT: {run_id} `{p['knob']}` moved throughput {_tps(p['base']):.1f} -> "
                 f"{_tps(p['row']):.1f} on the old stack and now measures IDENTICALLY to its "
                 f"baseline ({_tps(b):.1f}) -- the new release no longer models it. Its field-list "
                 f"entry in the engine repository should say so (VLM-3).")
+        elif listed is not None and _ok(b) and _ok(k):
+            failures.append(f"LOUD: {run_id} `{p['knob']}` is listed in KNOWN_NON_BINDING_KNOBS but now "
+                            f"moves throughput ({_tps(b):.1f} -> {_tps(k):.1f}): remove its entry from "
+                            f"scripts/blis_pin.py")
+    for k in KNOWN_NON_BINDING_KNOBS:
+        if k["report"] == run_id and id(k) not in matched:
+            failures.append(f"LOUD: {run_id} lists `{k['knob']}` in KNOWN_NON_BINDING_KNOBS but smoke no "
+                            f"longer picks a pair it matches: remove or update its entry in scripts/blis_pin.py")
     return {"id": run_id, "checks": checks, "failures": failures, "warnings": warnings,
+            "known_issues": known_issues, "known_non_binding": non_binding,
             "pairs": [{"knob": p["knob"], "moved": p["moved"]} for p in pairs]}
 
 
@@ -768,11 +840,23 @@ def smoke_markdown(results):
                     + (", ".join(f"`{p['knob']}`" + ("" if p["moved"] else " (inert before)")
                                  for p in r.get("pairs", []) if p["knob"]) or "—")
                     + f" | {_fmt(c0.get('old_tps'))} → {_fmt(c0.get('new_tps'))} | "
-                    + ("**FAIL**" if r["failures"] else "ok") + " |")
+                    + ("**FAIL**" if r["failures"] else "ok, with a **known kernel issue**" if r.get("known_issues")
+                       else "ok, with a **known non-binding knob**" if r.get("known_non_binding")
+                       else "ok") + " |")
     fails = [f for r in results for f in r["failures"]]
     if fails:
         rows += ["", "**Failures** — fix these on this PR; regeneration only starts after merge:", ""]
         rows += [f"- {f}" for f in fails]
+    known = [k for r in results for k in r.get("known_issues", [])]
+    if known:
+        rows += ["", "**Known kernel issues** — refused on purpose, not a pass; the entry fails the job when the "
+                 "case stops being refused:", ""]
+        rows += [f"- {k}" for k in known]
+    nb = [k for r in results for k in r.get("known_non_binding", [])]
+    if nb:
+        rows += ["", "**Known non-binding knobs** — identical numbers are correct here, not a knob gone inert; "
+                 "the entry fails the job when the knob starts to move or the entry stops matching:", ""]
+        rows += [f"- {k}" for k in nb]
     warns = [w for r in results for w in r.get("warnings", [])]
     if warns:
         rows += ["", "**Warnings** — not a failure, but the numbers will move:", ""]

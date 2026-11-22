@@ -433,6 +433,79 @@ def test_smoke_verdicts():
             r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root, pin_ref="v0.19.0")
             check(sum(f.startswith("LOUD") and "not a tagged release" in f for f in r["failures"]) == 3,
                   f"an unreleased binary at a release-tag pin is LOUD: {r['failures']}")
+            # A known kernel issue is strict: refused with its signature is a loud note, not a pass;
+            # the case running again, or refused for another reason, fails the job.
+            occ = "kernelmodel: the kernel reports 210.4 GiB of per-rank fixed occupancy on a 178.4 GiB device"
+            saved_known = B.KNOWN_KERNEL_ISSUES
+            B.KNOWN_KERNEL_ISSUES = ({"report": "r", "config": {"tp": 8, "num_instances": 2}, "signature":
+                                      "per-rank fixed occupancy", "reason": "an over-count"},)
+            try:
+                run_blis.run_one = fake(lambda c: _rec(c, 0, rc=1, error=occ))
+                r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
+                md = B.smoke_markdown([r])
+                check(not r["failures"] and len(r["known_issues"]) == 3 and "Known kernel issues" in md
+                      and "known kernel issue" in md and "an over-count" in md,
+                      f"a refused known case is printed as a known kernel issue, not a pass: {r['failures']}")
+                run_blis.run_one = fake(lambda c: _rec(c, 81.0 if c.get("max_num_seqs") else
+                                                       91.0 if c.get("router_config") else 101.0))
+                r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
+                check(sum("KNOWN_KERNEL_ISSUES" in f for f in r["failures"]) == 3 and not r["known_issues"],
+                      f"a known case that now runs fails the job: {r['failures']}")
+                run_blis.run_one = fake(lambda c: _rec(c, 0, rc=1, error="field x not found"))
+                r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
+                check(sum("KNOWN_KERNEL_ISSUES" in f for f in r["failures"]) == 3,
+                      "a known case refused for another reason fails the job")
+                B.KNOWN_KERNEL_ISSUES = ({"report": "other", "config": {"tp": 8}, "signature": "per-rank fixed occupancy",
+                                          "reason": "x"},)
+                run_blis.run_one = fake(lambda c: _rec(c, 0, rc=1, error=occ))
+                r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
+                check(sum(f.startswith("LOUD") for f in r["failures"]) == 3 and not r["known_issues"],
+                      "an entry for another report excuses nothing")
+            finally:
+                B.KNOWN_KERNEL_ISSUES = saved_known
+            check(B._known_issue("deepseek-v4-1-flash-b200-agentx-4node",
+                                 {"tp": 4, "dp": 1, "num_instances": 8, "enable_expert_parallel": True,
+                                  "concurrency": 64}) is not None
+                  and B._known_issue("deepseek-v4-1-flash-b200-agentx-4node", {"tp": 8, "dp": 1, "num_instances": 4,
+                                                                               "enable_expert_parallel": True}) is None,
+                  "the committed entry matches the tp4 ep4 8-instance case at any concurrency and not tp8")
+            # A known non-binding knob is strict too: identical numbers are a note, the knob moving
+            # or the entry matching no picked pair fails the job, and other knobs stay SILENT.
+            saved_nb = B.KNOWN_NON_BINDING_KNOBS
+            B.KNOWN_NON_BINDING_KNOBS = ({"report": "r", "knob": "max_num_seqs", "config": {"tp": 8, "num_instances": 2},
+                                          "reason": "the cap cannot bind"},)
+            try:
+                run_blis.run_one = fake(lambda c: _rec(c, 91.0 if c.get("router_config") else 100.0))
+                r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
+                md = B.smoke_markdown([r])
+                check(not r["failures"] and len(r["known_non_binding"]) == 1 and "Known non-binding knobs" in md
+                      and "the cap cannot bind" in md,
+                      f"a listed knob that measures identically is a note, not SILENT: {r['failures']}")
+                run_blis.run_one = fake(lambda c: _rec(c, 81.0 if c.get("max_num_seqs") else
+                                                       91.0 if c.get("router_config") else 101.0))
+                r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
+                check(any("KNOWN_NON_BINDING_KNOBS" in f and "now moves" in f for f in r["failures"])
+                      and not r["known_non_binding"],
+                      f"a listed knob that now moves fails the job: {r['failures']}")
+                B.KNOWN_NON_BINDING_KNOBS = ({"report": "r", "knob": "max_num_seqs", "config": {"tp": 4},
+                                              "reason": "x"},)
+                run_blis.run_one = fake(lambda c: _rec(c, 91.0 if c.get("router_config") else 100.0))
+                r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
+                check(any(f.startswith("SILENT") for f in r["failures"])
+                      and any("no longer picks a pair" in f for f in r["failures"]),
+                      f"an entry matching no picked pair excuses nothing and is itself a failure: {r['failures']}")
+                B.KNOWN_NON_BINDING_KNOBS = ({"report": "r", "knob": "router_config", "config": {"tp": 8},
+                                              "reason": "x"},)
+                r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
+                check(any(f.startswith("SILENT") and "max_num_seqs" in f for f in r["failures"]),
+                      "an entry for one knob does not excuse another knob")
+            finally:
+                B.KNOWN_NON_BINDING_KNOBS = saved_nb
+            check(B._non_binding("muse-spark-open-816b-a42b-gb200-agentx-rack", "max_num_seqs",
+                                 {"tp": 8, "num_instances": 8, "concurrency": 128}) is not None
+                  and B._non_binding("muse-spark-open-816b-a42b-gb200-agentx-rack", "max_num_seqs",
+                                     {"tp": 8, "num_instances": 8, "concurrency": 512}) is None,
+                  "the committed entry covers the 128-lane pair and not the 512-lane pair, where the cap binds")
             run_blis.run_one = fake(lambda c: _rec(c, 0, rc=1, error="field x not found"))
             r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
             check(sum(f.startswith("LOUD") for f in r["failures"]) == 3,

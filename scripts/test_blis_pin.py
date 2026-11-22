@@ -422,6 +422,17 @@ def test_smoke_verdicts():
             r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
             check(not r["failures"] and len(r["warnings"]) == 3 and "no longer fits" in r["warnings"][0],
                   f"a row the new release says does not fit is a warning naming the refusal, not LOUD: {r}")
+            def unreleased(c):
+                rec = _rec(c, 81.0 if c.get("max_num_seqs") else 91.0 if c.get("router_config") else 101.0)
+                rec["released_build"] = False
+                return rec
+            run_blis.run_one = fake(unreleased)
+            r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root, pin_ref="3e8fb1d24106c001f4eb46ce96cb219b7125675e")
+            check(not r["failures"] and sum("is a commit" in w for w in r["warnings"]) == 1,
+                  f"an unreleased binary at a commit pin is one warning per report, not a failure per row: {r}")
+            r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root, pin_ref="v0.19.0")
+            check(sum(f.startswith("LOUD") and "not a tagged release" in f for f in r["failures"]) == 3,
+                  f"an unreleased binary at a release-tag pin is LOUD: {r['failures']}")
             run_blis.run_one = fake(lambda c: _rec(c, 0, rc=1, error="field x not found"))
             r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
             check(sum(f.startswith("LOUD") for f in r["failures"]) == 3,

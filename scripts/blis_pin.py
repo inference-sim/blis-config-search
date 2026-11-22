@@ -660,11 +660,13 @@ def live_rows(runs, spec):
 
 
 def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=None,
-          max_pairs=SMOKE_PAIRS, timeout=1800, max_parallel=1, fields=None):
+          max_pairs=SMOKE_PAIRS, timeout=1800, max_parallel=1, fields=None, pin_ref=None):
     """Re-run a few of reports/<run_id>/'s own rows on `blis`; return {id, checks, failures}."""
     import concurrent.futures
     import tempfile
     import run_blis
+    pin_ref = pin_ref if pin_ref is not None else read_pins().get("BLIS_REF", "")
+    commit_pin = semver(pin_ref) is None
     entry = classify(run_id, root)
     if entry["kind"] == "orphan":
         return {"id": run_id, "checks": [], "failures": [f"{run_id}: no source to run from"],
@@ -703,6 +705,7 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
     shutil.rmtree(scen_dir, ignore_errors=True)
 
     checks, failures, warnings = [], [], []
+    unreleased_noted = False
     for key, old in sorted(todo.items()):
         n = new[key]
         why = (n.get("error") or (n.get("stderr_tail") or "")[-300:]).strip()
@@ -710,9 +713,19 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
                        "new_tps": None if _broken(n) else round(_tps(n), 1),
                        "error": None if _ok(n) else why})
         if not _broken(n) and n.get("released_build") is False:
-            failures.append(f"LOUD: {run_id} {_cfg_phrase(old['config'])} ran on a binary that is not a tagged "
-                            f"release (its Result says data.build is unreleased): the build must be "
-                            f"stamped with the release tag (scripts/build_blis.sh)")
+            if commit_pin:
+                # Before the stack is tagged the pin is a commit, and its binary is unreleased by
+                # construction. Smoke compares behaviour on the new stack; that the pin is a tagged
+                # release is checked where reports are written (check_released_build.py waits for
+                # the tag), so it is one warning per report here, not one failure per row.
+                if not unreleased_noted:
+                    warnings.append(f"{run_id}: the pin {pin_ref[:12]} is a commit, so its binary is "
+                                    f"unreleased; the pin moves to the release tag once the stack is tagged")
+                    unreleased_noted = True
+            else:
+                failures.append(f"LOUD: {run_id} {_cfg_phrase(old['config'])} ran on a binary that is not a tagged "
+                                f"release (its Result says data.build is unreleased): the build must be "
+                                f"stamped with the release tag (scripts/build_blis.sh)")
         if _broken(n) and _fit_refusal(why):
             warnings.append(f"{run_id} {_cfg_phrase(old['config'])} no longer fits on the new stack "
                             f"and is refused ({why[-400:]}): its report records it as a named "

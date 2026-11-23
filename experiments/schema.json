@@ -46,7 +46,7 @@
       }
     },
     "offload": {
-      "description": "The CPU KV tier below HBM, swept per sweep (colocated only). cpu_bytes: sizes with units (512GiB), 0 for no tier, the control. eviction_policy: the policies the engine accepts; needs a non-zero cpu_bytes.",
+      "description": "The CPU KV tier below HBM, swept per sweep (on a disaggregated sweep, for both pools), or per pool in a disaggregated sweep's prefill.offload / decode.offload, which overrides the sweep's for that pool. cpu_bytes: sizes with units (512GiB), 0 for no tier, the control. eviction_policy: the policies the engine accepts; needs a non-zero cpu_bytes.",
       "type": "object",
       "minProperties": 1,
       "additionalProperties": false,
@@ -84,7 +84,7 @@
           "minLength": 1
         },
         "workload_spec": {
-          "description": "A workload named by a file in this repository instead of by catalog name: the replay block of a workload entry, with corpus.sha256 and corpus.source (a Hugging Face dataset and revision, or a url). Exactly one of `workload` and `workload_spec`. The report labels it \"custom (not in the catalog)\" and records the file's sha256.",
+          "description": "A workload named by a file in this repository, or by a ./ path to a file beside the spec (copied into the run directory), instead of by catalog name: the replay block of a workload entry, with corpus.sha256 and corpus.source (a Hugging Face dataset and revision, or a url). Exactly one of `workload` and `workload_spec`. The report labels it \"custom (not in the catalog)\" and records the file's sha256.",
           "type": "string",
           "minLength": 1
         },
@@ -132,7 +132,7 @@
           "minProperties": 1
         },
         "replay": {
-          "description": "Replay knobs when `workload` names a trace corpus: corpus_sha256, benchmark_duration, grace_period, max_context_length, category, thinking. Optional server_series_interval_s (seconds, above 0) asks the simulator for per-engine diagnostic series, kept on each run record as server_series; it changes no figure that is ranked.",
+          "description": "Replay knobs the runner passes to BLIS: corpus, corpus_cache, grace_period, benchmark_duration, server_series_interval_s, and with a catalog workload also scenario, corpus_sha256 and max_context_length. Any other key is refused, because the run would ignore it; the replay's pacing (trace_idle_gap_cap_s, warmup) is the workload file's. Optional server_series_interval_s (seconds, above 0) asks the simulator for per-engine diagnostic series, kept on each run record as server_series; it changes no figure that is ranked.",
           "type": "object",
           "minProperties": 1,
           "properties": {
@@ -235,7 +235,8 @@
       "additionalProperties": false,
       "properties": {
         "parallel": { "$ref": "#/$defs/knobLists" },
-        "engine": { "$ref": "#/$defs/engineKnobs" }
+        "engine": { "$ref": "#/$defs/engineKnobs" },
+        "offload": { "$ref": "#/$defs/offload" }
       }
     },
     "router": {
@@ -245,7 +246,7 @@
       "additionalProperties": false,
       "properties": {
         "endpoint_picker_config": {
-          "description": "EndpointPickerConfig files: a file of routing/ or of the router's reference-configs/ at the commit pins.env pins. A new routing policy is a new file, never an invented knob.",
+          "description": "EndpointPickerConfig files: a file of routing/ or of the router's reference-configs/ at the commit pins.env pins, or a ./ path to a file beside the spec (./routing/guarded-pd.yaml), copied into the run's routing/. From a file beside the spec, kv-events-source and disaggregatedset-rollout-screener are stripped with a note, and a part the embedded router refuses is refused by name. A new routing policy is a new file, never an invented knob.",
           "type": "array",
           "minItems": 1,
           "items": { "type": "string", "minLength": 1 }
@@ -261,7 +262,7 @@
           }
         },
         "plugins": {
-          "description": "plugin name -> parameters -> field -> list of values. Field names are llm-d-router's own; it rejects unknown parameters. A parameter or plugin the file lacks is added when the router's index lists it as a knob; a parameter the index marks ineffective in the hosted boundary is refused by name.",
+          "description": "plugin name -> parameters -> field -> list of values. Field names are llm-d-router's own; it rejects unknown parameters. A parameter or plugin the file lacks is added when the router's index lists it as a knob; a parameter the index marks ineffective in the hosted boundary is refused by name. The key is a plugin's name, or its type when the file declares one plugin of that type. On a file outside the index, a guard parameter (maxConcurrency, maxTokenConcurrency, headroom, queueDepthThreshold, kvCacheUtilThreshold, peakPrefillThroughput) may be added to a guard the file declares.",
           "type": "object",
           "minProperties": 1,
           "additionalProperties": {

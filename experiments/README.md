@@ -324,10 +324,12 @@ scenario:
     grace_period: inf              # a deliberate override of the descriptor's 30s
 ```
 
-Don't restate `scenario`, `corpus_sha256`, `benchmark_duration`, `max_context_length`,
-`category` or `thinking` — a copy can only drift from the catalog, and the validator prints a
-style note for each. Keep the corpus path **relative**: an absolute one pins the spec to one
-machine. A field that genuinely differs from the descriptor is recorded as an override, so the
+Don't restate `scenario`, `corpus_sha256`, `benchmark_duration` or `max_context_length` — a copy
+can only drift from the catalog, and the validator prints a style note for each. A key the runner
+never passes to BLIS (`category`, `thinking`, `trace_idle_gap_cap_s`, `warmup`, ...) is refused,
+because the run would ignore it: the replay's pacing is the workload file's, so change it in a
+workload file (`workload_spec`, below). Keep the corpus path **relative**: an absolute one pins the
+spec to one machine. A field that genuinely differs from the descriptor is recorded as an override, so the
 report can say the run departed from the catalog.
 
 **To fetch the corpus**, let the descriptor drive it — it already names the dataset, the pinned
@@ -371,7 +373,11 @@ scenario:
 The validator requires `corpus.sha256` (64 lowercase hex digits) and `corpus.source`, either a
 Hugging Face `huggingface` dataset with a pinned `revision`, or a `url`, so every report names the
 bytes it replayed; the simulator refuses a corpus whose digest differs. The path is relative to the
-repository root. The report labels the workload "custom (not in the catalog)" and records the
+repository root, or, when it starts with `./`, to the spec's directory: a file beside the spec, such as
+a copy of the run recipe with `trace_idle_gap_cap_s: 1` to match a load generator that caps idle gaps
+at 1 s. Keep it in a subdirectory (`./workloads/`), since a directory of specs is validated file by
+file. The sweeper copies a file beside the spec into the run directory (`workloads/`), and BLIS reads
+the copy. The report labels the workload "custom (not in the catalog)" and records the
 file's own sha256 and the document as read, in `scenario.json` and `experiment.json`. A custom
 workload runs wherever its corpus can be fetched by its declared source and checked against the
 sha256.
@@ -500,6 +506,34 @@ names it (`pd_decider.complete_variant`, `pd-prefix-based` for the three `-pd` f
 listing its file, unedited, next to the other: `endpoint_picker_config: [round-robin-pd.yaml,
 pd-prefix-based.yaml]`. A `router.decider` key is an error that says so. On a file in `routing/` only
 fields the file already sets can change, as before.
+
+### A router file beside the spec
+
+A name that starts with `./` is a file beside the spec, such as a calibrated P/D config with flow
+control and admission guards: `endpoint_picker_config: [./routing/guarded-pd.yaml]`. The validator
+parses it and applies the overrides as for the other files. The sweeper writes the file each run
+reads into `reports/<name>/routing/` (the file itself, named by its sha256, or the generated file
+when parts are stripped or overridden), and every row records the sha256 of both. Two parts of a
+production config act only outside a simulation, so they are stripped, with a note in the
+validator's output, a comment in the file the run reads and `stripped` on the row: `kv-events-source`
+plugins and their `dataLayer.sources` entries (BLIS feeds the router KV events itself), and
+`disaggregatedset-rollout-screener` (it acts only during a rollout). Two parts the embedded router
+refuses are refused by name before any run: `utilization-filter` (inference-sim/inference-sim#2205)
+and `inflight-load-producer`'s `prefillCompletionFromKVEvents` (inference-sim/inference-sim#2206).
+BLIS also checks that the file's prefix producers cut at the engine's `block_size`.
+
+An override names a plugin by its `name`, or by its type when the file declares one plugin of that
+type. Besides the fields the file sets, a guard's parameters can be added to a guard the file
+declares: `maxConcurrency`, `maxTokenConcurrency` and `headroom` of a `concurrency-detector`,
+`queueDepthThreshold` and `kvCacheUtilThreshold` of a `utilization-detector`, and
+`peakPrefillThroughput` of a `prefix-cache-affinity-filter`:
+
+```yaml
+router:
+  endpoint_picker_config: [./routing/guarded-pd.yaml]
+  plugins:
+    prefill-concurrency: {parameters: {maxConcurrency: [1, 12, 64]}}
+```
 
 ## Objective and simulator switches
 

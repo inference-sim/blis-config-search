@@ -252,6 +252,19 @@ class PerPoolOffload(unittest.TestCase):
                       decode={"parallel": {"tp": [1], "dp": [8]}})
         self.assertEqual([], V.validate(spec, self.capable, ROUTING))
 
+    def test_the_disaggregated_offload_examples_match_the_published_schema(self):
+        """experiments/schema.json once said colocated only and had no pool `offload` (#195)."""
+        import json
+        import jsonschema
+        with open(os.path.join(os.path.dirname(HERE), "experiments", "schema.json"), encoding="utf-8") as f:
+            schema = jsonschema.Draft202012Validator(json.load(f))
+        for spec in (pd_doc(offload={"cpu_bytes": [0, "256GiB"]}, prefill={
+                         "parallel": {"tp": [8]}, "offload": {"cpu_bytes": ["512GiB"], "eviction_policy": ["lru"]}}),
+                     pd_doc(prefill={"parallel": {"tp": [1], "dp": [8]}, "offload": {"cpu_bytes": ["512GiB"]}},
+                            decode={"parallel": {"tp": [1], "dp": [8]}, "offload": {"cpu_bytes": [0]}})):
+            self.assertEqual([], V.validate(copy.deepcopy(spec), self.capable, ROUTING))
+            self.assertEqual([], [e.message for e in schema.iter_errors(spec)])
+
     def test_a_pools_eviction_policy_is_probed_with_the_engine(self):
         with __import__("tempfile").TemporaryDirectory() as d:
             fake = fake_engine(d, "arc")

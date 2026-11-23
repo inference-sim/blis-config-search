@@ -657,8 +657,10 @@ def _run_context(entry, root, blis, catalog, corpus, corpus_cache, fields=None):
     if entry["replay"]:
         stated = dict(sc.get("replay") or {}, **local)
         if sc.get("workload_spec"):
+            spec_dir = os.path.dirname(os.path.join(root, entry["source"]))
             replay = run_experiment.resolve_workload_spec(
-                sc["workload_spec"], run_experiment.load_workload_spec(sc["workload_spec"]), stated)
+                sc["workload_spec"], run_experiment.load_workload_spec(sc["workload_spec"], spec_dir), stated,
+                spec_dir=spec_dir)
         else:
             replay = run_experiment.resolve_replay(sc["workload"], catalog, stated)
         replay = {k: v for k, v in replay.items() if k not in run_experiment.RECORD_ONLY_REPLAY}
@@ -683,7 +685,9 @@ def ensure_corpus(entry, catalog, dest, root=ROOT):
     import run_experiment
     sc = _load_yaml(os.path.join(root, entry["source"])).get("scenario") or {}
     if sc.get("workload_spec"):
-        desc = _load_yaml(os.path.join(root, sc["workload_spec"]))
+        # A ./ path is beside the spec.
+        base = os.path.dirname(os.path.join(root, entry["source"])) if sc["workload_spec"].startswith("./") else root
+        desc = _load_yaml(os.path.join(base, sc["workload_spec"]))
     else:
         desc = run_experiment.replay_descriptor(sc.get("workload"), catalog)
     corpus = (desc or {}).get("corpus") or {}

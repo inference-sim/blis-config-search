@@ -185,8 +185,13 @@ def drafter_facts(catalog, registry, model, wl, blis=None, hardware=None, engine
             continue
         found = catalog_drafters.exact_profiles(registry, model, d["draft_model"], d["method"],
                                                 category, thinking)
+        # The graph's num_spec_tokens bounds the in-graph speculator; for an external drafter it is
+        # not a depth limit (measured profiles run above it), only the K asked when none is measured.
         cap = d.get("max_spec_tokens") or 0
-        found = [p for p in found if p["num_spec_tokens"] and (not cap or p["num_spec_tokens"] <= cap)]
+        if d["kind"] == "in_graph" and cap:
+            found = [p for p in found if p["num_spec_tokens"] and p["num_spec_tokens"] <= cap]
+        else:
+            found = [p for p in found if p["num_spec_tokens"]]
         ks = sorted({p["num_spec_tokens"] for p in found}) or ([cap] if cap else [])
         note = ""
         if blis and category and thinking and ks:

@@ -2073,6 +2073,14 @@ class DrafterArms(unittest.TestCase):
         self.assertEqual(("same_drafter_other_k", True), (g["acceptance"][0]["rung"], g["acceptance"][0]["borrowed"]))
         self.assertIn("BORROWED", g["why"])
 
+    def test_a_measured_depth_above_the_graphs_num_spec_tokens_is_kept_for_an_external_drafter(self):
+        with open(os.path.join(self.reg, "acceptance", "golden.yaml")) as f:
+            doc = yaml.safe_load(f)
+        doc["profiles"].append({**doc["profiles"][0], "num_spec_tokens": 3, "acceptance_length": 2.9})
+        with open(os.path.join(self.reg, "acceptance", "golden.yaml"), "w") as f:
+            yaml.safe_dump(doc, f)
+        self.assertEqual([1, 3], self.facts()["m-flash"]["depths"], "m-flash's graph says 1; K=3 is measured")
+
     def test_a_drafter_whose_lookup_is_refused_does_not_apply_and_says_why(self):
         n = self.facts(self.blis({}))["m-nope"]
         self.assertFalse(n["applies"])
@@ -2131,9 +2139,8 @@ class DrafterMatchesItsSweep(unittest.TestCase):
         errs = self.errs(method=["dspark"], draft_model=[self.SPARK, self.FLASH], num_spec_tokens=[1])
         self.assertTrue(any(self.FLASH in e and "dspark" in e for e in errs), errs)
 
-    def test_a_depth_above_the_drafters_own_is_refused(self):
-        errs = self.errs(method=["dflash"], draft_model=[self.FLASH], num_spec_tokens=[1, 7])
-        self.assertTrue(any(self.FLASH in e and "7" in e and "declares" in e for e in errs), errs)
+    def test_a_measured_depth_above_the_graphs_num_spec_tokens_passes(self):
+        self.assertEqual([], self.errs(method=["dflash"], draft_model=[self.FLASH], num_spec_tokens=[0, 1, 3]))
 
 
 class AcceptanceInTheReport(unittest.TestCase):

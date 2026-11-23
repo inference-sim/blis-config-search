@@ -54,7 +54,7 @@ CLOSURE_ROOTS = {
 # the smoke; the full set runs when asked for (the `full-smoke` label, or a workflow_dispatch with
 # `all`) and, for every report, after merge in regen-reports.yml. A report's own spec or ledger
 # changing still smokes that report regardless.
-SMOKE_CORE = ("kimi-k2-5-h200-multidoc-pd", "deepseek-v4-1-flash-h200-agentx-4node")
+SMOKE_CORE = ("kimi-k2-5-h200-multidoc-pd", "muse-spark-open-816b-a42b-h100-agentx-8gpu")
 
 # Paths no job reads. Everything else must be claimed by a rule below or it selects every job.
 INERT = ("docs/", ".claude/", "LICENSE", "CLAUDE.md", "AGENTS.md", ".gitignore")

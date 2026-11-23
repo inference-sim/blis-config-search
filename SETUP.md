@@ -8,19 +8,21 @@ same stack from `pins.env`; the clone lines below are kept in step by `scripts/b
 ```bash
 # From a checkout of this repository: pins.env names the release and the commit it must be.
 set -a; . ./pins.env; set +a
-git clone --branch "$BLIS_REF" --depth 1 https://github.com/inference-sim/inference-sim.git
-cd inference-sim
-# The tag is NOT configured immutable upstream, so verify it still resolves to the pinned
-# commit before building; fail loudly if the tag has been moved.
-test "$(git rev-parse HEAD)" = "$BLIS_SHA" || { echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
-# Stamp the release tag, or every Result calls the build "unreleased" and the sweeper refuses
-# to write its report to reports/. The script reads the tag from pins.env.
+# BLIS_REF is a release tag, or (until M3.2 is tagged) the commit of the M3.2 stack head. Fetch it,
+# and verify it is the pinned commit; fail loudly if a tag has been moved.
+git init -q inference-sim && cd inference-sim
+git remote add origin https://github.com/inference-sim/inference-sim.git
+git fetch -q --depth 1 origin "$BLIS_REF" && git checkout -q FETCH_HEAD
+test "$(git rev-parse HEAD)" = "$BLIS_SHA" || { echo "$BLIS_REF does not resolve to $BLIS_SHA -- aborting" >&2; exit 1; }
+# A release tag is stamped into the build; a commit pin builds "unreleased" (every Result says so and
+# the sweeper refuses to write its report to reports/ until the pin is a release tag).
+# The script reads the ref from pins.env.
 cd ..
 sh scripts/build_blis.sh inference-sim
 ```
 
 Pass this `inference-sim/blis` to the validator and the sweeper as `--blis`. Both read the engine's
-settings from the pinned blis-vllm release's `fields.json`, which `scripts/fetch_fields.py FILE`
+settings from the pinned stack's `engines/vllm/fields.json`, which `scripts/fetch_fields.py FILE`
 writes and `--fields FILE` names (the simulator prints it itself once it has `blis fields`), the pool-layout keys with `blis schema deployment`,
 and model and chip names with `blis catalog resolve`; the sweeper validates each generated
 scenario and each Result with `blis schema validate`. This repository keeps no copy of any of
@@ -49,19 +51,19 @@ whose `reference-configs/` is read instead, to try a router change before a simu
 
 ## 2. Catalog + registry (embedded; a checkout only for the scripts' file reads)
 
-The simulator prices with the catalog and registry **embedded** in the blis-substrate release it
+The simulator prices with the catalog and registry **embedded** in the inference-sim release it
 pins, so a run passes neither `--catalog` nor `--registry` to it and every Result records data
 source `embedded`. A model runs only if that embedded catalog carries it (NS-6).
 
 Some scripts read catalog and registry *files* (a workload's descriptor, a model's graph, the
-speculative-decoding acceptance profiles). They read them from a checkout of the same release,
-`SUBSTRATE_REF` in `pins.env` (a release tag, or while a stack is open a Go pseudo-version, which `scripts/clone_pinned.sh` checks out at its commit):
+speculative-decoding acceptance profiles). They read them from the `substrate/` directory of an inference-sim
+checkout at `BLIS_SHA` in `pins.env` (since M3.2 the substrate is part of inference-sim):
 
 ```bash
 set -a; . ./pins.env; set +a
-sh scripts/clone_pinned.sh "$SUBSTRATE_REF" https://github.com/inference-sim/blis-substrate.git blis-substrate
-export SUBSTRATE_CATALOG=$PWD/blis-substrate/catalog
-export SUBSTRATE_REGISTRY=$PWD/blis-substrate/registry
+sh scripts/clone_stack.sh ../inference-sim   # only substrate/catalog and substrate/registry
+export SUBSTRATE_CATALOG=$PWD/../inference-sim/substrate/catalog
+export SUBSTRATE_REGISTRY=$PWD/../inference-sim/substrate/registry
 ```
 
 These two variables (or `--catalog` / `--registry`) name where the scripts read those files; they

@@ -28,13 +28,11 @@ def main(argv):
         with open(os.path.join(args[args.index("--scenarios") + 1], name), encoding="utf-8") as f:
             text = f.read()
         kind = re.search(r"^  kind: (\S+)", text, re.M).group(1)
-        version = re.search(r'^  version: "?([^"\n]*)"?', text, re.M).group(1)
+        if re.search(r"^  version:", text, re.M):
+            fail(f'scenario "{name}": field version not found in type scenario.Engine')
         if kind not in ("vllm", "sglang"):
             fail(f'scenario "{name}" names engine kind "{kind}"; this build runs the kinds sglang, vllm')
         doc = read(f"fields-{kind}.json")
-        if version != doc["engine"]["version"]:
-            fail(f'scenario "{name}" names engine {kind} {version}; this build runs {kind} '
-                 f'{doc["engine"]["version"]}, and no inference-sim release runs it')
         print(json.dumps(doc))
         return
     if args == ["metrics"]:

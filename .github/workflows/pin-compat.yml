@@ -24,10 +24,9 @@ name: pin-compat
 #
 # Which work runs (scripts/ci_scope.py): a moved pin VALUE or a changed script the smoke imports selects
 # every report; a changed spec, report ledger, or routing/workload file it names selects only those
-# reports. A pull request smokes only the core pair (ci_scope.SMOKE_CORE) plus any report whose own spec
-# or ledger changed; the rest run on request: add the `full-smoke` label (bump-blis-pin.yml puts it on the
+# reports. A pull request smokes only the core pair (ci_scope.SMOKE_CORE); the rest run on request: add the `full-smoke` label (bump-blis-pin.yml puts it on the
 # pin bot's PR, so every event on a release bump smokes all of them), or dispatch this workflow with all=true
-# (the default). A changed runner script still smokes every report; regen-reports.yml runs every report after a merge that moves pins.env. A fork's pin move is refused; a fork's other changes run no smoke (its code must not reach the
+# (the default). regen-reports.yml runs every report after a merge that moves pins.env. A fork's pin move is refused; a fork's other changes run no smoke (its code must not reach the
 # regen runner). The simulator is built once per BLIS_SHA (.github/actions/pinned-blis) and shared as an artifact.
 #
 # Trigger: EVERY pull request, deliberately without a `paths:` filter. A workflow skipped by a
@@ -103,7 +102,7 @@ jobs:
         id: reports
         env:
           # Every report on a dispatch (the pin bot's PR) unless it says all=false, or on a PR labelled
-          # full-smoke; otherwise only the core plus the reports whose own spec or ledger changed.
+          # full-smoke; otherwise only the core pair.
           SELECTED: >-
             ${{ (github.event_name == 'workflow_dispatch' && inputs.all != 'false' ||
                  contains(github.event.pull_request.labels.*.name, 'full-smoke'))
@@ -168,27 +167,28 @@ jobs:
       - run: pip install --require-hashes -r requirements.txt
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with: { name: pin-compat-blis, path: .build }
-      - name: Clone the pinned substrate release (the files the scripts read; the simulator uses its embedded data)
+      - name: Check out the pinned substrate/ (the files the scripts read; the simulator uses its embedded data)
         id: stack
         run: |
           set -euo pipefail
           chmod +x .build/blis
           set -a; . ./pins.env; set +a
-          sh scripts/clone_pinned.sh "$SUBSTRATE_REF" https://github.com/inference-sim/blis-substrate.git ../blis-substrate
-          echo "substrate_ref=$SUBSTRATE_REF" >> "$GITHUB_OUTPUT"
+          sh scripts/clone_stack.sh ../inference-sim
+          echo "blis_sha=$BLIS_SHA" >> "$GITHUB_OUTPUT"
+          echo "corpus_key=$(grep -rh 'sha256:' ../inference-sim/substrate/catalog/workloads | sort -u | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       - name: Restore the replay corpus
         if: matrix.report.replay
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: .corpus/traces.jsonl
-          key: replay-corpus-${{ steps.stack.outputs.substrate_ref }}
+          key: replay-corpus-${{ steps.stack.outputs.corpus_key }}
       - name: Fetch the pinned engine field list
         run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
       - name: Re-run ${{ matrix.report.id }}'s own rows on the new binary
         run: |
           set -euo pipefail
           python3 -I scripts/blis_pin.py smoke "${{ matrix.report.id }}" \
-            --blis .build/blis --catalog ../blis-substrate/catalog --registry ../blis-substrate/registry \
+            --blis .build/blis --catalog ../inference-sim/substrate/catalog --registry ../inference-sim/substrate/registry \
             --fields "$RUNNER_TEMP/fields.json" \
             --corpus .corpus/traces.jsonl --corpus-cache "$RUNNER_TEMP/agx-cache" \
             --max-parallel 2 --timeout "${{ vars.REGEN_RUN_TIMEOUT || '1800' }}" \

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Write the engine field lists for the pinned blis-vllm and blis-sglang releases to files.
+"""Write the engine field lists of the pinned simulator to files.
 
-TEMPORARY until the M2 substrate release lets the simulator print its engine's field list
-(`blis fields`): the pinned simulator has no such command, so config search reads the
-`fields.json` of the blis-vllm release pins.env names (VLLM_REF), through --fields. The file is
-fetched once per job and checked to be a vLLM field list, so a run uses a reviewed file and not
-ambient state.
+TEMPORARY until every caller asks the binary (`blis fields --scenario`): config search reads the
+`fields.json` of the engines the pinned inference-sim commit carries, through --fields. Since M3.2
+the vLLM and SGLang engines are directories of inference-sim (engines/vllm, engines/sglang), so both
+lists are read at pins.env's BLIS_SHA, the commit the binary is built from; there is no engine pin of
+its own. Each file is fetched once per job and checked to be a FieldList of its engine, so a run uses
+a reviewed file and not ambient state.
 
-The vLLM list is written to OUT. When pins.env names a blis-sglang release (SGLANG_REF), its list is
-written beside it as OUT with `.json` replaced by `.sglang.json`, which blis_cli.fields reads for a
-spec that names the sglang engine.
+The vLLM list is written to OUT, and the SGLang list beside it as OUT with `.json` replaced by
+`.sglang.json`, which blis_cli.fields reads for a spec that names the sglang engine.
 
   python3 -I scripts/fetch_fields.py OUT
 """
@@ -20,29 +20,27 @@ import sys
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ENGINES = (("vllm", "engines/vllm/fields.json", ""), ("sglang", "engines/sglang/fields.json", ".sglang"))
 
 
-def pinned_release(key="VLLM_REF", required=True):
+def pinned_sha():
     with open(os.path.join(ROOT, "pins.env"), encoding="utf-8") as f:
         for line in f:
-            if line.startswith(key + "="):
-                return line.split("=", 1)[1].strip()
-    if required:
-        raise SystemExit(f"pins.env has no {key}")
-    return None
+            if line.startswith("BLIS_SHA="):
+                sha = line.split("=", 1)[1].strip()
+                if re.fullmatch(r"[0-9a-f]{40}", sha):
+                    return sha
+                raise SystemExit(f"pins.env BLIS_SHA={sha!r} is not a 40-hex commit")
+    raise SystemExit("pins.env has no BLIS_SHA")
 
 
-def fields_ref(ref):
-    """The git ref to fetch fields.json at. A tag is itself; a Go pseudo-version (`v0.32.1-0.20261111132033-
-    96ea750e3a62`, what go.mod says of an unreleased commit) names its commit by the last twelve hex digits,
-    which raw.githubusercontent.com resolves."""
-    m = re.fullmatch(r"v\d+\.\d+\.\d+-(?:[0-9A-Za-z.]+\.)?\d{14}-([0-9a-f]{12})", ref)
-    return m.group(1) if m else ref
+def fields_url(sha, path):
+    return f"https://raw.githubusercontent.com/inference-sim/inference-sim/{sha}/{path}"
 
 
-def fetch(repo, ref, kind):
-    """(raw bytes, document) of `repo`'s fields.json at `ref`, checked to be `kind`'s FieldList."""
-    url = f"https://raw.githubusercontent.com/inference-sim/{repo}/{fields_ref(ref)}/fields.json"
+def fetch(sha, path, kind):
+    """(raw bytes, document) of the pinned commit's `path`, checked to be `kind`'s FieldList."""
+    url = fields_url(sha, path)
     with urllib.request.urlopen(url, timeout=60) as r:  # noqa: S310 (a fixed https URL)
         raw = r.read()
     doc = json.loads(raw)
@@ -55,15 +53,13 @@ def main(argv):
     if len(argv) != 1:
         raise SystemExit(__doc__)
     out = argv[0]
-    jobs = [("blis-vllm", pinned_release(), "vllm", out)]
-    sglang = pinned_release("SGLANG_REF", required=False)
-    if sglang:
-        jobs.append(("blis-sglang", sglang, "sglang", re.sub(r"\.json$", "", out) + ".sglang.json"))
-    for repo, ref, kind, path in jobs:
-        raw, doc = fetch(repo, ref, kind)
-        with open(path, "wb") as f:
+    sha = pinned_sha()
+    for kind, path, infix in ENGINES:
+        dest = out if not infix else re.sub(r"\.json$", "", out) + infix + ".json"
+        raw, doc = fetch(sha, path, kind)
+        with open(dest, "wb") as f:
             f.write(raw)
-        print(f"{path}: {repo} {ref}, {kind} {doc['engine']['version']}, {len(doc['fields'])} fields")
+        print(f"{dest}: inference-sim {sha[:12]} {path}, {kind} {doc['engine']['version']}, {len(doc['fields'])} fields")
 
 
 if __name__ == "__main__":

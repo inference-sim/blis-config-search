@@ -23,7 +23,8 @@ What each job reads (the single place this is written down):
                spec and ledger (experiments/<id>.yaml, reports/<id>/), the routing/ and workloads/
                files that spec names, the pin VALUES, and the scripts blis_pin.py imports. A data
                file therefore selects only the reports that use it; only a pin move or a changed
-               runner script selects every report.
+               runner script selects every report. A pull request still smokes just SMOKE_CORE
+               of the selection unless the `full-smoke` label or a dispatch asks for all of it.
 
 The scripts each job reads are found by following `import` statements, so a new import cannot go
 unlisted. A path this table does not know selects every job.
@@ -40,22 +41,19 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 JOBS = ("python", "experiments", "web", "pages")
 
 # Roots whose import closure (plus the root itself) is what a job reads from scripts/.
-# fetch_fields.py and clone_pinned.sh are run as commands, not imported, so they are named.
+# fetch_fields.py and clone_stack.sh are run as commands, not imported, so they are named.
 CLOSURE_ROOTS = {
     "experiments": ("validate_experiment.py", "run_experiment.py", "fetch_fields.py", "knob_profile.py",
-                    "knob_table.py", "check_pending_pin.py", "check_released_build.py", "clone_pinned.sh",
+                    "knob_table.py", "check_pending_pin.py", "check_released_build.py", "clone_stack.sh",
                     "build_blis.sh"),
     "web": ("build_gallery.py",),
-    "smoke": ("blis_pin.py", "fetch_fields.py", "clone_pinned.sh"),
+    "smoke": ("blis_pin.py", "fetch_fields.py", "clone_stack.sh"),
 }
 
-# The reports a pull request smokes by default when a pin value moved (which selects every report).
-# One report with a generated workload and one corpus replay cover both code paths of the smoke; the
-# full set runs when asked for (the `full-smoke` label, or a workflow_dispatch with `all`), and
-# regen-reports.yml runs every report after a merge that moves pins.env. A changed runner script
-# (what the smoke imports, or requirements.txt) is not a pin move and nothing runs after its merge, so
-# it keeps selecting every report here. A report's own spec or ledger changing smokes that report
-# regardless.
+# The only reports a pull request smokes by default, whenever any smoke input changed. One report with a
+# generated workload and one corpus replay cover both code paths of the smoke; the full set runs only when
+# asked for (the `full-smoke` label, or a workflow_dispatch with `all`), and regen-reports.yml runs every
+# report after a merge that moves pins.env.
 SMOKE_CORE = ("kimi-k2-5-h200-multidoc-pd", "muse-spark-open-816b-a42b-h100-agentx-8gpu")
 
 # Paths no job reads. Everything else must be claimed by a rule below or it selects every job.
@@ -125,7 +123,7 @@ def scope(files, pins_moved=False, root=ROOT, workflow_file=None):
     files = [f.strip() for f in files if f.strip()]
     clo = {k: closure(v, root) for k, v in CLOSURE_ROOTS.items()}
     on = {j: False for j in JOBS}
-    smoke_ids, smoke_all, runner = set(), bool(pins_moved), False
+    smoke_ids, smoke_all = set(), bool(pins_moved)
     everything = False
     own = {"python": ".github/workflows/checks.yml", "experiments": ".github/workflows/checks.yml",
            "web": ".github/workflows/checks.yml", "pages": ".github/workflows/pages.yml"}
@@ -155,7 +153,7 @@ def scope(files, pins_moved=False, root=ROOT, workflow_file=None):
             on["experiments"] = True
         # smoke
         if f in clo["smoke"] or f in ("requirements.txt",):
-            smoke_all, runner, known = True, True, True
+            smoke_all, known = True, True
         m = re.match(r"(?:experiments/(.+)\.yaml|reports/([^/]+)/.*)$", f)
         if m:
             rid = m.group(1) or m.group(2)
@@ -172,17 +170,16 @@ def scope(files, pins_moved=False, root=ROOT, workflow_file=None):
             everything = True
     if everything:
         return _result({j: True for j in JOBS}, ids, True)
-    return _result(on, ids, smoke_all, smoke_ids, runner)
+    return _result(on, ids, smoke_all, smoke_ids)
 
 
-def _result(on, ids, smoke_all, smoke_ids=(), runner=False):
+def _result(on, ids, smoke_all, smoke_ids=()):
     sel = list(ids) if smoke_all else [i for i in ids if i in set(smoke_ids)]
     out = dict(on)
     out["smoke_all"] = bool(smoke_all)
     out["smoke_reports"] = sel
     out["smoke"] = bool(sel)
-    core = set(ids) if runner else set(smoke_ids) | (set(SMOKE_CORE) if smoke_all else set())
-    out["smoke_core"] = [i for i in ids if i in core]
+    out["smoke_core"] = [i for i in ids if i in SMOKE_CORE] if sel else []
     return out
 
 

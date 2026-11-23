@@ -14,6 +14,7 @@ import subprocess
 from unittest import mock
 import json
 import os
+import pathlib
 import sys
 import tempfile
 import unittest
@@ -458,6 +459,15 @@ class SchemaAgreesWithValidator(unittest.TestCase):
 
         walk(self.schema, "<root>")
 
+    def test_the_schema_agrees_with_the_validator_on_the_series_interval(self):
+        doc = spec()
+        for good in (0.5, 5):
+            doc["scenario"]["replay"] = {"server_series_interval_s": good}
+            self.assertEqual([], self.errors(doc), good)
+        for bad in (0, -1, "5", True, None):
+            doc["scenario"]["replay"] = {"server_series_interval_s": bad}
+            self.assertNotEqual([], self.errors(doc), bad)
+
     def test_every_shipped_spec_passes_the_published_schema(self):
         """The harmful direction. Each of these validates, so each must also satisfy the schema
         a contributor's editor reads -- otherwise the editor contradicts the authority."""
@@ -880,6 +890,148 @@ class RouterOverrides(unittest.TestCase):
         self.assertEqual("queue", desc)
 
 
+class RouterFileBesideTheSpec(unittest.TestCase):
+    """A spec names a calibrated EndpointPickerConfig beside it, ./routing/<file> (#196): it is parsed,
+    the parts the embedded router cannot take are stripped with a note or refused by name, and the
+    guard parameters of the plugins it declares can be swept."""
+
+    SPEC_DIR = os.path.join(FIXTURES, "spec-side")
+    FILE = "./routing/guarded-pd.yaml"
+
+    def doc(self, router=None):
+        sw = {"name": "s", "prefill-instances": [1], "decode-instances": [1],
+              "prefill": {"parallel": {"tp": [8]}}, "decode": {"parallel": {"tp": [8]}},
+              "router": {"endpoint_picker_config": [self.FILE], **(router or {})}}
+        return spec(sweeps=[sw])
+
+    def errs(self, doc, spec_dir=SPEC_DIR):
+        return V.validate(doc, BLIS, ROUTING, spec_dir=spec_dir)
+
+    def base(self):
+        with open(os.path.join(self.SPEC_DIR, self.FILE), encoding="utf-8") as f:
+            return yaml.safe_load(f)
+
+    def beside(self, doc):
+        """A spec directory holding `doc` as ./routing/guarded-pd.yaml."""
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        os.makedirs(os.path.join(d, "routing"))
+        with open(os.path.join(d, self.FILE), "w", encoding="utf-8") as f:
+            yaml.safe_dump(doc, f, sort_keys=False)
+        return d
+
+    def test_the_file_beside_the_spec_validates_only_where_the_spec_is(self):
+        self.assertEqual([], self.errs(self.doc()))
+        self.assertTrue(any("directory is not known" in e for e in self.errs(self.doc(), None)))
+        missing = self.doc()
+        missing["sweeps"][0]["router"]["endpoint_picker_config"] = ["./routing/none.yaml"]
+        self.assertTrue(any("no such file ./routing/none.yaml beside the spec" in e for e in self.errs(missing)))
+        outside = self.doc()
+        outside["sweeps"][0]["router"]["endpoint_picker_config"] = ["./../routing/queue.yaml"]
+        self.assertTrue(any("plain file name" in e for e in self.errs(outside)))
+
+    def test_guard_parameters_of_the_plugins_it_declares_are_swept_by_plugin_name(self):
+        router = {"plugins": {
+            "prefill-concurrency": {"parameters": {"maxConcurrency": [1, 64], "headroom": [0.2]}},
+            "decode-concurrency": {"parameters": {"maxTokenConcurrency": [50000]}},   # not in the file
+            "prefill-queue": {"parameters": {"queueDepthThreshold": [8], "kvCacheUtilThreshold": [0.9]}},
+            "prefix-cache-affinity-filter": {"parameters": {"peakPrefillThroughput": [9000]}}}}
+        self.assertEqual([], self.errs(self.doc(router)))
+        kept, _ = E.expand_sweep(self.doc(router)["sweeps"][0], 16)
+        self.assertEqual(2, len(kept))
+        with tempfile.TemporaryDirectory() as out:
+            got = {}
+            for cand in kept:
+                resolved, desc = E.materialize_router(cand, ROUTING, out, spec_dir=self.SPEC_DIR)
+                with open(resolved["router_config"], encoding="utf-8") as f:
+                    plugins = {p.get("name") or p["type"]: p.get("parameters") for p in yaml.safe_load(f)["plugins"]}
+                got[plugins["prefill-concurrency"]["maxConcurrency"]] = plugins
+                self.assertIn("maxConcurrency", desc)
+                rec = E.router_file_record(cand, resolved["router_config"], ROUTING, out, None, self.SPEC_DIR)
+                self.assertEqual(("spec", self.FILE), (rec["source"], rec["base"]))
+                self.assertEqual(RC.sha256_of(os.path.join(self.SPEC_DIR, self.FILE)), rec["base_sha256"])
+                self.assertTrue(os.path.isfile(os.path.join(out, rec["file"])))
+            self.assertEqual({1, 64}, set(got))
+            p = got[1]
+            self.assertEqual(0.2, p["prefill-concurrency"]["headroom"])
+            self.assertEqual(32, p["decode-concurrency"]["maxConcurrency"], "the other guard is untouched")
+            self.assertEqual(50000, p["decode-concurrency"]["maxTokenConcurrency"])
+            self.assertEqual((8, 0.9), (p["prefill-queue"]["queueDepthThreshold"], p["prefill-queue"]["kvCacheUtilThreshold"]))
+            self.assertEqual(9000, p["prefix-cache-affinity-filter"]["peakPrefillThroughput"])
+
+    def test_a_type_two_plugins_share_or_an_unset_parameter_that_is_no_guard_is_refused(self):
+        errs = self.errs(self.doc({"plugins": {"concurrency-detector": {"parameters": {"maxConcurrency": [4]}}}}))
+        self.assertTrue(any("2 plugins of type 'concurrency-detector'" in e and "name one" in e for e in errs), errs)
+        errs = self.errs(self.doc({"plugins": {"decode-concurrency": {"parameters": {"failOpen": [True]}}}}))
+        self.assertTrue(any("has no parameter 'failOpen'" in e for e in errs), errs)
+
+    def test_a_part_the_embedded_router_refuses_is_refused_by_name_and_issue(self):
+        doc = self.base()
+        doc["plugins"].append({"type": "utilization-filter", "name": "prefill-stall-guard",
+                               "parameters": {"conditions": [{"metric": "waiting-queue", "maxValue": 2}]}})
+        errs = self.errs(self.doc(), self.beside(doc))
+        self.assertTrue(any("'prefill-stall-guard' (type utilization-filter)" in e
+                            and "inference-sim/inference-sim#2205" in e for e in errs), errs)
+        doc = self.base()
+        next(p for p in doc["plugins"] if p["type"] == "inflight-load-producer")["parameters"][
+            "prefillCompletionFromKVEvents"] = True
+        errs = self.errs(self.doc(), self.beside(doc))
+        self.assertTrue(any("parameters.prefillCompletionFromKVEvents" in e
+                            and "inference-sim/inference-sim#2206" in e for e in errs), errs)
+
+    def test_kv_event_sources_and_the_rollout_screener_are_stripped_with_a_note(self):
+        doc = self.base()
+        doc["plugins"].insert(0, {"type": "disaggregatedset-rollout-screener",
+                                  "parameters": {"revisionGating": {"mode": "max-role"}}})
+        doc["plugins"].append({"type": "kv-events-source", "name": "decode-kv-events",
+                               "parameters": {"topicFilter": "kv@"}})
+        doc["dataLayer"]["sources"].append({"pluginRef": "decode-kv-events",
+                                            "extractors": [{"pluginRef": "inflight-load-producer"}]})
+        d = self.beside(doc)
+        self.assertEqual([], self.errs(self.doc(), d))
+        notes = V.advisories(self.doc(), os.path.join(d, "spec.yaml"))
+        self.assertTrue(any("'decode-kv-events' (type kv-events-source)" in n for n in notes), notes)
+        self.assertTrue(any("(type disaggregatedset-rollout-screener)" in n for n in notes), notes)
+        cand = {"router_config": self.FILE}
+        with tempfile.TemporaryDirectory() as out:
+            resolved, desc = E.materialize_router(cand, ROUTING, out, spec_dir=d)
+            self.assertEqual("guarded-pd", desc)
+            with open(resolved["router_config"], encoding="utf-8") as f:
+                text = f.read()
+            ran = yaml.safe_load(text)
+            self.assertEqual(self.base()["plugins"], ran["plugins"])
+            self.assertEqual(self.base()["dataLayer"], ran["dataLayer"])
+            self.assertEqual(2, text.count("# stripped plugin "))
+            rec = E.router_file_record(cand, resolved["router_config"], ROUTING, out, None, d)
+            self.assertEqual(2, len(rec["stripped"]))
+            self.assertNotEqual(rec["base_sha256"], rec["sha256"])
+
+    def test_an_unchanged_file_is_staged_byte_for_byte_named_by_its_hash(self):
+        cand = {"router_config": self.FILE}
+        with tempfile.TemporaryDirectory() as out:
+            resolved, desc = E.materialize_router(cand, ROUTING, out, spec_dir=self.SPEC_DIR)
+            rec = E.router_file_record(cand, resolved["router_config"], ROUTING, out, None, self.SPEC_DIR)
+            self.assertEqual(rec["base_sha256"], rec["sha256"])
+            self.assertEqual(f"guarded-pd-{rec['sha256'][:10]}.yaml", rec["file"])
+            self.assertNotIn("stripped", rec)
+
+    def test_the_sweep_records_the_file_on_every_row(self):
+        rows = []
+
+        def fake_run_one(*a, **kw):
+            rows.append(a[11]["router_config"])
+            return _ran(100.0, 10.0)
+        doc = self.doc({"plugins": {"prefill-concurrency": {"parameters": {"maxConcurrency": [1, 64]}}}})
+        doc["scenario"]["concurrency"] = [1]
+        with mock.patch.object(E.run_blis, "run_one", fake_run_one), tempfile.TemporaryDirectory() as out:
+            rep = E.run_experiment(doc, BLIS, "/c", "/r", out, verbose=False, spec_dir=self.SPEC_DIR)
+            self.assertEqual(2, len(rows))
+            self.assertTrue(all(r.startswith(os.path.join(out, "t", "routing")) for r in rows), rows)
+        recs = [r["router"] for r in rep["sweeps"][0]["rows"]]
+        self.assertEqual({"spec"}, {r["source"] for r in recs})
+        self.assertEqual({1, 64}, {r["overrides"]["plugins.prefill-concurrency.parameters.maxConcurrency"] for r in recs})
+
+
 # --- labelling and ranking --------------------------------------------------------------------
 
 
@@ -1265,6 +1417,27 @@ class WorkloadByFile(unittest.TestCase):
         self.assertEqual("300s", cmd[cmd.index("--benchmark-duration") + 1])
         self.assertEqual([900, 300], E.recipe_record(self.GOOD, r)["overrides"]["benchmark_duration_s"])
 
+    def test_a_series_interval_reaches_the_command_from_a_workload_file(self):
+        path = self.write(self.GOOD)
+        r = E.resolve_workload_spec(path, E.load_workload_spec(path),
+                                    {"corpus": "/c/t.jsonl", "server_series_interval_s": 5}, dry_run=True)
+        self.assertEqual(5, r["server_series_interval_s"])
+        replay = {k: v for k, v in r.items() if k not in E.RECORD_ONLY_REPLAY}
+        cmd = run_blis.build_replay_cmd("/b", None, None, "/sc", "s.yaml", 42, None, {}, replay)
+        self.assertEqual("5", cmd[cmd.index("--server-series-interval-s") + 1])
+        quiet = E.resolve_workload_spec(path, E.load_workload_spec(path), {"corpus": "/c/t.jsonl"},
+                                        dry_run=True)
+        self.assertNotIn("server_series_interval_s", quiet)
+
+    def test_a_series_interval_must_be_a_positive_number(self):
+        for good in (0.5, 5):
+            self.assertEqual([], V.replay_errors({"replay": {"server_series_interval_s": good}}), good)
+        self.assertEqual([], V.replay_errors({"replay": {"corpus": ".corpus/t.jsonl"}}))
+        for bad in (0, -1, "5", True, None):
+            errs = V.replay_errors({"replay": {"server_series_interval_s": bad}})
+            self.assertEqual(1, len(errs), bad)
+            self.assertIn("server_series_interval_s", errs[0])
+
     def test_the_command_passes_the_file_and_the_catalog_is_not_read(self):
         path = self.write(self.GOOD)
         r = E.resolve_workload_spec(path, E.load_workload_spec(path), {"corpus": "/c/t.jsonl"})
@@ -1382,6 +1555,85 @@ class AgentxRunRecipe(unittest.TestCase):
         for n in names:
             with open(os.path.join(E.ROOT, "experiments", n), encoding="utf-8") as f:
                 self.assertEqual(self.FILE, yaml.safe_load(f)["scenario"].get("workload_spec"), n)
+
+
+class ReplayKeysReachTheSimulator(unittest.TestCase):
+    """A `scenario.replay` key the runner never passes to BLIS was accepted and ignored (#197); and a
+    workload file may sit beside the spec, ./<file>, copied into the run directory."""
+
+    def test_a_key_the_runner_never_passes_is_refused(self):
+        for key in ("trace_idle_gap_cap_s", "warmup", "category"):
+            errs = V.validate(spec(scenario={**spec()["scenario"], "replay": {key: 1}}), BLIS, ROUTING)
+            self.assertTrue(any(f"scenario.replay.{key}: never reaches BLIS" in e for e in errs), (key, errs))
+        ok = {"corpus": ".corpus/t.jsonl", "corpus_cache": "/tmp/c", "grace_period": "inf",
+              "benchmark_duration": "900s", "server_series_interval_s": 5}
+        self.assertEqual([], V.replay_errors({"replay": ok}))
+
+    def test_every_key_the_validator_lets_through_reaches_the_command(self):
+        replay = {"scenario": "x", "corpus": "/c", "corpus_sha256": "a", "corpus_cache": "/cc",
+                  "max_context_length": "100", "benchmark_duration": "900s", "grace_period": "30s",
+                  "server_series_interval_s": 5}
+        self.assertEqual(V.REPLAY_KEYS, set(replay))
+        cmd = run_blis.build_replay_cmd("/b", None, None, "/sc", "s.yaml", 42, None, {}, replay)
+        for key, value in replay.items():
+            self.assertIn(str(value), cmd, key)
+
+    def test_beside_a_workload_file_the_keys_the_file_states_are_refused(self):
+        sc = {"workload_spec": "workloads/agentx-run-recipe.yaml",
+              "replay": {"corpus": ".corpus/t.jsonl", "corpus_sha256": "a" * 64, "max_context_length": 10}}
+        errs = V.replay_errors(sc)
+        self.assertEqual(2, len(errs), errs)
+        self.assertTrue(all("never reaches BLIS" in e for e in errs))
+
+    def recipe(self, cap):
+        with open(os.path.join(E.ROOT, AgentxRunRecipe.FILE), encoding="utf-8") as f:
+            doc = yaml.safe_load(f)
+        doc["trace_idle_gap_cap_s"] = cap
+        return doc
+
+    def beside(self, doc, name="wl.yaml"):
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        with open(os.path.join(d, name), "w", encoding="utf-8") as f:
+            yaml.safe_dump(doc, f)
+        return d
+
+    def with_file(self, path):
+        doc = spec()
+        del doc["scenario"]["workload"]
+        doc["scenario"].update({"workload_spec": path, "concurrency": [1],
+                                "replay": {"corpus": ".corpus/t.jsonl"}})
+        return doc
+
+    def test_a_workload_file_beside_the_spec_validates_and_keeps_the_recipe_check(self):
+        d = self.beside(self.recipe(1))
+        self.assertEqual([], V.validate(self.with_file("./wl.yaml"), BLIS, ROUTING, spec_dir=d))
+        errs = V.validate(self.with_file("./wl.yaml"), BLIS, ROUTING)
+        self.assertTrue(any("directory is not known" in e for e in errs), errs)
+        errs = V.validate(self.with_file("./none.yaml"), BLIS, ROUTING, spec_dir=d)
+        self.assertTrue(any("no such file in the spec's directory" in e for e in errs), errs)
+        incomplete = self.recipe(1)
+        del incomplete["trace_idle_gap_cap_s"]
+        errs = V.validate(self.with_file("./wl.yaml"), BLIS, ROUTING, spec_dir=self.beside(incomplete))
+        self.assertTrue(any("must state the whole run recipe" in e for e in errs), errs)
+
+    def test_the_run_reads_a_copy_in_the_run_directory_and_records_it(self):
+        d = self.beside(self.recipe(1))
+        seen = []
+
+        def fake_run_one(*a, **kw):
+            seen.append(kw["replay"]["workload_spec"])
+            return _ran(100.0, 10.0)
+        with mock.patch.object(E.run_blis, "run_one", fake_run_one), tempfile.TemporaryDirectory() as out:
+            rep = E.run_experiment(self.with_file("./wl.yaml"), BLIS, "/c", "/r", out, verbose=False, spec_dir=d)
+            self.assertEqual([os.path.join(out, "t", "workloads", "wl.yaml")], seen)
+            with open(seen[0], "rb") as got, open(os.path.join(d, "wl.yaml"), "rb") as want:
+                self.assertEqual(want.read(), got.read())
+        wl = rep["scenario"]["workload_spec"]
+        self.assertEqual(("./wl.yaml", "workloads/wl.yaml"), (wl["path"], wl["file"]))
+        self.assertEqual(RC.sha256_of(os.path.join(d, "wl.yaml")), wl["sha256"])
+        self.assertEqual(1, wl["document"]["trace_idle_gap_cap_s"])
+        self.assertEqual([1, 300], wl["recipe"]["differs_from_run"]["trace_idle_gap_cap_s"])
 
 
 class ReplayComesFromTheCatalog(unittest.TestCase):
@@ -1565,20 +1817,22 @@ class CorpusProvisioning(unittest.TestCase):
         rel = os.path.relpath(root, E.ROOT)
         with open(os.path.join(root, "wl.yaml"), "w") as f:
             yaml.safe_dump(WorkloadByFile.GOOD, f)
-        with open(os.path.join(root, "s.yaml"), "w") as f:
-            yaml.safe_dump({"scenario": {"workload_spec": os.path.join(rel, "wl.yaml"),
-                                         "replay": {"corpus": os.path.join(root, "c.jsonl")}}}, f)
         seen = []
-        orig, argv = FC.fetch, sys.argv
-        FC.fetch = lambda dest, url, sha, token=None: seen.append((dest, url, sha))
-        sys.argv = ["fetch_corpus.py", os.path.join(root, "s.yaml")]
-        try:
-            with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(0, FC.main())
-        finally:
-            FC.fetch, sys.argv = orig, argv
+        for path in (os.path.join(rel, "wl.yaml"), "./wl.yaml"):     # the second is beside the spec
+            with open(os.path.join(root, "s.yaml"), "w") as f:
+                yaml.safe_dump({"scenario": {"workload_spec": path,
+                                             "replay": {"corpus": os.path.join(root, "c.jsonl")}}}, f)
+            orig, argv = FC.fetch, sys.argv
+            FC.fetch = lambda dest, url, sha, token=None: seen.append((dest, url, sha))
+            sys.argv = ["fetch_corpus.py", os.path.join(root, "s.yaml")]
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(0, FC.main())
+            finally:
+                FC.fetch, sys.argv = orig, argv
         g = WorkloadByFile.GOOD["corpus"]
-        self.assertEqual(1, len(seen))
+        self.assertEqual(2, len(seen))
+        self.assertEqual(seen[0], seen[1])
         self.assertEqual("b" * 64, seen[0][2])
         self.assertIn(g["source"]["revision"], seen[0][1])      # the pinned revision, not a branch
         self.assertIn(g["source"]["huggingface"], seen[0][1])
@@ -1591,10 +1845,37 @@ class CorpusProvisioning(unittest.TestCase):
             with open(src, "w", encoding="utf-8") as f:
                 f.write("truncated")
             with self.assertRaises(SystemExit) as e:
-                FC.fetch(dest, "file://" + src, "0" * 64)
+                FC.fetch(dest, "file://" + src, "0" * 64, pause=0)
             self.assertIn("digest mismatch", str(e.exception))
             self.assertFalse(os.path.exists(dest), "a bad download must not land at the dest")
             self.assertFalse(os.path.exists(dest + ".part"), "the partial must be cleaned up")
+
+    def test_a_truncated_transfer_is_retried_and_the_good_copy_lands(self):
+        """A cold cache makes many jobs fetch at once; a cut-short transfer must not fail the job."""
+        with tempfile.TemporaryDirectory() as d:
+            dest = os.path.join(d, "traces.jsonl")
+            good = os.path.join(d, "good.jsonl")
+            with open(good, "w", encoding="utf-8") as f:
+                f.write("the whole corpus")
+            sha = FC.digest(good)
+            calls = []
+            real = FC._download
+
+            def flaky(part, url, token):
+                calls.append(url)
+                if len(calls) == 1:
+                    with open(part, "w", encoding="utf-8") as f:
+                        f.write("the who")
+                    return 7
+                return real(part, url, token)
+            FC._download = flaky
+            try:
+                self.assertTrue(FC.fetch(dest, "file://" + good, sha, pause=0))
+            finally:
+                FC._download = real
+            self.assertEqual(2, len(calls))
+            self.assertEqual(sha, FC.digest(dest))
+            self.assertFalse(os.path.exists(dest + ".part"))
 
     def test_an_already_verified_corpus_is_left_alone(self):
         """The step runs on every sweep, so a present, correct corpus must be a no-op."""
@@ -1904,14 +2185,276 @@ class DrafterProfile(unittest.TestCase):
         self.assertTrue(d["t-eagle3"]["applies"])
         self.assertEqual([2], d["t-eagle3"]["depths"])
         a = d["t-eagle3"]["acceptance"][0]
-        self.assertEqual(("exact", "golden", "https://example.org/a.yaml"),
-                         (a["rung"], a["set"], a["source"]))
+        self.assertEqual(("exact_key", "internal registry set", None),
+                         (a["rung"], a["set"], a["source"]),
+                         "read from a checkout the rung is only the key found, not the simulator's step")
         self.assertFalse(d["speculator"]["applies"], "its only profile is thinking off")
 
     def test_the_selectors_pick_the_profile(self):
         d = self.facts("off")
         self.assertTrue(d["speculator"]["applies"])
         self.assertFalse(d["t-eagle3"]["applies"])
+
+
+FAKE_ACCEPTANCE = """#!/usr/bin/env python3
+import json, os, sys
+here = os.path.dirname(os.path.abspath(__file__))
+a = sys.argv[1:]
+with open(os.path.join(here, "calls.log"), "a") as f:
+    f.write(" ".join(a) + "\\n")
+if a[:1] != ["acceptance"]:
+    sys.stderr.write('Error: unknown command "%s" for "blis"\\n' % a[0]); sys.exit(1)
+get = lambda flag: a[a.index(flag) + 1] if flag in a else ""
+key = "%s|%s|%s" % (get("--drafter"), get("--method"), get("--num-spec-tokens"))
+table = json.load(open(os.path.join(here, "table.json")))
+got = table.get(key)
+if got is None or "refuse" in got:
+    sys.stderr.write("Error: acceptance: " + (got or {}).get("refuse", "no profile") + "\\n"); sys.exit(1)
+print(json.dumps(got))
+"""
+
+
+class DrafterArms(unittest.TestCase):
+    """Each drafter is its own arm -- method, checkpoint and depths kept together -- and its rung is
+    the simulator's, when the build can be asked (`blis acceptance`)."""
+
+    MODEL = "m"
+    LINKS = {"m": {"drafters": ["speculator", "m-flash", "m-spark", "m-nope"], "speculator": "mtp", "k": 3},
+             "m-flash": {"targets": ["m"], "speculator": "dflash", "k": 1},
+             "m-spark": {"targets": ["m"], "speculator": "dspark", "k": 7},
+             "m-nope": {"targets": ["m"], "speculator": "eagle3", "k": 2}}
+    WL = {"kind": "replay", "category": "coding", "thinking": "on"}
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        import knob_profile
+        self.K = knob_profile
+        self.dir = tempfile.TemporaryDirectory()
+        root = self.dir.name
+        self.cat = _drafter_catalog(os.path.join(root, "catalog"), self.LINKS)
+        self.reg = os.path.join(root, "registry")
+        os.makedirs(os.path.join(self.reg, "acceptance"))
+        prof = lambda drafter, method, k, al: {
+            "model": "m", **({"drafter": drafter} if drafter else {}), "speculative_method": method,
+            "num_spec_tokens": k, "thinking": "on", "category": "coding", "acceptance_length": al,
+            "provenance": {"source": f"https://example.org/{method}.yaml"}}
+        with open(os.path.join(self.reg, "acceptance", "golden.yaml"), "w") as f:
+            yaml.safe_dump({"kind": "AcceptanceProfileSet", "name": "golden", "profiles": [
+                prof("m-flash", "dflash", 1, 1.85), prof("m-spark", "dspark", 7, 2.72)]}, f)
+        self.bin = os.path.join(root, "bin")
+        os.makedirs(self.bin)
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def blis(self, table, script=FAKE_ACCEPTANCE):
+        path = os.path.join(self.bin, "blis")
+        with open(path, "w") as f:
+            f.write(script)
+        os.chmod(path, 0o755)
+        with open(os.path.join(self.bin, "table.json"), "w") as f:
+            json.dump(table, f)
+        return path
+
+    def calls(self):
+        with open(os.path.join(self.bin, "calls.log")) as f:
+            return f.read().splitlines()
+
+    def facts(self, blis=None):
+        return {d["name"]: d for d in self.K.drafter_facts(self.cat, self.reg, self.MODEL, self.WL,
+                                                          blis=blis, hardware="b200")}
+
+    def hit(self, step, al=2.0, **more):
+        return {"acceptance_length": al, "step": step, "differed": [], "set": "golden",
+                "source": "https://example.org/x.yaml", "profile": "m/x", **more}
+
+    def test_a_drafter_with_exact_profiles_and_one_without_are_two_arms_not_one_union(self):
+        arms = {a["drafter"]: a["speculative"] for a in self.K.drafting_arms(list(self.facts().values()))}
+        self.assertEqual({"m-flash": {"method": ["dflash"], "draft_model": ["m-flash"], "num_spec_tokens": [1]},
+                          "m-spark": {"method": ["dspark"], "draft_model": ["m-spark"], "num_spec_tokens": [7]}},
+                         arms)
+
+    def test_a_non_public_set_is_not_named_in_the_profile_a_spec_author_copies_from(self):
+        got = self.K.drafter_facts(self.cat, self.reg, self.MODEL, self.WL)
+        self.assertNotIn("golden", json.dumps(got))
+        self.assertIn("internal registry set", json.dumps(got))
+        table = {"m-spark|dspark|7": self.hit("same_drafter_other_settings", set="golden", source="golden measurements")}
+        got = self.K.drafter_facts(self.cat, self.reg, self.MODEL, self.WL, blis=self.blis(table), hardware="b200")
+        self.assertNotIn("golden", json.dumps(got))
+
+    def test_the_in_graph_arm_names_no_draft_model(self):
+        with open(os.path.join(self.reg, "acceptance", "graph.yaml"), "w") as f:
+            yaml.safe_dump({"kind": "AcceptanceProfileSet", "name": "g", "profiles": [
+                {"model": "m", "speculative_method": "mtp", "num_spec_tokens": 2, "thinking": "on",
+                 "category": "coding", "acceptance_length": 1.9, "provenance": {"source": "s"}}]}, f)
+        arms = {a["drafter"]: a["speculative"] for a in self.K.drafting_arms(list(self.facts().values()))}
+        self.assertEqual({"method": ["mtp"], "num_spec_tokens": [2]}, arms["speculator"])
+        self.assertEqual(3, len(arms))
+
+    def test_the_knob_row_lists_each_drafter_with_its_own_values(self):
+        row = self.K.speculative_knob(list(self.facts().values()))
+        self.assertTrue(row["applies"])
+        self.assertEqual(2, len(row["arms"]))
+        lines = [v for v in row["values"] if "m-flash" in v or "m-spark" in v]
+        self.assertEqual(2, len(lines), row["values"])
+        self.assertFalse(any("dflash" in v and "dspark" in v for v in row["values"]),
+                         "no line may pair one drafter's method with another's depth or checkpoint")
+        self.assertIn("one sweep per drafter", " ".join(row["values"]))
+
+    def test_the_rung_is_the_simulators_not_the_key_found(self):
+        blis = self.blis({"m-flash|dflash|1": self.hit("same_drafter_other_settings", 1.85,
+                                                       differed=["draft_sampler", "engine"]),
+                          "m-spark|dspark|7": self.hit("exact", 2.72),
+                          "|mtp|3": self.hit("same_drafter_other_k", 2.3, k_rule="interpolated"),
+                          "m-nope|eagle3|2": {"refuse": "no profile for m-nope"}})
+        d = self.facts(blis)
+        flash = d["m-flash"]["acceptance"][0]
+        self.assertEqual(("same_drafter_other_settings", True, ["draft_sampler", "engine"]),
+                         (flash["rung"], flash["borrowed"], flash["differed"]))
+        self.assertEqual(("exact", False), (d["m-spark"]["acceptance"][0]["rung"],
+                                            d["m-spark"]["acceptance"][0]["borrowed"]))
+        self.assertTrue(all(d[n]["applies"] for n in ("m-flash", "m-spark", "speculator")))
+
+    def test_a_drafter_with_no_exact_profile_applies_when_the_simulator_borrows_one(self):
+        blis = self.blis({"|mtp|3": self.hit("same_drafter_other_k", 2.3, k_rule="interpolated")})
+        g = self.facts(blis)["speculator"]
+        self.assertTrue(g["applies"])
+        self.assertEqual([3], g["depths"])
+        self.assertEqual(("same_drafter_other_k", True), (g["acceptance"][0]["rung"], g["acceptance"][0]["borrowed"]))
+        self.assertIn("BORROWED", g["why"])
+
+    def test_a_measured_depth_above_the_graphs_num_spec_tokens_is_kept_for_an_external_drafter(self):
+        with open(os.path.join(self.reg, "acceptance", "golden.yaml")) as f:
+            doc = yaml.safe_load(f)
+        doc["profiles"].append({**doc["profiles"][0], "num_spec_tokens": 3, "acceptance_length": 2.9})
+        with open(os.path.join(self.reg, "acceptance", "golden.yaml"), "w") as f:
+            yaml.safe_dump(doc, f)
+        self.assertEqual([1, 3], self.facts()["m-flash"]["depths"], "m-flash's graph says 1; K=3 is measured")
+
+    def test_a_drafter_whose_lookup_is_refused_does_not_apply_and_says_why(self):
+        n = self.facts(self.blis({}))["m-nope"]
+        self.assertFalse(n["applies"])
+        self.assertIn("no profile", n["why"])
+
+    def test_the_lookup_states_the_workload_engine_and_chip(self):
+        self.facts(self.blis({"m-spark|dspark|7": self.hit("exact")}))
+        got = [c for c in self.calls() if "--drafter m-spark" in c][0]
+        for part in ("--model m ", "--method dspark", "--num-spec-tokens 7", "--category coding",
+                     "--thinking on", "--engine vllm", "--hardware b200"):
+            self.assertIn(part, got + " ")
+        speculator = [c for c in self.calls() if "--method mtp" in c][0]
+        self.assertNotIn("--drafter", speculator, "the in-graph speculator is asked with no drafter")
+
+    def test_a_build_without_the_command_falls_back_and_says_so(self):
+        old = self.blis({}, script="#!/bin/sh\necho 'Error: unknown command \"acceptance\" for \"blis\"' >&2\nexit 1\n")
+        d = self.facts(old)
+        self.assertEqual("exact_key", d["m-flash"]["acceptance"][0]["rung"])
+        self.assertTrue(d["m-flash"]["applies"])
+        self.assertIn("no `blis acceptance`", d["m-flash"]["why"])
+
+
+class DrafterMatchesItsSweep(unittest.TestCase):
+    """A sweep crosses method, draft_model and num_spec_tokens, so a checkpoint is paired with its
+    own method and a depth it declares, or the sweep is refused (one sweep per drafter)."""
+
+    FLASH, SPARK = "qwen2.5-7b-instruct", "muse-spark-open-dspark"
+    LINKS = {"qwen3-14b": {"drafters": ["speculator", "qwen2.5-7b-instruct", "muse-spark-open-dspark"],
+                           "speculator": "mtp"},
+             "qwen2.5-7b-instruct": {"targets": ["qwen3-14b"], "speculator": "dflash", "k": 1},
+             "muse-spark-open-dspark": {"targets": ["qwen3-14b"], "speculator": "dspark", "k": 7}}
+
+    def setUp(self):
+        self.env = os.environ.pop("SUBSTRATE_CATALOG", None)
+        self.dir = tempfile.TemporaryDirectory()
+        self.cat = _drafter_catalog(self.dir.name, self.LINKS)
+
+    def tearDown(self):
+        self.dir.cleanup()
+        if self.env is not None:
+            os.environ["SUBSTRATE_CATALOG"] = self.env
+
+    def errs(self, **speculative):
+        sw = {"name": "s", "num-instances": [2], "parallel": {"tp": [8]},
+              "engine": {"speculative": speculative}}
+        return V.validate(spec(sweeps=[sw]), BLIS, ROUTING, self.cat)
+
+    def test_a_drafter_with_its_own_method_and_depth_passes(self):
+        self.assertEqual([], self.errs(method=["dspark"], draft_model=[self.SPARK], num_spec_tokens=[0, 3, 7]))
+
+    def test_another_drafters_method_is_refused(self):
+        errs = self.errs(method=["dflash", "dspark"], draft_model=[self.SPARK], num_spec_tokens=[7])
+        self.assertTrue(any("dflash" in e and self.SPARK in e and "one sweep per drafter" in e for e in errs), errs)
+
+    def test_two_drafters_with_different_methods_are_refused(self):
+        errs = self.errs(method=["dspark"], draft_model=[self.SPARK, self.FLASH], num_spec_tokens=[1])
+        self.assertTrue(any(self.FLASH in e and "dspark" in e for e in errs), errs)
+
+    def test_a_measured_depth_above_the_graphs_num_spec_tokens_passes(self):
+        self.assertEqual([], self.errs(method=["dflash"], draft_model=[self.FLASH], num_spec_tokens=[0, 1, 3]))
+
+
+class AcceptanceInTheReport(unittest.TestCase):
+    """The report states the acceptance every drafting arm was priced with, and says when it is borrowed."""
+
+    def row(self, variant, step, label="eng", **more):
+        acc = {"acceptance_length": 2.5, "step": step, "profile_set": more.pop("profile_set", "inferencex-golden-al"),
+               "source": more.pop("source", "https://example.org/a.yaml"), "differed": more.pop("differed", []), **more}
+        return {"sweep": "s", "label": label, "variant": variant, "concurrency": 8,
+                **({"acceptance": acc} if step is not None else {})}
+
+    def lines(self, rows):
+        return E.acceptance_lines([{"name": "s", "rows": rows}])
+
+    def test_a_borrowed_arm_is_marked_with_its_rung_and_what_differed(self):
+        out = self.lines([self.row("K=3 dspark", "same_drafter_other_k", k_rule="interpolated", differed=["engine"])])
+        self.assertEqual(1, len(out))
+        for part in ("K=3 dspark", "BORROWED", "same_drafter_other_k", "interpolated", "engine", "inferencex-golden-al",
+                     "https://example.org/a.yaml"):
+            self.assertIn(part, out[0])
+
+    def test_an_exact_arm_is_not_marked_borrowed(self):
+        out = self.lines([self.row("K=7 dspark", "exact")])
+        self.assertIn("exact", out[0])
+        self.assertNotIn("BORROWED", out[0])
+        self.assertIn("2.5", out[0])
+
+    def test_an_arm_is_listed_once_across_its_load_levels(self):
+        self.assertEqual(1, len(self.lines([self.row("K=7 dspark", "exact")] * 4)))
+
+    def test_two_arms_of_one_sweep_are_two_lines(self):
+        self.assertEqual(2, len(self.lines([self.row("K=3 dspark", "exact"), self.row("K=7 dspark", "exact")])))
+
+    def test_a_non_public_set_is_shown_by_a_neutral_label_with_its_rung(self):
+        """A published report never carries a non-public set's name or source, even from a stored row."""
+        out = self.lines([self.row("K=3 dspark", "same_drafter_other_k", profile_set="acme-private-sweeps",
+                                   source="acme private measurements")])
+        self.assertNotIn("acme", out[0].lower())
+        self.assertIn("internal registry set", out[0])
+        self.assertIn("same_drafter_other_k", out[0])
+        self.assertIn("BORROWED", out[0])
+
+    def test_no_section_of_the_report_names_a_non_public_set(self):
+        rep = {"name": "n", "description": "", "scenario": {"model": "m", "gpus": 8, "hardware": "b200",
+                                                            "workload": "w", "concurrency": [1], "seed": 1},
+               "totals": {"configs": 1, "runs": 1, "servable": 0}, "best_overall": None, "basis": "b",
+               "scope": "s", "sweeps": [{"name": "s", "configs": 1, "runs": 1, "narrative": "",
+                                         "rows": [self.row("K=3 dspark", "exact", profile_set="acme-private-sweeps",
+                                                           source="acme private measurements")]}]}
+        sections = [x for x in E._report_json(rep)["sections"] if x["title"] == "Drafting acceptance"]
+        self.assertEqual(1, len(sections))
+        self.assertNotIn("acme", json.dumps(sections).lower())
+
+    def test_a_grid_with_no_drafting_has_no_acceptance_lines(self):
+        self.assertEqual([], self.lines([self.row("K=0", None)]))
+
+    def test_the_report_json_carries_the_section(self):
+        rep = {"name": "n", "description": "", "scenario": {"model": "m", "gpus": 8, "hardware": "b200",
+                                                            "workload": "w", "concurrency": [1], "seed": 1},
+               "totals": {"configs": 1, "runs": 1, "servable": 0}, "best_overall": None, "basis": "b",
+               "scope": "s", "sweeps": [{"name": "s", "configs": 1, "runs": 1, "narrative": "",
+                                         "rows": [self.row("K=3 dspark", "other_drafter")]}]}
+        titles = [x["title"] for x in E._report_json(rep)["sections"]]
+        self.assertIn("Drafting acceptance", titles)
 
 
 class DraftingControlArm(unittest.TestCase):
@@ -2775,11 +3318,17 @@ class CommittedReportsKeepTheirSloVerdicts(unittest.TestCase):
                 with open(runs_path, encoding="utf-8") as f:
                     recs = [json.loads(ln) for ln in f]
                 self.assertEqual(len(rows), len(recs))
+                # A report written at the older default (the x axis 1000 / mean TPOT) keeps that
+                # `interactivity` until the regeneration the pin move queues rewrites it; only that
+                # one figure is on another basis, so every other field is still checked.
+                fields = self.FIELDS
+                if (exp.get("pareto") or {}).get("x") == "interactivity_of_mean_tpot":
+                    fields = tuple(k for k in fields if k != "interactivity")
                 for row, rec in zip(rows, recs):
                     ok, why = E.servable(rec, slo_ms, gpus)
                     got = {**E.run_row(rec, {}, "", "", "", 0, gpus, slo_ms, sc.get("slo")),
                            "servable": ok, "not_servable_because": why}
-                    self.assertEqual({k: row.get(k) for k in self.FIELDS}, {k: got.get(k) for k in self.FIELDS})
+                    self.assertEqual({k: row.get(k) for k in fields}, {k: got.get(k) for k in fields})
                 self.assertEqual(exp["interactivity_floor"],
                                  {"tok_per_s_per_user": E.floor_rate_from(slo_ms)})
 
@@ -2861,7 +3410,7 @@ class PdRunner(unittest.TestCase):
 
     def test_scenario_yaml_renders_two_pools_and_pd_transfer(self):
         par, eng, cli, _router = run_blis.classify_config(self.cfg(), V.knob_vocabulary(BLIS))
-        doc = run_blis.scenario_yaml("kimi-k2.5", "h200", "0.29.0", par, eng, "x",
+        doc = run_blis.scenario_yaml("kimi-k2.5", "h200", par, eng, "x",
                                      cli["num_instances"])
         self.assertIn("role: prefill", doc)
         self.assertIn("role: decode", doc)
@@ -2878,7 +3427,7 @@ class PdRunner(unittest.TestCase):
     def test_colocated_scenario_is_unchanged(self):
         """The P/D path must not alter the colocated rendering every committed report used."""
         par, eng, _cli, _r = run_blis.classify_config({"tp": 8, "num_instances": 2}, V.knob_vocabulary(BLIS))
-        doc = run_blis.scenario_yaml("glm-5.3-flash", "h100", "0.29.0", par, eng, "x", 2)
+        doc = run_blis.scenario_yaml("glm-5.3-flash", "h100", par, eng, "x", 2)
         self.assertIn("role: colocated", doc)
         self.assertNotIn("pd_transfer", doc)
 
@@ -3674,11 +4223,11 @@ FATAL = ('time="2026-11-11T20:50:44-05:00" level=fatal msg="instance instance_0:
 
 
 def _ran(tps, tpot_ms, itl_p99=1.0, **extra):
-    # a Result that states the registry's interactivity of the mean TPOT (1000 / mean TPOT)
-    m = {"tokens_per_sec": tps, "itl_p99_ms": itl_p99, "tpot_mean_ms": tpot_ms,
-         "interactivity_of_mean_tpot": 1000.0 / tpot_ms}
+    # a Result that states the registry's mean of each request's tok/s, here every request at tpot_ms
+    m = {"tokens_per_sec": tps, "itl_p99_ms": itl_p99, "tpot_mean_ms": tpot_ms}
     m.update(extra)
-    return {"returncode": 0, "error": None, "metrics": m, "metrics_all_instances": [], "cmd": None}
+    return {"returncode": 0, "error": None, "metrics": m, "metrics_all_instances": [], "cmd": None,
+            "measured": {"metrics": {"interactivity_mean": {"value": 1000.0 / tpot_ms, "samples": 8}}}}
 
 
 def _refused(scn="a1b2.yaml"):
@@ -3792,21 +4341,30 @@ class Refusals(unittest.TestCase):
 
 
 class InteractivityAndFigures(unittest.TestCase):
+    @staticmethod
+    def rec_with(**figures):
+        return {"metrics": {"tpot_mean_ms": 8.0},
+                "measured": {"metrics": {k: {"value": v, "samples": 3} for k, v in figures.items()}}}
+
     def test_a_result_that_states_the_figure_is_used_as_stated(self):
-        self.assertEqual((130.0, "result"), PA.interactivity_of(
-            {"interactivity_of_mean_tpot": 130.0, "tpot_mean_ms": 8.0}))
+        self.assertEqual((130.0, "result"), PA.interactivity_of(self.rec_with(
+            interactivity_mean=130.0, interactivity_of_mean_tpot=125.0)))
 
     def test_a_result_without_the_figure_is_unrated_not_rebuilt_from_tpot(self):
         # DEV-8: a definition is read from the registry, never recomputed from another field
-        self.assertEqual((None, ""), PA.interactivity_of({"tpot_mean_ms": 8.0}))
+        self.assertEqual((None, ""), PA.interactivity_of({"metrics": {"tpot_mean_ms": 8.0}}))
         self.assertEqual((None, ""), PA.interactivity_of({}))
-        self.assertEqual((None, ""), PA.interactivity_of({"interactivity_of_mean_tpot": 0}))
+        self.assertEqual((None, ""), PA.interactivity_of(self.rec_with(interactivity_mean=0)))
+        self.assertEqual((None, ""), PA.interactivity_of(self.rec_with(interactivity_of_mean_tpot=125.0)),
+                         "the harmonic mean of the rates is never the axis (#187)")
+        self.assertEqual((None, ""), PA.interactivity_of(
+            {"metrics": {"interactivity_mean": 130.0, "interactivity_of_mean_tpot": 125.0}}))
 
     def test_a_row_of_a_result_without_the_figure_is_counted_unrated(self):
         rep = _sweep_with(_pd_and_agg_spec(ranking="pareto"), lambda cfg: {
             "returncode": 0, "error": None, "cmd": None, "metrics_all_instances": [],
             "metrics": {"tokens_per_sec": 100.0, "itl_p99_ms": 1.0, "tpot_mean_ms": 8.0,
-                        "total_tokens_per_sec_per_gpu": 480.0}})
+                        "interactivity_of_mean_tpot": 125.0, "total_tokens_per_sec_per_gpu": 480.0}})
         self.assertIsNone(rep["best_overall"])
         self.assertEqual(rep["totals"]["servable"], rep["pareto"]["overall"]["total"]["unrated"])
 
@@ -3827,6 +4385,56 @@ class InteractivityAndFigures(unittest.TestCase):
         self.assertEqual(480.0, row["total_tokens_per_sec_per_gpu"])
         self.assertFalse(row["disaggregated"])
         self.assertTrue(rep["sweeps"][0]["rows"][0]["disaggregated"])
+
+
+class DefaultInteractivityAxis(unittest.TestCase):
+    """#187: a spec that states no per-user statistic is ranked and shown on the registry's
+    interactivity_mean, the mean of each request's tok/s, not on 1000 / the mean TPOT."""
+
+    @staticmethod
+    def rec(tpots_ms):
+        return InteractivityMeanFloor().rec(InteractivityMeanFloor.doc(tpots_ms))
+
+    @staticmethod
+    def row(rec, spec_slo=None, y=100.0):
+        slo_ms = E.slo_limits(spec_slo or {"itl_p99": "20ms"})
+        return {**E.run_row(rec, {}, "l", "", "s", 8, 8, slo_ms, spec_slo or {"itl_p99": "20ms"}),
+                "servable": True, "total_tokens_per_sec_per_gpu": y}
+
+    def test_acceptance_users_at_10_and_30_ms_see_66_7_not_50(self):
+        rec = self.rec((10.0, 30.0))
+        self.assertEqual(66.667, self.row(rec)["interactivity"])
+        self.assertEqual(66.667, round(rec["measured"]["metrics"]["interactivity_mean"]["value"], 3),
+                         "the row is the Result's own interactivity_mean")
+        self.assertEqual(50.0, rec["measured"]["metrics"]["interactivity_of_mean_tpot"]["value"])
+
+    def test_the_default_axis_is_named_interactivity_mean(self):
+        obj = PA.objective_of({"ranking": "pareto"})
+        self.assertEqual("interactivity_mean", PA.X_METRIC)
+        self.assertEqual("interactivity_mean", E.pareto_report([], [], obj)["x"])
+        self.assertIn("interactivity_mean", PA.describe(obj))
+        self.assertNotIn("interactivity_of_mean_tpot", PA.describe(obj))
+
+    def test_the_front_orders_users_on_the_mean_of_their_rates(self):
+        """Same throughput, the same 1000 / mean TPOT (50), different spread: only the mean of the
+        rates tells them apart, so the spread one dominates."""
+        spread, even = self.row(self.rec((10.0, 30.0))), self.row(self.rec((20.0, 20.0)))
+        spread["label"], even["label"] = "spread", "even"
+        self.assertEqual((66.667, 50.0), (spread["interactivity"], even["interactivity"]))
+        front = E.pareto_report([], [spread, even], PA.objective_of({"ranking": "pareto"}))["overall"]["total"]
+        self.assertEqual([("spread", 66.667)], [(m["label"], m["interactivity"]) for m in front["members"]])
+
+    def test_a_tpot_cap_alone_keeps_one_thousand_over_that_statistic_and_says_so(self):
+        slo = {"tpot_p90": "40ms"}
+        rec = self.rec((10.0, 30.0))
+        row = self.row(rec, slo)
+        basis = E.per_user_basis(slo)
+        self.assertEqual("tpot_p90_ms", basis["of"])
+        rep = E.pareto_report([], [{**row, "label": "a"}], PA.objective_of({"ranking": "pareto"}), basis)
+        self.assertEqual(("tok_per_s_per_user", "tpot_p90_ms"), (rep["x"], rep["x_basis"]["of"]))
+        member = rep["overall"]["total"]["members"][0]
+        self.assertEqual(round(1000.0 / run_blis._percentile([10.0, 30.0], 90), 3), member["interactivity"])
+        self.assertEqual(66.667, row["interactivity"], "the row's own figure is still the mean of rates")
 
 
 def _row(label, x, y, pd=False, servable=True, c=1, sweep="s", decode_y=None):
@@ -4452,6 +5060,127 @@ class OmittedEngineKnobs(unittest.TestCase):
         _par, eng, _cli, _router = run_blis.classify_config(
             {"tp": 8, "max_num_seqs": 64, "max_model_len": 4096}, settings.vocabulary(BLIS), 8)
         self.assertEqual({"max_model_len": 4096, "max_num_seqs": 64}, eng)
+
+
+class AttemptJournal(unittest.TestCase):
+    """--checkpoint-runs: every attempt BLIS ran is on disk the moment it finishes, whatever its outcome."""
+
+    LOADS = [1, 2, 4]
+
+    def doc(self):
+        return spec(scenario={**spec()["scenario"], "concurrency": self.LOADS})
+
+    @staticmethod
+    def outcome(cfg):
+        """A passed run at c=1, a runner refusal at c=2, an overloaded run at c=4."""
+        c = cfg["concurrency"]
+        if c == 1:
+            return _ran(10.0, 10.0)
+        if c == 2:
+            return {"returncode": None, "error": "unsupported config: not modelled", "metrics": {},
+                    "metrics_all_instances": [], "cmd": None}
+        return {**_ran(10.0, 10.0), "error": "incomplete: 3 requests still running"}
+
+    def run_sweep(self, out, journal=None, fail_after=None, dry_run=False, max_parallel=1, **kw):
+        calls = []
+
+        def fake_run_one(*a, **k):
+            cfg = dict(k.get("config") or a[11])
+            if fail_after is not None and len(calls) == fail_after:
+                raise KeyboardInterrupt
+            calls.append(cfg["concurrency"])
+            return {**self.outcome(cfg), "config": cfg, "concurrency": cfg["concurrency"],
+                    "config_hash": run_blis._config_hash(cfg)}
+
+        real = E.run_blis.run_one
+        E.run_blis.run_one = fake_run_one
+        try:
+            return E.run_experiment(self.doc(), BLIS, "/c", "/r", out, verbose=False, dry_run=dry_run,
+                                    checkpoint_runs=journal, max_parallel=max_parallel, **kw)
+        finally:
+            E.run_blis.run_one = real
+
+    @staticmethod
+    def lines(path):
+        return [json.loads(line) for line in pathlib.Path(path).read_text().splitlines()]
+
+    def test_an_interrupted_search_loses_no_finished_attempt(self):
+        with tempfile.TemporaryDirectory() as t:
+            journal = os.path.join(t, "j", "attempts.jsonl")
+            with self.assertRaises(KeyboardInterrupt):
+                self.run_sweep(os.path.join(t, "out"), journal, fail_after=2)
+            got = self.lines(journal)
+            self.assertEqual([1, 2], [r["concurrency"] for r in got])
+            self.assertEqual(["s", "s"], [r["sweep"] for r in got])
+            self.assertFalse(os.path.exists(os.path.join(t, "out", "t", "runs.jsonl")),
+                             "nothing else was written: the journal is all an interrupted search leaves")
+
+    def test_passed_refused_and_incomplete_attempts_are_all_kept(self):
+        with tempfile.TemporaryDirectory() as t:
+            journal = os.path.join(t, "attempts.jsonl")
+            self.run_sweep(os.path.join(t, "out"), journal)
+            got = self.lines(journal)
+        self.assertEqual(self.LOADS, [r["concurrency"] for r in got])
+        self.assertIsNone(got[0]["error"])
+        self.assertTrue(got[1]["error"].startswith("unsupported config:"))
+        self.assertTrue(got[2]["error"].startswith("incomplete:"))
+
+    def test_each_attempt_is_on_disk_before_the_next_is_fsynced(self):
+        with tempfile.TemporaryDirectory() as t:
+            journal = os.path.join(t, "attempts.jsonl")
+            on_disk = []
+            real = os.fsync
+
+            def spy(fd):
+                on_disk.append(len(pathlib.Path(journal).read_text().splitlines()))
+                real(fd)
+            with mock.patch.object(E.os, "fsync", spy):
+                self.run_sweep(os.path.join(t, "out"), journal)
+        self.assertTrue({1, 2, 3} <= set(on_disk), on_disk)
+
+    def test_an_existing_journal_is_appended_to_never_truncated(self):
+        with tempfile.TemporaryDirectory() as t:
+            journal = os.path.join(t, "attempts.jsonl")
+            with open(journal, "w") as f:
+                f.write('{"earlier": "attempt"}\n')
+            self.run_sweep(os.path.join(t, "out"), journal)
+            got = self.lines(journal)
+        self.assertEqual({"earlier": "attempt"}, got[0])
+        self.assertEqual(self.LOADS, [r["concurrency"] for r in got[1:]])
+
+    def test_the_standard_artifacts_are_the_same_with_and_without_a_journal(self):
+        def artifacts(name, **kw):
+            with tempfile.TemporaryDirectory() as t:
+                self.run_sweep(os.path.join(t, "out"), **{k: (os.path.join(t, v) if k == "journal" else v)
+                                                          for k, v in kw.items()})
+                d = os.path.join(t, "out", "t")
+                return {f: pathlib.Path(d, f).read_text() for f in sorted(os.listdir(d))
+                        if f != "scenarios"}
+        plain = artifacts("plain")
+        for parallel in (1, 3):
+            self.assertEqual(plain, artifacts("j", journal="a.jsonl", max_parallel=parallel))
+
+    def test_parallel_runs_journal_the_same_attempts(self):
+        with tempfile.TemporaryDirectory() as t:
+            one, three = os.path.join(t, "one.jsonl"), os.path.join(t, "three.jsonl")
+            self.run_sweep(os.path.join(t, "a"), one)
+            self.run_sweep(os.path.join(t, "b"), three, max_parallel=3)
+            key = lambda r: json.dumps(r, sort_keys=True)
+            self.assertEqual(sorted(map(key, self.lines(one))), sorted(map(key, self.lines(three))))
+
+    def test_omitted_and_dry_runs_write_no_journal(self):
+        with tempfile.TemporaryDirectory() as t:
+            self.run_sweep(os.path.join(t, "out"))
+            self.run_sweep(os.path.join(t, "dry"), os.path.join(t, "dry.jsonl"), dry_run=True)
+            self.assertEqual(["out"], sorted(os.listdir(t)))
+
+    def test_a_run_taken_from_a_ledger_is_not_an_attempt(self):
+        with tempfile.TemporaryDirectory() as t:
+            self.run_sweep(os.path.join(t, "a"))
+            recorded = E.load_recorded([os.path.join(t, "a", "t", "runs.jsonl")])
+            journal = os.path.join(t, "attempts.jsonl")
+            self.run_sweep(os.path.join(t, "b"), journal, recorded=recorded)
+            self.assertEqual([], self.lines(journal))
 
 
 def main():

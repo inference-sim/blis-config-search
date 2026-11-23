@@ -109,7 +109,7 @@
   "finalists": [
     {
       "at_c_use": {
-        "interactivity": 23.12,
+        "interactivity": 24.93,
         "itl_p99_ms": 100.706,
         "tok_per_s_per_user": 9.9,
         "tokens_per_sec": 2119.3,
@@ -168,7 +168,7 @@
     },
     {
       "at_c_use": {
-        "interactivity": 15.631,
+        "interactivity": 29.378,
         "itl_p99_ms": 611.401,
         "tok_per_s_per_user": 1.6,
         "tokens_per_sec": 908.4,
@@ -227,7 +227,7 @@
     },
     {
       "at_c_use": {
-        "interactivity": 44.55,
+        "interactivity": 45.001,
         "itl_p99_ms": 27.737,
         "tok_per_s_per_user": 36.1,
         "tokens_per_sec": 851.3,
@@ -344,7 +344,7 @@
               "tp": 8
             },
             "disaggregated": true,
-            "interactivity": 44.55,
+            "interactivity": 45.001,
             "label": "6P TP8 + EP / 1D TP16 + EP",
             "status": "front",
             "sweep": "pd-wide-decode",
@@ -369,7 +369,7 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 23.12,
+            "interactivity": 24.93,
             "label": "2x TP8xPP4 + EP",
             "status": "front",
             "sweep": "pipeline",
@@ -388,35 +388,11 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 44.235,
+            "interactivity": 45.98,
             "label": "4x TP8xPP2 + EP",
             "status": "front",
             "sweep": "pipeline",
             "throughput_per_gpu": 2502.512,
-            "variant": ""
-          },
-          {
-            "concurrency": 64,
-            "config": {
-              "concurrency": 64,
-              "decode_enable_expert_parallel": true,
-              "decode_instances": 1,
-              "decode_tp": 16,
-              "gpu_memory_utilization": 0.95,
-              "max_model_len": 262144,
-              "num_instances": 7,
-              "prefill_enable_expert_parallel": true,
-              "prefill_instances": 6,
-              "prefill_tp": 8,
-              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-h100-agentx-8node/routing/pd-prefix-based-d2878efc34.yaml",
-              "tp": 8
-            },
-            "disaggregated": true,
-            "interactivity": 44.55,
-            "label": "6P TP8 + EP / 1D TP16 + EP",
-            "status": "front",
-            "sweep": "pd-wide-decode",
-            "throughput_per_gpu": 1276.54,
             "variant": ""
           }
         ],
@@ -472,7 +448,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 23.12,
+              "interactivity": 24.93,
               "label": "2x TP8xPP4 + EP",
               "status": "front",
               "sweep": "pipeline",
@@ -491,7 +467,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 44.235,
+              "interactivity": 45.98,
               "label": "4x TP8xPP2 + EP",
               "status": "front",
               "sweep": "pipeline",
@@ -537,7 +513,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 15.631,
+              "interactivity": 29.378,
               "label": "8x TP8 + EP",
               "status": "front",
               "sweep": "kv-capacity",
@@ -634,7 +610,7 @@
                 "tp": 8
               },
               "disaggregated": true,
-              "interactivity": 44.55,
+              "interactivity": 45.001,
               "label": "6P TP8 + EP / 1D TP16 + EP",
               "status": "front",
               "sweep": "pd-wide-decode",
@@ -665,7 +641,7 @@
                 "tp": 8
               },
               "disaggregated": true,
-              "interactivity": 44.55,
+              "interactivity": 45.001,
               "label": "6P TP8 + EP / 1D TP16 + EP",
               "status": "front",
               "sweep": "pd-wide-decode",
@@ -718,7 +694,7 @@
       }
     ],
     "throughput": "total",
-    "x": "interactivity_of_mean_tpot",
+    "x": "interactivity_mean",
     "y": {
       "decode": "output_tokens_per_second_per_decode_gpu",
       "total": "total_tokens_per_second_per_gpu"

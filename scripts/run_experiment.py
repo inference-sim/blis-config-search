@@ -40,6 +40,7 @@ import re
 import shutil
 import sys
 import tempfile
+import threading
 import time
 
 try:
@@ -86,10 +87,11 @@ def grid(knob_lists):
 def _engine_candidates(engine):
     """Expand a sweep's `engine:` block, including its nested blocks.
 
-    `speculative` FLATTENS, because run_blis takes drafting as two flat candidate keys and folds
-    them back into the nested block itself:
+    `speculative` FLATTENS its method, depth and drafter, because run_blis takes those as flat
+    candidate keys and folds them back into the nested block itself:
     `speculative: {method: [dspark], num_spec_tokens: [1,3,5]}` -> three candidates carrying
-    speculative_method + num_speculative_tokens.
+    speculative_method + num_speculative_tokens. Its other native fields stay NESTED, as below:
+    `speculative: {..., kv_cache_dtype: [fp8]}` adds `speculative: {kv_cache_dtype: fp8}`.
 
     The other nested blocks (`eplb`, `dbo`, `engram_config`) stay NESTED: the runner passes them
     through to the scenario as sub-blocks, so each combination of their inner fields becomes one
@@ -106,15 +108,81 @@ def _engine_candidates(engine):
         combos = grid(fields)
         out = [{**base, block: combo} for base in out for combo in combos]
     if spec:
+        legacy = {SPEC_TO_CANDIDATE[k]: v for k, v in spec.items() if k in SPEC_TO_CANDIDATE}
+        native = {k: v for k, v in spec.items() if k not in SPEC_TO_CANDIDATE}
         spec_combos = []
-        for combo in grid({SPEC_TO_CANDIDATE.get(k, k): v for k, v in spec.items()}):
-            # K=0 is the drafting-off control: one arm, with no drafter named, however many
-            # methods and drafters the grid crosses it with.
-            if combo.get("num_speculative_tokens") == 0:
-                combo = {"num_speculative_tokens": 0}
-            if combo not in spec_combos:
-                spec_combos.append(combo)
+        for flat in grid(legacy):
+            for inner in grid(native):
+                combo = {**flat, **({"speculative": inner} if inner else {})}
+                # K=0 is the drafting-off control: one arm, with no drafter named, however many
+                # methods, drafters and native fields the grid crosses it with.
+                if combo.get("num_speculative_tokens") == 0:
+                    combo = {"num_speculative_tokens": 0}
+                if combo not in spec_combos:
+                    spec_combos.append(combo)
         out = [{**b, **s} for b in out for s in spec_combos]
+    return out
+
+
+# One definition, in the runner that also merges a pool's block over the shared one.
+merge_nested = run_blis.merge_nested
+
+
+def leaf_paths(tree, prefix=()):
+    """The path of every non-mapping value of a nested settings mapping."""
+    out = set()
+    for key, value in (tree or {}).items():
+        if isinstance(value, dict):
+            out |= leaf_paths(value, prefix + (key,))
+        else:
+            out.add(prefix + (key,))
+    return out
+
+
+def engine_origin(engine, fixed, swept, path=()):
+    """Where each leaf of a run's engine settings came from, in the shape of `engine`.
+
+    `sweep`: the sweep's engine block (`swept` holds its leaf paths); `scenario`: the spec's
+    scenario.engine (`fixed`); `catalog`: the speculator the model's graph declares, filled in
+    when the candidate drafts without naming a method; `runner`: a value the runner states
+    (max_model_len, block_size). Recursion keeps each nested field's own origin, so a block
+    that mixes fixed and swept fields records both.
+    """
+    out = {}
+    for key, value in engine.items():
+        here = path + (key,)
+        if isinstance(value, dict):
+            out[key] = engine_origin(value, fixed, swept, here)
+        elif here in swept:
+            out[key] = "sweep"
+        elif here in fixed:
+            out[key] = "scenario"
+        elif here == ("speculative", "method"):
+            out[key] = "catalog"
+        else:
+            out[key] = "runner"
+    return out
+
+
+def row_origins(rec, fixed, swept, sweep=None):
+    """The provenance trees a run record adds to its row.
+
+    `engine_origin` follows the deployment's shared engine. A disaggregated record also gets
+    `pool_engine_origin`, one tree per role in the shape of that pool's own engine: the pool
+    engines are the shared one with the role's `prefill:`/`decode:` engine block laid on it, so a
+    leaf the sweep states for one pool alone is `sweep` there and nowhere else.
+    """
+    dep = (rec or {}).get("deployment") or {}
+    out = {}
+    if dep.get("engine"):
+        out["engine_origin"] = engine_origin(dep["engine"], fixed, swept)
+    pools = {}
+    for role, pool in (((dep.get("parallel") or {}).get("pd")) or {}).items():
+        if role in run_blis.PD_ROLES and (pool or {}).get("engine"):
+            own = leaf_paths(((sweep or {}).get(role) or {}).get("engine"))
+            pools[role] = engine_origin(pool["engine"], fixed, set(swept) | own)
+    if pools:
+        out["pool_engine_origin"] = pools
     return out
 
 
@@ -169,7 +237,8 @@ def expand_sweep(sweep, gpus):
                         base.update({_flag("decode", k): v for k, v in dc.items()})
                         base["prefill_instances"] = pi
                         base["decode_instances"] = di
-                        for pfe, dce, pfo, dco in itertools.product(grid(pf_eng), grid(dc_eng), pf_off, dc_off):
+                        for pfe, dce, pfo, dco in itertools.product(_engine_candidates(pf_eng),
+                                                                    _engine_candidates(dc_eng), pf_off, dc_off):
                             cfg = dict(base)
                             cfg.update({_flag("prefill", k): v for k, v in pfe.items()})
                             cfg.update({_flag("decode", k): v for k, v in dce.items()})
@@ -248,11 +317,12 @@ def apply_overrides(base_doc, overrides, knobs=None):
 override_phrase = router_configs.override_phrase
 
 
-def materialize_router(cand, routing_dir, out_dir, router=None):
+def materialize_router(cand, routing_dir, out_dir, router=None, spec_dir=None):
     """Resolve a candidate's `router_config` to a real file path, writing an override file if any.
 
     Returns (config_without_overrides, description). A base from the router's reference configs
-    is staged into `out_dir` byte for byte, so the report holds the exact file each arm ran. A
+    is staged into `out_dir` byte for byte, so the report holds the exact file each arm ran; a file
+    beside the spec is too, named by its sha256, unless parts of it are stripped. A
     generated file is named by the HASH of its contents, so the same override combination always
     lands on the same path and a re-run rewrites identical bytes -- the files are part of the
     reproducible output, not scratch.
@@ -263,47 +333,54 @@ def materialize_router(cand, routing_dir, out_dir, router=None):
     if not rel:
         return cand, ""
     router = router or router_configs.open_checkout()
-    source, base_path, knobs = router_configs.resolve(rel, routing_dir, router) \
+    source, base_path, knobs = router_configs.resolve(rel, routing_dir, router, spec_dir) \
         if not os.path.isabs(rel) else ("local", rel, None)
-    if not overrides:
-        if source == "router":
+    stripped = []
+    if source == "spec":
+        base_doc, stripped = validator.spec_router_file(base_path)
+    if not overrides and not stripped:
+        if source in ("router", "spec"):
             os.makedirs(out_dir, exist_ok=True)
-            staged = os.path.join(out_dir, os.path.basename(rel))
+            name = os.path.basename(rel) if source == "router" else \
+                f"{topologies.routing_arm_name(rel)}-{router_configs.sha256_of(base_path)[:10]}.yaml"
+            staged = os.path.join(out_dir, name)
             shutil.copyfile(base_path, staged)
             base_path = staged
         cand["router_config"] = base_path
         return cand, topologies.routing_arm_name(rel)
-    with open(base_path, encoding="utf-8") as f:
-        base_doc = yaml.safe_load(f) or {}
-    doc = apply_overrides(base_doc, overrides, knobs)
+    if source != "spec":
+        with open(base_path, encoding="utf-8") as f:
+            base_doc = yaml.safe_load(f) or {}
+    doc = apply_overrides(base_doc, overrides or {}, knobs)
     body = yaml.safe_dump(doc, sort_keys=False, default_flow_style=False)
     digest = hashlib.sha1(body.encode()).hexdigest()[:10]
     stem = topologies.routing_arm_name(rel)
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"{stem}-{digest}.yaml")
     if not os.path.exists(path):
-        origin = (f"the router's reference-configs/{rel} from {router.commit}"
-                  if source == "router" else f"routing/{rel}")
+        origin = {"router": f"the router's reference-configs/{rel} from {router.commit}",
+                  "spec": f"{rel} beside the spec"}.get(source, f"routing/{rel}")
         header = (f"# Code generated by scripts/run_experiment.py from {origin}. DO NOT EDIT.\n"
-                  f"# Overrides: {override_phrase(overrides)}\n"
+                  + "".join(f"# {n}\n" for n in stripped)
+                  + f"# Overrides: {override_phrase(overrides or {}) or 'none'}\n"
                   f"# The base was parsed, edited and written back, so its comments and key order are\n"
                   f"# not kept. Named by a hash of the BYTES below. It is not a semantic hash:\n"
                   f"# reordering keys in the base file renames the generated arm (and only that).\n")
         with open(path, "w", encoding="utf-8") as f:
             f.write(header + body)
     cand["router_config"] = path
-    return cand, f"{stem} ({override_phrase(overrides)})"
+    return cand, f"{stem} ({override_phrase(overrides)})" if overrides else stem
 
 
-def router_file_record(cand, resolved_path, routing_dir, out_dir, router):
+def router_file_record(cand, resolved_path, routing_dir, out_dir, router, spec_dir=None):
     """What a row records of its router file: the base (name, source, commit, sha256), the overrides
-    applied, and the file the run read (path relative to the run directory, sha256). None when the
-    candidate names no router file."""
+    applied, the parts stripped from a file beside the spec, and the file the run read (path
+    relative to the run directory, sha256). None when the candidate names no router file."""
     rel = cand.get("router_config")
     if not rel or not resolved_path:
         return None
     router = router or router_configs.open_checkout()
-    source, base_path, _knobs = router_configs.resolve(rel, routing_dir, router) \
+    source, base_path, _knobs = router_configs.resolve(rel, routing_dir, router, spec_dir) \
         if not os.path.isabs(rel) else ("local", rel, None)
     inside = os.path.abspath(resolved_path).startswith(os.path.abspath(out_dir) + os.sep)
     rec = {"base": rel, "source": source, "base_sha256": router_configs.sha256_of(base_path),
@@ -312,6 +389,10 @@ def router_file_record(cand, resolved_path, routing_dir, out_dir, router):
            "overrides": router_configs.override_record(cand.get("router_overrides") or {})}
     if source == "router":
         rec["router_commit"] = router_configs.source_record(router.commit)
+    if source == "spec":
+        stripped = validator.spec_router_file(base_path)[1]
+        if stripped:
+            rec["stripped"] = stripped
     return rec
 
 
@@ -350,6 +431,8 @@ def label_of(cand):
 # list is checked against run_blis.SCENARIO_ENGINE by test_experiment.py so it cannot fall behind
 # the runner again.
 VARIANT_KEYS = ("num_speculative_tokens", "speculative_method", "speculative_draft_model",
+                # the drafter's other native fields (dict-valued; described by _nested_phrase)
+                "speculative",
                 "router_config",
                 # simulator switches
                 "pd_transfer_contention",
@@ -387,6 +470,20 @@ VARIANT_KEYS = ("num_speculative_tokens", "speculative_method", "speculative_dra
                 "disable_radix_cache", "cuda_graph_max_bs_decode", "attention_backend")
 
 
+# The engine settings a disaggregated sweep may state for one pool, as `prefill_<knob>`/`decode_<knob>`
+# candidate keys: every variant key that is an engine setting rather than a runner or router switch.
+_POOL_ENGINE_VARIANT = tuple(k for k in VARIANT_KEYS if not k.startswith(
+    ("num_speculative", "speculative_", "router_", "pd_transfer", "offload_", "prefill_", "decode_")))
+
+
+def _variant_keys(cands):
+    """VARIANT_KEYS, then the per-pool spellings of the engine settings that these candidates carry."""
+    pool = sorted({k for c in cands for k in c
+                   if k.partition("_")[0] in run_blis.PD_ROLES
+                   and k.partition("_")[2] in _POOL_ENGINE_VARIANT})
+    return VARIANT_KEYS + tuple(pool)
+
+
 def variant_of(cand, router_desc, baseline):
     """How this candidate differs from its sweep's baseline, spelled out in words.
 
@@ -394,12 +491,18 @@ def variant_of(cand, router_desc, baseline):
     default, so in a sweep where every arm sets fp8 the variant says what actually varies.
     """
     parts = []
-    for key in VARIANT_KEYS:
+    for key in _variant_keys([cand]):
         if key not in cand:
             continue
         if baseline.get(key) == cand[key]:
             continue
-        if key == "router_config":
+        role, _, knob = key.partition("_")
+        if role in run_blis.PD_ROLES and knob in _POOL_ENGINE_VARIANT:
+            # A pool's own setting: the pool, then the phrase the shared setting would get.
+            inner = (_nested_phrase(knob, cand[key], baseline.get(key) or {}) if isinstance(cand[key], dict)
+                     else topologies.knob_phrase(knob, cand[key]))
+            parts.append(f"{role} {inner}")
+        elif key == "router_config":
             parts.append(f"{router_desc} routing")
         elif key == "speculative_method":
             continue                        # named by the draft-token phrase below
@@ -435,7 +538,7 @@ def _nested_phrase(block, value, baseline):
 def sweep_baseline(cands):
     """The most common value of each variant knob across a sweep -- its implicit baseline."""
     base = {}
-    for key in VARIANT_KEYS:
+    for key in _variant_keys(cands):
         values = [c[key] for c in cands if key in c]
         if not values:
             continue
@@ -537,7 +640,7 @@ def run_row(rec, cand, label, variant, sweep_name, concurrency, gpus, slo_ms=Non
     # Recorded on the basis `servable` JUDGES on, with the aggregate kept beside it as for ITL: a
     # row showing a passing aggregate next to an infeasible verdict is unreadable.
     worst_ttft, ttft_missing = run_blis.worst_metric(rec, "ttft_p99_ms")
-    inter, inter_basis = pareto.interactivity_of(m)
+    inter, inter_basis = pareto.interactivity_of(rec)
     acc = (rec.get("deployment") or {}).get("acceptance")
     return {
         "sweep": sweep_name, "label": label, "variant": variant,
@@ -665,10 +768,43 @@ def pareto_report(sweep_results, all_rows, objective, per_user=None):
             "sweeps": [{"name": s["name"], **both(s["rows"])} for s in sweep_results]}
 
 
+class _AttemptJournal:
+    """An append-only JSONL file of finished attempts, each flushed and fsynced before the next
+    attempt is waited on. Opened for append, so an existing journal is never truncated."""
+
+    def __init__(self, path):
+        self.path = path
+        self._lock = threading.Lock()
+        parent = os.path.dirname(os.path.abspath(path))
+        os.makedirs(parent, exist_ok=True)
+        new = not os.path.exists(path)
+        with open(path, "a", encoding="utf-8") as f:
+            os.fsync(f.fileno())
+        if new:
+            fd = os.open(parent, os.O_RDONLY)
+            try:
+                os.fsync(fd)             # the directory entry, so the file itself survives a crash
+            finally:
+                os.close(fd)
+
+    def append(self, rec):
+        line = json.dumps(rec, sort_keys=True) + "\n"
+        with self._lock, open(self.path, "a", encoding="utf-8") as f:
+            f.write(line)
+            f.flush()
+            os.fsync(f.fileno())
+
+
 def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dry_run=False,
                    run_timeout=600, max_parallel=1, verbose=True, fields=None, data_override=False,
-                   router_cfg=None, shard=None, recorded=None):
+                   router_cfg=None, shard=None, recorded=None, checkpoint_runs=None, spec_dir=None):
     """Expand, filter, run and rank one spec. Returns the assembled report dict.
+
+    `spec_dir` is the spec's directory, where a ./ router file or workload file is read from.
+
+    `checkpoint_runs` is a journal path: each attempt BLIS ran (passed, refused or incomplete) is
+    appended and fsynced there as soon as it returns, so an interrupted search keeps what finished.
+    The file is only appended to, never truncated; the report and runs.jsonl are unchanged by it.
 
     `shard` = (i, n) runs only every n-th run of the whole spec, starting at the i-th (counted
     across sweeps in spec order), so n jobs share one report's BLIS time; each writes the rows it
@@ -699,6 +835,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     # A key other than the legacy p99 caps: each record then names the figures this spec gates on.
     restated = any(k not in slo.LEGACY and k != slo.THROUGHPUT for k in slo_ms)
     shared_engine = dict(sc.get("engine") or {})
+    fixed_paths = leaf_paths(shared_engine)
     if not fields:
         run_blis.ask_field_list(blis, catalog, sc)
     engine_version = blis_cli.engine_release(blis, settings.ENGINE_KIND, fields)
@@ -719,10 +856,11 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     generated_routing = os.path.join(out_dir, "routing")
     if not dry_run:
         os.makedirs(scenarios_dir, exist_ok=True)
+    journal = _AttemptJournal(checkpoint_runs) if checkpoint_runs and not dry_run else None
 
     # Which simulator is about to price this sweep. Only the CI workflows verified BLIS_SHA, so a
     # contributor sweeping locally against an off-pin binary got real-looking numbers with no
-    # warning anywhere in the output (#23). Warned, not refused: see blis_pin_warning.
+    # warning anywhere in the output. Warned, not refused: see blis_pin_warning.
     # Skipped on a dry run, which prices nothing.
     if not dry_run:
         warn = _blis_pin_warning(blis, catalog, registry)
@@ -742,8 +880,14 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     # in blis-catalog/workloads/<name>.yaml. So a spec states NONE of them: naming the workload
     # is naming all of it. See resolve_replay.
     if workload_spec:
-        workload_doc = load_workload_spec(workload_spec)
-        replay = resolve_workload_spec(workload_spec, workload_doc, replay, dry_run=dry_run)
+        workload_doc = load_workload_spec(workload_spec, spec_dir)
+        replay = resolve_workload_spec(workload_spec, workload_doc, replay, dry_run=dry_run, spec_dir=spec_dir)
+        if workload_spec.startswith(validator.SPEC_PREFIX) and not dry_run:
+            # A file beside the spec is copied into the run directory, so the report holds what BLIS read.
+            copy = os.path.join(out_dir, "workloads", os.path.basename(workload_spec))
+            os.makedirs(os.path.dirname(copy), exist_ok=True)
+            shutil.copyfile(replay["workload_spec"], copy)
+            replay["workload_spec"] = copy
     else:
         replay = resolve_replay(workload, catalog, replay, dry_run=dry_run)
 
@@ -782,6 +926,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                   f"= {len(kept) * len(concurrency)} runs "
                   f"({len(dropped)} combos dropped off budget)")
         rows, sweep_dropped = [], []
+        swept_paths = leaf_paths(sweep.get("engine"))
         for tot in sorted({t for _c, t in dropped}):
             sweep_dropped.append({"gpus": tot, "reason":
                                   f"uses {tot} GPUs, not the scenario's {gpus}",
@@ -793,10 +938,10 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
         for cand in kept:
             try:
                 resolved, router_desc = materialize_router(cand, routing_dir, generated_routing,
-                                                           router_cfg) \
+                                                           router_cfg, spec_dir) \
                     if not dry_run else (dict(cand), "")
                 router_rec = (router_file_record(cand, resolved.get("router_config"), routing_dir,
-                                                 out_dir, router_cfg) if not dry_run else None)
+                                                 out_dir, router_cfg, spec_dir) if not dry_run else None)
 
                 if dry_run:
                     resolved.pop("router_overrides", None)
@@ -807,7 +952,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
             label = label_of(resolved)
             variant = variant_of(cand, router_desc, baseline)
             for c in concurrency:
-                cfg = {**shared_engine, **resolved, "concurrency": c}
+                cfg = {**merge_nested(shared_engine, resolved), "concurrency": c}
                 # Only a drafting candidate needs them; adding them elsewhere would change a
                 # non-drafting run's command line for no reason.
                 if cfg.get("speculative_method"):
@@ -844,6 +989,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
             # it: build_gallery reads `finalist.config.tp` / `.num_instances` for the winner
             # card, and showed "tp 0, 0 instances" without it.
             row["config"] = _jsonable(cfg)
+            row.update(row_origins(rec, fixed_paths, swept_paths, sweep))
             row["servable"] = ok
             if "in_flight_at_cutoff" in rec:
                 row["in_flight_at_cutoff"] = rec["in_flight_at_cutoff"]
@@ -877,6 +1023,8 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                                            if k not in RECORD_ONLY_REPLAY} if replay else None,
                                    fabric=fabric, gpus_per_node=gpus_per_node, fields=fields,
                                    data_override=data_override)
+            if journal:
+                journal.append({**rec, "sweep": sname})
             return _row_of(idx, rec, cfg, label, variant, c, router_rec)
 
         if work:
@@ -932,6 +1080,9 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                      # A workload named by a file: the file, its own sha256 and the document as read
                      # (null for a catalog workload), so the report can state it is not in the catalog.
                      "workload_spec": ({"path": workload_spec,
+                                        **({"file": os.path.relpath(replay["workload_spec"], out_dir)}
+                                           if workload_spec.startswith(validator.SPEC_PREFIX) and not dry_run
+                                           else {}),
                                         "sha256": replay["workload_spec_sha256"],
                                         "catalog": False, "label": WORKLOAD_SPEC_LABEL,
                                         "document": replay["workload_document"],
@@ -1260,22 +1411,28 @@ def recipe_record(doc, effective=None):
     return {"fields": fields, "overrides": overrides, "differs_from_run": diff, "label": line}
 
 
-def _spec_path(path):
-    """A workload_spec path is relative to the repository, so a spec means the same file anywhere.
-    It must stay inside the repository once symlinks and `..` are resolved."""
-    full = os.path.realpath(os.path.join(ROOT, path))
-    if os.path.isabs(path) or not full.startswith(os.path.realpath(ROOT) + os.sep):
-        raise SystemExit(f"scenario.workload_spec: {path!r} is outside the repository")
+def _spec_path(path, spec_dir=None):
+    """A workload_spec path is relative to the repository, so a spec means the same file anywhere;
+    one that starts with ./ is relative to the spec's directory. It must stay inside that directory
+    once symlinks and `..` are resolved."""
+    beside = path.startswith(validator.SPEC_PREFIX)
+    if beside and not spec_dir:
+        raise SystemExit(f"scenario.workload_spec: {path!r} is beside the spec, but the spec's directory is not known")
+    top = os.path.realpath(spec_dir if beside else ROOT)
+    full = os.path.realpath(os.path.join(top, path))
+    if os.path.isabs(path) or not full.startswith(top + os.sep):
+        where = "the spec's directory" if beside else "the repository"
+        raise SystemExit(f"scenario.workload_spec: {path!r} is outside {where}")
     return full
 
 
-def load_workload_spec(path):
+def load_workload_spec(path, spec_dir=None):
     """The replay document in the workload file, as a mapping.
 
     The file is a blis-schemas Replay document: the replay block itself, as the catalog's
     `replay:` carries it. The simulator reads and checks it (`blis replay --workload-spec`).
     """
-    full = _spec_path(path)
+    full = _spec_path(path, spec_dir)
     try:
         with open(full, encoding="utf-8") as f:
             doc = yaml.safe_load(f)
@@ -1286,14 +1443,14 @@ def load_workload_spec(path):
     return doc
 
 
-def workload_spec_sha256(path):
+def workload_spec_sha256(path, spec_dir=None):
     h = hashlib.sha256()
-    with open(_spec_path(path), "rb") as f:
+    with open(_spec_path(path, spec_dir), "rb") as f:
         h.update(f.read())
     return h.hexdigest()
 
 
-def resolve_workload_spec(path, doc, stated, dry_run=False):
+def resolve_workload_spec(path, doc, stated, dry_run=False, spec_dir=None):
     """The replay descriptor for a workload named by file.
 
     The corpus digest, the window, the grace period and the context filter come from the file, as
@@ -1306,9 +1463,9 @@ def resolve_workload_spec(path, doc, stated, dry_run=False):
     if not doc.get("scenario"):
         raise SystemExit(f"workload_spec {path!r} states no `scenario` (the harness scenario id)")
     out = {"scenario": doc["scenario"],
-           "workload_spec": _spec_path(path),
+           "workload_spec": _spec_path(path, spec_dir),
            "workload_spec_relative": path,
-           "workload_spec_sha256": workload_spec_sha256(path),
+           "workload_spec_sha256": workload_spec_sha256(path, spec_dir),
            "workload_document": doc}
     if corpus.get("sha256"):
         out["corpus_sha256"] = corpus["sha256"]
@@ -1325,6 +1482,8 @@ def resolve_workload_spec(path, doc, stated, dry_run=False):
     for key in ("corpus", "corpus_cache"):
         if stated.get(key):
             out[key] = stated[key]
+    if stated.get("server_series_interval_s") is not None:
+        out["server_series_interval_s"] = stated["server_series_interval_s"]
     # A spec's window and grace override the file's; recipe_record names the override (#158).
     for key in ("benchmark_duration", "grace_period"):
         if key in stated:
@@ -1437,7 +1596,7 @@ def _pinned_stack(blis, catalog, registry, engine_version, data_override=False, 
     out = {"blis": pins.get("BLIS_REF", "unpinned"),
            "kernel": pins.get("KERNEL_REF", "unpinned"),
            "router": pins.get("ROUTER_REF", "unpinned"),
-           "substrate": pins.get("SUBSTRATE_REF", "unpinned"),
+           "substrate": pins.get("SUBSTRATE_REF", "in-tree"),  # M3.2: a directory of inference-sim
            "engine_version": engine_version,
            "data": "override" if data_override else "embedded"}
     # The router's reference configs a spec may use: where they were read from.
@@ -1481,7 +1640,7 @@ def blis_pin_warning(stack, pins=None):
 
     Compares the SOURCE commit, never the binary digest: one tag builds to different bytes per
     toolchain. A warning, not a refusal, so a local sweep can still test an unreleased simulator;
-    CI refuses outright by checking BLIS_SHA on clone (#23).
+    CI refuses outright by checking BLIS_SHA on clone.
     """
     blis = ((stack or {}).get("resolved") or {}).get("blis") or {}
     want = (pins if pins is not None else build_catalog.read_pins()).get("BLIS_SHA")
@@ -1550,6 +1709,35 @@ def unplaceable_sentence(report):
     return (f"{report['totals']['servable']} runs held the scenario's SLOs, but none can be placed on the "
             f"Pareto front: their Results state no {metric} (or no TPOT), which the simulator build that "
             f"ran them does not emit. Re-run with a build that does, or rank with `objective.ranking: scalar`.")
+
+
+def acceptance_lines(sweeps):
+    """One line per drafting arm: the acceptance its runs were priced with and where it came from.
+
+    An arm is a label and variant within a sweep; its load levels share one acceptance. A rung
+    other than exact is marked BORROWED, with the key fields that differed and the K rule.
+    """
+    seen, out = set(), []
+    for s in sweeps:
+        for r in s["rows"]:
+            acc = r.get("acceptance")
+            key = (s["name"], r.get("label"), r.get("variant", ""))
+            if not acc or key in seen:
+                continue
+            seen.add(key)
+            acc = run_blis.public_acceptance(acc)
+            step = acc.get("step")
+            how = ("rung not recorded" if not step else "exact" if step == "exact" else
+                   f"BORROWED, rung {step}"
+                   + (f", differs in {', '.join(acc['differed'])}" if acc.get("differed") else "")
+                   + (f", K rule {acc['k_rule']}" if acc.get("k_rule") else "")
+                   + (f", measured on {acc['measured_on']}" if acc.get("measured_on") else ""))
+            out.append(f"{s['name']}: {r.get('label')}"
+                       + (f" ({r['variant']})" if r.get("variant") else "")
+                       + f" used acceptance length {acc.get('acceptance_length')} ({how}) from "
+                       f"{acc.get('profile_set') or 'an unnamed set'}"
+                       + (f", {acc['source']}" if acc.get("source") else ""))
+    return out
 
 
 def _report_json(report):
@@ -1635,6 +1823,16 @@ def _report_json(report):
         sections.append({"num": num, "title": f"Sweep: {s['name']}",
                          "prose": prose,
                          "caption_note": f"{s['configs']} configurations, {s['runs']} runs."})
+        num += 1
+    lines = acceptance_lines(report["sweeps"])
+    if lines:
+        sections.append({"num": num, "title": "Drafting acceptance",
+                         "prose": ["Each drafting arm was priced with the acceptance the simulator "
+                                   "resolved for it. BORROWED marks a profile measured under other "
+                                   "settings than the run's, so that arm's gain is only as good as "
+                                   "the borrowing; arms with no drafting (K=0) are not listed.",
+                                   *lines],
+                         "caption_note": f"{len(lines)} drafting arm{'s' if len(lines) != 1 else ''}."})
         num += 1
     return {
         "title": f"{sc['model']} on {sc['gpus']}x {sc['hardware']}: {report['name']}",
@@ -1806,6 +2004,9 @@ def main(argv=None):
                          "single-threaded (~1.1 cores), so this is the ONLY way to use more "
                          "cores. Output is independent of this value: rows are re-sorted into "
                          "expansion order, so a spec reproduces byte-for-byte at any setting.")
+    ap.add_argument("--checkpoint-runs", dest="checkpoint_runs", metavar="JOURNAL.jsonl",
+                    help="also append every attempt BLIS ran (passed, refused or incomplete) to this "
+                         "file, fsynced as it finishes; never truncated. It is not a resume command.")
     ap.add_argument("--json", action="store_true", dest="as_json",
                     help="print the assembled report to stdout")
     args = ap.parse_args(argv)
@@ -1825,7 +2026,7 @@ def main(argv=None):
         raise SystemExit(f"{args.spec}: {e}")
     try:
         errs = validator.validate(spec, args.blis, args.routing, args.catalog, args.fields,
-                                  router_cfg)
+                                  router_cfg, spec_dir=os.path.dirname(os.path.abspath(args.spec)))
     except blis_cli.BlisCommandError as e:
         raise SystemExit(f"{args.spec}: {e}")
     if errs:
@@ -1836,7 +2037,9 @@ def main(argv=None):
                             routing_dir=args.routing, dry_run=args.dry_run,
                             run_timeout=args.timeout, max_parallel=args.max_parallel, fields=args.fields,
                             data_override=args.data_override, router_cfg=router_cfg,
-                            shard=parse_shard(args.shard), recorded=load_recorded(args.runs_from))
+                            shard=parse_shard(args.shard), recorded=load_recorded(args.runs_from),
+                            checkpoint_runs=args.checkpoint_runs,
+                            spec_dir=os.path.dirname(os.path.abspath(args.spec)))
     if args.as_json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:

@@ -113,7 +113,8 @@ floor, each row's `tok_per_s_per_user` and the Pareto front's x axis are all one
 config cannot pass the gate and fail the ranking: `1000 /` the worst instance's `tpot_<stat>_ms`,
 or with `interactivity_mean` stated the worst instance's (lowest) mean of each request's tok/s. A
 `tpot_mean` cap alone keeps `1000 / tpot_mean_ms`, the reciprocal of the mean TPOT. State them at
-one statistic. A spec that states none keeps the p99 rate and the `interactivity_of_mean_tpot` axis;
+one statistic. A spec that states none keeps the p99 rate in `tok_per_s_per_user` and takes the Pareto
+x axis and each row's `interactivity` from `interactivity_mean`, the mean of each request's tok/s;
 a report that states one names it (`interactivity_floor.statistic` and `.of`, `pareto.x_basis`).
 
 The validator refuses a key the registry does not define, naming the statistics it does
@@ -132,6 +133,14 @@ vLLM's. The SGLang engine runs one colocated pool; a spec that asks for more is 
 simulator and the row says so. A spec for an engine kind the pinned simulator does not register
 yet lives in `experiments/pending-pin/`, where the checks do not run it; `scripts/check_pending_pin.py`
 fails once the pinned build registers the kind, which is the cue to move the spec to `experiments/`.
+
+Speculative decoding is stated per engine. vLLM's is the nested `speculative` block above; SGLang's
+is flat settings under the engine's own `speculative_*` names, which `blis fields` lists. The
+runner's `num_speculative_tokens`, `speculative_method` and `speculative_draft_model` keys are
+vLLM's, and a SGLang candidate carrying one is refused with the engine's names. A flat setting
+keeps its own origin in `engine_origin`. At the pinned release the field list marks every SGLang
+`speculative_*` setting not modelled and the engine refuses a run that enables drafting, so such a
+sweep does not run yet.
 
 ## The CPU KV tier
 
@@ -158,6 +167,7 @@ whose deployment schema lets a pool state its own offload (blis-substrate#307); 
 | `engine.max_model_len`, `quantization` | `model_config.*` |
 | `engine.all2all_backend` | `parallel_config.all2all_backend` |
 | `engine.speculative.{method, num_spec_tokens, draft_model}` | `speculative_config.{method, num_speculative_tokens, model}` |
+| `engine.speculative.{kv_cache_dtype, draft_sample_method, rejection_sample_method, synthetic_acceptance_length, enable_adaptive_verification}` | `speculative_config.<same name>` |
 | `num-instances`, `prefill-instances`, `decode-instances` | `blis run` replica-count flags, not engine keys |
 | `router.*` | llm-d's EndpointPickerConfig, not an engine key |
 
@@ -262,15 +272,27 @@ engine:
 ```
 
 `speculative` is also nested and needs **both** `method` and `num_spec_tokens`; acceptance comes
-from the registry, not a knob. It carries seven fields at this pin (it held two before v0.14.0),
-and `method`, `num_spec_tokens` and `draft_model` change a run. The sampling fields
-(`draft_sample_method`, `rejection_sample_method`, `enable_adaptive_verification`,
-`kv_cache_dtype`) are recorded as the launch gave them and never re-price acceptance, so the
-validator refuses a sweep over any of them. `draft_model` names a separate drafter checkpoint by
-its catalog name. The validator refuses one the catalog does not resolve, and one that is not a
-drafter of the scenario's model in both directions: the model lists it under `drafters:` and it
-names the model under `targets:`. Leave it out to draft with the graph's own speculator.
-`num_spec_tokens: 0` is the drafting-off control, one arm whatever drafters the grid lists.
+from the registry, not a knob. It carries the engine's native fields (`blis fields`; eight at the
+current engine), and `method`, `num_spec_tokens` and `draft_model` change a run. The other fields
+(`draft_sample_method`, `rejection_sample_method`, `synthetic_acceptance_length`,
+`enable_adaptive_verification`, `kv_cache_dtype`) stay nested in the run's engine block; the
+validator refuses a sweep over one the field list marks inert. A field stated in `scenario.engine`
+and others swept under a sweep's `engine.speculative` merge field by field. `draft_model` names a
+separate drafter checkpoint by its catalog name. The validator refuses one the catalog does not
+resolve, and one that is not a drafter of the scenario's model in both directions: the model lists
+it under `drafters:` and it names the model under `targets:`. Leave it out to draft with the
+graph's own speculator. `num_spec_tokens: 0` is the drafting-off control, one arm whatever drafters
+and native fields the grid lists.
+
+Each ledger row records where every engine setting came from as `engine_origin`, a tree shaped
+like `deployment.engine` with one origin per leaf: `sweep`, `scenario` (`scenario.engine`),
+`catalog` (a `method` the model's graph declared) or `runner` (`max_model_len`, `block_size`).
+A nested block keeps each field's own origin.
+
+A disaggregated row also records `pool_engine_origin`, `{prefill: ..., decode: ...}`, each a tree
+shaped like that pool's own engine block. A pool is credited only with the values its own
+`prefill:` / `decode:` engine block swept or stated, never with the other pool's. `engine_origin`
+keeps describing the engine both pools share, and a colocated row has no `pool_engine_origin`.
 
 ### Not every accepted knob is a lever
 
@@ -302,10 +324,12 @@ scenario:
     grace_period: inf              # a deliberate override of the descriptor's 30s
 ```
 
-Don't restate `scenario`, `corpus_sha256`, `benchmark_duration`, `max_context_length`,
-`category` or `thinking` — a copy can only drift from the catalog, and the validator prints a
-style note for each. Keep the corpus path **relative**: an absolute one pins the spec to one
-machine. A field that genuinely differs from the descriptor is recorded as an override, so the
+Don't restate `scenario`, `corpus_sha256`, `benchmark_duration` or `max_context_length` — a copy
+can only drift from the catalog, and the validator prints a style note for each. A key the runner
+never passes to BLIS (`category`, `thinking`, `trace_idle_gap_cap_s`, `warmup`, ...) is refused,
+because the run would ignore it: the replay's pacing is the workload file's, so change it in a
+workload file (`workload_spec`, below). Keep the corpus path **relative**: an absolute one pins the
+spec to one machine. A field that genuinely differs from the descriptor is recorded as an override, so the
 report can say the run departed from the catalog.
 
 **To fetch the corpus**, let the descriptor drive it — it already names the dataset, the pinned
@@ -319,6 +343,17 @@ It downloads to the path the spec states, verifies the sha256 before moving the 
 and is a no-op once the corpus is there — so `run-experiment.yml` runs it on every sweep. A spec
 whose workload is a generated shape needs nothing and the script says so. `.corpus/` is
 gitignored; the corpus is 568 MB and deliberately not vendored.
+
+### Diagnostic server series
+
+`scenario.replay.server_series_interval_s` (seconds, above 0), for either way of naming a replay
+workload, passes the interval to `blis replay --server-series-interval-s`. The simulator then
+reports each engine's binned KV usage, running and waiting requests, prefix-cache and prompt-token
+counters, and generated tokens at `reports.engine.cluster.server_series` of the Result, and the
+sweeper keeps that block on the run record as `server_series`. Omit the key and nothing changes.
+Collecting the series moves no figure that is ranked: `metrics`, `measured`, `whole_run`, the
+outcome and the SLO verdict are the same with and without it. Series are large when the interval is
+small, so use it on a probe rather than a committed sweep.
 
 ### A workload the catalog does not have: `workload_spec`
 
@@ -338,7 +373,11 @@ scenario:
 The validator requires `corpus.sha256` (64 lowercase hex digits) and `corpus.source`, either a
 Hugging Face `huggingface` dataset with a pinned `revision`, or a `url`, so every report names the
 bytes it replayed; the simulator refuses a corpus whose digest differs. The path is relative to the
-repository root. The report labels the workload "custom (not in the catalog)" and records the
+repository root, or, when it starts with `./`, to the spec's directory: a file beside the spec, such as
+a copy of the run recipe with `trace_idle_gap_cap_s: 1` to match a load generator that caps idle gaps
+at 1 s. Keep it in a subdirectory (`./workloads/`), since a directory of specs is validated file by
+file. The sweeper copies a file beside the spec into the run directory (`workloads/`), and BLIS reads
+the copy. The report labels the workload "custom (not in the catalog)" and records the
 file's own sha256 and the document as read, in `scenario.json` and `experiment.json`. A custom
 workload runs wherever its corpus can be fetched by its declared source and checked against the
 sha256.
@@ -468,6 +507,34 @@ listing its file, unedited, next to the other: `endpoint_picker_config: [round-r
 pd-prefix-based.yaml]`. A `router.decider` key is an error that says so. On a file in `routing/` only
 fields the file already sets can change, as before.
 
+### A router file beside the spec
+
+A name that starts with `./` is a file beside the spec, such as a calibrated P/D config with flow
+control and admission guards: `endpoint_picker_config: [./routing/guarded-pd.yaml]`. The validator
+parses it and applies the overrides as for the other files. The sweeper writes the file each run
+reads into `reports/<name>/routing/` (the file itself, named by its sha256, or the generated file
+when parts are stripped or overridden), and every row records the sha256 of both. Two parts of a
+production config act only outside a simulation, so they are stripped, with a note in the
+validator's output, a comment in the file the run reads and `stripped` on the row: `kv-events-source`
+plugins and their `dataLayer.sources` entries (BLIS feeds the router KV events itself), and
+`disaggregatedset-rollout-screener` (it acts only during a rollout). Two parts the embedded router
+refuses are refused by name before any run: `utilization-filter` (inference-sim/inference-sim#2205)
+and `inflight-load-producer`'s `prefillCompletionFromKVEvents` (inference-sim/inference-sim#2206).
+BLIS also checks that the file's prefix producers cut at the engine's `block_size`.
+
+An override names a plugin by its `name`, or by its type when the file declares one plugin of that
+type. Besides the fields the file sets, a guard's parameters can be added to a guard the file
+declares: `maxConcurrency`, `maxTokenConcurrency` and `headroom` of a `concurrency-detector`,
+`queueDepthThreshold` and `kvCacheUtilThreshold` of a `utilization-detector`, and
+`peakPrefillThroughput` of a `prefix-cache-affinity-filter`:
+
+```yaml
+router:
+  endpoint_picker_config: [./routing/guarded-pd.yaml]
+  plugins:
+    prefill-concurrency: {parameters: {maxConcurrency: [1, 12, 64]}}
+```
+
 ## Objective and simulator switches
 
 ```yaml
@@ -478,8 +545,8 @@ sweeps:
 ```
 
 Every report carries the Pareto front of throughput per GPU against interactivity in `pareto.json`:
-`interactivity_of_mean_tpot` (1000 / mean TPOT, the harmonic mean of the users' rates) unless the
-spec states a per-user statistic, and then each row's `tok_per_s_per_user` on it (SLOs above), for the total and the decode-GPU
+`interactivity_mean` (the mean of each request's tok/s, not 1000 / the mean TPOT, which is the harmonic
+mean and lower whenever the rates differ) unless the spec states a per-user statistic, and then each row's `tok_per_s_per_user` on it (SLOs above), for the total and the decode-GPU
 form, points compared exactly (no tolerance; a P/D preference waits for replications with intervals, design DEV-11). `ranking`
 (`scalar` by default, or `pareto`) says which rule picks the finalists and the winner card, and the
 report states it. A candidate the simulator refuses is reported as refused, counted and grouped by
@@ -508,6 +575,9 @@ BLIS imposes real constraints on P/D, all checked before any run:
 - The two pools must **agree** on `dp` (one replica factor applies to both), `block_size` (a
   handoff moves whole KV blocks), and KV cache format.
 - Drafting is **one configuration per run**, not per pool.
+- A pool's `engine:` block merges field by field over the shared engine, so a nested block such
+  as `compilation` keeps the fields the pool does not state. `speculative` (or a runner-level
+  drafting knob) in a pool block is refused with that reason.
 - A prefill pool needs a decode pool, and vice versa; a colocated pool can't sit beside either.
 - Pools never share a node, so a P/D run always spans ≥ 2 nodes and prices its handoff over
   `scenario.cluster.fabric` (default `ib-400g`).
@@ -534,6 +604,32 @@ both. So the schema can be looser than the validator only in the three classes i
 out of reach — it can never be *stricter*, which is the case that would have your editor
 red-underline a spec CI accepts.
 
+## Splitting a large grid into bounded specs
+
+`--shard I/N` slices the full expansion, so it still expands every point. For a grid too large to
+expand at all, `scripts/shard_experiment.py` cuts the spec instead:
+
+```bash
+python3 -I scripts/shard_experiment.py experiments/<name>.yaml --max-runs 64            # the plan
+python3 -I scripts/shard_experiment.py experiments/<name>.yaml --max-runs 64 --index 3 --out /tmp/<name>-shard-03.yaml
+```
+
+Each shard is a spec of one sweep, with every declared load and each independent axis cut to a
+contiguous slice, holding at most `--max-runs` runs (configurations x loads). Taken together the
+shards' runs are the parent's runs, as a multiset: nothing is priced, ranked or filtered, and GPU
+budget refusals stay the runner's.
+
+The grid is not purely Cartesian (a speculative K of 0 collapses its method and drafter, a 0-byte
+offload tier takes no policy), so the plan asks the runner's own expansion, on one-point probes,
+which axes expand together, and never cuts those: every shard carries each such group whole. The
+plan costs the probes, not the grid. A `--max-runs` too small to hold one group is refused, naming
+it. A coupling that only appears among three or more axes is not seen by the probes; the shard's
+expansion is checked against the plan's count when it is written, and a mismatch is refused.
+
+A shard has its own name (`<name>-shard-<i>`), so it writes its own `reports/` directory, and it
+ranks only its own slice: a finished shard is not the whole grid's best. Merge shards by feeding
+their `runs.jsonl` to `--runs-from`.
+
 ## What the sweeper writes
 
 `reports/<name>/` — the same run-directory format the rest of the repo reads:
@@ -552,6 +648,19 @@ red-underline a spec CI accepts.
 the scenario's SLOs, breaking ties on fleet tok/s then the lighter load. A run that misses an SLO
 can never win, however fast it is, and a declared SLO that wasn't measured counts as a miss rather
 than a silent pass.
+
+### A durable journal of attempts
+
+`run_experiment.py --checkpoint-runs JOURNAL.jsonl` also appends every attempt BLIS ran to
+`JOURNAL.jsonl` as it finishes, flushed and fsynced: passed, refused by the simulator or the runner,
+and incomplete (overloaded, timed out, crashed). One JSON object per line, the same record
+`runs.jsonl` holds for that run plus its `sweep`. An interrupted search keeps every attempt that
+finished. The file is only ever appended to, so an existing journal is never truncated, and it sits
+outside the report directory, so the report and `runs.jsonl` are byte for byte what they are without
+the flag. It is not a resume command: use `--runs-from` on ledgers for that. Only finished attempts are
+journaled. A router file that cannot be materialized is never attempted and stays a `dropped` entry
+of the report. A run taken from `--runs-from` is not an attempt and is not journaled. `--dry-run` runs
+nothing and writes no journal.
 
 ## When the pinned simulator moves
 

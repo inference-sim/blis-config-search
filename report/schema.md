@@ -112,7 +112,10 @@ time per output token. A user's rate is 1000 over that request's TPOT in ms, and
 over its TPOT at that percentile (p99 unless the spec states another), which is the users' rate at
 the matching percentile from the slow end; with `interactivity_mean` stated, its mean of each
 request's tok/s (the registry's `interactivity_mean`), not 1000 over the mean TPOT, which is lower.
-`interactivity_floor.statistic` and `.of` name a stated statistic. Whole-run figures include warm-up and drain and are never ranked on. The
+`interactivity_floor.statistic` and `.of` name a stated statistic. A spec that states none takes the
+Pareto x axis and each row's `interactivity` from the Result's `interactivity_mean` (the mean of each
+request's tok/s, `pareto.x_basis.of`), not `interactivity_of_mean_tpot`; a spec whose only per-user
+statistic is a `tpot_<stat>` cap keeps `1000 / tpot_<stat>_ms`, labelled so in `pareto.x_basis`. Whole-run figures include warm-up and drain and are never ranked on. The
 report states this in `scenario.json` (`basis`, `scope`) and in its meta line. A ledger that mixes
 records with and without a basis is flagged, not rendered as one comparison.
 
@@ -128,6 +131,7 @@ A record keeps the run's inputs and outputs as written. The fields added with th
 | `measured.window` | the Result's measured window: start, end, duration, requests |
 | `measured.instances` | per-instance TTFT, end-to-end and TPOT figures for the window, and `interactivity_mean` (the mean of each request's 1000 / TPOT in ms), rebuilt from the per-request rows until the simulator emits them (inference-sim #2087) |
 | `whole_run` | the whole-run cluster aggregate, raw data only; nothing ranks or displays it |
+| `server_series` | the Result's per-engine diagnostic series (`reports.engine.cluster.server_series`), present only when the spec set `scenario.replay.server_series_interval_s`; nothing ranks or displays it |
 | `config_key` | the hash of `config` with `concurrency` removed: the records of one configuration across loads share it |
 
 `config_hash` is unchanged: the hash of the whole `config`, so one run at one load. `measured` is

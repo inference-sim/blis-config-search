@@ -104,9 +104,8 @@ def ask_field_list(blis, catalog, sc):
         if settings.ENGINE_KIND == "vllm":
             engine.setdefault("block_size", default_block_size(catalog, sc.get("model"), sc.get("hardware")))
         node = int(fixed or stated or 1)
-        return scenario_yaml(sc.get("model"), sc.get("hardware"), blis_cli.build_release(blis, settings.ENGINE_KIND),
-                             {"tp": node, "pp": 1, "dp": 1}, engine, "fields-probe",
-                             node_size=node, states_node_size=not fixed)
+        return scenario_yaml(sc.get("model"), sc.get("hardware"), {"tp": node, "pp": 1, "dp": 1}, engine,
+                             "fields-probe", node_size=node, states_node_size=not fixed)
     try:
         return blis_cli.fields(blis, settings.ENGINE_KIND, scenario=probe, catalog=catalog)
     except blis_cli.BlisCommandError as e:
@@ -244,6 +243,21 @@ class ConfigError(ValueError):
 SCENARIO_OFFLOAD = frozenset({"offload_cpu_bytes", "offload_eviction_policy"})
 
 
+def merge_nested(base, over):
+    """`over` laid on `base`, a nested block merged field by field rather than replaced whole.
+
+    A block neither side overrides is shared with `base`, not copied (resolve_pd relies on that for
+    `speculative`: the method the runner fills in later reaches both pools).
+    """
+    out = dict(base)
+    for key, value in over.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = merge_nested(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
 def classify_config(config, vocab, node_size=None, pool_offload=False):
     """Split a candidate into (parallel, engine, cli, router); raise ConfigError on unknown keys.
 
@@ -274,8 +288,18 @@ def classify_config(config, vocab, node_size=None, pool_offload=False):
         elif k in vocab.parallel:
             parallel[k] = v
         elif k in vocab.engine_names():
-            engine[k] = v
+            # A block is copied: the runner fills its fields (speculative.method) per run.
+            engine[k] = dict(v) if isinstance(v, dict) else v
         elif k in SCENARIO_SPECULATIVE:
+            if settings.ENGINE_KIND != "vllm":
+                # These three keys fold into vLLM's nested `speculative` block, which no other engine
+                # takes; folding them would hand SGLang a block it refuses, one run at a time.
+                own = sorted(n for n in vocab.engine_names() if n.startswith("speculative_"))
+                raise ConfigError(
+                    f"{k!r}: the runner's drafting keys are vLLM's; a {settings.ENGINE_KIND} sweep states "
+                    f"drafting in the engine's own settings ("
+                    f"{', '.join(own) if own else 'none are listed by ' + vocab.source}), "
+                    f"each as the engine names it")
             spec[k] = v
         elif k in SPECULATIVE_CLI:
             cli[k] = v
@@ -296,7 +320,8 @@ def classify_config(config, vocab, node_size=None, pool_offload=False):
         elif role in PD_ROLES and knob in vocab.parallel:
             pd_parallel[role][knob] = v
         elif role in PD_ROLES and (knob in vocab.engine_names() or k in PD_SPECULATIVE):
-            pd_engine[role][knob] = v
+            # A nested block is copied, as the shared one is: resolve_pd merges it field by field.
+            pd_engine[role][knob] = dict(v) if isinstance(v, dict) else v
         else:
             raise ConfigError(
                 f"{k!r}: unknown key: not a pool-layout key or engine setting in {vocab.source}, "
@@ -308,17 +333,24 @@ def classify_config(config, vocab, node_size=None, pool_offload=False):
             # `method` defaults to the speculator the model's own graph declares; naming it here
             # would hardcode one model's drafter (deepseek-v4.1-flash is dspark, glm-5.2 is mtp).
             method = spec.get("speculative_method")
-            engine["speculative"] = ({"method": method, "num_spec_tokens": k} if method
-                                     else {"num_spec_tokens": k})
+            # The three flat keys fold INTO the nested block, over what it already states: the
+            # block's other native fields (kv_cache_dtype, rejection_sample_method, ...) stay.
+            block = dict(engine.get("speculative") or {})
+            block["num_spec_tokens"] = k
+            if method:
+                block["method"] = method
             # A separate drafter checkpoint, by catalog name; absent means the in-graph speculator.
             if spec.get("speculative_draft_model"):
-                engine["speculative"]["draft_model"] = spec["speculative_draft_model"]
+                block["draft_model"] = spec["speculative_draft_model"]
+            engine["speculative"] = block
         else:
             named = [n for n in ("speculative_method", "speculative_draft_model") if spec.get(n)]
             if named:
                 raise ConfigError(
                     f"{named[0]} with num_speculative_tokens 0 (or unset): drafting 0 tokens is "
                     f"speculative decoding OFF, so naming a drafter would record one that never ran")
+            # Drafting off: a nested block's fields would be recorded for a drafter that never ran.
+            engine.pop("speculative", None)
     rc = router.get("router_config")
     if rc is not None and not os.path.exists(rc):
         # Fail here rather than let BLIS fail per-run: a typo'd EPP path would otherwise cost a
@@ -417,7 +449,9 @@ def resolve_pd(cli, pd_parallel, pd_engine, base_parallel, base_engine, node_siz
     # Checked BEFORE the pools are built: a per-role drafting key must not reach a pool's engine
     # block, where it would be written into the scenario as a field no engine accepts.
     for role in PD_ROLES:
-        bad = sorted(k for k in pd_engine[role] if k in SCENARIO_SPECULATIVE)
+        # `speculative` is the nested native block (its method, depth and drafter arrive as the
+        # flat keys above): it is one configuration per run in either spelling.
+        bad = sorted(k for k in pd_engine[role] if k in SCENARIO_SPECULATIVE or k == "speculative")
         if bad:
             raise ConfigError(
                 f"{role}_{bad[0]}: drafting is one configuration per run, not per pool -- BLIS "
@@ -440,10 +474,10 @@ def resolve_pd(cli, pd_parallel, pd_engine, base_parallel, base_engine, node_siz
     out = {}
     for role, instances in (("prefill", pi), ("decode", di)):
         par = {**{k: v for k, v in base_parallel.items() if k != "pd"}, **pd_parallel[role]}
-        eng = dict(base_engine)
         # The shared `speculative` block is already folded into base_engine; a per-role override
-        # of it is refused below (one draft width per run), so only flat keys merge here.
-        eng.update(pd_engine[role])
+        # of it is refused above (one draft width per run). Every other nested block (`eplb`,
+        # `dbo`, ...) merges field by field, as the scenario's block and a sweep's do.
+        eng = merge_nested(base_engine, pd_engine[role])
         # pp>1 is priced from kernel v0.5.0 on each side of a disaggregated run too; see the
         # colocated site in classify_config for what moved and what still refuses.
         fp = footprint_gpus(par)
@@ -622,6 +656,27 @@ def load_workload_shape(catalog, workload):
     return out
 
 
+PUBLIC_ACCEPTANCE_SETS = frozenset({"inferencex-golden-al"})
+NON_PUBLIC_SET = "internal registry set"
+
+
+def public_set(name, source):
+    """(name, source) of an acceptance set as a published report may state them."""
+    if not name or name in PUBLIC_ACCEPTANCE_SETS:
+        return name, source
+    return NON_PUBLIC_SET, None
+
+
+def public_acceptance(acc):
+    """The acceptance record as a published report may state it: a set outside PUBLIC_ACCEPTANCE_SETS
+    is named only by NON_PUBLIC_SET, with no source, and no field repeats its name. The rung stays."""
+    name = acc.get("profile_set")
+    if not name or name in PUBLIC_ACCEPTANCE_SETS or name == NON_PUBLIC_SET:
+        return acc
+    out = {k: (v.replace(name, NON_PUBLIC_SET) if isinstance(v, str) else v) for k, v in acc.items()}
+    return {**out, "profile_set": NON_PUBLIC_SET, "source": None}
+
+
 def acceptance_record(doc):
     """The acceptance a drafting run was priced with, as the pinned simulator's Result records it,
     or None when the run did not speculate.
@@ -639,7 +694,7 @@ def acceptance_record(doc):
     entry = acc.get("entry") or {}
     prop = next((p for p in ((doc.get("input") or {}).get("workload_properties") or [])
                  if isinstance(p, dict) and p.get("name") == "speculative_acceptance"), {})
-    return {"acceptance_length": acc.get("length"), "acceptance_rate": acc.get("rate"),
+    return public_acceptance({"acceptance_length": acc.get("length"), "acceptance_rate": acc.get("rate"),
             "source_layer": acc.get("source_layer"),
             "profile_set": entry.get("set") or None, "profile_key": entry.get("key") or None,
             "source": entry.get("source") or None, "profile_method": entry.get("method") or None,
@@ -648,7 +703,7 @@ def acceptance_record(doc):
             "fallback_from": entry.get("fallback_from") or None,
             "step": entry.get("step") or prop.get("step") or None,
             "differed": entry.get("differed") or prop.get("differed") or [],
-            "k_rule": entry.get("k_rule") or prop.get("k_rule") or None}
+            "k_rule": entry.get("k_rule") or prop.get("k_rule") or None})
 
 
 def draft_depth(run):
@@ -971,7 +1026,7 @@ BASIS = "measured_window"
 # document states, so it lights up with the pin bump to a simulator that writes version 3 and does
 # nothing before it (test_run_blis.FigureForms). A version this module has not read is refused.
 FIGURE_SCOPE_FROM_SCHEMA = 3
-READ_RESULT_SCHEMAS = (1, 2, 3)      # 1: the fixtures' string "1"; 2: the pinned release; 3: layer 10
+READ_RESULT_SCHEMAS = (1, 2, 3, 4)   # 1: the fixtures' string "1"; 2: the pinned release; 3: layer 10; 4: M3.2 (adds `estimate`; figures as in 3)
 FIGURE_FORM_FIELDS = ("member", "aggregate", "over")
 
 
@@ -1035,9 +1090,10 @@ _MEASURED_KEYS = {"tokens_per_sec": "output_tok_s", "responses_per_sec": "reques
                   "itl_mean_ms": "tpot_mean_ms", "itl_p90_ms": "tpot_p90_ms",
                   "itl_p95_ms": "tpot_p95_ms", "itl_p99_ms": "tpot_p99_ms",
                   "preemption_count": "preemptions",
-                  # The registry's per-GPU rates and the interactivity of the mean TPOT: the figures the
-                  # Pareto objective is stated in (pareto.py). A Result that lacks one leaves the slot
-                  # empty and the row unrated (pareto.interactivity_of rebuilds nothing).
+                  # The registry's per-GPU rates the Pareto objective is stated in (pareto.py), and the
+                  # interactivity of the mean TPOT, kept in the record but never ranked on: the
+                  # axis is interactivity_mean, read from measured.metrics (pareto.interactivity_of).
+                  # A Result that lacks a figure leaves the slot empty and the row unrated.
                   "total_tokens_per_sec_per_gpu": "total_tokens_per_second_per_gpu",
                   "output_tokens_per_sec_per_decode_gpu": "output_tokens_per_second_per_decode_gpu",
                   "interactivity_of_mean_tpot": "interactivity_of_mean_tpot"}
@@ -1322,7 +1378,7 @@ def _pool_offload_block(off):
     return f"    offload:\n{policy}      tiers:\n        - {{tier: cpu_dram, bytes: {int(off['cpu_bytes'])}}}\n"
 
 
-def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router,
+def _pd_scenario_yaml(model, hardware, pd, name, block, fabric, router,
                       node_size, states_node_size):
     """Render a DISAGGREGATED Scenario+Deployment: one pool per role plus `pd_transfer`.
 
@@ -1357,7 +1413,6 @@ def _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, 
 name: {name}
 engine:
   kind: {settings.ENGINE_KIND}
-  version: "{engine_version}"
 model: {model}
 coefficients: [{", ".join(COEFFICIENTS + (["cost-model-offload-tiers"] if any_offload else []))}]
 cluster:
@@ -1403,6 +1458,7 @@ VLLM_BLOCK_MOVES = (
     ("speculative.kv_cache_dtype", "speculative_config.kv_cache_dtype"),
     ("speculative.draft_sample_method", "speculative_config.draft_sample_method"),
     ("speculative.rejection_sample_method", "speculative_config.rejection_sample_method"),
+    ("speculative.synthetic_acceptance_length", "speculative_config.synthetic_acceptance_length"),
     ("speculative.enable_adaptive_verification", "speculative_config.enable_adaptive_verification"),
 )
 
@@ -1430,7 +1486,7 @@ def to_vllm_block(eng):
     return out
 
 
-def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances=1,
+def scenario_yaml(model, hardware, parallel, engine, name, num_instances=1,
                   fabric=DEFAULT_FABRIC, router=None, node_size=8, states_node_size=True):
     """Render a two-doc Scenario+Deployment YAML (no external yaml dep). Omitted engine keys (e.g.
     quantization when unset) let the checkpoint/engine govern.
@@ -1458,7 +1514,7 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
     pd = (parallel or {}).get("pd")
     if pd:
         pd = {**pd, **{r: {**pd[r], "engine": to_vllm_block(pd[r].get("engine"))} for r in PD_ROLES if r in pd}}
-        return _pd_scenario_yaml(model, hardware, engine_version, pd, name, block, fabric, router,
+        return _pd_scenario_yaml(model, hardware, pd, name, block, fabric, router,
                                  node_size, states_node_size)
     engine = to_vllm_block(engine)
     nodes = pool_nodes(parallel, num_instances, node_size)
@@ -1486,7 +1542,6 @@ def scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_i
 name: {name}
 engine:
   kind: {settings.ENGINE_KIND}
-  version: "{engine_version}"
 model: {model}
 coefficients: [{", ".join(coefficients)}]
 cluster:
@@ -1535,7 +1590,7 @@ def write_scenario(blis, scenarios_dir, model, hardware, engine_version, paralle
     os.makedirs(scenarios_dir, exist_ok=True)
     path = os.path.join(scenarios_dir, name + ".yaml")
     if not os.path.exists(path):
-        body = scenario_yaml(model, hardware, engine_version, parallel, engine, name, num_instances,
+        body = scenario_yaml(model, hardware, parallel, engine, name, num_instances,
                              fabric, router, node_size, states_node_size)
         fd, tmp = tempfile.mkstemp(dir=scenarios_dir, prefix=".tmp-", suffix=".yaml")
         try:
@@ -1638,6 +1693,8 @@ def build_replay_cmd(blis, catalog, registry, scenarios_dir, scenario_name, seed
             cmd += ["--format", "yaml"]
     if replay.get("corpus_cache"):
         cmd += ["--corpus-cache", replay["corpus_cache"]]
+    if replay.get("server_series_interval_s") is not None:
+        cmd += ["--server-series-interval-s", str(replay["server_series_interval_s"])]
     if seed is not None:
         cmd += ["--seed", str(seed)]
     cmd += _cli_args(cli)
@@ -1967,6 +2024,9 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
         whole = (_engine_report(doc).get("cluster") or {}).get("whole_run")
         if whole:
             rec["whole_run"] = whole
+        series = (_engine_report(doc).get("cluster") or {}).get("server_series")
+        if series:
+            rec["server_series"] = series
     return rec
 
 

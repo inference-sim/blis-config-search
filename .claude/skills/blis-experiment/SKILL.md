@@ -71,8 +71,11 @@ single-knob sweeps pinned to one topology is under-delivering on the information
 **Run this first, every time:**
 
 ```
-python3 -I scripts/knob_profile.py --model <m> --hardware <hw> --workload <wl>
+python3 -I scripts/knob_profile.py --model <m> --hardware <hw> --workload <wl> --blis <blis>
 ```
+
+With `--blis` (or `$BLIS`) it asks the simulator's `blis acceptance` for each drafter, so the rung
+shown is the simulator's own step; without it the rung is only the key found in the checkout.
 
 It prints, per knob: whether it **applies** to this exact combination, the values that are
 **legal here**, and **why** — read from the sources, not from memory:
@@ -81,7 +84,7 @@ It prints, per knob: whether it **applies** to this exact combination, the value
 |---|---|
 | catalog model row | `arch`, `experts`, `top_k`, `attn_kind`, `context`, `quant` |
 | the model's **`graph.yaml`** | the **declared speculator and its max depth** (so whether drafting is legal at all, and the K ceiling), the sliding window, and the `bytes_by_cache_dtype` tables — *which KV dtypes this model is priced for* |
-| the model's **`model.yaml`** and the registry's acceptance profiles | its **drafters** (the graph's speculator, and each separate drafter entry that names the model in its `targets:`), and for each whether an acceptance profile has its exact key at this workload's category and thinking mode, with the profile set and source |
+| the model's **`model.yaml`** and the registry's acceptance profiles | its **drafters** (the graph's speculator, and each separate drafter entry that names the model in its `targets:`), and for each whether the simulator resolves an acceptance at this workload's category and thinking mode, with the rung (marked BORROWED when it is not exact), the profile set and source. Each applicable drafter is its own arm: method, checkpoint and depths together |
 | the hardware entry | `ComputeCapability` → the capability family that gates the per-dtype KV table, plus memory for the footprint floor |
 
 **The catalog row alone is not enough**, and this is the trap: it carries no speculator, no
@@ -268,18 +271,26 @@ and note in a `#` comment that the grid was bounded. Do not silently drop a cont
   `tp x dp x num-instances == gpus`; for a disaggregated one both pools count together.
 - **Concurrency is set once, in `scenario`,** so every sweep is measured at the same loads.
 - **Routing is a file**, listed under `router.endpoint_picker_config` (see `routing/`). A new
-  policy is a new file. Overrides edit fields the base file already has, against one base.
+  policy is a new file. Overrides edit fields the base file already has, against one base. A
+  calibrated config beside the spec is `./routing/<file>.yaml`; its guards' parameters can be swept
+  by plugin name (experiments/README.md, "A router file beside the spec").
 - **`speculative` needs both `method` and `num_spec_tokens`.** Acceptance comes from the registry.
   Draft only with a drafter `knob_profile.py` marks as applying. A separate drafter goes in
   `draft_model: [<its catalog name>]`; leave `draft_model` out to draft with the graph's own
   speculator.
+- **One sweep per drafter.** A sweep crosses its lists, so a second drafter in the same sweep is
+  paired with the first one's method and depths. Copy one arm from `knob_profile.py` into each
+  sweep; the validator refuses a checkpoint paired with another method or a depth above its own.
 - **Keep the K=0 control in the drafting grid:** `num_spec_tokens: [0, 1, 3]`. K=0 expands to one
   drafting-off arm, which needs no acceptance.
-- **Say when an acceptance is borrowed.** The profile reports only exact profiles. If you sweep a
-  drafter without one, the simulator may borrow another drafter's or another K's (D8). Write a `#`
-  comment saying the arm's acceptance is borrowed, from which profile, and that it is not
-  measured for this drafter. The run's Result records the profile it used.
+- **Say when an acceptance is borrowed.** `knob_profile.py --blis` reports the rung the simulator
+  would use. Any rung but `exact` is borrowed from another drafter, K or settings (D8). Write a `#`
+  comment saying the arm's acceptance is borrowed, the rung, which profile, and that it is not
+  measured for this drafter. The run's Result and the report's "Drafting acceptance" section
+  record the profile it used.
 - **A replay workload is already fully described by the catalog.** Naming it names all of it.
+  To change its pacing (`trace_idle_gap_cap_s`, warm-up), copy the recipe beside the spec and name
+  it `workload_spec: ./workloads/<file>.yaml`; a pacing key under `scenario.replay` is refused.
 
 ### Replay workloads: state the corpus path, nothing else
 

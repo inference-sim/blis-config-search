@@ -20,6 +20,10 @@ class BlisCommandError(RuntimeError):
     """A command could not run, failed, or printed something other than its documented shape."""
 
 
+class CommandMissing(BlisCommandError):
+    """This build of the simulator has no such command."""
+
+
 class DocumentInvalid(ValueError):
     """`blis schema validate` refused a document. The message is the validator's own."""
 
@@ -66,7 +70,7 @@ def _field_list_json(blis, engine, path, scenario, catalog=None):
     `blis fields --scenario` prints for the scenario text `scenario()` returns, built over `catalog`."""
     if not path:
         # Without a spec's scenario, one that names only the engine; a build that needs a model refuses it.
-        text = scenario() if scenario else _engine_probe(engine, build_release(blis, engine))
+        text = scenario() if scenario else _engine_probe(engine)
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, "fields-probe.yaml"), "w", encoding="utf-8") as f:
                 f.write(text)
@@ -119,27 +123,6 @@ def fields(blis, engine, path=None, scenario=None, catalog=None):
     return _cached(_key(blis, "fields", engine, path), load)
 
 
-def build_release(blis, engine):
-    """The upstream release of `engine` this build runs, from the refusal it prints for a scenario
-    naming another: `names engine vllm 0; this build runs vllm 0.33.0, ...`. It lets config search
-    write the probe scenario `blis fields` needs before it has the field list."""
-    import re
-
-    def load():
-        text = _engine_probe(engine, "0")
-        with tempfile.TemporaryDirectory() as d:
-            with open(os.path.join(d, "release-probe.yaml"), "w", encoding="utf-8") as f:
-                f.write(text)
-            pr = _run(blis, ["fields", "--scenario", "release-probe.yaml", "--scenarios", d], 120)
-        m = re.search(rf'names engine {re.escape(engine)} 0; this build runs {re.escape(engine)} (\S+?),',
-                      (pr.stderr or "") + "\n" + (pr.stdout or ""))
-        if not m:
-            raise BlisCommandError(f"`blis fields` did not say which {engine} release the build runs: "
-                                   + _stderr(pr))
-        return m.group(1)
-    return _cached(_key(blis, "build_release", engine), load)
-
-
 def engine_release(blis, engine, fields_path=None):
     """The upstream release of `engine` this build runs, for example "0.32.0" (LIF-6)."""
     return fields(blis, engine, fields_path)["engine"]["version"]
@@ -173,6 +156,31 @@ def supports_pool_offload(blis):
     deployment, so a disaggregated deployment cannot give only some pools a CPU tier."""
     pool = (schema(blis, "deployment").get("$defs") or {}).get("deployment.Pool") or {}
     return "offload" in (pool.get("properties") or {})
+
+
+def acceptance(blis, model, drafter, method, k, category, thinking, hardware=None, engine=None,
+               catalog=None, registry=None):
+    """(lookup, reason): `blis acceptance`, the acceptance the simulator would price this arm with.
+
+    lookup is its JSON (acceptance_length, step, differed, k_rule, set, source), or None with the
+    simulator's refusal in `reason`. drafter is None for the model's own in-graph speculator.
+    CommandMissing when the build predates the command.
+    """
+    args = ["acceptance", "--model", model, "--method", method, "--num-spec-tokens", str(k),
+            "--category", category, "--thinking", thinking, "--json"]
+    for flag, val in (("--drafter", drafter), ("--hardware", hardware), ("--engine", engine),
+                      ("--catalog", catalog), ("--registry", registry)):
+        if val:
+            args += [flag, val]
+    pr = _run(blis, args, 120)
+    if pr.returncode != 0:
+        if "unknown command" in (pr.stderr or ""):
+            raise CommandMissing(f"`{blis}` has no `acceptance` command")
+        return None, _stderr(pr).removeprefix("Error: ")
+    try:
+        return json.loads(pr.stdout), ""
+    except ValueError as e:
+        raise BlisCommandError(f"`blis acceptance --json` printed no JSON: {e}") from e
 
 
 def resolve(blis, model=None, chip=None, catalog=None):
@@ -235,7 +243,6 @@ _PROBE = """kind: Scenario
 name: kind-probe
 engine:
   kind: kind-probe
-  version: "0"
 model: kind-probe
 cluster:
   hardware: kind-probe
@@ -249,8 +256,9 @@ pools:
 """
 
 
-def _engine_probe(engine, version):
-    return _PROBE.replace("kind: kind-probe", f"kind: {engine}", 1).replace('version: "0"', f'version: "{version}"', 1)
+def _engine_probe(engine):
+    """A scenario naming only the engine. It states no version: the build fixes the release (LIF-6)."""
+    return _PROBE.replace("kind: kind-probe", f"kind: {engine}", 1)
 
 
 def registered_kinds(blis):

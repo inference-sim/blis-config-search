@@ -44,6 +44,12 @@ require (
 replace github.com/llm-d/llm-d-router => github.com/inference-sim/llm-d-router v1.0.0-blis.2
 """
 
+# M3.2 on: the substrate and engines are directories of inference-sim; only the router fork is a module.
+GO_MOD_M32 = """module github.com/inference-sim/inference-sim
+
+replace github.com/llm-d/llm-d-router => github.com/inference-sim/llm-d-router v1.0.0-blis.5.0.20261121014725-cb8d93fcb0fa
+"""
+
 
 def test_version_ordering():
     print("test_version_ordering")
@@ -143,7 +149,7 @@ def test_setup_md_sources_the_pins():
     with open(os.path.join(B.ROOT, "SETUP.md")) as f:
         setup = f.read()
     pins = B.read_pins()
-    check(". ./pins.env" in setup and '--branch "$BLIS_REF"' in setup
+    check(". ./pins.env" in setup and 'fetch -q --depth 1 origin "$BLIS_REF"' in setup
           and '"$(git rev-parse HEAD)" = "$BLIS_SHA"' in setup,
           "the clone recipe sources pins.env and uses $BLIS_REF and $BLIS_SHA")
     check(pins["BLIS_REF"] not in setup and pins["BLIS_SHA"] not in setup,
@@ -158,28 +164,23 @@ def test_bump_end_to_end_on_copies():
         pins = os.path.join(tmp, "pins.env")
         shutil.copy(B.PINS, pins)
         cur = B.read_pins(pins)
-        if not B.semver(cur["BLIS_REF"]):
-            # A draft pins a branch commit; the bot orders only release tags, so start the copy
-            # from one.
-            with open(pins) as f:
-                text = B.rewrite_pins(f.read(), {"BLIS_REF": "v0.15.0"})
-            with open(pins, "w") as f:
-                f.write(text)
-            cur = B.read_pins(pins)
+        # The copy of pins.env may pin a commit (the M3.2 stack head): a bump moves it to the first
+        # release tag, and from then on to later ones.
         setup_before = open(os.path.join(B.ROOT, "SETUP.md"), "rb").read()
-        moved = B.bump("v99.0.0", sha="e" * 40, go_mod=GO_MOD, release_name="v99.0.0: big", pins_path=pins)
+        moved = B.bump("v99.0.0", sha="e" * 40, go_mod=GO_MOD_M32, release_name="v99.0.0: big", pins_path=pins)
         after = B.read_pins(pins)
         check(after["BLIS_REF"] == "v99.0.0" and after["BLIS_SHA"] == "e" * 40, "pin moved")
-        check(after["SUBSTRATE_REF"] == "v0.11.0", "SUBSTRATE_REF follows the release's go.mod")
-        check(after["VLLM_REF"] == "v0.32.0-blis.2" and after["ROUTER_REF"] == "v1.0.0-blis.2",
-              "every derived pin follows the release's go.mod")
+        check(after["ROUTER_REF"] == "v1.0.0-blis.5.0.20261121014725-cb8d93fcb0fa",
+              "the router pin follows the release's go.mod")
+        check("SUBSTRATE_REF" not in after and "VLLM_REF" not in after,
+              "the substrate and the engines are in-tree: no pin of their own")
         check("CATALOG_REF" not in after and "REGISTRY_REF" not in after,
               "the catalog and registry are embedded in the release: no pin of their own")
         check(set(moved) >= {"BLIS_REF", "BLIS_SHA"}, f"bump reports what moved: {moved}")
         check(open(os.path.join(B.ROOT, "SETUP.md"), "rb").read() == setup_before,
               "a bump leaves SETUP.md alone: it sources pins.env and holds no version")
         try:
-            B.bump(cur["BLIS_REF"], sha="e" * 40, go_mod=GO_MOD, pins_path=pins)
+            B.bump(after["BLIS_REF"], sha="e" * 40, go_mod=GO_MOD_M32, pins_path=pins)
             check(False, "bumping to a tag that is not newer must refuse")
         except SystemExit:
             check(True, "")
@@ -421,6 +422,94 @@ def test_smoke_verdicts():
             r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
             check(not r["failures"] and len(r["warnings"]) == 3 and "no longer fits" in r["warnings"][0],
                   f"a row the new release says does not fit is a warning naming the refusal, not LOUD: {r}")
+            def unreleased(c):
+                rec = _rec(c, 81.0 if c.get("max_num_seqs") else 91.0 if c.get("router_config") else 101.0)
+                rec["released_build"] = False
+                return rec
+            run_blis.run_one = fake(unreleased)
+            r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root, pin_ref="0fb85a76192eb1cb3f55aadc42d3f24876385c0c")
+            check(not r["failures"] and sum("is a commit" in w for w in r["warnings"]) == 1,
+                  f"an unreleased binary at a commit pin is one warning per report, not a failure per row: {r}")
+            r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root, pin_ref="v0.19.0")
+            check(sum(f.startswith("LOUD") and "not a tagged release" in f for f in r["failures"]) == 3,
+                  f"an unreleased binary at a release-tag pin is LOUD: {r['failures']}")
+            # A known kernel issue is strict: refused with its signature is a loud note, not a pass;
+            # the case running again, or refused for another reason, fails the job.
+            occ = "kernelmodel: the kernel reports 210.4 GiB of per-rank fixed occupancy on a 178.4 GiB device"
+            saved_known = B.KNOWN_KERNEL_ISSUES
+            B.KNOWN_KERNEL_ISSUES = ({"report": "r", "config": {"tp": 8, "num_instances": 2}, "signature":
+                                      "per-rank fixed occupancy", "reason": "an over-count"},)
+            try:
+                run_blis.run_one = fake(lambda c: _rec(c, 0, rc=1, error=occ))
+                r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
+                md = B.smoke_markdown([r])
+                check(not r["failures"] and len(r["known_issues"]) == 3 and "Known kernel issues" in md
+                      and "known kernel issue" in md and "an over-count" in md,
+                      f"a refused known case is printed as a known kernel issue, not a pass: {r['failures']}")
+                run_blis.run_one = fake(lambda c: _rec(c, 81.0 if c.get("max_num_seqs") else
+                                                       91.0 if c.get("router_config") else 101.0))
+                r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
+                check(sum("KNOWN_KERNEL_ISSUES" in f for f in r["failures"]) == 3 and not r["known_issues"],
+                      f"a known case that now runs fails the job: {r['failures']}")
+                run_blis.run_one = fake(lambda c: _rec(c, 0, rc=1, error="field x not found"))
+                r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
+                check(sum("KNOWN_KERNEL_ISSUES" in f for f in r["failures"]) == 3,
+                      "a known case refused for another reason fails the job")
+                B.KNOWN_KERNEL_ISSUES = ({"report": "other", "config": {"tp": 8}, "signature": "per-rank fixed occupancy",
+                                          "reason": "x"},)
+                run_blis.run_one = fake(lambda c: _rec(c, 0, rc=1, error=occ))
+                r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
+                check(sum(f.startswith("LOUD") for f in r["failures"]) == 3 and not r["known_issues"],
+                      "an entry for another report excuses nothing")
+            finally:
+                B.KNOWN_KERNEL_ISSUES = saved_known
+            check(B._known_issue("deepseek-v4-1-flash-b200-agentx-4node",
+                                 {"tp": 4, "dp": 1, "num_instances": 8, "enable_expert_parallel": True,
+                                  "concurrency": 64}) is not None
+                  and B._known_issue("deepseek-v4-1-flash-b200-agentx-4node", {"tp": 8, "dp": 1, "num_instances": 4,
+                                                                               "enable_expert_parallel": True}) is None
+                  and B._known_issue("deepseek-v4-1-flash-b200-agentx-4node",
+                                     {"tp": 4, "dp": 1, "num_instances": 8, "enable_expert_parallel": True,
+                                      "max_num_batched_tokens": 2048}) is None,
+                  "the committed entry matches the tp4 ep4 8-instance default case at any concurrency, not tp8 "
+                  "and not the same shape with max_num_batched_tokens set (that one fits)")
+            # A known non-binding knob is strict too: identical numbers are a note, the knob moving
+            # or the entry matching no picked pair fails the job, and other knobs stay SILENT.
+            saved_nb = B.KNOWN_NON_BINDING_KNOBS
+            B.KNOWN_NON_BINDING_KNOBS = ({"report": "r", "knob": "max_num_seqs", "config": {"tp": 8, "num_instances": 2},
+                                          "reason": "the cap cannot bind"},)
+            try:
+                run_blis.run_one = fake(lambda c: _rec(c, 91.0 if c.get("router_config") else 100.0))
+                r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
+                md = B.smoke_markdown([r])
+                check(not r["failures"] and len(r["known_non_binding"]) == 1 and "Known non-binding knobs" in md
+                      and "the cap cannot bind" in md,
+                      f"a listed knob that measures identically is a note, not SILENT: {r['failures']}")
+                run_blis.run_one = fake(lambda c: _rec(c, 81.0 if c.get("max_num_seqs") else
+                                                       91.0 if c.get("router_config") else 101.0))
+                r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
+                check(any("KNOWN_NON_BINDING_KNOBS" in f and "now moves" in f for f in r["failures"])
+                      and not r["known_non_binding"],
+                      f"a listed knob that now moves fails the job: {r['failures']}")
+                B.KNOWN_NON_BINDING_KNOBS = ({"report": "r", "knob": "max_num_seqs", "config": {"tp": 4},
+                                              "reason": "x"},)
+                run_blis.run_one = fake(lambda c: _rec(c, 91.0 if c.get("router_config") else 100.0))
+                r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
+                check(any(f.startswith("SILENT") for f in r["failures"])
+                      and any("no longer picks a pair" in f for f in r["failures"]),
+                      f"an entry matching no picked pair excuses nothing and is itself a failure: {r['failures']}")
+                B.KNOWN_NON_BINDING_KNOBS = ({"report": "r", "knob": "router_config", "config": {"tp": 8},
+                                              "reason": "x"},)
+                r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
+                check(any(f.startswith("SILENT") and "max_num_seqs" in f for f in r["failures"]),
+                      "an entry for one knob does not excuse another knob")
+            finally:
+                B.KNOWN_NON_BINDING_KNOBS = saved_nb
+            check(B._non_binding("muse-spark-open-816b-a42b-gb200-agentx-rack", "max_num_seqs",
+                                 {"tp": 8, "num_instances": 8, "concurrency": 128}) is not None
+                  and B._non_binding("muse-spark-open-816b-a42b-gb200-agentx-rack", "max_num_seqs",
+                                     {"tp": 8, "num_instances": 8, "concurrency": 512}) is None,
+                  "the committed entry covers the 128-lane pair and not the 512-lane pair, where the cap binds")
             run_blis.run_one = fake(lambda c: _rec(c, 0, rc=1, error="field x not found"))
             r = B.smoke("r", FIXTURE_BLIS, "cat", "reg", root=root)
             check(sum(f.startswith("LOUD") for f in r["failures"]) == 3,
@@ -432,6 +521,30 @@ def test_smoke_verdicts():
             run_blis.run_one = real
     finally:
         shutil.rmtree(root)
+
+
+def test_regen_refuses_an_unreleased_pin():
+    print("test_regen_refuses_an_unreleased_pin")
+    commit = "0fb85a76192eb1cb3f55aadc42d3f24876385c0c"
+    for ref in (commit, "main", "v0.18", "v0.18.2-rc1", ""):
+        try:
+            B.require_release({"BLIS_REF": ref})
+            check(False, f"BLIS_REF={ref!r} must be refused")
+        except SystemExit as e:
+            check("not a release tag" in str(e) and repr(ref) in str(e), f"a clear refusal for {ref!r}: {e}")
+    B.require_release({"BLIS_REF": "v0.18.2"})
+    check(True, "a release tag passes")
+    # regen itself refuses before it touches anything (the guard is its first step, so no BLIS is run).
+    try:
+        B.regen("any-report", "blis", "cat", "reg", tempfile.mkdtemp(), pins={"BLIS_REF": commit})
+        check(False, "regen on a commit pin must refuse")
+    except SystemExit as e:
+        check("not a release tag" in str(e), f"regen refuses on a commit pin: {e}")
+    # The campaign refuses at its plan step, so no report job starts, and the plan step does not hide it.
+    wf = open(os.path.join(ROOT, ".github", "workflows", "regen-reports.yml")).read()
+    check("blis_pin.py plan --require-release" in wf, "regen-reports.yml plans with --require-release")
+    check("|| true" not in wf.split("blis_pin.py plan --require-release")[1].split("PY\n")[0],
+          "the plan step does not swallow the refusal")
 
 
 def test_workflow_wiring():
@@ -453,9 +566,9 @@ def test_workflow_wiring():
           "a pushed branch with no PR (a failed create) is resumed, not skipped forever")
     check("github.event.before" in regen and "fetch-depth: 0" in regen,
           "pins are compared across the whole push: a rebase-merged pin PR ends in its fixes")
-    check("../blis-substrate" not in regen and "--catalog blis-substrate/catalog" in regen
+    check("../blis-substrate" not in regen and "--catalog inference-sim/substrate/catalog" in regen
           and "--data-override" not in regen,
-          "regen clones the substrate inside the checkout, so ledger cmds stay relative, and "
+          "regen checks out inference-sim's substrate/ inside the checkout, so ledger cmds stay relative, and "
           "prices with the simulator's embedded data")
     check('paths: ["pins.env"]' in regen and "branches: [main]" in regen,
           "regeneration triggers on a pins.env change reaching main")
@@ -734,6 +847,7 @@ if __name__ == "__main__":
     test_smoke_pairs()
     test_smoke_verdicts()
     test_workflow_wiring()
+    test_regen_refuses_an_unreleased_pin()
     test_stale_reports_and_the_post_merge_plan()
     test_shards_fit_a_long_report_into_jobs()
     test_a_pending_regeneration_is_held_only_until_its_release_is_pinned()

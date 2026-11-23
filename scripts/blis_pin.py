@@ -54,6 +54,7 @@ UPSTREAM = "inference-sim/inference-sim"
 TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 # The keys whose VALUE says which stack priced a report. A comment-only edit to pins.env moves
 # none of them and must not queue hours of sweeps.
+IN_TREE = "in-tree"  # the `substrate` label of a stack with no SUBSTRATE_REF (M3.2 on)
 STACK_KEYS = ("BLIS_REF", "BLIS_SHA", "SUBSTRATE_REF", "VLLM_REF", "SGLANG_REF", "ROUTER_REF")
 # A batch is one PR. Small enough to review the numbers, large enough not to open a PR per report.
 MAX_BATCH = 4
@@ -151,7 +152,9 @@ def bump(tag, sha=None, go_mod=None, release_name=None, pins_path=PINS):
     The catalog and registry need no pin of their own: the release embeds them (CFG-1)."""
     pins = read_pins(pins_path)
     old_ref = pins.get("BLIS_REF")
-    if not newer(tag, old_ref):
+    # A commit pin (the M3.2 stack head, before its release tag exists) is moved to a release by
+    # naming the tag; between two tags the new one must be later.
+    if not semver(tag) or (semver(old_ref) and not newer(tag, old_ref)):
         raise SystemExit(f"{tag} is not newer than the pinned {old_ref}; nothing to bump")
     sha = sha or resolve_tag_sha(tag)
     if go_mod is None:
@@ -196,7 +199,8 @@ def is_current(scen_dir, pins=None):
     """Whether the report in `scen_dir` was priced by the stack pins.env names now.
 
     A report records the pins that priced it in scenario.json's `pinned_stack` (run_experiment's
-    _pinned_stack): `blis` is BLIS_REF, `router` ROUTER_REF and `substrate` SUBSTRATE_REF, and
+    _pinned_stack): `blis` is BLIS_REF, `router` ROUTER_REF and `substrate` SUBSTRATE_REF (absent
+    from M3.2, when the substrate is a directory of inference-sim: the label is "in-tree"), and
     `resolved.blis.commit`, when the binary's build info carried it, the commit it was built from.
     All three labels must match, and the commit too when it is recorded. VLLM_REF has no label of
     its own: BLIS_SHA determines it (pins.env's derived block). A label that is missing is not a
@@ -204,7 +208,7 @@ def is_current(scen_dir, pins=None):
     pins = pins if pins is not None else read_pins()
     st = (_load_json(os.path.join(scen_dir, "scenario.json"), {}) or {}).get("pinned_stack") or {}
     want = {"blis": pins.get("BLIS_REF"), "router": pins.get("ROUTER_REF"),
-            "substrate": pins.get("SUBSTRATE_REF")}
+            "substrate": pins.get("SUBSTRATE_REF") or IN_TREE}
     if any(not v or st.get(k) != v for k, v in want.items()):
         return False
     commit = ((st.get("resolved") or {}).get("blis") or {}).get("commit")
@@ -371,8 +375,24 @@ def shards_for(run_id, max_parallel, budget_s, growth=3.0, root=ROOT):
     return max(1, math.ceil(serial * growth / (max(1, max_parallel) * budget_s)))
 
 
+def require_release(pins=None):
+    """Refuse unless BLIS_REF is a plain release tag (vX.Y.Z).
+
+    Regeneration writes into a scratch --out, so run_experiment's refusal of an experimental report
+    (which fires only when --out is reports/) never sees it, and the workflow then copies the result
+    into reports/. A commit pin prices every run on an unreleased build, so a campaign on it would
+    replace committed reports with experimental ones that checks.yml lets through (it skips
+    check_released_build.py for a non-tag ref). The committed reports are regenerated after the tag."""
+    ref = (pins if pins is not None else read_pins()).get("BLIS_REF", "")
+    if semver(ref) is None:
+        raise SystemExit(f"refusing to regenerate committed reports: pins.env BLIS_REF is {ref!r}, not a "
+                         f"release tag (vX.Y.Z). A build of a commit is unreleased, and its reports are "
+                         f"experimental and must not replace committed ones; move BLIS_REF to the release "
+                         f"tag, then regenerate")
+
+
 def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1, fields=None,
-          shard=None, runs_from=()):
+          shard=None, runs_from=(), pins=None):
     """Regenerate ONE report into <out>/<run_id>/ from its source, at the pins on disk.
 
     `shard` "I/N" runs only that share of its runs (run_experiment --shard); `runs_from` lists
@@ -380,6 +400,7 @@ def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1, fi
 
     Writes into a fresh `out` rather than over reports/: the caller swaps the directory in whole,
     so a file the new run no longer writes cannot survive from the old one."""
+    require_release(pins)
     e = classify(run_id)
     py = sys.executable
     os.makedirs(out, exist_ok=True)
@@ -513,6 +534,54 @@ _FIT_REFUSALS = ("No available memory for the cache blocks", "No KV budget exist
                  "To serve at least one request with the model's max seq len")
 
 
+# Cases the pinned stack refuses and that are a known fault of the kernel's memory model, not of the
+# report. Each entry is strict: the case must still be refused with this signature, and smoke FAILS
+# when it no longer is, so an entry cannot outlive the fault. The report prints it as a known kernel
+# issue, never as a pass. `config` is a subset match on the ledger row's config, and `absent` lists
+# keys the row must not set (a knob that changes what the memory model counts makes it another case).
+KNOWN_KERNEL_ISSUES = (
+    {"report": "deepseek-v4-1-flash-b200-agentx-4node",
+     "config": {"tp": 4, "dp": 1, "num_instances": 8, "enable_expert_parallel": True},
+     "absent": ("max_num_batched_tokens",),
+     "signature": "per-rank fixed occupancy",
+     "reason": "the kernel's CUDA-graph term is 127.75 GiB per rank against a 4.0 GiB activation peak (the "
+               "same shape fits an H200, tp8 fits this B200, and the same tp4 shape fits once "
+               "max_num_batched_tokens is set), so the 210.4 GiB occupancy is an over-count "
+               "in the memory family; a deferred item for that family's owner, not a property of this report"},
+)
+
+
+# Knobs whose swept value cannot bind at the row the smoke picked, so the new stack measuring the
+# pair identically is the correct behaviour and not a knob gone inert (SILENT). Strict like the list
+# above: the pair must still measure identically, and the entry must still match a pair smoke
+# picks; either failing fails the job, so the entry cannot outlive the fact. `config` is a subset
+# match on the knob row's config. This does not touch the SILENT rule for any other knob or row.
+KNOWN_NON_BINDING_KNOBS = (
+    {"report": "muse-spark-open-816b-a42b-gb200-agentx-rack", "knob": "max_num_seqs",
+     "config": {"tp": 8, "num_instances": 8, "concurrency": 128},
+     "reason": "128 session lanes is the most requests that can be in flight in the whole rack (the "
+               "ledger's cutoff snapshot shows 15 running), so no one of the 8 instances reaches "
+               "max_num_seqs=32 and the cap cannot bind there; the old stack's 0.8% is below what a cap "
+               "that does not bind explains. The cap does bind at 512 lanes, where the ledger shows up to 14%; "
+               "a per-instance peak is not recorded in the report"},
+)
+
+
+def _non_binding(run_id, knob, cfg):
+    for k in KNOWN_NON_BINDING_KNOBS:
+        if k["report"] == run_id and k["knob"] == knob and all(cfg.get(a) == b for a, b in k["config"].items()):
+            return k
+    return None
+
+
+def _known_issue(run_id, cfg):
+    for k in KNOWN_KERNEL_ISSUES:
+        if (k["report"] == run_id and all(cfg.get(a) == b for a, b in k["config"].items())
+                and not any(a in cfg for a in k.get("absent", ()))):
+            return k
+    return None
+
+
 def _fit_refusal(why):
     return any(m in why for m in _FIT_REFUSALS) or ("does not fit" in why and "devices" in why)
 
@@ -588,8 +657,10 @@ def _run_context(entry, root, blis, catalog, corpus, corpus_cache, fields=None):
     if entry["replay"]:
         stated = dict(sc.get("replay") or {}, **local)
         if sc.get("workload_spec"):
+            spec_dir = os.path.dirname(os.path.join(root, entry["source"]))
             replay = run_experiment.resolve_workload_spec(
-                sc["workload_spec"], run_experiment.load_workload_spec(sc["workload_spec"]), stated)
+                sc["workload_spec"], run_experiment.load_workload_spec(sc["workload_spec"], spec_dir), stated,
+                spec_dir=spec_dir)
         else:
             replay = run_experiment.resolve_replay(sc["workload"], catalog, stated)
         replay = {k: v for k, v in replay.items() if k not in run_experiment.RECORD_ONLY_REPLAY}
@@ -614,7 +685,9 @@ def ensure_corpus(entry, catalog, dest, root=ROOT):
     import run_experiment
     sc = _load_yaml(os.path.join(root, entry["source"])).get("scenario") or {}
     if sc.get("workload_spec"):
-        desc = _load_yaml(os.path.join(root, sc["workload_spec"]))
+        # A ./ path is beside the spec.
+        base = os.path.dirname(os.path.join(root, entry["source"])) if sc["workload_spec"].startswith("./") else root
+        desc = _load_yaml(os.path.join(base, sc["workload_spec"]))
     else:
         desc = run_experiment.replay_descriptor(sc.get("workload"), catalog)
     corpus = (desc or {}).get("corpus") or {}
@@ -656,11 +729,13 @@ def live_rows(runs, spec):
 
 
 def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=None,
-          max_pairs=SMOKE_PAIRS, timeout=1800, max_parallel=1, fields=None):
+          max_pairs=SMOKE_PAIRS, timeout=1800, max_parallel=1, fields=None, pin_ref=None):
     """Re-run a few of reports/<run_id>/'s own rows on `blis`; return {id, checks, failures}."""
     import concurrent.futures
     import tempfile
     import run_blis
+    pin_ref = pin_ref if pin_ref is not None else read_pins().get("BLIS_REF", "")
+    commit_pin = semver(pin_ref) is None
     entry = classify(run_id, root)
     if entry["kind"] == "orphan":
         return {"id": run_id, "checks": [], "failures": [f"{run_id}: no source to run from"],
@@ -699,6 +774,8 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
     shutil.rmtree(scen_dir, ignore_errors=True)
 
     checks, failures, warnings = [], [], []
+    unreleased_noted = False
+    known_issues = []
     for key, old in sorted(todo.items()):
         n = new[key]
         why = (n.get("error") or (n.get("stderr_tail") or "")[-300:]).strip()
@@ -706,10 +783,30 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
                        "new_tps": None if _broken(n) else round(_tps(n), 1),
                        "error": None if _ok(n) else why})
         if not _broken(n) and n.get("released_build") is False:
-            failures.append(f"LOUD: {run_id} {_cfg_phrase(old['config'])} ran on a binary that is not a tagged "
-                            f"release (its Result says data.build is unreleased): the build must be "
-                            f"stamped with the release tag (scripts/build_blis.sh)")
-        if _broken(n) and _fit_refusal(why):
+            if commit_pin:
+                # Before the stack is tagged the pin is a commit, and its binary is unreleased by
+                # construction. Smoke compares behaviour on the new stack; that the pin is a tagged
+                # release is checked where reports are written (check_released_build.py waits for
+                # the tag), so it is one warning per report here, not one failure per row.
+                if not unreleased_noted:
+                    warnings.append(f"{run_id}: the pin {pin_ref[:12]} is a commit, so its binary is "
+                                    f"unreleased; the pin moves to the release tag once the stack is tagged")
+                    unreleased_noted = True
+            else:
+                failures.append(f"LOUD: {run_id} {_cfg_phrase(old['config'])} ran on a binary that is not a tagged "
+                                f"release (its Result says data.build is unreleased): the build must be "
+                                f"stamped with the release tag (scripts/build_blis.sh)")
+        known = _known_issue(run_id, old["config"])
+        if known is not None:
+            if _broken(n) and known["signature"] in why:
+                known_issues.append(f"{run_id} {_cfg_phrase(old['config'])} is refused ({known['signature']}): "
+                                    f"{known['reason']}")
+            else:
+                failures.append(f"LOUD: {run_id} {_cfg_phrase(old['config'])} is listed in KNOWN_KERNEL_ISSUES "
+                                f"but is no longer refused for '{known['signature']}'"
+                                + (f" ({why[-200:]})" if why else "")
+                                + ": remove its entry from scripts/blis_pin.py")
+        elif _broken(n) and _fit_refusal(why):
             warnings.append(f"{run_id} {_cfg_phrase(old['config'])} no longer fits on the new stack "
                             f"and is refused ({why[-400:]}): its report records it as a named "
                             f"refusal on regeneration")
@@ -719,18 +816,35 @@ def smoke(run_id, blis, catalog, registry, root=ROOT, corpus=None, corpus_cache=
         elif not _ok(n):
             warnings.append(f"{run_id} {_cfg_phrase(old['config'])} still runs but no longer "
                             f"completes cleanly ({why}): expect its report to move on regeneration")
+    non_binding, matched = [], set()
     for p in pairs:
         if p["row"] is None or not p["moved"]:
             continue
         b = new[json.dumps(p["base"]["config"], sort_keys=True)]
         k = new[json.dumps(p["row"]["config"], sort_keys=True)]
+        listed = _non_binding(run_id, p["knob"], p["row"]["config"])
+        if listed is not None:
+            matched.add(id(listed))
         if _ok(b) and _ok(k) and _same_measurement(b, k):
+            if listed is not None:
+                non_binding.append(f"{run_id} `{p['knob']}` {_cfg_phrase(p['row']['config'])} measures identically "
+                                   f"to its baseline: {listed['reason']}")
+                continue
             failures.append(
                 f"SILENT: {run_id} `{p['knob']}` moved throughput {_tps(p['base']):.1f} -> "
                 f"{_tps(p['row']):.1f} on the old stack and now measures IDENTICALLY to its "
                 f"baseline ({_tps(b):.1f}) -- the new release no longer models it. Its field-list "
                 f"entry in the engine repository should say so (VLM-3).")
+        elif listed is not None and _ok(b) and _ok(k):
+            failures.append(f"LOUD: {run_id} `{p['knob']}` is listed in KNOWN_NON_BINDING_KNOBS but now "
+                            f"moves throughput ({_tps(b):.1f} -> {_tps(k):.1f}): remove its entry from "
+                            f"scripts/blis_pin.py")
+    for k in KNOWN_NON_BINDING_KNOBS:
+        if k["report"] == run_id and id(k) not in matched:
+            failures.append(f"LOUD: {run_id} lists `{k['knob']}` in KNOWN_NON_BINDING_KNOBS but smoke no "
+                            f"longer picks a pair it matches: remove or update its entry in scripts/blis_pin.py")
     return {"id": run_id, "checks": checks, "failures": failures, "warnings": warnings,
+            "known_issues": known_issues, "known_non_binding": non_binding,
             "pairs": [{"knob": p["knob"], "moved": p["moved"]} for p in pairs]}
 
 
@@ -751,11 +865,23 @@ def smoke_markdown(results):
                     + (", ".join(f"`{p['knob']}`" + ("" if p["moved"] else " (inert before)")
                                  for p in r.get("pairs", []) if p["knob"]) or "—")
                     + f" | {_fmt(c0.get('old_tps'))} → {_fmt(c0.get('new_tps'))} | "
-                    + ("**FAIL**" if r["failures"] else "ok") + " |")
+                    + ("**FAIL**" if r["failures"] else "ok, with a **known kernel issue**" if r.get("known_issues")
+                       else "ok, with a **known non-binding knob**" if r.get("known_non_binding")
+                       else "ok") + " |")
     fails = [f for r in results for f in r["failures"]]
     if fails:
         rows += ["", "**Failures** — fix these on this PR; regeneration only starts after merge:", ""]
         rows += [f"- {f}" for f in fails]
+    known = [k for r in results for k in r.get("known_issues", [])]
+    if known:
+        rows += ["", "**Known kernel issues** — refused on purpose, not a pass; the entry fails the job when the "
+                 "case stops being refused:", ""]
+        rows += [f"- {k}" for k in known]
+    nb = [k for r in results for k in r.get("known_non_binding", [])]
+    if nb:
+        rows += ["", "**Known non-binding knobs** — identical numbers are correct here, not a knob gone inert; "
+                 "the entry fails the job when the knob starts to move or the entry stops matching:", ""]
+        rows += [f"- {k}" for k in nb]
     warns = [w for r in results for w in r.get("warnings", [])]
     if warns:
         rows += ["", "**Warnings** — not a failure, but the numbers will move:", ""]
@@ -783,6 +909,8 @@ def main(argv=None):
     p.add_argument("--max-batch", type=int, default=MAX_BATCH)
     p.add_argument("--stale-only", action="store_true",
                    help="only the reports the pinned stack did not price")
+    p.add_argument("--require-release", action="store_true",
+                   help="refuse (exit non-zero) unless BLIS_REF is a release tag: a campaign on a commit pin")
     p.add_argument("--max-parallel", type=int, default=1, help="BLIS runs at once per job, for --budget-s")
     p.add_argument("--budget-s", type=float, default=0, help="seconds of BLIS per job; >0 shards long reports")
     st = sub.add_parser("stale", help="list the reports the pinned stack did not price; exit 1 if any")
@@ -835,6 +963,8 @@ def main(argv=None):
     elif a.cmd == "same-stack":
         sys.exit(0 if same_stack(a.a, a.b) else 1)
     elif a.cmd == "plan":
+        if a.require_release:
+            require_release()
         only = [x for x in (a.only or "").replace(" ", ",").split(",") if x]
         out = plan(only=only or None, max_batch=a.max_batch, stale_only=a.stale_only)
         for r in out["reports"]:

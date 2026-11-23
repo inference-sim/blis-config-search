@@ -59,6 +59,7 @@ jobs:
             specs=""
             for spec in $REQUESTED; do
               case "$spec" in
+                experiments/*/*) echo "spec must be experiments/<name>.yaml, not a file beside one: $spec" >&2; exit 1 ;;
                 experiments/*.yaml) ;;
                 *) echo "spec must be experiments/<name>.yaml: $spec" >&2; exit 1 ;;
               esac
@@ -70,7 +71,15 @@ jobs:
             # Only the specs this push touched (all its commits, not just the last one).
             old=HEAD^
             if [ -n "${BEFORE:-}" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then old="$BEFORE"; fi
-            specs="$(git diff --name-only --diff-filter=d "$old" HEAD -- 'experiments/*.yaml')"
+            # :(glob) keeps `*` from matching `/`: a file under experiments/<dir>/ is not a spec.
+            specs="$(git diff --name-only --diff-filter=d "$old" HEAD -- ':(glob)experiments/*.yaml')"
+            # A changed file beside a spec reruns each spec that names it as ./<dir>/<file>.
+            for f in $(git diff --name-only --diff-filter=d "$old" HEAD -- ':(glob)experiments/*/**'); do
+              for spec in experiments/*.yaml; do
+                if grep -qF -- "./${f#experiments/}" "$spec"; then specs="$specs"$'\n'"$spec"; fi
+              done
+            done
+            specs="$(printf '%s\n' "$specs" | sed '/^$/d' | sort -u)"
           fi
           echo "will run:"; echo "${specs:-none}"
           # JSON list for the sweep matrix: one job (runner, timeout, PR) per spec.
@@ -113,22 +122,25 @@ jobs:
           # pins.env is the single source of truth for which simulator priced these runs; never
           # hard-code a ref here (scripts/test_build.py enforces the agreement).
           set -a; . ./pins.env; set +a
-          git clone --branch "$BLIS_REF" --depth 1 https://github.com/inference-sim/inference-sim.git upstream
+          # BLIS_REF is a commit (the M3.2 stack head) or a release tag; a tag peels to its commit on checkout.
+          git init -q upstream
+          git -C upstream remote add origin https://github.com/inference-sim/inference-sim.git
+          git -C upstream fetch -q --depth 1 origin "$BLIS_REF"
+          git -C upstream checkout -q FETCH_HEAD
           # The tag is not immutable upstream; refuse to build a moved tag (same check as SETUP.md).
           test "$(git -C upstream rev-parse HEAD)" = "$BLIS_SHA" || {
             echo "$BLIS_REF no longer resolves to $BLIS_SHA -- aborting" >&2; exit 1; }
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with: { go-version-file: upstream/go.mod, cache-dependency-path: upstream/go.sum }
-      - name: Build BLIS and clone the substrate release it embeds
+      - name: Build BLIS and point at the substrate/ it embeds
         run: |
           set -euo pipefail
           set -a; . ./pins.env; set +a
           sh scripts/build_blis.sh upstream
-          # The simulator prices with this release's EMBEDDED catalog and registry (CFG-1) and is
-          # given neither flag-by-path; the checkout is only where the scripts read files from.
-          sh scripts/clone_pinned.sh "$SUBSTRATE_REF" https://github.com/inference-sim/blis-substrate.git blis-substrate
-          echo "SUBSTRATE_CATALOG=$PWD/blis-substrate/catalog" >> "$GITHUB_ENV"
-          echo "SUBSTRATE_REGISTRY=$PWD/blis-substrate/registry" >> "$GITHUB_ENV"
+          # The simulator prices with its EMBEDDED catalog and registry (CFG-1) and is given neither
+          # flag-by-path; the checkout's substrate/ (the same commit) is where the scripts read files from.
+          echo "SUBSTRATE_CATALOG=$PWD/upstream/substrate/catalog" >> "$GITHUB_ENV"
+          echo "SUBSTRATE_REGISTRY=$PWD/upstream/substrate/registry" >> "$GITHUB_ENV"
           echo "BLIS_BIN=$PWD/upstream/blis"      >> "$GITHUB_ENV"
 
       - name: Fetch the pinned engine field list
@@ -146,7 +158,7 @@ jobs:
           # A REPLAY workload's corpus is the one input neither the spec nor a clone can carry:
           # the catalog says it is not vendored (568 MB), so a consumer fetches it and checks it
           # against the descriptor's sha256. The script reads the dataset, the PINNED revision and
-          # the digest out of the substrate release we just cloned, so there is no second copy of that pin to
+          # the digest out of the substrate/ we just checked out, so there is no second copy of that pin to
           # drift. A generated-shape spec needs nothing and the step is a no-op.
           python3 -I scripts/fetch_corpus.py "$SPEC" --catalog "$SUBSTRATE_CATALOG"
 

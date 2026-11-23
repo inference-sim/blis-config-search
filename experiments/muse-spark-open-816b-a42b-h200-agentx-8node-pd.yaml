@@ -1,5 +1,5 @@
 # Is P/D disaggregation worth it for Muse-Spark (nvfp4) on 8 H200 nodes (64 GPUs) under AgentX?
-# The gap left by #72 (that spec's grid is the colocated control this one has to beat).
+# The gap left by the colocated H200 8-node spec (that spec's grid is the colocated control this one has to beat).
 # MoE 256 experts top_k 8, SWA, no speculator; 8 nodes are NOT one NVLink domain, so unlike the
 # GB200 rack every KV handoff crosses the fabric -- here ib-400g (50 GB/s, the runner's multi-node
 # default), half the cost of GB200 NVLink but twice H100's RoCE, which is why this is its own spec.

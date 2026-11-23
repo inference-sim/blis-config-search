@@ -21,9 +21,13 @@ The indirect case is why this parses the whole require set rather than the direc
 that only took direct requires would silently drop the kernel at v0.15.0 and publish a footer with
 no cost-model version at all.
 
+FROM M3.2 ON only the router fork is left to derive. blis-substrate, blis-vllm and blis-sglang are
+directories of inference-sim (substrate/, engines/vllm, engines/sglang), so go.mod no longer names
+them and BLIS_SHA alone determines them; their keys are legally absent from pins.env. The mapping
+below keeps them, so a pin at an older release still derives its rows.
+
 The catalog and the registry are not pinned here: the simulator prices with the data embedded in
-the blis-substrate release (SUBSTRATE_REF), so a committed report has no data axis of its own
-(CFG-1).
+it, so a committed report has no data axis of its own (CFG-1).
 
 WHY THE VALUES ARE COMMITTED RATHER THAN READ AT BUILD TIME. The site build (pages.yml) runs
 actions/checkout on this repo alone and never clones inference-sim, so go.mod is unreadable when
@@ -41,7 +45,7 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 PINS = os.path.join(ROOT, "pins.env")
 
-BEGIN = "# >>> derived from inference-sim's go.mod at BLIS_REF -- DO NOT EDIT BY HAND >>>"
+BEGIN = "# >>> derived from inference-sim's go.mod at BLIS_SHA -- DO NOT EDIT BY HAND >>>"
 END = "# <<< end derived block <<<"
 
 # go.mod module path -> the pins.env key it becomes.
@@ -116,7 +120,7 @@ def derive_from_text(go_mod):
 
 def render(derived):
     lines = [BEGIN,
-             "# Regenerate with: python3 -I scripts/sync_pins.py  (after changing BLIS_REF above)",
+             "# Regenerate with: python3 -I scripts/sync_pins.py  (after changing BLIS_SHA above)",
              "# Guarded by test_build.py::test_derived_pins_match_gomod."]
     for key in DERIVED.values():            # stable order, not dict-insertion order
         if key in derived:

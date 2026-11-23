@@ -1,28 +1,29 @@
 name: blis
 
-# The shared BLIS checks (design §13.2, §13.4), called from blis-substrate by commit (X21):
-# the pull-request checks (description, commit policy, workflow lint,
-# version literals, documentation references, cited issues, quarantine, the generated
-# AGENTS.md section and pull-request template, the selected-version lint) and the nightly checks
-# (cited issues stay open, X28). v0.14.1 moved the merge-queue check into the pull-request one.
+# The shared BLIS pull-request checks (design §13.2), called from blis-substrate by commit (X21):
+# workflow lint, version literals, documentation references, the generated AGENTS.md section and
+# pull-request template, the selected-version lint. There is no scheduled run: CI checks product
+# correctness only (M3.2 row 22).
+# The pinned commit still has the description, commit-policy and cited-issue steps, which read the
+# pull request's title and body, so this workflow runs on `edited` (#141: a text check must see a
+# text edit). It is its own workflow, so an edit starts nothing in checks.yml or pin-compat.yml.
+# The pin moves to the substrate release whose shared-pr-checks.yml has dropped those steps; the
+# `edited` type goes with them.
 #
-# The commit is blis-substrate release v0.14.1 (f9f3c93), the release pins.env's SUBSTRATE_REF
-# names; it moves with that pin. v0.14.1's description check accepts a dependency pin written as
+# The commit is blis-substrate release v0.14.1 (f9f3c93). Since M3.2 the substrate is in-tree in
+# inference-sim and pins.env has no SUBSTRATE_REF, so this commit moves by hand until the shared
+# check is published from the M3.2 tag. v0.14.1's description check accepts a dependency pin written as
 # a release tag ("owner/repo at vX.Y.Z <hash>"), the form the pin-bump PR body uses.
 
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
-  schedule:
-    - cron: "17 5 * * *"
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   pr:
-    if: github.event_name == 'pull_request'
     uses: inference-sim/blis-substrate/.github/workflows/shared-pr-checks.yml@f9f3c9327794d543a0915c4deb1259ff9985c753
     permissions:
       contents: read
@@ -31,14 +32,3 @@ jobs:
     with:
       repo: blis-config-search
       substrate-ref: f9f3c9327794d543a0915c4deb1259ff9985c753
-
-  nightly:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    uses: inference-sim/blis-substrate/.github/workflows/shared-nightly.yml@f9f3c9327794d543a0915c4deb1259ff9985c753
-    permissions:
-      contents: read
-      issues: read
-    with:
-      substrate-ref: f9f3c9327794d543a0915c4deb1259ff9985c753
-    secrets:
-      INTERNAL_NAME_PATTERNS: ${{ secrets.INTERNAL_NAME_PATTERNS }}

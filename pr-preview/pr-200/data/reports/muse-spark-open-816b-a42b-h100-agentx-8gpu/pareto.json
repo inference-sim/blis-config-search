@@ -1,0 +1,1054 @@
+{
+  "dropped": [
+    {
+      "count": 2,
+      "gpus": 2,
+      "reason": "uses 2 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 4,
+      "gpus": 4,
+      "reason": "uses 4 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 4,
+      "gpus": 16,
+      "reason": "uses 16 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 2,
+      "gpus": 32,
+      "reason": "uses 32 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 8,
+      "gpus": 4,
+      "reason": "uses 4 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 8,
+      "gpus": 16,
+      "reason": "uses 16 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 4,
+      "gpus": 2,
+      "reason": "uses 2 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 8,
+      "gpus": 4,
+      "reason": "uses 4 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 8,
+      "gpus": 16,
+      "reason": "uses 16 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 4,
+      "gpus": 32,
+      "reason": "uses 32 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 4,
+      "gpus": 4,
+      "reason": "uses 4 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 4,
+      "gpus": 16,
+      "reason": "uses 16 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 1,
+      "gpus": 2,
+      "reason": "uses 2 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 2,
+      "gpus": 4,
+      "reason": "uses 4 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 2,
+      "gpus": 16,
+      "reason": "uses 16 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 1,
+      "gpus": 32,
+      "reason": "uses 32 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 2,
+      "gpus": 4,
+      "reason": "uses 4 GPUs, not the scenario's 8"
+    },
+    {
+      "count": 2,
+      "gpus": 16,
+      "reason": "uses 16 GPUs, not the scenario's 8"
+    }
+  ],
+  "finalists": [
+    {
+      "at_c_use": {
+        "interactivity": 17.245,
+        "itl_p99_ms": 205.317,
+        "tok_per_s_per_user": 4.9,
+        "tokens_per_sec": 48.7,
+        "tokens_per_sec_per_gpu": 6.09,
+        "total_tokens_per_sec_per_gpu": 774.166
+      },
+      "c_star": 4,
+      "c_use": 4,
+      "config": {
+        "concurrency": 4,
+        "enable_expert_parallel": false,
+        "gpu_memory_utilization": 0.95,
+        "max_model_len": 262144,
+        "num_instances": 1,
+        "pp": 4,
+        "tp": 2
+      },
+      "curve": [
+        {
+          "concurrency": 4,
+          "itl_p99_ms": 205.317,
+          "preemption_count": 187,
+          "tok_per_s_per_user": 4.9,
+          "tokens_per_sec": 48.7,
+          "ttft_p99_ms": 114512.2
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 179.055,
+          "preemption_count": 5,
+          "tok_per_s_per_user": 5.6,
+          "tokens_per_sec": 46.6,
+          "ttft_p99_ms": 419470.2
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 393.525,
+          "preemption_count": 3,
+          "tok_per_s_per_user": 2.5,
+          "tokens_per_sec": 45.8,
+          "ttft_p99_ms": 373881.6
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 579.901,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 1.7,
+          "tokens_per_sec": 49.6,
+          "ttft_p99_ms": 741230.3
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 410.629,
+          "preemption_count": 2,
+          "tok_per_s_per_user": 2.4,
+          "tokens_per_sec": 64.0,
+          "ttft_p99_ms": 1657590.4
+        }
+      ],
+      "gpus": 8,
+      "label": "1x TP2xPP4",
+      "sweep": "pipeline-topology",
+      "variant": ""
+    },
+    {
+      "at_c_use": {
+        "interactivity": 29.914,
+        "itl_p99_ms": 119.591,
+        "tok_per_s_per_user": 8.4,
+        "tokens_per_sec": 62.7,
+        "tokens_per_sec_per_gpu": 7.84,
+        "total_tokens_per_sec_per_gpu": 1082.591
+      },
+      "c_star": 4,
+      "c_use": 4,
+      "config": {
+        "concurrency": 4,
+        "enable_expert_parallel": true,
+        "gpu_memory_utilization": 0.95,
+        "max_model_len": 262144,
+        "max_num_batched_tokens": 2048,
+        "max_num_seqs": 8,
+        "num_instances": 1,
+        "pp": 2,
+        "tp": 4
+      },
+      "curve": [
+        {
+          "concurrency": 4,
+          "itl_p99_ms": 119.591,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 8.4,
+          "tokens_per_sec": 62.7,
+          "ttft_p99_ms": 54870.1
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 140.869,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 7.1,
+          "tokens_per_sec": 66.8,
+          "ttft_p99_ms": 308073.7
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 199.201,
+          "preemption_count": 1,
+          "tok_per_s_per_user": 5.0,
+          "tokens_per_sec": 60.0,
+          "ttft_p99_ms": 431691.1
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 145.427,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 6.9,
+          "tokens_per_sec": 71.3,
+          "ttft_p99_ms": 580981.2
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 278.202,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 3.6,
+          "tokens_per_sec": 78.3,
+          "ttft_p99_ms": 1312476.0
+        }
+      ],
+      "gpus": 8,
+      "label": "1x TP4xPP2 + EP",
+      "sweep": "batch-caps",
+      "variant": ""
+    },
+    {
+      "at_c_use": {
+        "interactivity": 13.254,
+        "itl_p99_ms": 203.616,
+        "tok_per_s_per_user": 4.9,
+        "tokens_per_sec": 92.0,
+        "tokens_per_sec_per_gpu": 11.51,
+        "total_tokens_per_sec_per_gpu": 1198.473
+      },
+      "c_star": 8,
+      "c_use": 8,
+      "config": {
+        "cache_dtype": "fp8",
+        "concurrency": 8,
+        "enable_expert_parallel": true,
+        "gpu_memory_utilization": 0.95,
+        "max_model_len": 262144,
+        "num_instances": 1,
+        "pp": 4,
+        "tp": 2
+      },
+      "curve": [
+        {
+          "concurrency": 4,
+          "itl_p99_ms": 125.969,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 7.9,
+          "tokens_per_sec": 62.0,
+          "ttft_p99_ms": 12736.1
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 203.616,
+          "preemption_count": 2,
+          "tok_per_s_per_user": 4.9,
+          "tokens_per_sec": 92.0,
+          "ttft_p99_ms": 110130.9
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 357.822,
+          "preemption_count": 2,
+          "tok_per_s_per_user": 2.8,
+          "tokens_per_sec": 68.6,
+          "ttft_p99_ms": 231379.9
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 356.394,
+          "preemption_count": 5,
+          "tok_per_s_per_user": 2.8,
+          "tokens_per_sec": 77.8,
+          "ttft_p99_ms": 430915.6
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 637.773,
+          "preemption_count": 4,
+          "tok_per_s_per_user": 1.6,
+          "tokens_per_sec": 99.1,
+          "ttft_p99_ms": 985637.4
+        }
+      ],
+      "gpus": 8,
+      "label": "1x TP2xPP4 + EP",
+      "sweep": "kv-capacity",
+      "variant": "gpu mem util 0.95 \u00b7 KV dtype fp8"
+    },
+    {
+      "at_c_use": {
+        "interactivity": 19.647,
+        "itl_p99_ms": 139.816,
+        "tok_per_s_per_user": 7.2,
+        "tokens_per_sec": 50.0,
+        "tokens_per_sec_per_gpu": 6.25,
+        "total_tokens_per_sec_per_gpu": 815.526
+      },
+      "c_star": 4,
+      "c_use": 4,
+      "config": {
+        "concurrency": 4,
+        "enable_expert_parallel": true,
+        "enable_prefix_caching": false,
+        "gpu_memory_utilization": 0.95,
+        "max_model_len": 262144,
+        "num_instances": 1,
+        "pp": 4,
+        "tp": 2
+      },
+      "curve": [
+        {
+          "concurrency": 4,
+          "itl_p99_ms": 139.816,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 7.2,
+          "tokens_per_sec": 50.0,
+          "ttft_p99_ms": 56556.8
+        },
+        {
+          "concurrency": 8,
+          "itl_p99_ms": 204.939,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 4.9,
+          "tokens_per_sec": 49.0,
+          "ttft_p99_ms": 368163.7
+        },
+        {
+          "concurrency": 16,
+          "itl_p99_ms": 526.387,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 1.9,
+          "tokens_per_sec": 48.8,
+          "ttft_p99_ms": 522898.2
+        },
+        {
+          "concurrency": 32,
+          "itl_p99_ms": 592.497,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 1.7,
+          "tokens_per_sec": 53.6,
+          "ttft_p99_ms": 709863.3
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 294.005,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 3.4,
+          "tokens_per_sec": 63.4,
+          "ttft_p99_ms": 1632693.5
+        }
+      ],
+      "gpus": 8,
+      "label": "1x TP2xPP4 + EP",
+      "sweep": "prefix-cache",
+      "variant": ""
+    }
+  ],
+  "front": {
+    "interval": null,
+    "overall": {
+      "decode": {
+        "members": [],
+        "points": 0,
+        "unrated": 8
+      },
+      "total": {
+        "members": [
+          {
+            "concurrency": 4,
+            "config": {
+              "cache_dtype": "fp8",
+              "concurrency": 4,
+              "enable_expert_parallel": true,
+              "gpu_memory_utilization": 0.95,
+              "max_model_len": 262144,
+              "num_instances": 1,
+              "pp": 2,
+              "tp": 4
+            },
+            "disaggregated": false,
+            "interactivity": 31.641,
+            "label": "1x TP4xPP2 + EP",
+            "status": "front",
+            "sweep": "kv-capacity",
+            "throughput_per_gpu": 1225.514,
+            "variant": "gpu mem util 0.95 \u00b7 KV dtype fp8"
+          }
+        ],
+        "points": 8,
+        "unrated": 0
+      }
+    },
+    "sweeps": [
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 1
+        },
+        "name": "pipeline-topology",
+        "total": {
+          "members": [
+            {
+              "concurrency": 4,
+              "config": {
+                "concurrency": 4,
+                "enable_expert_parallel": false,
+                "gpu_memory_utilization": 0.95,
+                "max_model_len": 262144,
+                "num_instances": 1,
+                "pp": 4,
+                "tp": 2
+              },
+              "disaggregated": false,
+              "interactivity": 17.245,
+              "label": "1x TP2xPP4",
+              "status": "front",
+              "sweep": "pipeline-topology",
+              "throughput_per_gpu": 774.166,
+              "variant": ""
+            }
+          ],
+          "points": 1,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 2
+        },
+        "name": "batch-caps",
+        "total": {
+          "members": [
+            {
+              "concurrency": 4,
+              "config": {
+                "concurrency": 4,
+                "enable_expert_parallel": true,
+                "gpu_memory_utilization": 0.95,
+                "max_model_len": 262144,
+                "max_num_batched_tokens": 2048,
+                "max_num_seqs": 8,
+                "num_instances": 1,
+                "pp": 2,
+                "tp": 4
+              },
+              "disaggregated": false,
+              "interactivity": 29.914,
+              "label": "1x TP4xPP2 + EP",
+              "status": "front",
+              "sweep": "batch-caps",
+              "throughput_per_gpu": 1082.591,
+              "variant": ""
+            },
+            {
+              "concurrency": 4,
+              "config": {
+                "concurrency": 4,
+                "enable_expert_parallel": true,
+                "gpu_memory_utilization": 0.95,
+                "max_model_len": 262144,
+                "max_num_batched_tokens": 2048,
+                "max_num_seqs": 16,
+                "num_instances": 1,
+                "pp": 2,
+                "tp": 4
+              },
+              "disaggregated": false,
+              "interactivity": 29.914,
+              "label": "1x TP4xPP2 + EP",
+              "status": "front",
+              "sweep": "batch-caps",
+              "throughput_per_gpu": 1082.591,
+              "variant": "max seqs 16"
+            }
+          ],
+          "points": 2,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 4
+        },
+        "name": "kv-capacity",
+        "total": {
+          "members": [
+            {
+              "concurrency": 4,
+              "config": {
+                "cache_dtype": "fp8",
+                "concurrency": 4,
+                "enable_expert_parallel": true,
+                "gpu_memory_utilization": 0.95,
+                "max_model_len": 262144,
+                "num_instances": 1,
+                "pp": 2,
+                "tp": 4
+              },
+              "disaggregated": false,
+              "interactivity": 31.641,
+              "label": "1x TP4xPP2 + EP",
+              "status": "front",
+              "sweep": "kv-capacity",
+              "throughput_per_gpu": 1225.514,
+              "variant": "gpu mem util 0.95 \u00b7 KV dtype fp8"
+            }
+          ],
+          "points": 4,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "moe-collective",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 1
+        },
+        "name": "prefix-cache",
+        "total": {
+          "members": [
+            {
+              "concurrency": 4,
+              "config": {
+                "concurrency": 4,
+                "enable_expert_parallel": true,
+                "enable_prefix_caching": false,
+                "gpu_memory_utilization": 0.95,
+                "max_model_len": 262144,
+                "num_instances": 1,
+                "pp": 4,
+                "tp": 2
+              },
+              "disaggregated": false,
+              "interactivity": 19.647,
+              "label": "1x TP2xPP4 + EP",
+              "status": "front",
+              "sweep": "prefix-cache",
+              "throughput_per_gpu": 815.526,
+              "variant": ""
+            }
+          ],
+          "points": 1,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "prefill-chunking",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        },
+        "name": "cudagraph",
+        "total": {
+          "members": [],
+          "points": 0,
+          "unrated": 0
+        }
+      }
+    ],
+    "throughput": "total",
+    "x": "interactivity_of_mean_tpot",
+    "y": {
+      "decode": "output_tokens_per_second_per_decode_gpu",
+      "total": "total_tokens_per_second_per_gpu"
+    }
+  },
+  "outcomes": {
+    "overloaded": 42,
+    "refused": 210,
+    "served": 8
+  },
+  "ranking": {
+    "description": "max output tok/s per accelerator subject to the scenario's SLOs",
+    "throughput": "total",
+    "used": "scalar"
+  },
+  "refusals": [
+    {
+      "configs": 14,
+      "examples": [
+        "1x TP8 + EP",
+        "1x TP8 + EP (gpu mem util 0.95)",
+        "1x TP8 + EP (KV dtype fp8)"
+      ],
+      "issue": null,
+      "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+      "runs": 70,
+      "source": "engine"
+    },
+    {
+      "configs": 10,
+      "examples": [
+        "1x TP4xPP2 + EP",
+        "1x TP4xPP2",
+        "1x TP4xPP2 + EP (gpu mem util 0.95)"
+      ],
+      "issue": null,
+      "reason": "scenario: engine vllm 0.33.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.61 GiB KV cache is needed, which is larger than the available KV cache memory (2.49 GiB). Based on the available memory, the estimated maximum model length is 246240. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
+      "runs": 50,
+      "source": "engine"
+    },
+    {
+      "configs": 2,
+      "examples": [
+        "1x TP4xPP2 + EP (batch tokens 16,384)",
+        "1x TP4xPP2 + EP (max seqs 16 \u00b7 batch tokens 16,384)"
+      ],
+      "issue": null,
+      "reason": "scenario: engine vllm 0.33.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (3.17 GiB KV cache is needed, which is larger than the available KV cache memory (1.24 GiB). Based on the available memory, the estimated maximum model length is 40560. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
+      "runs": 10,
+      "source": "engine"
+    },
+    {
+      "configs": 2,
+      "examples": [
+        "1x TP2xPP4 + EP",
+        "1x TP2xPP4 + EP (KV dtype fp8)"
+      ],
+      "issue": null,
+      "reason": "scenario: kernelmodel: No available memory for the cache blocks. Try increasing `gpu_memory_utilization` when initializing the engine (no room for KV: a 79.2 GiB device at utilization 0.90 gives a 71.3 GiB budget against 71.3 GiB of fixed occupancy per rank)",
+      "runs": 10,
+      "source": "engine"
+    },
+    {
+      "configs": 2,
+      "examples": [
+        "1x TP4xPP2 + EP",
+        "1x TP4xPP2 + EP (KV dtype fp8)"
+      ],
+      "issue": null,
+      "reason": "scenario: kernelmodel: No available memory for the cache blocks. Try increasing `gpu_memory_utilization` when initializing the engine (no room for KV: a 79.2 GiB device at utilization 0.90 gives a 71.3 GiB budget against 72.7 GiB of fixed occupancy per rank)",
+      "runs": 10,
+      "source": "engine"
+    },
+    {
+      "configs": 2,
+      "examples": [
+        "1x TP4xPP2 + EP (batch tokens 32,768)",
+        "1x TP4xPP2 + EP (max seqs 16 \u00b7 batch tokens 32,768)"
+      ],
+      "issue": null,
+      "reason": "scenario: kernelmodel: No available memory for the cache blocks. Try increasing `gpu_memory_utilization` when initializing the engine (no room for KV: a 79.2 GiB device at utilization 0.95 gives a 75.2 GiB budget against 76.5 GiB of fixed occupancy per rank)",
+      "runs": 10,
+      "source": "engine"
+    },
+    {
+      "configs": 2,
+      "examples": [
+        "1x TP8 + EP",
+        "1x TP8 + EP (max seqs 16)"
+      ],
+      "issue": null,
+      "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 82.2 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+      "runs": 10,
+      "source": "engine"
+    },
+    {
+      "configs": 2,
+      "examples": [
+        "1x TP8 + EP (batch tokens 4,096)",
+        "1x TP8 + EP (max seqs 16 \u00b7 batch tokens 4,096)"
+      ],
+      "issue": null,
+      "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 82.5 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+      "runs": 10,
+      "source": "engine"
+    },
+    {
+      "configs": 2,
+      "examples": [
+        "1x TP8 + EP (batch tokens 16,384)",
+        "1x TP8 + EP (max seqs 16 \u00b7 batch tokens 16,384)"
+      ],
+      "issue": null,
+      "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 84.4 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+      "runs": 10,
+      "source": "engine"
+    },
+    {
+      "configs": 2,
+      "examples": [
+        "1x TP8 + EP (batch tokens 32,768)",
+        "1x TP8 + EP (max seqs 16 \u00b7 batch tokens 32,768)"
+      ],
+      "issue": null,
+      "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 86.9 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+      "runs": 10,
+      "source": "engine"
+    },
+    {
+      "configs": 1,
+      "examples": [
+        "1x TP8"
+      ],
+      "issue": null,
+      "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 1): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+      "runs": 5,
+      "source": "engine"
+    },
+    {
+      "configs": 1,
+      "examples": [
+        "1x TP8 + EP"
+      ],
+      "issue": null,
+      "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 82.0 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+      "runs": 5,
+      "source": "engine"
+    }
+  ],
+  "run_id": "muse-spark-open-816b-a42b-h100-agentx-8gpu",
+  "sweep_outcomes": [
+    {
+      "name": "pipeline-topology",
+      "outcomes": {
+        "overloaded": 9,
+        "refused": 20,
+        "served": 1
+      },
+      "refusals": [
+        {
+          "configs": 2,
+          "examples": [
+            "1x TP4xPP2 + EP",
+            "1x TP4xPP2"
+          ],
+          "issue": null,
+          "reason": "scenario: engine vllm 0.33.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.61 GiB KV cache is needed, which is larger than the available KV cache memory (2.49 GiB). Based on the available memory, the estimated maximum model length is 246240. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
+          "runs": 10,
+          "source": "engine"
+        },
+        {
+          "configs": 1,
+          "examples": [
+            "1x TP8"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 1): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 5,
+          "source": "engine"
+        },
+        {
+          "configs": 1,
+          "examples": [
+            "1x TP8 + EP"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 5,
+          "source": "engine"
+        }
+      ]
+    },
+    {
+      "name": "batch-caps",
+      "outcomes": {
+        "overloaded": 18,
+        "refused": 60,
+        "served": 2
+      },
+      "refusals": [
+        {
+          "configs": 2,
+          "examples": [
+            "1x TP4xPP2 + EP (batch tokens 16,384)",
+            "1x TP4xPP2 + EP (max seqs 16 \u00b7 batch tokens 16,384)"
+          ],
+          "issue": null,
+          "reason": "scenario: engine vllm 0.33.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (3.17 GiB KV cache is needed, which is larger than the available KV cache memory (1.24 GiB). Based on the available memory, the estimated maximum model length is 40560. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
+          "runs": 10,
+          "source": "engine"
+        },
+        {
+          "configs": 2,
+          "examples": [
+            "1x TP4xPP2 + EP (batch tokens 32,768)",
+            "1x TP4xPP2 + EP (max seqs 16 \u00b7 batch tokens 32,768)"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: No available memory for the cache blocks. Try increasing `gpu_memory_utilization` when initializing the engine (no room for KV: a 79.2 GiB device at utilization 0.95 gives a 75.2 GiB budget against 76.5 GiB of fixed occupancy per rank)",
+          "runs": 10,
+          "source": "engine"
+        },
+        {
+          "configs": 2,
+          "examples": [
+            "1x TP8 + EP",
+            "1x TP8 + EP (max seqs 16)"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 82.2 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 10,
+          "source": "engine"
+        },
+        {
+          "configs": 2,
+          "examples": [
+            "1x TP8 + EP (batch tokens 4,096)",
+            "1x TP8 + EP (max seqs 16 \u00b7 batch tokens 4,096)"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 82.5 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 10,
+          "source": "engine"
+        },
+        {
+          "configs": 2,
+          "examples": [
+            "1x TP8 + EP (batch tokens 16,384)",
+            "1x TP8 + EP (max seqs 16 \u00b7 batch tokens 16,384)"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 84.4 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 10,
+          "source": "engine"
+        },
+        {
+          "configs": 2,
+          "examples": [
+            "1x TP8 + EP (batch tokens 32,768)",
+            "1x TP8 + EP (max seqs 16 \u00b7 batch tokens 32,768)"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 86.9 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 10,
+          "source": "engine"
+        }
+      ]
+    },
+    {
+      "name": "kv-capacity",
+      "outcomes": {
+        "overloaded": 11,
+        "refused": 45,
+        "served": 4
+      },
+      "refusals": [
+        {
+          "configs": 4,
+          "examples": [
+            "1x TP8 + EP",
+            "1x TP8 + EP (gpu mem util 0.95)",
+            "1x TP8 + EP (KV dtype fp8)"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 20,
+          "source": "engine"
+        },
+        {
+          "configs": 2,
+          "examples": [
+            "1x TP2xPP4 + EP",
+            "1x TP2xPP4 + EP (KV dtype fp8)"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: No available memory for the cache blocks. Try increasing `gpu_memory_utilization` when initializing the engine (no room for KV: a 79.2 GiB device at utilization 0.90 gives a 71.3 GiB budget against 71.3 GiB of fixed occupancy per rank)",
+          "runs": 10,
+          "source": "engine"
+        },
+        {
+          "configs": 2,
+          "examples": [
+            "1x TP4xPP2 + EP",
+            "1x TP4xPP2 + EP (KV dtype fp8)"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: No available memory for the cache blocks. Try increasing `gpu_memory_utilization` when initializing the engine (no room for KV: a 79.2 GiB device at utilization 0.90 gives a 71.3 GiB budget against 72.7 GiB of fixed occupancy per rank)",
+          "runs": 10,
+          "source": "engine"
+        },
+        {
+          "configs": 1,
+          "examples": [
+            "1x TP4xPP2 + EP (gpu mem util 0.95)"
+          ],
+          "issue": null,
+          "reason": "scenario: engine vllm 0.33.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.61 GiB KV cache is needed, which is larger than the available KV cache memory (2.49 GiB). Based on the available memory, the estimated maximum model length is 246240. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
+          "runs": 5,
+          "source": "engine"
+        }
+      ]
+    },
+    {
+      "name": "moe-collective",
+      "outcomes": {
+        "refused": 40
+      },
+      "refusals": [
+        {
+          "configs": 4,
+          "examples": [
+            "1x TP4xPP2 + EP",
+            "1x TP4xPP2 + EP (all-to-all deepep_low_latency)",
+            "1x TP4xPP2 + EP (all-to-all deepep_v2)"
+          ],
+          "issue": null,
+          "reason": "scenario: engine vllm 0.33.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.61 GiB KV cache is needed, which is larger than the available KV cache memory (2.49 GiB). Based on the available memory, the estimated maximum model length is 246240. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
+          "runs": 20,
+          "source": "engine"
+        },
+        {
+          "configs": 4,
+          "examples": [
+            "1x TP8 + EP",
+            "1x TP8 + EP (all-to-all deepep_low_latency)",
+            "1x TP8 + EP (all-to-all deepep_v2)"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 20,
+          "source": "engine"
+        }
+      ]
+    },
+    {
+      "name": "prefix-cache",
+      "outcomes": {
+        "overloaded": 4,
+        "refused": 10,
+        "served": 1
+      },
+      "refusals": [
+        {
+          "configs": 1,
+          "examples": [
+            "1x TP4xPP2 + EP"
+          ],
+          "issue": null,
+          "reason": "scenario: engine vllm 0.33.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.61 GiB KV cache is needed, which is larger than the available KV cache memory (2.49 GiB). Based on the available memory, the estimated maximum model length is 246240. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
+          "runs": 5,
+          "source": "engine"
+        },
+        {
+          "configs": 1,
+          "examples": [
+            "1x TP8 + EP"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 5,
+          "source": "engine"
+        }
+      ]
+    },
+    {
+      "name": "prefill-chunking",
+      "outcomes": {
+        "refused": 20
+      },
+      "refusals": [
+        {
+          "configs": 2,
+          "examples": [
+            "1x TP4xPP2 + EP",
+            "1x TP4xPP2 + EP (prefill chunk 8,192)"
+          ],
+          "issue": null,
+          "reason": "scenario: engine vllm 0.33.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.61 GiB KV cache is needed, which is larger than the available KV cache memory (2.49 GiB). Based on the available memory, the estimated maximum model length is 246240. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
+          "runs": 10,
+          "source": "engine"
+        },
+        {
+          "configs": 2,
+          "examples": [
+            "1x TP8 + EP",
+            "1x TP8 + EP (prefill chunk 8,192)"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 10,
+          "source": "engine"
+        }
+      ]
+    },
+    {
+      "name": "cudagraph",
+      "outcomes": {
+        "refused": 15
+      },
+      "refusals": [
+        {
+          "configs": 2,
+          "examples": [
+            "1x TP8 + EP (graph capture full)",
+            "1x TP8 + EP (graph capture full+piecewise)"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 10,
+          "source": "engine"
+        },
+        {
+          "configs": 1,
+          "examples": [
+            "1x TP8 + EP"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 82.0 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 5,
+          "source": "engine"
+        }
+      ]
+    }
+  ],
+  "winner": {
+    "chosen": "1x TP2xPP4 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8)",
+    "label": "1x TP2xPP4 + EP",
+    "reason": "1x TP2xPP4 + EP (gpu mem util 0.95 \u00b7 KV dtype fp8) in sweep 'kv-capacity' gives the most tok/s/accelerator (11.51 tok/s/accelerator, 92 tok/s fleet) while holding the scenario's SLOs, at concurrency 8.",
+    "sweep": "kv-capacity",
+    "variant": "gpu mem util 0.95 \u00b7 KV dtype fp8"
+  }
+}

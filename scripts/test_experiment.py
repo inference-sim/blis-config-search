@@ -1845,10 +1845,37 @@ class CorpusProvisioning(unittest.TestCase):
             with open(src, "w", encoding="utf-8") as f:
                 f.write("truncated")
             with self.assertRaises(SystemExit) as e:
-                FC.fetch(dest, "file://" + src, "0" * 64)
+                FC.fetch(dest, "file://" + src, "0" * 64, pause=0)
             self.assertIn("digest mismatch", str(e.exception))
             self.assertFalse(os.path.exists(dest), "a bad download must not land at the dest")
             self.assertFalse(os.path.exists(dest + ".part"), "the partial must be cleaned up")
+
+    def test_a_truncated_transfer_is_retried_and_the_good_copy_lands(self):
+        """A cold cache makes many jobs fetch at once; a cut-short transfer must not fail the job."""
+        with tempfile.TemporaryDirectory() as d:
+            dest = os.path.join(d, "traces.jsonl")
+            good = os.path.join(d, "good.jsonl")
+            with open(good, "w", encoding="utf-8") as f:
+                f.write("the whole corpus")
+            sha = FC.digest(good)
+            calls = []
+            real = FC._download
+
+            def flaky(part, url, token):
+                calls.append(url)
+                if len(calls) == 1:
+                    with open(part, "w", encoding="utf-8") as f:
+                        f.write("the who")
+                    return 7
+                return real(part, url, token)
+            FC._download = flaky
+            try:
+                self.assertTrue(FC.fetch(dest, "file://" + good, sha, pause=0))
+            finally:
+                FC._download = real
+            self.assertEqual(2, len(calls))
+            self.assertEqual(sha, FC.digest(dest))
+            self.assertFalse(os.path.exists(dest + ".part"))
 
     def test_an_already_verified_corpus_is_left_alone(self):
         """The step runs on every sweep, so a present, correct corpus must be a no-op."""

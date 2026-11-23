@@ -21,7 +21,7 @@ A spec whose workload is a generated shape needs nothing and exits 0 without tou
 
   python3 -I scripts/fetch_corpus.py experiments/<name>.yaml --catalog ../inference-sim/substrate/catalog
 """
-import argparse, hashlib, os, sys, urllib.request
+import argparse, hashlib, os, sys, time, urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
@@ -60,13 +60,7 @@ def digest(path):
     return h.hexdigest()
 
 
-def fetch(dest, url, want_sha, token=None):
-    """Download url to dest and verify its sha256. Returns False if the corpus was already there."""
-    if os.path.isfile(dest) and digest(dest) == want_sha:
-        print(f"corpus already present and verified: {dest}")
-        return False
-    os.makedirs(os.path.dirname(os.path.abspath(dest)) or ".", exist_ok=True)
-    part = dest + ".part"
+def _download(part, url, token):
     req = urllib.request.Request(url)
     if token:
         req.add_header("Authorization", f"Bearer {token}")
@@ -79,14 +73,38 @@ def fetch(dest, url, want_sha, token=None):
                 break
             out.write(chunk)
             total += len(chunk)
-    got = digest(part)
-    if got != want_sha:
-        os.remove(part)
-        raise SystemExit(
-            f"corpus digest mismatch -- refusing to replay it.\n"
-            f"  expected {want_sha}\n  got      {got}\n"
-            f"The catalog pins the revision, so a mismatch means a truncated transfer or a moved "
-            f"dataset, not a new corpus. BLIS would refuse this file too.")
+    return total
+
+
+def fetch(dest, url, want_sha, token=None, attempts=3, pause=5):
+    """Download url to dest and verify its sha256. Returns False if the corpus was already there.
+
+    A transfer that is cut short or fails is retried (many CI jobs fetch the same 568 MB file at once
+    on a cold cache); only the last attempt's failure is raised."""
+    if os.path.isfile(dest) and digest(dest) == want_sha:
+        print(f"corpus already present and verified: {dest}")
+        return False
+    os.makedirs(os.path.dirname(os.path.abspath(dest)) or ".", exist_ok=True)
+    part = dest + ".part"
+    for attempt in range(1, attempts + 1):
+        try:
+            total = _download(part, url, token)
+            got = digest(part)
+            err = None if got == want_sha else (
+                f"corpus digest mismatch -- refusing to replay it.\n"
+                f"  expected {want_sha}\n  got      {got}\n"
+                f"The catalog pins the revision, so a mismatch means a truncated transfer or a moved "
+                f"dataset, not a new corpus. BLIS would refuse this file too.")
+        except OSError as e:
+            err = f"corpus download failed: {e}"
+        if err is None:
+            break
+        if os.path.exists(part):
+            os.remove(part)
+        if attempt == attempts:
+            raise SystemExit(err)
+        print(f"attempt {attempt} of {attempts}: {err.splitlines()[0]}; retrying in {pause * attempt}s")
+        time.sleep(pause * attempt)
     os.rename(part, dest)
     print(f"corpus verified ({total} bytes): {dest}")
     return True

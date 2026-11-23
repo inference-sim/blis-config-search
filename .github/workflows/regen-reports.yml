@@ -216,6 +216,7 @@ jobs:
           # Inside the checkout, as run-experiment.yml does, so no runner path reaches a committed report.
           sh scripts/clone_stack.sh inference-sim
           echo "blis_sha=$BLIS_SHA" >> "$GITHUB_OUTPUT"
+          echo "corpus_key=$(grep -rh 'sha256:' inference-sim/substrate/catalog/workloads | sort -u | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       # The 568 MB replay corpus is pinned by the catalog, so one download per simulator pin serves
       # every replay report in the campaign. blis_pin.py digest-checks it either way.
       - name: Restore the replay corpus
@@ -223,7 +224,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: .corpus/traces.jsonl
-          key: replay-corpus-${{ steps.stack.outputs.blis_sha }}
+          key: replay-corpus-${{ steps.stack.outputs.corpus_key }}
       - name: Fetch the pinned engine field list
         run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
       - name: Regenerate ${{ matrix.report.key }}
@@ -272,12 +273,13 @@ jobs:
           set -a; . ./pins.env; set +a
           sh scripts/clone_stack.sh inference-sim
           echo "blis_sha=$BLIS_SHA" >> "$GITHUB_OUTPUT"
+          echo "corpus_key=$(grep -rh 'sha256:' inference-sim/substrate/catalog/workloads | sort -u | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       - name: Restore the replay corpus
         if: matrix.report.replay
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: .corpus/traces.jsonl
-          key: replay-corpus-${{ steps.stack.outputs.blis_sha }}
+          key: replay-corpus-${{ steps.stack.outputs.corpus_key }}
       - name: Fetch the pinned engine field list
         run: python3 -I scripts/fetch_fields.py "$RUNNER_TEMP/fields.json"
       # download-artifact, not gh: the REGEN_RUNS_ON runner (the ARC image) has no gh CLI (#183).

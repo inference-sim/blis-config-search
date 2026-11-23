@@ -25,8 +25,9 @@ name: pin-compat
 # Which work runs (scripts/ci_scope.py): a moved pin VALUE or a changed script the smoke imports selects
 # every report; a changed spec, report ledger, or routing/workload file it names selects only those
 # reports. A pull request smokes only the core pair (ci_scope.SMOKE_CORE) plus any report whose own spec
-# or ledger changed; the rest run on request: add the `full-smoke` label, or dispatch this workflow with
-# all=true (the default, which is what the pin bot's PR gets). regen-reports.yml runs every report after merge. A fork's pin move is refused; a fork's other changes run no smoke (its code must not reach the
+# or ledger changed; the rest run on request: add the `full-smoke` label (bump-blis-pin.yml puts it on the
+# pin bot's PR, so every event on a release bump smokes all of them), or dispatch this workflow with all=true
+# (the default). regen-reports.yml runs every report after merge. A fork's pin move is refused; a fork's other changes run no smoke (its code must not reach the
 # regen runner). The simulator is built once per BLIS_SHA (.github/actions/pinned-blis) and shared as an artifact.
 #
 # Trigger: EVERY pull request, deliberately without a `paths:` filter. A workflow skipped by a

@@ -210,9 +210,13 @@ jobs:
             --description "Opened by the pin-bump automation, not by a person"
           gh label create blis-pin --force --color 1d76db \
             --description "Moves the pinned inference-sim; code fixes for the release go here"
+          # full-smoke: pin-compat smokes only a core pair on a pull request unless this label is on it,
+          # and a release bump (and every fix pushed to it) must smoke every report.
+          gh label create full-smoke --force --color fbca04 \
+            --description "pin-compat smokes every report on this pull request, not just the core pair"
           gh pr create --draft --title "Bump the pinned inference-sim to $tag" \
             --body-file /tmp/body.md --base main --head "$branch" \
-            --label auto-update --label blis-pin
+            --label auto-update --label blis-pin --label full-smoke
           # A PR opened with GITHUB_TOKEN starts no workflows, but a dispatch does: start its CI here.
           if [ "$HAS_BOT_TOKEN" != true ]; then
             pr="$(gh pr view "$branch" --json number --jq .number)"

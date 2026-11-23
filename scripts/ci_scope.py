@@ -179,7 +179,7 @@ def _result(on, ids, smoke_all, smoke_ids=()):
     out["smoke_all"] = bool(smoke_all)
     out["smoke_reports"] = sel
     out["smoke"] = bool(sel)
-    out["smoke_core"] = [i for i in sel if i in SMOKE_CORE] if sel else []
+    out["smoke_core"] = [i for i in ids if i in SMOKE_CORE] if sel else []
     return out
 
 

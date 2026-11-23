@@ -84,7 +84,12 @@ def test_default_smoke_is_only_the_core():
         check(r["smoke_reports"] == IDS and r["smoke_core"] == core,
               "a changed runner script (%s) selects every report in full and only the core by default" % f)
     r = S.scope(["experiments/%s.yaml" % other])
-    check(r["smoke_reports"] == [other] and r["smoke_core"] == [], "a lone spec change of a non-core report runs in full only")
+    check(r["smoke_reports"] == [other] and r["smoke_core"] == core,
+          "a lone spec change of a non-core report still smokes the core pair on an ordinary PR")
+    import blis_pin
+    plan = {x["id"] for x in blis_pin.plan()["reports"]}
+    check(plan & set(r["smoke_core"]) == set(r["smoke_core"]) and r["smoke_core"],
+          "the workflow's ordinary-PR selection (smoke_core, no label) is nonempty and resolvable for a non-core change")
     check(S.scope(["docs/x.md"])["smoke_core"] == [], "a docs-only change smokes nothing")
 
 

@@ -68,21 +68,23 @@ def test_pin_move_and_runner_scripts_select_all_smoke():
     check(not S.scope(["scripts/build_gallery.py"])["smoke"], "the site builder is not read by the smoke")
 
 
-def test_default_smoke_is_the_core_unless_a_report_itself_changed():
-    print("test_default_smoke_is_the_core_unless_a_report_itself_changed")
+def test_default_smoke_is_only_the_core():
+    print("test_default_smoke_is_only_the_core")
     check(all(c in IDS for c in S.SMOKE_CORE), "every core report must be a committed report")
     r = S.scope(["pins.env"], True)
     check(r["smoke_reports"] == IDS and r["smoke_core"] == [i for i in IDS if i in S.SMOKE_CORE],
           "a moved pin selects every report in full and only the core by default")
     other = next(i for i in IDS if i not in S.SMOKE_CORE)
     r = S.scope(["experiments/%s.yaml" % other], True)
-    check(other in r["smoke_core"] and set(S.SMOKE_CORE) <= set(r["smoke_core"]),
-          "a report whose own spec changed is smoked by default, beside the core")
+    check(r["smoke_core"] == [i for i in IDS if i in S.SMOKE_CORE],
+          "a report whose own spec changed is still smoked as the core only by default")
+    core = [i for i in IDS if i in S.SMOKE_CORE]
     for f in ("scripts/blis_pin.py", "requirements.txt"):
-        check(S.scope([f])["smoke_core"] == IDS,
-              "a changed runner script (%s) smokes every report by default: no merge reruns them" % f)
+        r = S.scope([f])
+        check(r["smoke_reports"] == IDS and r["smoke_core"] == core,
+              "a changed runner script (%s) selects every report in full and only the core by default" % f)
     r = S.scope(["experiments/%s.yaml" % other])
-    check(r["smoke_core"] == [other], "a lone spec change adds no core report")
+    check(r["smoke_reports"] == [other] and r["smoke_core"] == [], "a lone spec change of a non-core report runs in full only")
     check(S.scope(["docs/x.md"])["smoke_core"] == [], "a docs-only change smokes nothing")
 
 
@@ -119,7 +121,7 @@ if __name__ == "__main__":
     test_web_only()
     test_spec_selects_its_own_smoke()
     test_pin_move_and_runner_scripts_select_all_smoke()
-    test_default_smoke_is_the_core_unless_a_report_itself_changed()
+    test_default_smoke_is_only_the_core()
     test_closure_follows_imports()
     test_shared_data_selects_only_its_users()
     test_every_test_file_is_run_by_the_python_job()

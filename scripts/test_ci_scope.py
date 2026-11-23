@@ -75,9 +75,12 @@ def test_default_smoke_is_the_core_unless_a_report_itself_changed():
     check(r["smoke_reports"] == IDS and r["smoke_core"] == [i for i in IDS if i in S.SMOKE_CORE],
           "a moved pin selects every report in full and only the core by default")
     other = next(i for i in IDS if i not in S.SMOKE_CORE)
-    r = S.scope(["experiments/%s.yaml" % other, "scripts/blis_pin.py"])
+    r = S.scope(["experiments/%s.yaml" % other], True)
     check(other in r["smoke_core"] and set(S.SMOKE_CORE) <= set(r["smoke_core"]),
           "a report whose own spec changed is smoked by default, beside the core")
+    for f in ("scripts/blis_pin.py", "requirements.txt"):
+        check(S.scope([f])["smoke_core"] == IDS,
+              "a changed runner script (%s) smokes every report by default: no merge reruns them" % f)
     r = S.scope(["experiments/%s.yaml" % other])
     check(r["smoke_core"] == [other], "a lone spec change adds no core report")
     check(S.scope(["docs/x.md"])["smoke_core"] == [], "a docs-only change smokes nothing")

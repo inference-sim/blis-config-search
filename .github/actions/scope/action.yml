@@ -14,6 +14,7 @@ outputs:
   pages: { value: "${{ steps.s.outputs.pages }}" }
   smoke: { value: "${{ steps.s.outputs.smoke }}" }
   smoke_reports: { value: "${{ steps.s.outputs.smoke_reports }}" }
+  smoke_core: { value: "${{ steps.s.outputs.smoke_core }}" }
 runs:
   using: composite
   steps:

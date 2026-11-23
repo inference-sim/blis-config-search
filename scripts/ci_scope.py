@@ -49,6 +49,13 @@ CLOSURE_ROOTS = {
     "smoke": ("blis_pin.py", "fetch_fields.py", "clone_pinned.sh"),
 }
 
+# The reports a pull request smokes by default when a pin value or a runner script moved (which selects
+# every report). One report with a generated workload and one corpus replay cover both code paths of
+# the smoke; the full set runs when asked for (the `full-smoke` label, or a workflow_dispatch with
+# `all`) and, for every report, after merge in regen-reports.yml. A report's own spec or ledger
+# changing still smokes that report regardless.
+SMOKE_CORE = ("kimi-k2-5-h200-multidoc-pd", "deepseek-v4-1-flash-h200-agentx-4node")
+
 # Paths no job reads. Everything else must be claimed by a rule below or it selects every job.
 INERT = ("docs/", ".claude/", "LICENSE", "CLAUDE.md", "AGENTS.md", ".gitignore")
 
@@ -172,6 +179,8 @@ def _result(on, ids, smoke_all, smoke_ids=()):
     out["smoke_all"] = bool(smoke_all)
     out["smoke_reports"] = sel
     out["smoke"] = bool(sel)
+    core = set(smoke_ids) | (set(SMOKE_CORE) if smoke_all else set())
+    out["smoke_core"] = [i for i in ids if i in core]
     return out
 
 
@@ -203,6 +212,7 @@ def main(argv):
             for k in JOBS + ("smoke", "smoke_all"):
                 f.write(f"{k}={str(res[k]).lower()}\n")
             f.write("smoke_reports=" + json.dumps(res["smoke_reports"]) + "\n")
+            f.write("smoke_core=" + json.dumps(res["smoke_core"]) + "\n")
     return 0
 
 

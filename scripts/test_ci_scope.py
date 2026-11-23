@@ -68,6 +68,21 @@ def test_pin_move_and_runner_scripts_select_all_smoke():
     check(not S.scope(["scripts/build_gallery.py"])["smoke"], "the site builder is not read by the smoke")
 
 
+def test_default_smoke_is_the_core_unless_a_report_itself_changed():
+    print("test_default_smoke_is_the_core_unless_a_report_itself_changed")
+    check(all(c in IDS for c in S.SMOKE_CORE), "every core report must be a committed report")
+    r = S.scope(["pins.env"], True)
+    check(r["smoke_reports"] == IDS and r["smoke_core"] == [i for i in IDS if i in S.SMOKE_CORE],
+          "a moved pin selects every report in full and only the core by default")
+    other = next(i for i in IDS if i not in S.SMOKE_CORE)
+    r = S.scope(["experiments/%s.yaml" % other, "scripts/blis_pin.py"])
+    check(other in r["smoke_core"] and set(S.SMOKE_CORE) <= set(r["smoke_core"]),
+          "a report whose own spec changed is smoked by default, beside the core")
+    r = S.scope(["experiments/%s.yaml" % other])
+    check(r["smoke_core"] == [other], "a lone spec change adds no core report")
+    check(S.scope(["docs/x.md"])["smoke_core"] == [], "a docs-only change smokes nothing")
+
+
 def test_closure_follows_imports():
     print("test_closure_follows_imports")
     c = S.closure(S.CLOSURE_ROOTS["smoke"])
@@ -101,6 +116,7 @@ if __name__ == "__main__":
     test_web_only()
     test_spec_selects_its_own_smoke()
     test_pin_move_and_runner_scripts_select_all_smoke()
+    test_default_smoke_is_the_core_unless_a_report_itself_changed()
     test_closure_follows_imports()
     test_shared_data_selects_only_its_users()
     test_every_test_file_is_run_by_the_python_job()

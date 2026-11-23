@@ -24,7 +24,9 @@ name: pin-compat
 #
 # Which work runs (scripts/ci_scope.py): a moved pin VALUE or a changed script the smoke imports selects
 # every report; a changed spec, report ledger, or routing/workload file it names selects only those
-# reports. A fork's pin move is refused; a fork's other changes run no smoke (its code must not reach the
+# reports. A pull request smokes only the core pair (ci_scope.SMOKE_CORE) plus any report whose own spec
+# or ledger changed; the rest run on request: add the `full-smoke` label, or dispatch this workflow with
+# all=true (the default, which is what the pin bot's PR gets). regen-reports.yml runs every report after merge. A fork's pin move is refused; a fork's other changes run no smoke (its code must not reach the
 # regen runner). The simulator is built once per BLIS_SHA (.github/actions/pinned-blis) and shared as an artifact.
 #
 # Trigger: EVERY pull request, deliberately without a `paths:` filter. A workflow skipped by a
@@ -37,6 +39,7 @@ name: pin-compat
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]   # `labeled`: the full-smoke label asks for every report
   # The bot's PRs dispatch this with the PR's base and number, since their PR event starts nothing.
   workflow_dispatch:
     inputs:
@@ -46,6 +49,10 @@ on:
       pr:
         description: "PR number to comment the result on (blank = no comment)"
         required: false
+      all:
+        description: "'true' = smoke every report, not just the default core (a bot's pin PR does)"
+        required: false
+        default: "true"
 
 permissions:
   contents: read
@@ -93,7 +100,14 @@ jobs:
           pins-moved: ${{ steps.diff.outputs.moved }}
       - name: Reports to smoke
         id: reports
-        env: { SELECTED: "${{ steps.scope.outputs.smoke_reports }}", MOVED: "${{ steps.diff.outputs.moved }}" }
+        env:
+          # Every report on a dispatch (the pin bot's PR) unless it says all=false, or on a PR labelled
+          # full-smoke; otherwise only the core plus the reports whose own spec or ledger changed.
+          SELECTED: >-
+            ${{ (github.event_name == 'workflow_dispatch' && inputs.all != 'false' ||
+                 contains(github.event.pull_request.labels.*.name, 'full-smoke'))
+                && steps.scope.outputs.smoke_reports || steps.scope.outputs.smoke_core }}
+          MOVED: ${{ steps.diff.outputs.moved }}
         run: |
           python3 -I - >> "$GITHUB_OUTPUT" <<'PY'
           import json, os, sys

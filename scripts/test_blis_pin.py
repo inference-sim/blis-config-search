@@ -513,6 +513,9 @@ def test_workflow_wiring():
         check("gh label create auto-update --force" in text and f"gh label create {kind} --force" in text,
               f"{name} creates its labels first: `gh pr create --label` fails on a missing label")
         check("issues: write" in text, f"{name} needs issues: write to create labels")
+    check("gh label create full-smoke --force" in bump and "--label full-smoke" in bump,
+          "the pin bot's PR carries `full-smoke`: pin-compat smokes only a core pair on a PR without it, "
+          "and a release bump (with every fix pushed to it) must smoke every report")
     checks_yml = open(os.path.join(wf, "checks.yml")).read()
     check("workflow_dispatch:" in checks_yml.split("\njobs:")[0],
           "checks.yml is dispatchable: a GITHUB_TOKEN PR event starts no workflows")

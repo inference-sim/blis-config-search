@@ -49,6 +49,15 @@ CLOSURE_ROOTS = {
     "smoke": ("blis_pin.py", "fetch_fields.py", "clone_pinned.sh"),
 }
 
+# The reports a pull request smokes by default when a pin value moved (which selects every report).
+# One report with a generated workload and one corpus replay cover both code paths of the smoke; the
+# full set runs when asked for (the `full-smoke` label, or a workflow_dispatch with `all`), and
+# regen-reports.yml runs every report after a merge that moves pins.env. A changed runner script
+# (what the smoke imports, or requirements.txt) is not a pin move and nothing runs after its merge, so
+# it keeps selecting every report here. A report's own spec or ledger changing smokes that report
+# regardless.
+SMOKE_CORE = ("kimi-k2-5-h200-multidoc-pd", "muse-spark-open-816b-a42b-h100-agentx-8gpu")
+
 # Paths no job reads. Everything else must be claimed by a rule below or it selects every job.
 INERT = ("docs/", ".claude/", "LICENSE", "CLAUDE.md", "AGENTS.md", ".gitignore")
 
@@ -116,7 +125,7 @@ def scope(files, pins_moved=False, root=ROOT, workflow_file=None):
     files = [f.strip() for f in files if f.strip()]
     clo = {k: closure(v, root) for k, v in CLOSURE_ROOTS.items()}
     on = {j: False for j in JOBS}
-    smoke_ids, smoke_all = set(), bool(pins_moved)
+    smoke_ids, smoke_all, runner = set(), bool(pins_moved), False
     everything = False
     own = {"python": ".github/workflows/checks.yml", "experiments": ".github/workflows/checks.yml",
            "web": ".github/workflows/checks.yml", "pages": ".github/workflows/pages.yml"}
@@ -146,7 +155,7 @@ def scope(files, pins_moved=False, root=ROOT, workflow_file=None):
             on["experiments"] = True
         # smoke
         if f in clo["smoke"] or f in ("requirements.txt",):
-            smoke_all, known = True, True
+            smoke_all, runner, known = True, True, True
         m = re.match(r"(?:experiments/(.+)\.yaml|reports/([^/]+)/.*)$", f)
         if m:
             rid = m.group(1) or m.group(2)
@@ -163,15 +172,17 @@ def scope(files, pins_moved=False, root=ROOT, workflow_file=None):
             everything = True
     if everything:
         return _result({j: True for j in JOBS}, ids, True)
-    return _result(on, ids, smoke_all, smoke_ids)
+    return _result(on, ids, smoke_all, smoke_ids, runner)
 
 
-def _result(on, ids, smoke_all, smoke_ids=()):
+def _result(on, ids, smoke_all, smoke_ids=(), runner=False):
     sel = list(ids) if smoke_all else [i for i in ids if i in set(smoke_ids)]
     out = dict(on)
     out["smoke_all"] = bool(smoke_all)
     out["smoke_reports"] = sel
     out["smoke"] = bool(sel)
+    core = set(ids) if runner else set(smoke_ids) | (set(SMOKE_CORE) if smoke_all else set())
+    out["smoke_core"] = [i for i in ids if i in core]
     return out
 
 
@@ -203,6 +214,7 @@ def main(argv):
             for k in JOBS + ("smoke", "smoke_all"):
                 f.write(f"{k}={str(res[k]).lower()}\n")
             f.write("smoke_reports=" + json.dumps(res["smoke_reports"]) + "\n")
+            f.write("smoke_core=" + json.dumps(res["smoke_core"]) + "\n")
     return 0
 
 

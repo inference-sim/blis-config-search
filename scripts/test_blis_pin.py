@@ -523,6 +523,30 @@ def test_smoke_verdicts():
         shutil.rmtree(root)
 
 
+def test_regen_refuses_an_unreleased_pin():
+    print("test_regen_refuses_an_unreleased_pin")
+    commit = "0fb85a76192eb1cb3f55aadc42d3f24876385c0c"
+    for ref in (commit, "main", "v0.18", "v0.18.2-rc1", ""):
+        try:
+            B.require_release({"BLIS_REF": ref})
+            check(False, f"BLIS_REF={ref!r} must be refused")
+        except SystemExit as e:
+            check("not a release tag" in str(e) and repr(ref) in str(e), f"a clear refusal for {ref!r}: {e}")
+    B.require_release({"BLIS_REF": "v0.18.2"})
+    check(True, "a release tag passes")
+    # regen itself refuses before it touches anything (the guard is its first step, so no BLIS is run).
+    try:
+        B.regen("any-report", "blis", "cat", "reg", tempfile.mkdtemp(), pins={"BLIS_REF": commit})
+        check(False, "regen on a commit pin must refuse")
+    except SystemExit as e:
+        check("not a release tag" in str(e), f"regen refuses on a commit pin: {e}")
+    # The campaign refuses at its plan step, so no report job starts, and the plan step does not hide it.
+    wf = open(os.path.join(ROOT, ".github", "workflows", "regen-reports.yml")).read()
+    check("blis_pin.py plan --require-release" in wf, "regen-reports.yml plans with --require-release")
+    check("|| true" not in wf.split("blis_pin.py plan --require-release")[1].split("PY\n")[0],
+          "the plan step does not swallow the refusal")
+
+
 def test_workflow_wiring():
     print("test_workflow_wiring")
     wf = os.path.join(ROOT, ".github", "workflows")
@@ -820,6 +844,7 @@ if __name__ == "__main__":
     test_smoke_pairs()
     test_smoke_verdicts()
     test_workflow_wiring()
+    test_regen_refuses_an_unreleased_pin()
     test_stale_reports_and_the_post_merge_plan()
     test_shards_fit_a_long_report_into_jobs()
     test_a_pending_regeneration_is_held_only_until_its_release_is_pinned()

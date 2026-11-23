@@ -375,8 +375,24 @@ def shards_for(run_id, max_parallel, budget_s, growth=3.0, root=ROOT):
     return max(1, math.ceil(serial * growth / (max(1, max_parallel) * budget_s)))
 
 
+def require_release(pins=None):
+    """Refuse unless BLIS_REF is a plain release tag (vX.Y.Z).
+
+    Regeneration writes into a scratch --out, so run_experiment's refusal of an experimental report
+    (which fires only when --out is reports/) never sees it, and the workflow then copies the result
+    into reports/. A commit pin prices every run on an unreleased build, so a campaign on it would
+    replace committed reports with experimental ones that checks.yml lets through (it skips
+    check_released_build.py for a non-tag ref). The committed reports are regenerated after the tag."""
+    ref = (pins if pins is not None else read_pins()).get("BLIS_REF", "")
+    if semver(ref) is None:
+        raise SystemExit(f"refusing to regenerate committed reports: pins.env BLIS_REF is {ref!r}, not a "
+                         f"release tag (vX.Y.Z). A build of a commit is unreleased, and its reports are "
+                         f"experimental and must not replace committed ones; move BLIS_REF to the release "
+                         f"tag, then regenerate")
+
+
 def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1, fields=None,
-          shard=None, runs_from=()):
+          shard=None, runs_from=(), pins=None):
     """Regenerate ONE report into <out>/<run_id>/ from its source, at the pins on disk.
 
     `shard` "I/N" runs only that share of its runs (run_experiment --shard); `runs_from` lists
@@ -384,6 +400,7 @@ def regen(run_id, blis, catalog, registry, out, timeout=1800, max_parallel=1, fi
 
     Writes into a fresh `out` rather than over reports/: the caller swaps the directory in whole,
     so a file the new run no longer writes cannot survive from the old one."""
+    require_release(pins)
     e = classify(run_id)
     py = sys.executable
     os.makedirs(out, exist_ok=True)
@@ -888,6 +905,8 @@ def main(argv=None):
     p.add_argument("--max-batch", type=int, default=MAX_BATCH)
     p.add_argument("--stale-only", action="store_true",
                    help="only the reports the pinned stack did not price")
+    p.add_argument("--require-release", action="store_true",
+                   help="refuse (exit non-zero) unless BLIS_REF is a release tag: a campaign on a commit pin")
     p.add_argument("--max-parallel", type=int, default=1, help="BLIS runs at once per job, for --budget-s")
     p.add_argument("--budget-s", type=float, default=0, help="seconds of BLIS per job; >0 shards long reports")
     st = sub.add_parser("stale", help="list the reports the pinned stack did not price; exit 1 if any")
@@ -940,6 +959,8 @@ def main(argv=None):
     elif a.cmd == "same-stack":
         sys.exit(0 if same_stack(a.a, a.b) else 1)
     elif a.cmd == "plan":
+        if a.require_release:
+            require_release()
         only = [x for x in (a.only or "").replace(" ", ",").split(",") if x]
         out = plan(only=only or None, max_batch=a.max_batch, stale_only=a.stale_only)
         for r in out["reports"]:

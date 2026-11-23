@@ -114,7 +114,9 @@ jobs:
             stale="--stale-only"
           fi
           # A report whose BLIS time will not fit one job runs as several shards (80% of the job timeout each).
-          python3 -I scripts/blis_pin.py plan --only "${ONLY:-}" $stale \
+          # --require-release fails the plan while BLIS_REF is a commit: a head build is unreleased, and
+          # its regenerated reports would replace committed ones (blis_pin.py regen refuses too).
+          python3 -I scripts/blis_pin.py plan --require-release --only "${ONLY:-}" $stale \
             --max-parallel "$PARALLEL" --budget-s "$(( TIMEOUT_MIN * 60 * 8 / 10 ))" > /tmp/plan.json
           python3 - <<'PY'
           import json, os

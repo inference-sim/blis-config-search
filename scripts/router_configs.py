@@ -19,7 +19,9 @@ Override grammar (spec `router:` block, every value a list):
 
   schedulingProfiles.<profile>.<plugin>.weight   a scorer weight; adds `weight` to a profile entry that has none
   plugins.<plugin>.parameters.<name>             a plugin parameter; added when the file lacks it, and the
-                                                 plugin is added when the file does not declare it
+                                                 plugin is added when the file does not declare it.
+                                                 <plugin> is a plugin's `name`, or its type when one
+                                                 plugin of that type is declared
 
 For a file in the index only the index's `knobs` (hosted_effect true: each proven to move a decision
 in the hosted boundary) are reachable. An `ineffective_parameters` entry is refused by name, and any
@@ -42,6 +44,26 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 REFERENCE_DIR = "reference-configs"
 HOSTED_NOTE = "accepted by the router, no effect in the hosted boundary"
 COMMAND = ("router-configs", "--json")
+# A base file named with this prefix is a file beside the spec, e.g. ./routing/guarded-pd.yaml.
+SPEC_PREFIX = "./"
+
+# Guard parameters an override may add to a guard that a file outside the router's index declares.
+# The index lists knobs only for the router's reference files, and none of them declares a guard.
+GUARD_PARAMETERS = {
+    "concurrency-detector": ("maxConcurrency", "maxTokenConcurrency", "headroom"),
+    "utilization-detector": ("queueDepthThreshold", "kvCacheUtilThreshold"),
+    "prefix-cache-affinity-filter": ("peakPrefillThroughput",),
+}
+# What the router BLIS embeds cannot take in a file beside the spec: stripped with a note (the part
+# acts only outside a simulation), or refused by name until the open issue is fixed.
+STRIPPED_PLUGINS = {
+    "kv-events-source": "it reads a real engine's KV events, and BLIS feeds the router KV events itself",
+    "disaggregatedset-rollout-screener": "it acts only during a rollout, and the simulated pods carry "
+                                         "no DisaggregatedSet labels",
+}
+REFUSED_PLUGINS = {"utilization-filter": "inference-sim/inference-sim#2205"}
+REFUSED_PARAMETERS = {("inflight-load-producer", "prefillCompletionFromKVEvents"):
+                      "inference-sim/inference-sim#2206"}
 
 
 class RouterConfigsError(Exception):
@@ -184,12 +206,23 @@ def open_checkout(path=None, verify=True, blis=None):
     return None
 
 
-def resolve(name, routing_dir, router):
+def resolve(name, routing_dir, router, spec_dir=None):
     """(source, path, knobs) for a base file named in a spec.
 
     A name found in the local `routing/` directory is local (knobs None: the old rule, change what
     the file already sets). A name in the router's index is the router's file. A name in both is an
-    error: a local copy must not shadow the router's file of that name. Raises RouterConfigsError."""
+    error: a local copy must not shadow the router's file of that name. A name that starts with ./
+    is a file beside the spec (source "spec", knobs None), inside `spec_dir`. Raises RouterConfigsError."""
+    if name.startswith(SPEC_PREFIX):
+        if not spec_dir:
+            raise RouterConfigsError(f"{name} is a file beside the spec, but the spec's directory is not known")
+        top = os.path.realpath(spec_dir)
+        path = os.path.realpath(os.path.join(top, name))
+        if not path.startswith(top + os.sep):
+            raise RouterConfigsError(f"{name} is outside the spec's directory")
+        if not os.path.isfile(path):
+            raise RouterConfigsError(f"no such file {name} beside the spec ({top})")
+        return "spec", path, None
     local = os.path.join(routing_dir, name) if routing_dir else None
     is_local = bool(local and os.path.isfile(local))
     in_index = bool(router and name in router.files)
@@ -274,8 +307,47 @@ def unmet_requirements(knob, doc, overrides, knobs):
     return out
 
 
-def _plugin(doc, type_):
-    return next((p for p in (doc.get("plugins") or []) if p.get("type") == type_), None)
+def _plugin(doc, key):
+    """The plugin `key` names: the one of that `name`, else the one of that type. KeyError when
+    several plugins have that type, since an override would then change only the first."""
+    plugins = doc.get("plugins") or []
+    named = next((p for p in plugins if p.get("name") == key), None)
+    if named is not None:
+        return named
+    typed = [p for p in plugins if p.get("type") == key]
+    if len(typed) > 1:
+        raise KeyError(f"the base config declares {len(typed)} plugins of type {key!r} "
+                       f"({', '.join(str(p.get('name')) for p in typed)}); name one of them")
+    return typed[0] if typed else None
+
+
+def prepare_spec_file(doc):
+    """(doc, notes) for a file beside the spec: a copy without the parts STRIPPED_PLUGINS names (and
+    the references to them), and one note per part removed. Raises RouterConfigsError naming a part
+    the embedded router refuses."""
+    plugins = doc.get("plugins") or []
+    for p in plugins:
+        label = f"plugin {p.get('name') or p.get('type')!r} (type {p.get('type')})"
+        if p.get("type") in REFUSED_PLUGINS:
+            raise RouterConfigsError(f"{label}: the router BLIS embeds refuses it as not audited for "
+                                     f"the hosting runtime ({REFUSED_PLUGINS[p['type']]}); remove it")
+        for (type_, param), issue in REFUSED_PARAMETERS.items():
+            if p.get("type") == type_ and param in (p.get("parameters") or {}):
+                raise RouterConfigsError(f"{label}: parameters.{param} is not a parameter of the router "
+                                         f"BLIS embeds ({issue}); remove it")
+    gone = {p.get("name") or p.get("type"): p for p in plugins if p.get("type") in STRIPPED_PLUGINS}
+    if not gone:
+        return doc, []
+    out = copy.deepcopy(doc)
+    out["plugins"] = [p for p in plugins if (p.get("name") or p.get("type")) not in gone]
+    layer = out.get("dataLayer") or {}
+    if layer.get("sources"):
+        layer["sources"] = [s for s in layer["sources"] if s.get("pluginRef") not in gone]
+    for prof in out.get("schedulingProfiles") or []:
+        prof["plugins"] = [r for r in prof.get("plugins") or [] if r.get("pluginRef") not in gone]
+    notes = [f"stripped plugin {n!r} (type {p['type']}) and its references: {STRIPPED_PLUGINS[p['type']]}"
+             for n, p in gone.items()]
+    return out, notes
 
 
 def apply_overrides(base_doc, overrides, knobs=None):
@@ -309,17 +381,19 @@ def apply_overrides(base_doc, overrides, knobs=None):
             entry[field] = value
         else:
             _, plugin, _params, field = path
-            if (plugin, field) in ineffective:
-                raise KeyError(f"{plugin}.{field}: {HOSTED_NOTE}. {ineffective[(plugin, field)]}")
+            entry = _plugin(doc, plugin)
+            type_ = entry.get("type") if entry is not None else plugin
+            if (type_, field) in ineffective:
+                raise KeyError(f"{plugin}.{field}: {HOSTED_NOTE}. {ineffective[(type_, field)]}")
             knob = next((k for k in (knobs or {}).get("knobs", []) if k.get("kind") == "plugin_parameter"
-                         and k["plugin"] == plugin and k["parameter"] == field), None)
+                         and k["plugin"] == type_ and k["parameter"] == field), None)
             unmet = unmet_requirements(knob, base_doc, overrides, knobs) if knob else []
             if unmet:
                 raise KeyError(f"{plugin}.{field} changes no decision unless "
                                f"{'; '.join(unmet)} in the same configuration "
                                f"({knob.get('effective_when', '')})".rstrip(" ()"))
-            entry = _plugin(doc, plugin)
-            listed = (plugin, field) in params_ok
+            listed = (type_, field) in params_ok or (
+                knobs is None and entry is not None and field in GUARD_PARAMETERS.get(type_, ()))
             if entry is None:
                 if not listed:
                     raise KeyError(f"the base config declares no plugin of type {plugin!r} "

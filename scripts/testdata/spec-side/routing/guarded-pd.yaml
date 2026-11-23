@@ -1,0 +1,121 @@
+# A P/D router config beside a spec (#196): flow control with two concurrency guards and a queue-depth
+# guard behind one saturation detector, and a prefix-cache affinity filter.
+apiVersion: llm-d.ai/v1alpha1
+kind: EndpointPickerConfig
+plugins:
+- type: always-disagg-pd-decider
+- type: disagg-profile-handler
+  parameters:
+    profiles: {prefill: prefill, decode: decode}
+    deciders: {prefill: always-disagg-pd-decider}
+- type: token-producer
+  parameters:
+    modelName: Qwen/Qwen3-14B
+    vllm: {prefillOnly: true}
+- type: endpoint-notification-source
+- type: endpoint-notification-source
+  name: decode-endpoint-notification-source
+- type: prefill-filter
+- type: decode-filter
+- type: precise-prefix-cache-producer
+  name: prefill-prefix-producer
+  parameters:
+    tokenProcessorConfig: {blockSizeTokens: 64}
+- type: precise-prefix-cache-producer
+  name: decode-prefix-producer
+  parameters:
+    tokenProcessorConfig: {blockSizeTokens: 64}
+- type: inflight-load-producer
+  parameters:
+    prefixMatchInfoProducerName: prefill-prefix-producer
+- type: concurrency-detector
+  name: prefill-concurrency
+  parameters:
+    concurrencyMode: hybrid
+    maxConcurrency: 12
+    maxTokenConcurrency: 1000000
+    headroom: 0.5
+    inFlightLoadProducerName: inflight-load-producer
+- type: concurrency-detector
+  name: decode-concurrency
+  parameters:
+    concurrencyMode: requests
+    maxConcurrency: 32
+    headroom: 0
+    inFlightLoadProducerName: inflight-load-producer
+- type: utilization-detector
+  name: prefill-queue
+  parameters:
+    queueDepthThreshold: 4
+    kvCacheUtilThreshold: 1.0
+- type: max-saturation-detector
+  name: admission
+  parameters:
+    detectors: [decode-concurrency, prefill-queue, prefill-concurrency]
+    stages:
+      decode-concurrency: [decode]
+      prefill-queue: [prefill]
+      prefill-concurrency: [prefill]
+- type: prefix-cache-affinity-filter
+  parameters:
+    affinityThreshold: 0.5
+    explorationProbability: 0
+    inFlightLoadProducerName: inflight-load-producer
+    maxTTFTPenaltyMs: 5400
+    peakPrefillThroughput: 19400
+    prefixMatchInfoProducerName: prefill-prefix-producer
+- type: token-load-scorer
+  parameters: {inFlightLoadProducerName: inflight-load-producer}
+- type: active-request-scorer
+  parameters: {inFlightLoadProducerName: inflight-load-producer}
+- type: prefix-cache-scorer
+  name: decode-prefix-scorer
+  parameters: {prefixMatchInfoProducerName: decode-prefix-producer}
+- type: max-score-picker
+- type: metrics-data-source
+  name: metrics-source
+- type: core-metrics-extractor
+  name: metrics-extractor
+- type: round-robin-fairness-policy
+- type: fcfs-ordering-policy
+- type: priority-holdback-policy
+  name: shared-capacity
+  parameters: {shape: linear, domain: value, minCeiling: 0.75, maxCeiling: 1.0}
+dataLayer:
+  injectDefaults: false
+  sources:
+  - pluginRef: endpoint-notification-source
+    extractors: [{pluginRef: prefill-prefix-producer}]
+  - pluginRef: decode-endpoint-notification-source
+    extractors: [{pluginRef: decode-prefix-producer}]
+  - pluginRef: metrics-source
+    extractors: [{pluginRef: metrics-extractor}]
+schedulingProfiles:
+- name: prefill
+  plugins:
+  - pluginRef: prefill-filter
+  - pluginRef: prefill-concurrency
+  - pluginRef: prefix-cache-affinity-filter
+  - pluginRef: token-load-scorer
+  - pluginRef: max-score-picker
+- name: decode
+  plugins:
+  - pluginRef: decode-filter
+  - pluginRef: decode-concurrency
+  - pluginRef: decode-prefix-scorer
+  - pluginRef: active-request-scorer
+  - pluginRef: max-score-picker
+featureGates: [flowControl]
+flowControl:
+  defaultPriorityBand:
+    fairnessPolicyRef: round-robin-fairness-policy
+    orderingPolicyRef: fcfs-ordering-policy
+  priorityBands:
+  - priority: 80
+    fairnessPolicyRef: round-robin-fairness-policy
+    orderingPolicyRef: fcfs-ordering-policy
+  - priority: 0
+    fairnessPolicyRef: round-robin-fairness-policy
+    orderingPolicyRef: fcfs-ordering-policy
+  saturationDetector: {pluginRef: admission}
+  usageLimitPolicyPluginRef: shared-capacity

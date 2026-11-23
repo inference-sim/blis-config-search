@@ -1085,6 +1085,55 @@ def test_released_build_check_names_unstamped_rows():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_run_experiment_picks_only_top_level_specs():
+    """run-experiment's plan step runs experiments/*.yaml only, never a file beside a spec
+    (./routing/, ./workloads/), and a change to such a file reruns the specs that name it (#198)."""
+    import subprocess
+    import yaml as _yaml
+    wf = _yaml.safe_load(open(os.path.join(ROOT, ".github", "workflows", "run-experiment.yml")))
+    script = next(st["run"] for st in wf["jobs"]["plan"]["steps"] if st.get("id") == "pick")
+    tmp = tempfile.mkdtemp()
+    try:
+        def git(*a):
+            subprocess.run(["git", "-C", tmp, *a], check=True, capture_output=True)
+
+        def write(rel, text):
+            os.makedirs(os.path.dirname(os.path.join(tmp, rel)), exist_ok=True)
+            with open(os.path.join(tmp, rel), "w") as f:
+                f.write(text)
+
+        def pick(**env):
+            out = os.path.join(tmp, "out")
+            open(out, "w").close()
+            pr = subprocess.run(["bash", "-c", script], cwd=tmp, capture_output=True, text=True,
+                                env={**os.environ, "REQUESTED": "", "BEFORE": "", "GITHUB_OUTPUT": out, **env})
+            return pr.returncode, (json.loads(open(out).read().split("=", 1)[1]) if pr.returncode == 0 else pr.stderr)
+
+        git("init", "-q")
+        git("config", "user.email", "t@example.org")
+        git("config", "user.name", "t")
+        write("experiments/a.yaml", "router: {endpoint_picker_config: [./routing/g.yaml]}\n")
+        write("experiments/b.yaml", "scenario: {workload_spec: ./workloads/w.yaml}\n")
+        write("experiments/routing/g.yaml", "plugins: []\n")
+        write("experiments/workloads/w.yaml", "scenario: x\n")
+        git("add", "-A")
+        git("commit", "-qm", "one")
+        write("experiments/routing/g.yaml", "plugins: [x]\n")
+        write("experiments/workloads/w.yaml", "scenario: y\n")
+        git("commit", "-qam", "two")
+        check(pick() == (0, ["experiments/a.yaml", "experiments/b.yaml"]),
+              f"a changed ./ file reruns the specs that name it, never itself: {pick()}")
+        write("experiments/b.yaml", "scenario: {workload_spec: ./workloads/w.yaml}\nname: b\n")
+        git("commit", "-qam", "three")
+        check(pick() == (0, ["experiments/b.yaml"]), f"a changed spec runs once: {pick()}")
+        check(pick(REQUESTED="all") == (0, ["experiments/a.yaml", "experiments/b.yaml"]),
+              f"`all` lists the top-level specs only: {pick(REQUESTED='all')}")
+        rc, err = pick(REQUESTED="experiments/routing/g.yaml")
+        check(rc != 0 and "not a file beside one" in err, f"a file beside a spec cannot be requested: {err}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     test_build_script_stamps_the_pinned_release_tag()
     test_released_build_check_names_unstamped_rows()
@@ -1106,5 +1155,6 @@ if __name__ == "__main__":
     test_lexicon_mirror_is_in_sync()
     test_catalog()
     test_workflows_sane()
+    test_run_experiment_picks_only_top_level_specs()
     print(f"\n{PASS} passed, {FAIL} failed")
     sys.exit(1 if FAIL else 0)

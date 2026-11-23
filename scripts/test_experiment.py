@@ -890,6 +890,148 @@ class RouterOverrides(unittest.TestCase):
         self.assertEqual("queue", desc)
 
 
+class RouterFileBesideTheSpec(unittest.TestCase):
+    """A spec names a calibrated EndpointPickerConfig beside it, ./routing/<file> (#196): it is parsed,
+    the parts the embedded router cannot take are stripped with a note or refused by name, and the
+    guard parameters of the plugins it declares can be swept."""
+
+    SPEC_DIR = os.path.join(FIXTURES, "spec-side")
+    FILE = "./routing/guarded-pd.yaml"
+
+    def doc(self, router=None):
+        sw = {"name": "s", "prefill-instances": [1], "decode-instances": [1],
+              "prefill": {"parallel": {"tp": [8]}}, "decode": {"parallel": {"tp": [8]}},
+              "router": {"endpoint_picker_config": [self.FILE], **(router or {})}}
+        return spec(sweeps=[sw])
+
+    def errs(self, doc, spec_dir=SPEC_DIR):
+        return V.validate(doc, BLIS, ROUTING, spec_dir=spec_dir)
+
+    def base(self):
+        with open(os.path.join(self.SPEC_DIR, self.FILE), encoding="utf-8") as f:
+            return yaml.safe_load(f)
+
+    def beside(self, doc):
+        """A spec directory holding `doc` as ./routing/guarded-pd.yaml."""
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        os.makedirs(os.path.join(d, "routing"))
+        with open(os.path.join(d, self.FILE), "w", encoding="utf-8") as f:
+            yaml.safe_dump(doc, f, sort_keys=False)
+        return d
+
+    def test_the_file_beside_the_spec_validates_only_where_the_spec_is(self):
+        self.assertEqual([], self.errs(self.doc()))
+        self.assertTrue(any("directory is not known" in e for e in self.errs(self.doc(), None)))
+        missing = self.doc()
+        missing["sweeps"][0]["router"]["endpoint_picker_config"] = ["./routing/none.yaml"]
+        self.assertTrue(any("no such file ./routing/none.yaml beside the spec" in e for e in self.errs(missing)))
+        outside = self.doc()
+        outside["sweeps"][0]["router"]["endpoint_picker_config"] = ["./../routing/queue.yaml"]
+        self.assertTrue(any("plain file name" in e for e in self.errs(outside)))
+
+    def test_guard_parameters_of_the_plugins_it_declares_are_swept_by_plugin_name(self):
+        router = {"plugins": {
+            "prefill-concurrency": {"parameters": {"maxConcurrency": [1, 64], "headroom": [0.2]}},
+            "decode-concurrency": {"parameters": {"maxTokenConcurrency": [50000]}},   # not in the file
+            "prefill-queue": {"parameters": {"queueDepthThreshold": [8], "kvCacheUtilThreshold": [0.9]}},
+            "prefix-cache-affinity-filter": {"parameters": {"peakPrefillThroughput": [9000]}}}}
+        self.assertEqual([], self.errs(self.doc(router)))
+        kept, _ = E.expand_sweep(self.doc(router)["sweeps"][0], 16)
+        self.assertEqual(2, len(kept))
+        with tempfile.TemporaryDirectory() as out:
+            got = {}
+            for cand in kept:
+                resolved, desc = E.materialize_router(cand, ROUTING, out, spec_dir=self.SPEC_DIR)
+                with open(resolved["router_config"], encoding="utf-8") as f:
+                    plugins = {p.get("name") or p["type"]: p.get("parameters") for p in yaml.safe_load(f)["plugins"]}
+                got[plugins["prefill-concurrency"]["maxConcurrency"]] = plugins
+                self.assertIn("maxConcurrency", desc)
+                rec = E.router_file_record(cand, resolved["router_config"], ROUTING, out, None, self.SPEC_DIR)
+                self.assertEqual(("spec", self.FILE), (rec["source"], rec["base"]))
+                self.assertEqual(RC.sha256_of(os.path.join(self.SPEC_DIR, self.FILE)), rec["base_sha256"])
+                self.assertTrue(os.path.isfile(os.path.join(out, rec["file"])))
+            self.assertEqual({1, 64}, set(got))
+            p = got[1]
+            self.assertEqual(0.2, p["prefill-concurrency"]["headroom"])
+            self.assertEqual(32, p["decode-concurrency"]["maxConcurrency"], "the other guard is untouched")
+            self.assertEqual(50000, p["decode-concurrency"]["maxTokenConcurrency"])
+            self.assertEqual((8, 0.9), (p["prefill-queue"]["queueDepthThreshold"], p["prefill-queue"]["kvCacheUtilThreshold"]))
+            self.assertEqual(9000, p["prefix-cache-affinity-filter"]["peakPrefillThroughput"])
+
+    def test_a_type_two_plugins_share_or_an_unset_parameter_that_is_no_guard_is_refused(self):
+        errs = self.errs(self.doc({"plugins": {"concurrency-detector": {"parameters": {"maxConcurrency": [4]}}}}))
+        self.assertTrue(any("2 plugins of type 'concurrency-detector'" in e and "name one" in e for e in errs), errs)
+        errs = self.errs(self.doc({"plugins": {"decode-concurrency": {"parameters": {"failOpen": [True]}}}}))
+        self.assertTrue(any("has no parameter 'failOpen'" in e for e in errs), errs)
+
+    def test_a_part_the_embedded_router_refuses_is_refused_by_name_and_issue(self):
+        doc = self.base()
+        doc["plugins"].append({"type": "utilization-filter", "name": "prefill-stall-guard",
+                               "parameters": {"conditions": [{"metric": "waiting-queue", "maxValue": 2}]}})
+        errs = self.errs(self.doc(), self.beside(doc))
+        self.assertTrue(any("'prefill-stall-guard' (type utilization-filter)" in e
+                            and "inference-sim/inference-sim#2205" in e for e in errs), errs)
+        doc = self.base()
+        next(p for p in doc["plugins"] if p["type"] == "inflight-load-producer")["parameters"][
+            "prefillCompletionFromKVEvents"] = True
+        errs = self.errs(self.doc(), self.beside(doc))
+        self.assertTrue(any("parameters.prefillCompletionFromKVEvents" in e
+                            and "inference-sim/inference-sim#2206" in e for e in errs), errs)
+
+    def test_kv_event_sources_and_the_rollout_screener_are_stripped_with_a_note(self):
+        doc = self.base()
+        doc["plugins"].insert(0, {"type": "disaggregatedset-rollout-screener",
+                                  "parameters": {"revisionGating": {"mode": "max-role"}}})
+        doc["plugins"].append({"type": "kv-events-source", "name": "decode-kv-events",
+                               "parameters": {"topicFilter": "kv@"}})
+        doc["dataLayer"]["sources"].append({"pluginRef": "decode-kv-events",
+                                            "extractors": [{"pluginRef": "inflight-load-producer"}]})
+        d = self.beside(doc)
+        self.assertEqual([], self.errs(self.doc(), d))
+        notes = V.advisories(self.doc(), os.path.join(d, "spec.yaml"))
+        self.assertTrue(any("'decode-kv-events' (type kv-events-source)" in n for n in notes), notes)
+        self.assertTrue(any("(type disaggregatedset-rollout-screener)" in n for n in notes), notes)
+        cand = {"router_config": self.FILE}
+        with tempfile.TemporaryDirectory() as out:
+            resolved, desc = E.materialize_router(cand, ROUTING, out, spec_dir=d)
+            self.assertEqual("guarded-pd", desc)
+            with open(resolved["router_config"], encoding="utf-8") as f:
+                text = f.read()
+            ran = yaml.safe_load(text)
+            self.assertEqual(self.base()["plugins"], ran["plugins"])
+            self.assertEqual(self.base()["dataLayer"], ran["dataLayer"])
+            self.assertEqual(2, text.count("# stripped plugin "))
+            rec = E.router_file_record(cand, resolved["router_config"], ROUTING, out, None, d)
+            self.assertEqual(2, len(rec["stripped"]))
+            self.assertNotEqual(rec["base_sha256"], rec["sha256"])
+
+    def test_an_unchanged_file_is_staged_byte_for_byte_named_by_its_hash(self):
+        cand = {"router_config": self.FILE}
+        with tempfile.TemporaryDirectory() as out:
+            resolved, desc = E.materialize_router(cand, ROUTING, out, spec_dir=self.SPEC_DIR)
+            rec = E.router_file_record(cand, resolved["router_config"], ROUTING, out, None, self.SPEC_DIR)
+            self.assertEqual(rec["base_sha256"], rec["sha256"])
+            self.assertEqual(f"guarded-pd-{rec['sha256'][:10]}.yaml", rec["file"])
+            self.assertNotIn("stripped", rec)
+
+    def test_the_sweep_records_the_file_on_every_row(self):
+        rows = []
+
+        def fake_run_one(*a, **kw):
+            rows.append(a[11]["router_config"])
+            return _ran(100.0, 10.0)
+        doc = self.doc({"plugins": {"prefill-concurrency": {"parameters": {"maxConcurrency": [1, 64]}}}})
+        doc["scenario"]["concurrency"] = [1]
+        with mock.patch.object(E.run_blis, "run_one", fake_run_one), tempfile.TemporaryDirectory() as out:
+            rep = E.run_experiment(doc, BLIS, "/c", "/r", out, verbose=False, spec_dir=self.SPEC_DIR)
+            self.assertEqual(2, len(rows))
+            self.assertTrue(all(r.startswith(os.path.join(out, "t", "routing")) for r in rows), rows)
+        recs = [r["router"] for r in rep["sweeps"][0]["rows"]]
+        self.assertEqual({"spec"}, {r["source"] for r in recs})
+        self.assertEqual({1, 64}, {r["overrides"]["plugins.prefill-concurrency.parameters.maxConcurrency"] for r in recs})
+
+
 # --- labelling and ranking --------------------------------------------------------------------
 
 
@@ -1415,6 +1557,85 @@ class AgentxRunRecipe(unittest.TestCase):
                 self.assertEqual(self.FILE, yaml.safe_load(f)["scenario"].get("workload_spec"), n)
 
 
+class ReplayKeysReachTheSimulator(unittest.TestCase):
+    """A `scenario.replay` key the runner never passes to BLIS was accepted and ignored (#197); and a
+    workload file may sit beside the spec, ./<file>, copied into the run directory."""
+
+    def test_a_key_the_runner_never_passes_is_refused(self):
+        for key in ("trace_idle_gap_cap_s", "warmup", "category"):
+            errs = V.validate(spec(scenario={**spec()["scenario"], "replay": {key: 1}}), BLIS, ROUTING)
+            self.assertTrue(any(f"scenario.replay.{key}: never reaches BLIS" in e for e in errs), (key, errs))
+        ok = {"corpus": ".corpus/t.jsonl", "corpus_cache": "/tmp/c", "grace_period": "inf",
+              "benchmark_duration": "900s", "server_series_interval_s": 5}
+        self.assertEqual([], V.replay_errors({"replay": ok}))
+
+    def test_every_key_the_validator_lets_through_reaches_the_command(self):
+        replay = {"scenario": "x", "corpus": "/c", "corpus_sha256": "a", "corpus_cache": "/cc",
+                  "max_context_length": "100", "benchmark_duration": "900s", "grace_period": "30s",
+                  "server_series_interval_s": 5}
+        self.assertEqual(V.REPLAY_KEYS, set(replay))
+        cmd = run_blis.build_replay_cmd("/b", None, None, "/sc", "s.yaml", 42, None, {}, replay)
+        for key, value in replay.items():
+            self.assertIn(str(value), cmd, key)
+
+    def test_beside_a_workload_file_the_keys_the_file_states_are_refused(self):
+        sc = {"workload_spec": "workloads/agentx-run-recipe.yaml",
+              "replay": {"corpus": ".corpus/t.jsonl", "corpus_sha256": "a" * 64, "max_context_length": 10}}
+        errs = V.replay_errors(sc)
+        self.assertEqual(2, len(errs), errs)
+        self.assertTrue(all("never reaches BLIS" in e for e in errs))
+
+    def recipe(self, cap):
+        with open(os.path.join(E.ROOT, AgentxRunRecipe.FILE), encoding="utf-8") as f:
+            doc = yaml.safe_load(f)
+        doc["trace_idle_gap_cap_s"] = cap
+        return doc
+
+    def beside(self, doc, name="wl.yaml"):
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        with open(os.path.join(d, name), "w", encoding="utf-8") as f:
+            yaml.safe_dump(doc, f)
+        return d
+
+    def with_file(self, path):
+        doc = spec()
+        del doc["scenario"]["workload"]
+        doc["scenario"].update({"workload_spec": path, "concurrency": [1],
+                                "replay": {"corpus": ".corpus/t.jsonl"}})
+        return doc
+
+    def test_a_workload_file_beside_the_spec_validates_and_keeps_the_recipe_check(self):
+        d = self.beside(self.recipe(1))
+        self.assertEqual([], V.validate(self.with_file("./wl.yaml"), BLIS, ROUTING, spec_dir=d))
+        errs = V.validate(self.with_file("./wl.yaml"), BLIS, ROUTING)
+        self.assertTrue(any("directory is not known" in e for e in errs), errs)
+        errs = V.validate(self.with_file("./none.yaml"), BLIS, ROUTING, spec_dir=d)
+        self.assertTrue(any("no such file in the spec's directory" in e for e in errs), errs)
+        incomplete = self.recipe(1)
+        del incomplete["trace_idle_gap_cap_s"]
+        errs = V.validate(self.with_file("./wl.yaml"), BLIS, ROUTING, spec_dir=self.beside(incomplete))
+        self.assertTrue(any("must state the whole run recipe" in e for e in errs), errs)
+
+    def test_the_run_reads_a_copy_in_the_run_directory_and_records_it(self):
+        d = self.beside(self.recipe(1))
+        seen = []
+
+        def fake_run_one(*a, **kw):
+            seen.append(kw["replay"]["workload_spec"])
+            return _ran(100.0, 10.0)
+        with mock.patch.object(E.run_blis, "run_one", fake_run_one), tempfile.TemporaryDirectory() as out:
+            rep = E.run_experiment(self.with_file("./wl.yaml"), BLIS, "/c", "/r", out, verbose=False, spec_dir=d)
+            self.assertEqual([os.path.join(out, "t", "workloads", "wl.yaml")], seen)
+            with open(seen[0], "rb") as got, open(os.path.join(d, "wl.yaml"), "rb") as want:
+                self.assertEqual(want.read(), got.read())
+        wl = rep["scenario"]["workload_spec"]
+        self.assertEqual(("./wl.yaml", "workloads/wl.yaml"), (wl["path"], wl["file"]))
+        self.assertEqual(RC.sha256_of(os.path.join(d, "wl.yaml")), wl["sha256"])
+        self.assertEqual(1, wl["document"]["trace_idle_gap_cap_s"])
+        self.assertEqual([1, 300], wl["recipe"]["differs_from_run"]["trace_idle_gap_cap_s"])
+
+
 class ReplayComesFromTheCatalog(unittest.TestCase):
     """A replay workload is fully described by blis-catalog/workloads/<name>.yaml.
 
@@ -1596,20 +1817,22 @@ class CorpusProvisioning(unittest.TestCase):
         rel = os.path.relpath(root, E.ROOT)
         with open(os.path.join(root, "wl.yaml"), "w") as f:
             yaml.safe_dump(WorkloadByFile.GOOD, f)
-        with open(os.path.join(root, "s.yaml"), "w") as f:
-            yaml.safe_dump({"scenario": {"workload_spec": os.path.join(rel, "wl.yaml"),
-                                         "replay": {"corpus": os.path.join(root, "c.jsonl")}}}, f)
         seen = []
-        orig, argv = FC.fetch, sys.argv
-        FC.fetch = lambda dest, url, sha, token=None: seen.append((dest, url, sha))
-        sys.argv = ["fetch_corpus.py", os.path.join(root, "s.yaml")]
-        try:
-            with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(0, FC.main())
-        finally:
-            FC.fetch, sys.argv = orig, argv
+        for path in (os.path.join(rel, "wl.yaml"), "./wl.yaml"):     # the second is beside the spec
+            with open(os.path.join(root, "s.yaml"), "w") as f:
+                yaml.safe_dump({"scenario": {"workload_spec": path,
+                                             "replay": {"corpus": os.path.join(root, "c.jsonl")}}}, f)
+            orig, argv = FC.fetch, sys.argv
+            FC.fetch = lambda dest, url, sha, token=None: seen.append((dest, url, sha))
+            sys.argv = ["fetch_corpus.py", os.path.join(root, "s.yaml")]
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(0, FC.main())
+            finally:
+                FC.fetch, sys.argv = orig, argv
         g = WorkloadByFile.GOOD["corpus"]
-        self.assertEqual(1, len(seen))
+        self.assertEqual(2, len(seen))
+        self.assertEqual(seen[0], seen[1])
         self.assertEqual("b" * 64, seen[0][2])
         self.assertIn(g["source"]["revision"], seen[0][1])      # the pinned revision, not a branch
         self.assertIn(g["source"]["huggingface"], seen[0][1])

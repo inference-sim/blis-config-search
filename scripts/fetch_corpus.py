@@ -32,9 +32,12 @@ HF_URL = "https://huggingface.co/datasets/{dataset}/resolve/{revision}/{path}"
 CHUNK = 1 << 20
 
 
-def _spec_descriptor(path):
-    """The replay block of a workload file named by `workload_spec` (relative to the repository)."""
+def _spec_descriptor(path, spec_dir=None):
+    """The replay block of a workload file named by `workload_spec` (relative to the repository, or
+    to the spec's directory when it starts with ./)."""
     root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    if path.startswith("./") and spec_dir:
+        root = spec_dir
     with open(os.path.join(root, path)) as f:
         return yaml.safe_load(f) or {}
 
@@ -104,7 +107,7 @@ def main():
     workload = sc.get("workload") or sc.get("workload_spec")
 
     if sc.get("workload_spec"):
-        desc = _spec_descriptor(sc["workload_spec"])
+        desc = _spec_descriptor(sc["workload_spec"], os.path.dirname(os.path.abspath(args.spec)))
     else:
         if not args.catalog:
             raise SystemExit("--catalog (or $SUBSTRATE_CATALOG) is required to read the workload descriptor")

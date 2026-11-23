@@ -59,6 +59,7 @@ jobs:
             specs=""
             for spec in $REQUESTED; do
               case "$spec" in
+                experiments/*/*) echo "spec must be experiments/<name>.yaml, not a file beside one: $spec" >&2; exit 1 ;;
                 experiments/*.yaml) ;;
                 *) echo "spec must be experiments/<name>.yaml: $spec" >&2; exit 1 ;;
               esac
@@ -70,7 +71,15 @@ jobs:
             # Only the specs this push touched (all its commits, not just the last one).
             old=HEAD^
             if [ -n "${BEFORE:-}" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then old="$BEFORE"; fi
-            specs="$(git diff --name-only --diff-filter=d "$old" HEAD -- 'experiments/*.yaml')"
+            # :(glob) keeps `*` from matching `/`: a file under experiments/<dir>/ is not a spec.
+            specs="$(git diff --name-only --diff-filter=d "$old" HEAD -- ':(glob)experiments/*.yaml')"
+            # A changed file beside a spec reruns each spec that names it as ./<dir>/<file>.
+            for f in $(git diff --name-only --diff-filter=d "$old" HEAD -- ':(glob)experiments/*/**'); do
+              for spec in experiments/*.yaml; do
+                if grep -qF -- "./${f#experiments/}" "$spec"; then specs="$specs"$'\n'"$spec"; fi
+              done
+            done
+            specs="$(printf '%s\n' "$specs" | sed '/^$/d' | sort -u)"
           fi
           echo "will run:"; echo "${specs:-none}"
           # JSON list for the sweep matrix: one job (runner, timeout, PR) per spec.

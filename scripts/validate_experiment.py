@@ -52,6 +52,8 @@ import catalog_drafters  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 ROUTING_DIR = os.path.join(ROOT, "routing")
+# A router file or workload file named with this prefix is beside the spec: ./routing/x.yaml.
+SPEC_PREFIX = router_configs.SPEC_PREFIX
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 # A sweep's `narrative` is the ONE line the report prints above that sweep's measured result, so
@@ -82,6 +84,12 @@ CATALOG_OWNED_REPLAY_FIELDS = frozenset({
     "cache_bust", "system_idle_gap_cap_s", "trajectory_start", "warmup",
     "split_flattened_agents",
 })
+# The scenario.replay keys the runner passes to BLIS (run_blis.build_replay_cmd); any other key would be
+# ignored, so it is refused. A workload file states the scenario, the digest and the context filter
+# itself, so beside one those three are not read either.
+REPLAY_KEYS = frozenset({"scenario", "corpus", "corpus_sha256", "corpus_cache", "max_context_length",
+                         "benchmark_duration", "grace_period", "server_series_interval_s"})
+REPLAY_KEYS_WITH_FILE = REPLAY_KEYS - {"scenario", "corpus_sha256", "max_context_length"}
 DURATION_RE = re.compile(r"^([0-9]+(?:\.[0-9]+)?)(us|ms|s)$")
 
 # ---------------------------------------------------------------------------------------------
@@ -381,16 +389,27 @@ def _check_gpu_math_pd(sweep, gpus, where, errs):
                     f"{list(dc_i)}), so this sweep expands to no runs")
 
 
-def _check_router(router, where, errs, routing_dir=ROUTING_DIR, router_cfg=None):
+def spec_router_file(path):
+    """A router file beside the spec, parsed and stripped: (doc, notes); see router_configs.prepare_spec_file.
+    Raises RouterConfigsError, OSError or yaml.YAMLError."""
+    with open(path, encoding="utf-8") as f:
+        doc = yaml.safe_load(f)
+    if not isinstance(doc, dict):
+        raise router_configs.RouterConfigsError("not an EndpointPickerConfig mapping")
+    return router_configs.prepare_spec_file(doc)
+
+
+def _check_router(router, where, errs, routing_dir=ROUTING_DIR, router_cfg=None, spec_dir=None):
     """Router files must exist, and every override combination must apply to its base file.
 
     A missing EndpointPickerConfig is the cheapest possible catch: BLIS would fail once per
-    run in the sweep, all for the same typo. A file is the local routing/ one or one of the router's
-    reference configs; the overrides are applied to the parsed file here, exactly as the runner
+    run in the sweep, all for the same typo. A file is the local routing/ one, one of the router's
+    reference configs, or a ./ file beside the spec (parsed, with the parts the embedded router
+    refuses named); the overrides are applied to the parsed file here, exactly as the runner
     will, so a knob the index does not list (or a decider the file cannot take) is rejected before
     any run.
     """
-    resolved = {}
+    resolved, beside = {}, {}
     for rel in (router.get("endpoint_picker_config") or []):
         if not isinstance(rel, str):
             continue
@@ -398,9 +417,16 @@ def _check_router(router, where, errs, routing_dir=ROUTING_DIR, router_cfg=None)
             errs.append(f"{where}.endpoint_picker_config: {rel!r} must be a plain file name")
             continue
         try:
-            resolved[rel] = router_configs.resolve(rel, routing_dir, router_cfg)
+            resolved[rel] = router_configs.resolve(rel, routing_dir, router_cfg, spec_dir)
         except router_configs.RouterConfigsError as e:
             errs.append(f"{where}.endpoint_picker_config: {e}")
+            continue
+        if resolved[rel][0] == "spec":
+            try:
+                beside[rel] = spec_router_file(resolved[rel][1])[0]
+            except (OSError, yaml.YAMLError, router_configs.RouterConfigsError) as e:
+                del resolved[rel]
+                errs.append(f"{where}.endpoint_picker_config: {rel}: {e}")
     for profile, refs in (router.get("schedulingProfiles") or {}).items():
         for ref, fields in (refs or {}).items():
             _check_value_lists(fields, f"{where}.schedulingProfiles.{profile}.{ref}", errs)
@@ -422,8 +448,11 @@ def _check_router(router, where, errs, routing_dir=ROUTING_DIR, router_cfg=None)
     if len(resolved) == 1 and (router.get("schedulingProfiles") or router.get("plugins")):
         rel, (_src, path, knobs) = next(iter(resolved.items()))
         try:
-            with open(path, encoding="utf-8") as f:
-                base = yaml.safe_load(f) or {}
+            if rel in beside:
+                base = beside[rel]
+            else:
+                with open(path, encoding="utf-8") as f:
+                    base = yaml.safe_load(f) or {}
         except (OSError, yaml.YAMLError) as e:
             errs.append(f"{where}.endpoint_picker_config: cannot read {rel}: {e}")
             return
@@ -530,19 +559,26 @@ def recipe_differences(doc):
     return out
 
 
-def workload_spec_errors(path, root=ROOT):
+def workload_spec_errors(path, root=ROOT, spec_dir=None):
     """Why the workload file at `path` cannot be a workload, else []. The file is read as the replay
     block of a catalog workload entry: `corpus.sha256` and `corpus.source` (a Hugging Face dataset
-    and revision, or a URL) are required, so every report names the bytes it replayed."""
+    and revision, or a URL) are required, so every report names the bytes it replayed. A ./ path is
+    a file beside the spec, in `spec_dir`."""
     import yaml
+    beside = path.startswith(SPEC_PREFIX)
+    if beside and not spec_dir:
+        return [f"scenario.workload_spec: {path!r} is beside the spec, but the spec's directory is not known"]
+    root = spec_dir if beside else root
+    where = "the spec's directory" if beside else "this repository"
     full = os.path.realpath(os.path.join(root, path))
     if not os.path.isabs(path) and not full.startswith(os.path.realpath(root) + os.sep):
-        return [f"scenario.workload_spec: {path!r} is outside this repository"]
+        return [f"scenario.workload_spec: {path!r} is outside {where}"]
     if os.path.isabs(path):
         return [f"scenario.workload_spec: {path!r} is an absolute path, which pins the spec to one "
-                f"machine -- use a path inside this repository, such as workloads/muse-cb-1m.yaml"]
+                f"machine -- use a path inside this repository, such as workloads/muse-cb-1m.yaml, "
+                f"or a ./ path beside the spec"]
     if not os.path.isfile(full):
-        return [f"scenario.workload_spec: {path!r}: no such file in this repository"]
+        return [f"scenario.workload_spec: {path!r}: no such file in {where}"]
     try:
         with open(full, encoding="utf-8") as f:
             doc = yaml.safe_load(f)
@@ -574,7 +610,7 @@ def workload_spec_errors(path, root=ROOT):
     return errs
 
 
-def workload_errors(sc, blis=None, root=ROOT):
+def workload_errors(sc, blis=None, root=ROOT, spec_dir=None):
     """`workload` (a catalog name) or `workload_spec` (a file), one of them and never both."""
     named, filed = sc.get("workload"), sc.get("workload_spec")
     if named and filed:
@@ -586,7 +622,7 @@ def workload_errors(sc, blis=None, root=ROOT):
     if filed:
         if not isinstance(filed, str):
             return ["scenario.workload_spec: must be a path string"]
-        return workload_spec_errors(filed, root)
+        return workload_spec_errors(filed, root, spec_dir)
     if str(named).startswith("agentx"):
         return [f"scenario.workload: {named!r} is the catalog's AgentX descriptor, which states no per-trajectory "
                 f"idle-gap cap and no warm-up: name `workload_spec: workloads/agentx-run-recipe.yaml` (the full "
@@ -595,15 +631,24 @@ def workload_errors(sc, blis=None, root=ROOT):
 
 
 def replay_errors(sc):
-    """`scenario.replay.server_series_interval_s`, when stated: a number of seconds above zero."""
+    """A `scenario.replay` key the runner never passes to BLIS (#197), and
+    `server_series_interval_s`, when stated: a number of seconds above zero."""
     rep = sc.get("replay")
-    if not isinstance(rep, dict) or "server_series_interval_s" not in rep:
+    if not isinstance(rep, dict):
         return []
+    passed = REPLAY_KEYS_WITH_FILE if sc.get("workload_spec") else REPLAY_KEYS
+    errs = [f"scenario.replay.{key}: never reaches BLIS (the runner passes only "
+            f"{', '.join(sorted(passed))}), so the run would ignore it. The replay's pacing "
+            f"(trace_idle_gap_cap_s, warmup, trajectory_start) is the workload file's: name a file "
+            f"with scenario.workload_spec, which may be a ./ path beside the spec"
+            for key in sorted(set(rep) - passed)]
+    if "server_series_interval_s" not in rep:
+        return errs
     v = rep["server_series_interval_s"]
     if isinstance(v, bool) or not isinstance(v, (int, float)) or not v > 0:
-        return ["scenario.replay.server_series_interval_s: must be a number of seconds above 0; "
-                "leave it out to collect no series"]
-    return []
+        errs.append("scenario.replay.server_series_interval_s: must be a number of seconds above 0; "
+                    "leave it out to collect no series")
+    return errs
 
 
 def cluster_errors(sc, blis=None, catalog=None):
@@ -693,8 +738,10 @@ def advisories(spec, path=None):
     # grace period and context filter from blis-catalog/workloads/<name>.yaml, and still refuses
     # a corpus whose bytes do not match -- so none of those belong in a spec.
     rep = ((spec.get("scenario") or {}).get("replay") or {})
-    # (A workload named by a file states these in the file, and the spec still must not.)
-    for key in sorted(set(rep) & CATALOG_OWNED_REPLAY_FIELDS):
+    # (A workload named by a file states these in the file, and the spec still must not.) A key the
+    # runner never passes is refused by replay_errors instead.
+    passed = REPLAY_KEYS_WITH_FILE if (spec.get("scenario") or {}).get("workload_spec") else REPLAY_KEYS
+    for key in sorted(set(rep) & CATALOG_OWNED_REPLAY_FIELDS & passed):
         notes.append(
             f"scenario.replay.{key}: already stated by the workload's descriptor, which "
             f"the sweeper reads -- remove it rather than keeping a copy that can drift")
@@ -707,6 +754,16 @@ def advisories(spec, path=None):
         if not isinstance(sw, dict):
             continue
         where = f"sweeps[{i}]({sw.get('name', '?')})"
+        router = sw.get("router") if isinstance(sw.get("router"), dict) else {}
+        bases = router.get("endpoint_picker_config")
+        for rel in (bases if path and isinstance(bases, list) else []):
+            if isinstance(rel, str) and rel.startswith(SPEC_PREFIX):
+                try:
+                    found = router_configs.resolve(rel, None, None, os.path.dirname(os.path.abspath(path)))
+                    stripped = spec_router_file(found[1])[1]
+                except (OSError, yaml.YAMLError, router_configs.RouterConfigsError):
+                    continue            # validate() reports it
+                notes += [f"{where}.router.endpoint_picker_config: {rel}: {n}" for n in stripped]
         text = " ".join(str(sw.get("narrative") or "").split())
         if len(text) > NARRATIVE_CHARS:
             # The REASON is printed once per run by main(), not once per sweep: repeating it 51
@@ -942,11 +999,13 @@ def _ask_field_list(blis, catalog, spec):
     return None
 
 
-def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, router_cfg=None):
+def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, router_cfg=None,
+             spec_dir=None):
     """Every error in `spec`, as readable `path: message` strings. Empty means valid.
 
     `router_cfg` is the router's reference configs (router_configs.open_checkout) a spec may name;
-    None reads them from `blis router-configs --json`.
+    None reads them from `blis router-configs --json`. `spec_dir` is the spec's directory, where a
+    ./ router file or workload file is read from.
 
     `blis` is the simulator binary whose commands supply the names (`blis fields`, `blis
     schema deployment`) and the catalog identities (`blis catalog resolve`). `catalog` names a
@@ -1002,7 +1061,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
         for key in ("model", "hardware"):
             if not sc.get(key):
                 errs.append(f"scenario.{key}: required")
-        errs.extend(workload_errors(sc, blis))
+        errs.extend(workload_errors(sc, blis, spec_dir=spec_dir))
         # Present AND real: a name the catalog does not define cannot run anywhere.
         errs.extend(scenario_identity_errors(sc, blis, catalog))
         errs.extend(cluster_errors(sc, blis, catalog))
@@ -1168,7 +1227,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
                         errs.append(f"{where}.router: overrides apply to ONE base file, but "
                                     f"{len(bases)} are listed ({', '.join(map(str, bases))}); "
                                     f"split into separate sweeps")
-                _check_router(router, f"{where}.router", errs, routing_dir, router_cfg)
+                _check_router(router, f"{where}.router", errs, routing_dir, router_cfg, spec_dir)
 
         if isinstance(sc.get("gpus"), int) and not isinstance(sc.get("gpus"), bool):
             if disagg:
@@ -1361,7 +1420,8 @@ def main(argv=None):
             rel = path
         spec, err = load(path)
         try:
-            errs = [err] if err else validate(spec, args.blis, args.routing, args.catalog, args.fields, router_cfg)
+            errs = [err] if err else validate(spec, args.blis, args.routing, args.catalog, args.fields, router_cfg,
+                                              os.path.dirname(os.path.abspath(path)))
         except blis_cli.BlisCommandError as e:
             print(f"validate_experiment: {rel}: {e}", file=sys.stderr)
             return 2

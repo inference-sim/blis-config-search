@@ -1,0 +1,4503 @@
+{
+  "dropped": [
+    {
+      "count": 1,
+      "gpus": 4,
+      "reason": "uses 4 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 2,
+      "gpus": 8,
+      "reason": "uses 8 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 2,
+      "gpus": 12,
+      "reason": "uses 12 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 1,
+      "gpus": 16,
+      "reason": "uses 16 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 4,
+      "gpus": 24,
+      "reason": "uses 24 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 3,
+      "gpus": 36,
+      "reason": "uses 36 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 2,
+      "gpus": 48,
+      "reason": "uses 48 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 2,
+      "gpus": 108,
+      "reason": "uses 108 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 2,
+      "gpus": 144,
+      "reason": "uses 144 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 3,
+      "gpus": 216,
+      "reason": "uses 216 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 1,
+      "gpus": 324,
+      "reason": "uses 324 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 1,
+      "gpus": 432,
+      "reason": "uses 432 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 1,
+      "gpus": 648,
+      "reason": "uses 648 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 4,
+      "gpus": 24,
+      "reason": "uses 24 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 4,
+      "gpus": 216,
+      "reason": "uses 216 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 4,
+      "gpus": 40,
+      "reason": "uses 40 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 8,
+      "gpus": 48,
+      "reason": "uses 48 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 12,
+      "gpus": 56,
+      "reason": "uses 56 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 16,
+      "gpus": 64,
+      "reason": "uses 64 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 16,
+      "gpus": 80,
+      "reason": "uses 80 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 12,
+      "gpus": 88,
+      "reason": "uses 88 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 8,
+      "gpus": 96,
+      "reason": "uses 96 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 4,
+      "gpus": 104,
+      "reason": "uses 104 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 1,
+      "gpus": 40,
+      "reason": "uses 40 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 2,
+      "gpus": 48,
+      "reason": "uses 48 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 3,
+      "gpus": 56,
+      "reason": "uses 56 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 4,
+      "gpus": 64,
+      "reason": "uses 64 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 4,
+      "gpus": 80,
+      "reason": "uses 80 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 3,
+      "gpus": 88,
+      "reason": "uses 88 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 2,
+      "gpus": 96,
+      "reason": "uses 96 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 1,
+      "gpus": 104,
+      "reason": "uses 104 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 2,
+      "gpus": 40,
+      "reason": "uses 40 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 4,
+      "gpus": 56,
+      "reason": "uses 56 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 4,
+      "gpus": 88,
+      "reason": "uses 88 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 2,
+      "gpus": 104,
+      "reason": "uses 104 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 2,
+      "gpus": 40,
+      "reason": "uses 40 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 4,
+      "gpus": 56,
+      "reason": "uses 56 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 4,
+      "gpus": 88,
+      "reason": "uses 88 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 2,
+      "gpus": 104,
+      "reason": "uses 104 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 4,
+      "gpus": 56,
+      "reason": "uses 56 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 4,
+      "gpus": 88,
+      "reason": "uses 88 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 3,
+      "gpus": 24,
+      "reason": "uses 24 GPUs, not the scenario's 72"
+    },
+    {
+      "count": 3,
+      "gpus": 216,
+      "reason": "uses 216 GPUs, not the scenario's 72"
+    }
+  ],
+  "finalists": [
+    {
+      "at_c_use": {
+        "interactivity": 51.419,
+        "itl_p99_ms": 108.369,
+        "tok_per_s_per_user": 9.2,
+        "tokens_per_sec": 6181.2,
+        "tokens_per_sec_per_gpu": 85.85,
+        "total_tokens_per_sec_per_gpu": 8685.573
+      },
+      "c_star": 256,
+      "c_use": 256,
+      "config": {
+        "concurrency": 256,
+        "dp": 1,
+        "enable_expert_parallel": true,
+        "max_model_len": 262144,
+        "num_instances": 9,
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 17.917,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 55.8,
+          "tokens_per_sec": 1865.8,
+          "ttft_p99_ms": 2334.4
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 24.321,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 41.1,
+          "tokens_per_sec": 3721.7,
+          "ttft_p99_ms": 4929.5
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 108.369,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 9.2,
+          "tokens_per_sec": 6181.2,
+          "ttft_p99_ms": 8470.8
+        },
+        {
+          "concurrency": 512,
+          "itl_p99_ms": 432.383,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 2.3,
+          "tokens_per_sec": 3450.0,
+          "ttft_p99_ms": 23110.9
+        }
+      ],
+      "gpus": 72,
+      "label": "9x TP8 + EP",
+      "sweep": "colocated",
+      "variant": ""
+    },
+    {
+      "at_c_use": {
+        "interactivity": 52.916,
+        "itl_p99_ms": 106.021,
+        "tok_per_s_per_user": 9.4,
+        "tokens_per_sec": 6405.5,
+        "tokens_per_sec_per_gpu": 88.97,
+        "total_tokens_per_sec_per_gpu": 9004.134
+      },
+      "c_star": 256,
+      "c_use": 256,
+      "config": {
+        "concurrency": 256,
+        "dp": 1,
+        "enable_expert_parallel": true,
+        "long_prefill_token_threshold": 2048,
+        "max_model_len": 262144,
+        "max_num_batched_tokens": 8192,
+        "num_instances": 9,
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 18.749,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 53.3,
+          "tokens_per_sec": 1872.6,
+          "ttft_p99_ms": 3124.5
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 32.331,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 30.9,
+          "tokens_per_sec": 3718.8,
+          "ttft_p99_ms": 3971.0
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 106.021,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 9.4,
+          "tokens_per_sec": 6405.5,
+          "ttft_p99_ms": 11835.6
+        },
+        {
+          "concurrency": 512,
+          "itl_p99_ms": 232.339,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 4.3,
+          "tokens_per_sec": 3647.0,
+          "ttft_p99_ms": 33726.5
+        }
+      ],
+      "gpus": 72,
+      "label": "9x TP8 + EP",
+      "sweep": "colocated-tuned",
+      "variant": "prefill chunk 2,048"
+    },
+    {
+      "at_c_use": {
+        "interactivity": 65.59,
+        "itl_p99_ms": 19.761,
+        "tok_per_s_per_user": 50.6,
+        "tokens_per_sec": 3455.4,
+        "tokens_per_sec_per_gpu": 47.99,
+        "total_tokens_per_sec_per_gpu": 4721.152
+      },
+      "c_star": 128,
+      "c_use": 128,
+      "config": {
+        "concurrency": 128,
+        "decode_enable_expert_parallel": true,
+        "decode_instances": 4,
+        "decode_tp": 8,
+        "max_model_len": 262144,
+        "num_instances": 9,
+        "prefill_enable_expert_parallel": true,
+        "prefill_instances": 5,
+        "prefill_tp": 8,
+        "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-9b34c1ca9f.yaml",
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 16.438,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 60.8,
+          "tokens_per_sec": 1814.9,
+          "ttft_p99_ms": 4004.2
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 19.649,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 50.9,
+          "tokens_per_sec": 3425.3,
+          "ttft_p99_ms": 17298.8
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 22.579,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 44.3,
+          "tokens_per_sec": 2347.0,
+          "ttft_p99_ms": 138524.0
+        },
+        {
+          "concurrency": 512,
+          "itl_p99_ms": 18.419,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 54.3,
+          "tokens_per_sec": 2318.8,
+          "ttft_p99_ms": 282228.0
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 15.737,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 63.5,
+          "tokens_per_sec": 1825.6,
+          "ttft_p99_ms": 5370.6
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 19.761,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 50.6,
+          "tokens_per_sec": 3455.4,
+          "ttft_p99_ms": 12671.4
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 19.503,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 51.3,
+          "tokens_per_sec": 2342.3,
+          "ttft_p99_ms": 143129.0
+        },
+        {
+          "concurrency": 512,
+          "itl_p99_ms": 17.621,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 56.7,
+          "tokens_per_sec": 2359.8,
+          "ttft_p99_ms": 307677.7
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 16.318,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 61.3,
+          "tokens_per_sec": 1823.9,
+          "ttft_p99_ms": 3719.1
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 21.334,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 46.9,
+          "tokens_per_sec": 3442.5,
+          "ttft_p99_ms": 11480.3
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 20.98,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 47.7,
+          "tokens_per_sec": 2324.7,
+          "ttft_p99_ms": 143069.9
+        },
+        {
+          "concurrency": 512,
+          "itl_p99_ms": 18.911,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 52.9,
+          "tokens_per_sec": 2346.1,
+          "ttft_p99_ms": 286891.3
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 16.784,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 59.6,
+          "tokens_per_sec": 1818.0,
+          "ttft_p99_ms": 3804.2
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 20.187,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 49.5,
+          "tokens_per_sec": 3411.1,
+          "ttft_p99_ms": 10996.5
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 24.384,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 41.0,
+          "tokens_per_sec": 2475.4,
+          "ttft_p99_ms": 145675.7
+        },
+        {
+          "concurrency": 512,
+          "itl_p99_ms": 19.413,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 51.5,
+          "tokens_per_sec": 2401.9,
+          "ttft_p99_ms": 305360.9
+        }
+      ],
+      "gpus": 72,
+      "label": "5P/4D TP8 + EP",
+      "sweep": "pd-ratio",
+      "variant": ""
+    },
+    {
+      "at_c_use": {
+        "interactivity": 66.159,
+        "itl_p99_ms": 19.767,
+        "tok_per_s_per_user": 50.6,
+        "tokens_per_sec": 3452.9,
+        "tokens_per_sec_per_gpu": 47.96,
+        "total_tokens_per_sec_per_gpu": 4715.981
+      },
+      "c_star": 128,
+      "c_use": 128,
+      "config": {
+        "concurrency": 128,
+        "decode_enable_expert_parallel": true,
+        "decode_instances": 4,
+        "decode_tp": 8,
+        "max_model_len": 262144,
+        "num_instances": 9,
+        "prefill_enable_expert_parallel": true,
+        "prefill_instances": 5,
+        "prefill_tp": 8,
+        "router_config": "routing/pd-always.yaml",
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 15.701,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 63.7,
+          "tokens_per_sec": 1824.4,
+          "ttft_p99_ms": 3668.6
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 19.767,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 50.6,
+          "tokens_per_sec": 3452.9,
+          "ttft_p99_ms": 13120.0
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 21.332,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 46.9,
+          "tokens_per_sec": 2342.2,
+          "ttft_p99_ms": 136292.8
+        },
+        {
+          "concurrency": 512,
+          "itl_p99_ms": 17.002,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 58.8,
+          "tokens_per_sec": 2304.4,
+          "ttft_p99_ms": 301464.1
+        }
+      ],
+      "gpus": 72,
+      "label": "5P/4D TP8 + EP",
+      "sweep": "pd-always",
+      "variant": ""
+    },
+    {
+      "at_c_use": {
+        "interactivity": 49.379,
+        "itl_p99_ms": 23.84,
+        "tok_per_s_per_user": 41.9,
+        "tokens_per_sec": 3131.0,
+        "tokens_per_sec_per_gpu": 43.49,
+        "total_tokens_per_sec_per_gpu": 4325.62
+      },
+      "c_star": 128,
+      "c_use": 128,
+      "config": {
+        "concurrency": 128,
+        "decode_enable_expert_parallel": true,
+        "decode_instances": 2,
+        "decode_tp": 16,
+        "max_model_len": 262144,
+        "num_instances": 7,
+        "prefill_enable_expert_parallel": true,
+        "prefill_instances": 5,
+        "prefill_tp": 8,
+        "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 19.165,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 52.2,
+          "tokens_per_sec": 1672.3,
+          "ttft_p99_ms": 5436.1
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 23.84,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 41.9,
+          "tokens_per_sec": 3131.0,
+          "ttft_p99_ms": 8942.0
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 22.909,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 43.7,
+          "tokens_per_sec": 2684.0,
+          "ttft_p99_ms": 132536.6
+        },
+        {
+          "concurrency": 512,
+          "itl_p99_ms": 21.289,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 47.0,
+          "tokens_per_sec": 2310.7,
+          "ttft_p99_ms": 285278.6
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 20.233,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 49.4,
+          "tokens_per_sec": 1676.9,
+          "ttft_p99_ms": 4647.9
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 23.152,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 43.2,
+          "tokens_per_sec": 3116.9,
+          "ttft_p99_ms": 9918.6
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 23.462,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 42.6,
+          "tokens_per_sec": 2331.6,
+          "ttft_p99_ms": 150357.1
+        },
+        {
+          "concurrency": 512,
+          "itl_p99_ms": 23.003,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 43.5,
+          "tokens_per_sec": 2365.8,
+          "ttft_p99_ms": 298662.9
+        }
+      ],
+      "gpus": 72,
+      "label": "5P TP8 + EP / 2D TP16 + EP",
+      "sweep": "pd-wide-decode",
+      "variant": ""
+    },
+    {
+      "at_c_use": {
+        "interactivity": 44.905,
+        "itl_p99_ms": 30.154,
+        "tok_per_s_per_user": 33.2,
+        "tokens_per_sec": 4870.7,
+        "tokens_per_sec_per_gpu": 67.65,
+        "total_tokens_per_sec_per_gpu": 6741.767
+      },
+      "c_star": 256,
+      "c_use": 256,
+      "config": {
+        "concurrency": 256,
+        "decode_enable_expert_parallel": true,
+        "decode_instances": 3,
+        "decode_tp": 8,
+        "max_model_len": 262144,
+        "num_instances": 6,
+        "prefill_enable_expert_parallel": true,
+        "prefill_instances": 3,
+        "prefill_tp": 16,
+        "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+        "tp": 16
+      },
+      "curve": [
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 17.977,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 55.6,
+          "tokens_per_sec": 1791.1,
+          "ttft_p99_ms": 2334.8
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 23.11,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 43.3,
+          "tokens_per_sec": 3339.0,
+          "ttft_p99_ms": 4448.8
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 30.154,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 33.2,
+          "tokens_per_sec": 4870.7,
+          "ttft_p99_ms": 98884.0
+        },
+        {
+          "concurrency": 512,
+          "itl_p99_ms": 16.54,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 60.5,
+          "tokens_per_sec": 1614.9,
+          "ttft_p99_ms": 426056.2
+        },
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 17.272,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 57.9,
+          "tokens_per_sec": 1790.0,
+          "ttft_p99_ms": 2352.5
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 23.747,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 42.1,
+          "tokens_per_sec": 3319.5,
+          "ttft_p99_ms": 6123.5
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 28.77,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 34.8,
+          "tokens_per_sec": 4733.4,
+          "ttft_p99_ms": 60852.2
+        },
+        {
+          "concurrency": 512,
+          "itl_p99_ms": 16.753,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 59.7,
+          "tokens_per_sec": 1637.3,
+          "ttft_p99_ms": 413933.2
+        }
+      ],
+      "gpus": 72,
+      "label": "3P TP16 + EP / 3D TP8 + EP",
+      "sweep": "pd-wide-prefill",
+      "variant": ""
+    },
+    {
+      "at_c_use": {
+        "interactivity": 74.236,
+        "itl_p99_ms": 18.209,
+        "tok_per_s_per_user": 54.9,
+        "tokens_per_sec": 3049.4,
+        "tokens_per_sec_per_gpu": 42.35,
+        "total_tokens_per_sec_per_gpu": 4170.171
+      },
+      "c_star": 128,
+      "c_use": 128,
+      "config": {
+        "concurrency": 128,
+        "decode_enable_expert_parallel": true,
+        "decode_instances": 5,
+        "decode_long_prefill_token_threshold": 2048,
+        "decode_tp": 8,
+        "max_model_len": 262144,
+        "num_instances": 9,
+        "prefill_enable_expert_parallel": true,
+        "prefill_instances": 4,
+        "prefill_max_num_batched_tokens": 32768,
+        "prefill_tp": 8,
+        "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 15.513,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 64.5,
+          "tokens_per_sec": 1838.6,
+          "ttft_p99_ms": 5422.2
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 18.209,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 54.9,
+          "tokens_per_sec": 3049.4,
+          "ttft_p99_ms": 36097.5
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 18.003,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 55.5,
+          "tokens_per_sec": 1934.5,
+          "ttft_p99_ms": 170785.6
+        },
+        {
+          "concurrency": 512,
+          "itl_p99_ms": 16.793,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 59.6,
+          "tokens_per_sec": 1956.0,
+          "ttft_p99_ms": 361996.7
+        }
+      ],
+      "gpus": 72,
+      "label": "4P/5D TP8 + EP",
+      "sweep": "pd-pool-engine",
+      "variant": "decode prefill chunk 2,048 \u00b7 prefill batch tokens 32,768"
+    },
+    {
+      "at_c_use": {
+        "interactivity": 79.341,
+        "itl_p99_ms": 15.948,
+        "tok_per_s_per_user": 62.7,
+        "tokens_per_sec": 2701.6,
+        "tokens_per_sec_per_gpu": 37.52,
+        "total_tokens_per_sec_per_gpu": 3662.538
+      },
+      "c_star": 128,
+      "c_use": 128,
+      "config": {
+        "concurrency": 128,
+        "decode_cudagraph_mode": "FULL_DECODE_ONLY",
+        "decode_enable_expert_parallel": true,
+        "decode_instances": 6,
+        "decode_tp": 8,
+        "max_model_len": 262144,
+        "num_instances": 9,
+        "prefill_enable_expert_parallel": true,
+        "prefill_instances": 3,
+        "prefill_tp": 8,
+        "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 15.889,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 62.9,
+          "tokens_per_sec": 1841.2,
+          "ttft_p99_ms": 5338.0
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 15.948,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 62.7,
+          "tokens_per_sec": 2701.6,
+          "ttft_p99_ms": 47590.2
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 16.507,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 60.6,
+          "tokens_per_sec": 1418.3,
+          "ttft_p99_ms": 238170.2
+        },
+        {
+          "concurrency": 512,
+          "itl_p99_ms": 13.252,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 75.5,
+          "tokens_per_sec": 1442.8,
+          "ttft_p99_ms": 474981.2
+        }
+      ],
+      "gpus": 72,
+      "label": "3P/6D TP8 + EP",
+      "sweep": "pd-decode-cudagraph",
+      "variant": "decode graph capture full decode only"
+    },
+    {
+      "at_c_use": {
+        "interactivity": 51.458,
+        "itl_p99_ms": 186.151,
+        "tok_per_s_per_user": 5.4,
+        "tokens_per_sec": 5871.8,
+        "tokens_per_sec_per_gpu": 81.55,
+        "total_tokens_per_sec_per_gpu": 8231.027
+      },
+      "c_star": 256,
+      "c_use": 256,
+      "config": {
+        "concurrency": 256,
+        "dp": 1,
+        "enable_expert_parallel": true,
+        "max_model_len": 262144,
+        "num_instances": 9,
+        "router_config": "routing/prefix-affinity.yaml",
+        "tp": 8
+      },
+      "curve": [
+        {
+          "concurrency": 64,
+          "itl_p99_ms": 18.059,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 55.4,
+          "tokens_per_sec": 1863.0,
+          "ttft_p99_ms": 2473.2
+        },
+        {
+          "concurrency": 128,
+          "itl_p99_ms": 37.806,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 26.5,
+          "tokens_per_sec": 3697.1,
+          "ttft_p99_ms": 4765.8
+        },
+        {
+          "concurrency": 256,
+          "itl_p99_ms": 186.151,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 5.4,
+          "tokens_per_sec": 5871.8,
+          "ttft_p99_ms": 11660.6
+        },
+        {
+          "concurrency": 512,
+          "itl_p99_ms": 439.395,
+          "preemption_count": 0,
+          "tok_per_s_per_user": 2.3,
+          "tokens_per_sec": 3831.3,
+          "ttft_p99_ms": 97393.1
+        }
+      ],
+      "gpus": 72,
+      "label": "9x TP8 + EP",
+      "sweep": "routing",
+      "variant": ""
+    }
+  ],
+  "front": {
+    "interval": null,
+    "overall": {
+      "decode": {
+        "members": [
+          {
+            "concurrency": 256,
+            "config": {
+              "concurrency": 256,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 3,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 6,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_tp": 16,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 16
+            },
+            "disaggregated": true,
+            "interactivity": 44.905,
+            "label": "3P TP16 + EP / 3D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-wide-prefill",
+            "throughput_per_gpu": 202.945,
+            "variant": ""
+          },
+          {
+            "concurrency": 256,
+            "config": {
+              "concurrency": 256,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 3,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 6,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_tp": 16,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+              "tp": 16
+            },
+            "disaggregated": true,
+            "interactivity": 45.464,
+            "label": "3P TP16 + EP / 3D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-wide-prefill",
+            "throughput_per_gpu": 197.224,
+            "variant": ""
+          },
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 3,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 6,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_tp": 16,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 16
+            },
+            "disaggregated": true,
+            "interactivity": 58.33,
+            "label": "3P TP16 + EP / 3D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-wide-prefill",
+            "throughput_per_gpu": 139.123,
+            "variant": ""
+          },
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 4,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 5,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-9b34c1ca9f.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 65.59,
+            "label": "5P/4D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-ratio",
+            "throughput_per_gpu": 107.981,
+            "variant": ""
+          },
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 4,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 5,
+              "prefill_tp": 8,
+              "router_config": "routing/pd-always.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 66.159,
+            "label": "5P/4D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-always",
+            "throughput_per_gpu": 107.904,
+            "variant": ""
+          },
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 5,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 7,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 2,
+              "prefill_tp": 16,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 16
+            },
+            "disaggregated": true,
+            "interactivity": 71.988,
+            "label": "2P TP16 + EP / 5D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-wide-prefill",
+            "throughput_per_gpu": 83.426,
+            "variant": ""
+          },
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 5,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-2e520e62ae.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 72.099,
+            "label": "4P/5D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-ratio",
+            "throughput_per_gpu": 81.944,
+            "variant": ""
+          },
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 5,
+              "decode_long_prefill_token_threshold": 2048,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 74.236,
+            "label": "4P/5D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-pool-engine",
+            "throughput_per_gpu": 76.234,
+            "variant": "decode prefill chunk 2,048 \u00b7 prefill batch tokens 32,768"
+          },
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 5,
+              "decode_long_prefill_token_threshold": 2048,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 74.339,
+            "label": "4P/5D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-pool-engine",
+            "throughput_per_gpu": 75.243,
+            "variant": "decode prefill chunk 2,048"
+          },
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 5,
+              "decode_long_prefill_token_threshold": 0,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 74.687,
+            "label": "4P/5D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-pool-engine",
+            "throughput_per_gpu": 74.659,
+            "variant": ""
+          },
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 5,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-9b34c1ca9f.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 75.02,
+            "label": "4P/5D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-ratio",
+            "throughput_per_gpu": 73.081,
+            "variant": ""
+          },
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 6,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_tp": 8,
+              "router_config": "routing/pd-always.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 78.883,
+            "label": "3P/6D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-always",
+            "throughput_per_gpu": 58.541,
+            "variant": ""
+          },
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 6,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-2e520e62ae.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 79.31,
+            "label": "3P/6D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-ratio",
+            "throughput_per_gpu": 57.513,
+            "variant": ""
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 4,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 5,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-9b34c1ca9f.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 79.669,
+            "label": "5P/4D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-ratio",
+            "throughput_per_gpu": 57.049,
+            "variant": ""
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 4,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 5,
+              "prefill_tp": 8,
+              "router_config": "routing/pd-always.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 79.785,
+            "label": "5P/4D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-always",
+            "throughput_per_gpu": 57.011,
+            "variant": ""
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 4,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 5,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 80.008,
+            "label": "5P/4D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-ratio",
+            "throughput_per_gpu": 56.715,
+            "variant": ""
+          },
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 6,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 80.378,
+            "label": "3P/6D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-ratio",
+            "throughput_per_gpu": 54.553,
+            "variant": ""
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 5,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 7,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 2,
+              "prefill_tp": 16,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+              "tp": 16
+            },
+            "disaggregated": true,
+            "interactivity": 82.319,
+            "label": "2P TP16 + EP / 5D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-wide-prefill",
+            "throughput_per_gpu": 46.037,
+            "variant": ""
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 5,
+              "decode_long_prefill_token_threshold": 2048,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 82.67,
+            "label": "4P/5D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-pool-engine",
+            "throughput_per_gpu": 45.965,
+            "variant": "decode prefill chunk 2,048 \u00b7 prefill batch tokens 32,768"
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 5,
+              "decode_long_prefill_token_threshold": 0,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 32768,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 82.67,
+            "label": "4P/5D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-pool-engine",
+            "throughput_per_gpu": 45.965,
+            "variant": "prefill batch tokens 32,768"
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 5,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-9b34c1ca9f.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 83.164,
+            "label": "4P/5D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-ratio",
+            "throughput_per_gpu": 45.932,
+            "variant": ""
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 5,
+              "decode_long_prefill_token_threshold": 0,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 83.234,
+            "label": "4P/5D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-pool-engine",
+            "throughput_per_gpu": 45.844,
+            "variant": ""
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 5,
+              "decode_long_prefill_token_threshold": 2048,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 4,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 83.234,
+            "label": "4P/5D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-pool-engine",
+            "throughput_per_gpu": 45.844,
+            "variant": "decode prefill chunk 2,048"
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 6,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 84.43,
+            "label": "3P/6D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-ratio",
+            "throughput_per_gpu": 38.626,
+            "variant": ""
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 6,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_tp": 8,
+              "router_config": "routing/pd-always.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 85.55,
+            "label": "3P/6D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-always",
+            "throughput_per_gpu": 38.403,
+            "variant": ""
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 6,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 85.802,
+            "label": "3P/6D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-ratio",
+            "throughput_per_gpu": 38.374,
+            "variant": ""
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_cudagraph_mode": "FULL",
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 6,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 85.803,
+            "label": "3P/6D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-decode-cudagraph",
+            "throughput_per_gpu": 38.361,
+            "variant": ""
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 7,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 1,
+              "prefill_tp": 16,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+              "tp": 16
+            },
+            "disaggregated": true,
+            "interactivity": 86.743,
+            "label": "1P TP16 + EP / 7D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-wide-prefill",
+            "throughput_per_gpu": 33.117,
+            "variant": ""
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 7,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 8,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 1,
+              "prefill_tp": 16,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+              "tp": 16
+            },
+            "disaggregated": true,
+            "interactivity": 87.406,
+            "label": "1P TP16 + EP / 7D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-wide-prefill",
+            "throughput_per_gpu": 33.103,
+            "variant": ""
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 7,
+              "decode_long_prefill_token_threshold": 0,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 2,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 87.533,
+            "label": "2P/7D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-pool-engine",
+            "throughput_per_gpu": 31.952,
+            "variant": ""
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 7,
+              "decode_long_prefill_token_threshold": 2048,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 2,
+              "prefill_max_num_batched_tokens": 8192,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 87.533,
+            "label": "2P/7D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-pool-engine",
+            "throughput_per_gpu": 31.952,
+            "variant": "decode prefill chunk 2,048"
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 7,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 2,
+              "prefill_tp": 8,
+              "router_config": "routing/pd-always.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 87.765,
+            "label": "2P/7D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-always",
+            "throughput_per_gpu": 31.841,
+            "variant": ""
+          }
+        ],
+        "points": 69,
+        "unrated": 76
+      },
+      "total": {
+        "members": [
+          {
+            "concurrency": 256,
+            "config": {
+              "concurrency": 256,
+              "dp": 1,
+              "enable_expert_parallel": true,
+              "long_prefill_token_threshold": 2048,
+              "max_model_len": 262144,
+              "max_num_batched_tokens": 8192,
+              "num_instances": 9,
+              "tp": 8
+            },
+            "disaggregated": false,
+            "interactivity": 52.916,
+            "label": "9x TP8 + EP",
+            "status": "front",
+            "sweep": "colocated-tuned",
+            "throughput_per_gpu": 9004.134,
+            "variant": "prefill chunk 2,048"
+          },
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "dp": 1,
+              "enable_expert_parallel": true,
+              "long_prefill_token_threshold": 0,
+              "max_model_len": 262144,
+              "max_num_batched_tokens": 8192,
+              "num_instances": 9,
+              "tp": 8
+            },
+            "disaggregated": false,
+            "interactivity": 77.199,
+            "label": "9x TP8 + EP",
+            "status": "front",
+            "sweep": "colocated-tuned",
+            "throughput_per_gpu": 5119.003,
+            "variant": ""
+          },
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "dp": 1,
+              "enable_expert_parallel": true,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "tp": 8
+            },
+            "disaggregated": false,
+            "interactivity": 77.271,
+            "label": "9x TP8 + EP",
+            "status": "front",
+            "sweep": "colocated",
+            "throughput_per_gpu": 5108.233,
+            "variant": ""
+          },
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 6,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_tp": 8,
+              "router_config": "routing/pd-always.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 78.883,
+            "label": "3P/6D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-always",
+            "throughput_per_gpu": 3817.55,
+            "variant": ""
+          },
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 6,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-2e520e62ae.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 79.31,
+            "label": "3P/6D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-ratio",
+            "throughput_per_gpu": 3745.269,
+            "variant": ""
+          },
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "decode_cudagraph_mode": "FULL_DECODE_ONLY",
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 6,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 79.341,
+            "label": "3P/6D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-decode-cudagraph",
+            "throughput_per_gpu": 3662.538,
+            "variant": "decode graph capture full decode only"
+          },
+          {
+            "concurrency": 128,
+            "config": {
+              "concurrency": 128,
+              "decode_enable_expert_parallel": true,
+              "decode_instances": 6,
+              "decode_tp": 8,
+              "max_model_len": 262144,
+              "num_instances": 9,
+              "prefill_enable_expert_parallel": true,
+              "prefill_instances": 3,
+              "prefill_tp": 8,
+              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+              "tp": 8
+            },
+            "disaggregated": true,
+            "interactivity": 80.378,
+            "label": "3P/6D TP8 + EP",
+            "status": "front",
+            "sweep": "pd-ratio",
+            "throughput_per_gpu": 3542.423,
+            "variant": ""
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "dp": 1,
+              "enable_expert_parallel": true,
+              "long_prefill_token_threshold": 2048,
+              "max_model_len": 262144,
+              "max_num_batched_tokens": 8192,
+              "num_instances": 9,
+              "tp": 8
+            },
+            "disaggregated": false,
+            "interactivity": 88.158,
+            "label": "9x TP8 + EP",
+            "status": "front",
+            "sweep": "colocated-tuned",
+            "throughput_per_gpu": 2740.255,
+            "variant": "prefill chunk 2,048"
+          },
+          {
+            "concurrency": 64,
+            "config": {
+              "concurrency": 64,
+              "dp": 1,
+              "enable_expert_parallel": true,
+              "long_prefill_token_threshold": 0,
+              "max_model_len": 262144,
+              "max_num_batched_tokens": 32768,
+              "num_instances": 9,
+              "tp": 8
+            },
+            "disaggregated": false,
+            "interactivity": 88.593,
+            "label": "9x TP8 + EP",
+            "status": "front",
+            "sweep": "colocated-tuned",
+            "throughput_per_gpu": 2733.375,
+            "variant": "batch tokens 32,768"
+          }
+        ],
+        "points": 145,
+        "unrated": 0
+      }
+    },
+    "sweeps": [
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 20
+        },
+        "name": "colocated",
+        "total": {
+          "members": [
+            {
+              "concurrency": 256,
+              "config": {
+                "concurrency": 256,
+                "dp": 1,
+                "enable_expert_parallel": true,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 51.419,
+              "label": "9x TP8 + EP",
+              "status": "front",
+              "sweep": "colocated",
+              "throughput_per_gpu": 8685.573,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "dp": 1,
+                "enable_expert_parallel": true,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 77.271,
+              "label": "9x TP8 + EP",
+              "status": "front",
+              "sweep": "colocated",
+              "throughput_per_gpu": 5108.233,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "dp": 1,
+                "enable_expert_parallel": true,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 88.043,
+              "label": "9x TP8 + EP",
+              "status": "front",
+              "sweep": "colocated",
+              "throughput_per_gpu": 2737.444,
+              "variant": ""
+            }
+          ],
+          "points": 20,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 32
+        },
+        "name": "colocated-tuned",
+        "total": {
+          "members": [
+            {
+              "concurrency": 256,
+              "config": {
+                "concurrency": 256,
+                "dp": 1,
+                "enable_expert_parallel": true,
+                "long_prefill_token_threshold": 2048,
+                "max_model_len": 262144,
+                "max_num_batched_tokens": 8192,
+                "num_instances": 9,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 52.916,
+              "label": "9x TP8 + EP",
+              "status": "front",
+              "sweep": "colocated-tuned",
+              "throughput_per_gpu": 9004.134,
+              "variant": "prefill chunk 2,048"
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "dp": 1,
+                "enable_expert_parallel": true,
+                "long_prefill_token_threshold": 0,
+                "max_model_len": 262144,
+                "max_num_batched_tokens": 8192,
+                "num_instances": 9,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 77.199,
+              "label": "9x TP8 + EP",
+              "status": "front",
+              "sweep": "colocated-tuned",
+              "throughput_per_gpu": 5119.003,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "dp": 1,
+                "enable_expert_parallel": true,
+                "long_prefill_token_threshold": 2048,
+                "max_model_len": 262144,
+                "max_num_batched_tokens": 8192,
+                "num_instances": 9,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 88.158,
+              "label": "9x TP8 + EP",
+              "status": "front",
+              "sweep": "colocated-tuned",
+              "throughput_per_gpu": 2740.255,
+              "variant": "prefill chunk 2,048"
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "dp": 1,
+                "enable_expert_parallel": true,
+                "long_prefill_token_threshold": 0,
+                "max_model_len": 262144,
+                "max_num_batched_tokens": 32768,
+                "num_instances": 9,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 88.593,
+              "label": "9x TP8 + EP",
+              "status": "front",
+              "sweep": "colocated-tuned",
+              "throughput_per_gpu": 2733.375,
+              "variant": "batch tokens 32,768"
+            }
+          ],
+          "points": 32,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-9b34c1ca9f.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 65.59,
+              "label": "5P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 107.981,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 65.637,
+              "label": "5P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 107.577,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 65.793,
+              "label": "5P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 107.04,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-2e520e62ae.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 72.099,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 81.944,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 74.31,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 75.194,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-9b34c1ca9f.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 75.02,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 73.081,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-9b34c1ca9f.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 78.619,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 58.043,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-2e520e62ae.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 79.31,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 57.513,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-9b34c1ca9f.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 79.669,
+              "label": "5P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 57.049,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 80.008,
+              "label": "5P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 56.715,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 80.378,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 54.553,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-9b34c1ca9f.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 83.164,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 45.932,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 84.43,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 38.626,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 85.802,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 38.374,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 7,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-2e520e62ae.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 87.118,
+              "label": "2P/7D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 32.032,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 7,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 87.405,
+              "label": "2P/7D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 32.016,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 7,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 87.503,
+              "label": "2P/7D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 31.908,
+              "variant": ""
+            }
+          ],
+          "points": 27,
+          "unrated": 0
+        },
+        "name": "pd-ratio",
+        "total": {
+          "members": [
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-9b34c1ca9f.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 65.59,
+              "label": "5P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 4721.152,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 65.637,
+              "label": "5P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 4707.417,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 65.793,
+              "label": "5P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 4694.486,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-2e520e62ae.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 72.099,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 4484.507,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 74.31,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 4127.813,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-9b34c1ca9f.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 75.02,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 4000.096,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-9b34c1ca9f.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 78.619,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 3775.929,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-2e520e62ae.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 79.31,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 3745.269,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 80.378,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 3542.423,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 84.43,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 2704.357,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-2e520e62ae.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 85.39,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 2697.224,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 85.802,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 2695.813,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 7,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 87.405,
+              "label": "2P/7D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 2606.389,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 7,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 87.503,
+              "label": "2P/7D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-ratio",
+              "throughput_per_gpu": 2596.255,
+              "variant": ""
+            }
+          ],
+          "points": 27,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 66.159,
+              "label": "5P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 107.904,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 74.615,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 73.781,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 78.883,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 58.541,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 79.785,
+              "label": "5P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 57.011,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 83.003,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 45.671,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 85.55,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 38.403,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 7,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 87.765,
+              "label": "2P/7D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 31.841,
+              "variant": ""
+            }
+          ],
+          "points": 7,
+          "unrated": 0
+        },
+        "name": "pd-always",
+        "total": {
+          "members": [
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 4,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 66.159,
+              "label": "5P/4D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 4715.981,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 74.615,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 4043.013,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 78.883,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 3817.55,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 85.55,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 2697.43,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 7,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_tp": 8,
+                "router_config": "routing/pd-always.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 87.765,
+              "label": "2P/7D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-always",
+              "throughput_per_gpu": 2583.304,
+              "variant": ""
+            }
+          ],
+          "points": 7,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 2,
+                "decode_tp": 16,
+                "max_model_len": 262144,
+                "num_instances": 7,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 49.379,
+              "label": "5P TP8 + EP / 2D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-wide-decode",
+              "throughput_per_gpu": 97.845,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 2,
+                "decode_tp": 16,
+                "max_model_len": 262144,
+                "num_instances": 7,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 49.524,
+              "label": "5P TP8 + EP / 2D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-wide-decode",
+              "throughput_per_gpu": 97.404,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 2,
+                "decode_tp": 16,
+                "max_model_len": 262144,
+                "num_instances": 7,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 58.826,
+              "label": "5P TP8 + EP / 2D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-wide-decode",
+              "throughput_per_gpu": 52.404,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 2,
+                "decode_tp": 16,
+                "max_model_len": 262144,
+                "num_instances": 7,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 59.033,
+              "label": "5P TP8 + EP / 2D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-wide-decode",
+              "throughput_per_gpu": 52.259,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 16,
+                "max_model_len": 262144,
+                "num_instances": 6,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 59.045,
+              "label": "3P TP8 + EP / 3D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-wide-decode",
+              "throughput_per_gpu": 51.99,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 16,
+                "max_model_len": 262144,
+                "num_instances": 6,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 59.508,
+              "label": "3P TP8 + EP / 3D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-wide-decode",
+              "throughput_per_gpu": 46.397,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 16,
+                "max_model_len": 262144,
+                "num_instances": 6,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 62.616,
+              "label": "3P TP8 + EP / 3D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-wide-decode",
+              "throughput_per_gpu": 35.604,
+              "variant": ""
+            }
+          ],
+          "points": 8,
+          "unrated": 0
+        },
+        "name": "pd-wide-decode",
+        "total": {
+          "members": [
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 2,
+                "decode_tp": 16,
+                "max_model_len": 262144,
+                "num_instances": 7,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 49.379,
+              "label": "5P TP8 + EP / 2D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-wide-decode",
+              "throughput_per_gpu": 4325.62,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 2,
+                "decode_tp": 16,
+                "max_model_len": 262144,
+                "num_instances": 7,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 5,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 49.524,
+              "label": "5P TP8 + EP / 2D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-wide-decode",
+              "throughput_per_gpu": 4306.572,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 16,
+                "max_model_len": 262144,
+                "num_instances": 6,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 59.045,
+              "label": "3P TP8 + EP / 3D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-wide-decode",
+              "throughput_per_gpu": 3418.636,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 16,
+                "max_model_len": 262144,
+                "num_instances": 6,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 59.508,
+              "label": "3P TP8 + EP / 3D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-wide-decode",
+              "throughput_per_gpu": 3104.452,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 16,
+                "max_model_len": 262144,
+                "num_instances": 6,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 62.616,
+              "label": "3P TP8 + EP / 3D TP16 + EP",
+              "status": "front",
+              "sweep": "pd-wide-decode",
+              "throughput_per_gpu": 2467.183,
+              "variant": ""
+            }
+          ],
+          "points": 8,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [
+            {
+              "concurrency": 256,
+              "config": {
+                "concurrency": 256,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 6,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 44.905,
+              "label": "3P TP16 + EP / 3D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-wide-prefill",
+              "throughput_per_gpu": 202.945,
+              "variant": ""
+            },
+            {
+              "concurrency": 256,
+              "config": {
+                "concurrency": 256,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 6,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 45.464,
+              "label": "3P TP16 + EP / 3D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-wide-prefill",
+              "throughput_per_gpu": 197.224,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 6,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 58.33,
+              "label": "3P TP16 + EP / 3D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-wide-prefill",
+              "throughput_per_gpu": 139.123,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 7,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 71.988,
+              "label": "2P TP16 + EP / 5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-wide-prefill",
+              "throughput_per_gpu": 83.426,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 6,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 73.368,
+              "label": "3P TP16 + EP / 3D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-wide-prefill",
+              "throughput_per_gpu": 74.63,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 6,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 74.279,
+              "label": "3P TP16 + EP / 3D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-wide-prefill",
+              "throughput_per_gpu": 74.583,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 7,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 82.319,
+              "label": "2P TP16 + EP / 5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-wide-prefill",
+              "throughput_per_gpu": 46.037,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 7,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 82.456,
+              "label": "2P TP16 + EP / 5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-wide-prefill",
+              "throughput_per_gpu": 45.77,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 7,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 1,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 86.743,
+              "label": "1P TP16 + EP / 7D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-wide-prefill",
+              "throughput_per_gpu": 33.117,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 7,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 1,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 87.406,
+              "label": "1P TP16 + EP / 7D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-wide-prefill",
+              "throughput_per_gpu": 33.103,
+              "variant": ""
+            }
+          ],
+          "points": 12,
+          "unrated": 0
+        },
+        "name": "pd-wide-prefill",
+        "total": {
+          "members": [
+            {
+              "concurrency": 256,
+              "config": {
+                "concurrency": 256,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 6,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 44.905,
+              "label": "3P TP16 + EP / 3D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-wide-prefill",
+              "throughput_per_gpu": 6741.767,
+              "variant": ""
+            },
+            {
+              "concurrency": 256,
+              "config": {
+                "concurrency": 256,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 6,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 45.464,
+              "label": "3P TP16 + EP / 3D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-wide-prefill",
+              "throughput_per_gpu": 6554.856,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 3,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 6,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 58.33,
+              "label": "3P TP16 + EP / 3D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-wide-prefill",
+              "throughput_per_gpu": 4574.177,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 7,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-f0363a9dfc.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 71.988,
+              "label": "2P TP16 + EP / 5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-wide-prefill",
+              "throughput_per_gpu": 4539.691,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 7,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 8,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 1,
+                "prefill_tp": 16,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based-d2878efc34.yaml",
+                "tp": 16
+              },
+              "disaggregated": true,
+              "interactivity": 87.406,
+              "label": "1P TP16 + EP / 7D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-wide-prefill",
+              "throughput_per_gpu": 2715.711,
+              "variant": ""
+            }
+          ],
+          "points": 12,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_long_prefill_token_threshold": 2048,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 74.236,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 76.234,
+              "variant": "decode prefill chunk 2,048 \u00b7 prefill batch tokens 32,768"
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_long_prefill_token_threshold": 2048,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 74.339,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 75.243,
+              "variant": "decode prefill chunk 2,048"
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 74.687,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 74.659,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_long_prefill_token_threshold": 2048,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 82.67,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 45.965,
+              "variant": "decode prefill chunk 2,048 \u00b7 prefill batch tokens 32,768"
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 82.67,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 45.965,
+              "variant": "prefill batch tokens 32,768"
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 83.234,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 45.844,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_long_prefill_token_threshold": 2048,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 83.234,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 45.844,
+              "variant": "decode prefill chunk 2,048"
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 7,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 87.533,
+              "label": "2P/7D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 31.952,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 7,
+                "decode_long_prefill_token_threshold": 2048,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 87.533,
+              "label": "2P/7D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 31.952,
+              "variant": "decode prefill chunk 2,048"
+            }
+          ],
+          "points": 12,
+          "unrated": 0
+        },
+        "name": "pd-pool-engine",
+        "total": {
+          "members": [
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_long_prefill_token_threshold": 2048,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 74.236,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 4170.171,
+              "variant": "decode prefill chunk 2,048 \u00b7 prefill batch tokens 32,768"
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_long_prefill_token_threshold": 2048,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 74.339,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 4121.382,
+              "variant": "decode prefill chunk 2,048"
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 74.677,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 4087.231,
+              "variant": "prefill batch tokens 32,768"
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 74.687,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 4085.062,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_long_prefill_token_threshold": 2048,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 82.67,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 2689.112,
+              "variant": "decode prefill chunk 2,048 \u00b7 prefill batch tokens 32,768"
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 32768,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 82.67,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 2689.112,
+              "variant": "prefill batch tokens 32,768"
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 83.234,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 2687.969,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 5,
+                "decode_long_prefill_token_threshold": 2048,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 4,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 83.234,
+              "label": "4P/5D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 2687.969,
+              "variant": "decode prefill chunk 2,048"
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 7,
+                "decode_long_prefill_token_threshold": 0,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 87.533,
+              "label": "2P/7D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 2589.209,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 7,
+                "decode_long_prefill_token_threshold": 2048,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 2,
+                "prefill_max_num_batched_tokens": 8192,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 87.533,
+              "label": "2P/7D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-pool-engine",
+              "throughput_per_gpu": 2589.209,
+              "variant": "decode prefill chunk 2,048"
+            }
+          ],
+          "points": 12,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_cudagraph_mode": "FULL_DECODE_ONLY",
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 79.341,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-decode-cudagraph",
+              "throughput_per_gpu": 56.283,
+              "variant": "decode graph capture full decode only"
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_cudagraph_mode": "FULL",
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 85.803,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-decode-cudagraph",
+              "throughput_per_gpu": 38.361,
+              "variant": ""
+            }
+          ],
+          "points": 3,
+          "unrated": 0
+        },
+        "name": "pd-decode-cudagraph",
+        "total": {
+          "members": [
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "decode_cudagraph_mode": "FULL_DECODE_ONLY",
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 79.341,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-decode-cudagraph",
+              "throughput_per_gpu": 3662.538,
+              "variant": "decode graph capture full decode only"
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "decode_cudagraph_mode": "FULL",
+                "decode_enable_expert_parallel": true,
+                "decode_instances": 6,
+                "decode_tp": 8,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "prefill_enable_expert_parallel": true,
+                "prefill_instances": 3,
+                "prefill_tp": 8,
+                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-gb200-agentx-pd/routing/pd-prefix-based.yaml",
+                "tp": 8
+              },
+              "disaggregated": true,
+              "interactivity": 85.803,
+              "label": "3P/6D TP8 + EP",
+              "status": "front",
+              "sweep": "pd-decode-cudagraph",
+              "throughput_per_gpu": 2695.22,
+              "variant": ""
+            }
+          ],
+          "points": 3,
+          "unrated": 0
+        }
+      },
+      {
+        "decode": {
+          "members": [],
+          "points": 0,
+          "unrated": 24
+        },
+        "name": "routing",
+        "total": {
+          "members": [
+            {
+              "concurrency": 256,
+              "config": {
+                "concurrency": 256,
+                "dp": 1,
+                "enable_expert_parallel": true,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "router_config": "routing/prefix-affinity.yaml",
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 51.458,
+              "label": "9x TP8 + EP",
+              "status": "front",
+              "sweep": "routing",
+              "throughput_per_gpu": 8231.027,
+              "variant": ""
+            },
+            {
+              "concurrency": 128,
+              "config": {
+                "concurrency": 128,
+                "dp": 1,
+                "enable_expert_parallel": true,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "router_config": "routing/prefix-affinity.yaml",
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 75.14,
+              "label": "9x TP8 + EP",
+              "status": "front",
+              "sweep": "routing",
+              "throughput_per_gpu": 5060.017,
+              "variant": ""
+            },
+            {
+              "concurrency": 64,
+              "config": {
+                "concurrency": 64,
+                "dp": 1,
+                "enable_expert_parallel": true,
+                "max_model_len": 262144,
+                "num_instances": 9,
+                "router_config": "routing/prefix-affinity.yaml",
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 86.746,
+              "label": "9x TP8 + EP",
+              "status": "front",
+              "sweep": "routing",
+              "throughput_per_gpu": 2728.266,
+              "variant": ""
+            }
+          ],
+          "points": 24,
+          "unrated": 0
+        }
+      }
+    ],
+    "throughput": "total",
+    "x": "interactivity_mean",
+    "y": {
+      "decode": "output_tokens_per_second_per_decode_gpu",
+      "total": "total_tokens_per_second_per_gpu"
+    }
+  },
+  "outcomes": {
+    "overloaded": 119,
+    "served": 145
+  },
+  "ranking": {
+    "description": "max output tok/s per accelerator subject to the scenario's SLOs",
+    "throughput": "total",
+    "used": "scalar"
+  },
+  "refusals": [],
+  "run_id": "muse-spark-open-816b-a42b-gb200-agentx-pd",
+  "sweep_outcomes": [
+    {
+      "name": "colocated",
+      "outcomes": {
+        "served": 20
+      },
+      "refusals": []
+    },
+    {
+      "name": "colocated-tuned",
+      "outcomes": {
+        "served": 32
+      },
+      "refusals": []
+    },
+    {
+      "name": "pd-ratio",
+      "outcomes": {
+        "overloaded": 53,
+        "served": 27
+      },
+      "refusals": []
+    },
+    {
+      "name": "pd-always",
+      "outcomes": {
+        "overloaded": 13,
+        "served": 7
+      },
+      "refusals": []
+    },
+    {
+      "name": "pd-wide-decode",
+      "outcomes": {
+        "overloaded": 16,
+        "served": 8
+      },
+      "refusals": []
+    },
+    {
+      "name": "pd-wide-prefill",
+      "outcomes": {
+        "overloaded": 12,
+        "served": 12
+      },
+      "refusals": []
+    },
+    {
+      "name": "pd-pool-engine",
+      "outcomes": {
+        "overloaded": 20,
+        "served": 12
+      },
+      "refusals": []
+    },
+    {
+      "name": "pd-decode-cudagraph",
+      "outcomes": {
+        "overloaded": 5,
+        "served": 3
+      },
+      "refusals": []
+    },
+    {
+      "name": "routing",
+      "outcomes": {
+        "served": 24
+      },
+      "refusals": []
+    }
+  ],
+  "winner": {
+    "chosen": "9x TP8 + EP (prefill chunk 2,048)",
+    "label": "9x TP8 + EP",
+    "reason": "9x TP8 + EP (prefill chunk 2,048) in sweep 'colocated-tuned' gives the most tok/s/accelerator (88.97 tok/s/accelerator, 6405.5 tok/s fleet) while holding the scenario's SLOs, at concurrency 256.",
+    "sweep": "colocated-tuned",
+    "variant": "prefill chunk 2,048"
+  }
+}

@@ -1,0 +1,139 @@
+{
+  "basis": "measured_window",
+  "experiment": {
+    "description": "",
+    "name": "muse-spark-open-816b-a42b-gb200-agentx-rack",
+    "sweeps": [
+      {
+        "name": "topology",
+        "narrative": "Eight TP8 instances should peak highest, since a 64-wide EP group pays all-to-all on every step for little extra batch."
+      },
+      {
+        "name": "ep-off",
+        "narrative": "Replicating experts instead of sharding them should cost KV room and throughput against the EP twins in topology."
+      },
+      {
+        "name": "pipeline",
+        "narrative": "Pipeline stages should trail data-parallel shapes of the same width, since each stage adds a boundary hop per step."
+      },
+      {
+        "name": "batch-caps",
+        "narrative": "A seq cap of 32 should bind on 8x TP8 at 512 lanes but not on 2x TP8 DP4, whose dp ranks each schedule their own batch."
+      },
+      {
+        "name": "moe-collective",
+        "narrative": "DeepEP backends should pay off at EP width 64 and matter little at width 8, where dispatch volume is small."
+      },
+      {
+        "name": "routing-prefix-cache",
+        "narrative": "prefix-affinity should only beat queue and random with caching on, and eight instances give it the most room to win."
+      },
+      {
+        "name": "prefill-chunking",
+        "narrative": "Capping long prefills should trade a little peak throughput for a much lower ITL p99 at saturation."
+      },
+      {
+        "name": "cudagraph",
+        "narrative": "FULL capture should beat the PIECEWISE default by a few percent, and NONE should collapse."
+      }
+    ]
+  },
+  "gpu_budget": 64,
+  "hardware": "gb200-nvl72",
+  "headroom": 1.0,
+  "interactivity_floor": {},
+  "model": "muse-spark-open-816b-a42b-nvfp4",
+  "objective": "max output tok/s per accelerator subject to the scenario's SLOs",
+  "pinned_stack": {
+    "blis": "v0.19.0",
+    "data": "embedded",
+    "engine_version": "0.34.0+0fda86a35419",
+    "kernel": "unpinned",
+    "resolved": {
+      "blis": {
+        "sha256": "ab2cbc0430d928fb009b24a9941f0f705447b970b0ac9fec3cdd1ede1e2d7077",
+        "version": "unknown"
+      }
+    },
+    "router": "v1.0.0-blis.6",
+    "router_configs": {
+      "resolved": {
+        "module": "github.com/llm-d/llm-d-router",
+        "version": "v1.0.0-blis.6"
+      }
+    },
+    "substrate": "in-tree"
+  },
+  "run_id": "muse-spark-open-816b-a42b-gb200-agentx-rack",
+  "scope": "cluster; worst instance for TTFT and end-to-end gates",
+  "seed": 42,
+  "slos": {},
+  "workload": {
+    "replay": {
+      "benchmark_duration": "3600s",
+      "category": "coding",
+      "corpus": ".corpus/traces.jsonl",
+      "corpus_cache": "/tmp/agx-cache-muse-gb200",
+      "corpus_sha256": "29b6a19e751ff5230771519aab755f80a0f43a4ba9cf96b72d3a6a437ec99276",
+      "grace_period": "30s",
+      "max_context_length": "max_model_len",
+      "scenario": "inferencex-agentx-mvp",
+      "thinking": "on",
+      "workload_spec": "/home/runner/_work/blis-config-search/blis-config-search/workloads/agentx-run-recipe.yaml",
+      "workload_spec_relative": "workloads/agentx-run-recipe.yaml",
+      "workload_spec_sha256": "f9ee0a3428b556fbae00a7215c3b7bf76dd6a15cac0b60c63c1f86766b6c991a"
+    },
+    "workload_spec": {
+      "catalog": false,
+      "document": {
+        "benchmark_duration_s": 3600,
+        "category": "coding",
+        "corpus": {
+          "encoding": "jsonl",
+          "format": "weka-trace-v7",
+          "loader": "semianalysis_cc_traces_weka_062126",
+          "sha256": "29b6a19e751ff5230771519aab755f80a0f43a4ba9cf96b72d3a6a437ec99276",
+          "source": {
+            "file": "traces.jsonl",
+            "huggingface": "semianalysisai/cc-traces-weka-062126",
+            "revision": "23f152f6f0f9399a85901b89a6458def0ef16729",
+            "split": "train"
+          }
+        },
+        "grace_period_s": 30,
+        "harness_version": "0.12.0",
+        "max_context_length": "max_model_len",
+        "random_seed": 42,
+        "scenario": "inferencex-agentx-mvp",
+        "system_idle_gap_cap_s": 10,
+        "thinking": "on",
+        "trace_idle_gap_cap_s": 300,
+        "trajectory_start": {
+          "max_ratio": 0.75,
+          "min_ratio": 0.25
+        },
+        "warmup": {
+          "mode": "cache_pressure",
+          "requests_per_lane": 10
+        }
+      },
+      "label": "custom (not in the catalog)",
+      "path": "workloads/agentx-run-recipe.yaml",
+      "recipe": {
+        "differs_from_run": {},
+        "fields": {
+          "benchmark_duration_s": 3600,
+          "corpus.loader": "semianalysis_cc_traces_weka_062126",
+          "grace_period_s": 30,
+          "trace_idle_gap_cap_s": 300,
+          "trajectory_start.max_ratio": 0.75,
+          "trajectory_start.min_ratio": 0.25,
+          "warmup.requests_per_lane": 10
+        },
+        "label": "AgentX run recipe: 300 s idle-gap cap, 10 warm-up requests per lane, trajectory start 0.25 to 0.75, 3600 s window, 30 s grace, corpus semianalysis_cc_traces_weka_062126",
+        "overrides": {}
+      },
+      "sha256": "f9ee0a3428b556fbae00a7215c3b7bf76dd6a15cac0b60c63c1f86766b6c991a"
+    }
+  }
+}

@@ -46,13 +46,28 @@
       }
     },
     "offload": {
-      "description": "The CPU KV tier below HBM, swept per sweep (on a disaggregated sweep, for both pools), or per pool in a disaggregated sweep's prefill.offload / decode.offload, which overrides the sweep's for that pool. cpu_bytes: sizes with units (512GiB), 0 for no tier, the control. eviction_policy: the policies the engine accepts; needs a non-zero cpu_bytes.",
+      "description": "The KV tier hierarchy below HBM, swept per sweep (on a disaggregated sweep, for both pools), or per pool in a disaggregated sweep's prefill.offload / decode.offload, which overrides the sweep's for that pool. cpu_bytes: sizes with units (512GiB), 0 for no tier, the control. eviction_policy: the policies the engine accepts; needs a non-zero cpu_bytes. tiers: extra fs/obj device tiers below the CPU tier. p2p: a p2p secondary tier (a peer instance's host memory). tiers and p2p need a non-zero cpu_bytes (the primary tier).",
       "type": "object",
       "minProperties": 1,
       "additionalProperties": false,
       "properties": {
         "cpu_bytes": { "type": "array", "minItems": 1, "items": { "type": ["integer", "string"] } },
-        "eviction_policy": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+        "eviction_policy": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "tiers": {
+          "description": "Extra device tiers below the CPU tier, a fixed hierarchy (not swept): each {tier: <catalog storage device>, bytes: <size>}. cpu_dram is the primary tier, stated with cpu_bytes.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tier", "bytes"],
+            "properties": {
+              "tier": { "type": "string", "minLength": 1 },
+              "bytes": { "type": ["integer", "string"] }
+            }
+          }
+        },
+        "p2p": { "description": "A p2p secondary tier (a peer instance's host memory), on or off.", "type": "boolean" }
       }
     },
     "scenario": {
@@ -112,6 +127,16 @@
               "minLength": 1
             }
           }
+        },
+        "acceptance": {
+          "description": "The speculative-acceptance pin, passed through to the Scenario whole (BLIS validates it: acceptance.Pin). Either names a registry profile set (profiles) or states a value inline (value: {num_spec_tokens, acceptance_length | acceptance_rate | per_position_rates, source, realisation}); fallback_category and exact_only refine it. Scenario-wide, above the workload's and the registry's.",
+          "type": "object",
+          "minProperties": 1
+        },
+        "routing": {
+          "description": "The expert-parallel routing-imbalance pin, passed through to the Scenario whole (BLIS validates it: routing.Pin). Either names a registry profile set (profiles; a sensitivity set is usable only this way, having no CLI alternative since v0.12.0) or states a value inline (value: {token_imbalance, expert_imbalance, source}); fallback_category refines it. Scenario-wide.",
+          "type": "object",
+          "minProperties": 1
         },
         "slo": { "$ref": "#/$defs/slo" },
         "concurrency": {

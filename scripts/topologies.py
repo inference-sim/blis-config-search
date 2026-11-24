@@ -36,6 +36,9 @@ def label(cand):
 # Readable knob names, spelled out on purpose: "b2k" for max_num_batched_tokens=2048 tells a
 # reader nothing. Mirrors report.KNOB_NAMES, keyed by candidate-config key.
 KNOB_NAMES = {"offload_cpu_bytes": "CPU KV tier", "offload_eviction_policy": "tier eviction",
+              "offload_tiers": "extra KV tiers", "offload_p2p": "P2P KV tier",
+              "prefill_offload_tiers": "prefill extra KV tiers", "decode_offload_tiers": "decode extra KV tiers",
+              "prefill_offload_p2p": "prefill P2P KV tier", "decode_offload_p2p": "decode P2P KV tier",
               "prefill_offload_cpu_bytes": "prefill CPU KV tier", "decode_offload_cpu_bytes": "decode CPU KV tier",
               "prefill_offload_eviction_policy": "prefill tier eviction",
               "decode_offload_eviction_policy": "decode tier eviction",

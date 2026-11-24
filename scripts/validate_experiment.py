@@ -885,38 +885,94 @@ def parse_size(v):
     return int(float(m.group(1)) * _SIZE_UNITS[m.group(2)]) if m else None
 
 
-def offload_errors(sw, where, pool_offload=False):
-    """Errors in a sweep's `offload:` blocks: the CPU KV tier, off as the control (#94).
+# The storage device classes the pinned registry prices, the fallback when no catalog checkout is
+# present to read `devices/storage.yaml` from. cpu_dram is the primary tier (stated with cpu_bytes),
+# so a `tiers` entry names one of the others.
+PRICED_STORAGE_DEVICES = ("cpu_dram", "nvme_gen3", "nvme_gen4", "nvme_gen4_raid0_8x", "sata_ssd", "s3")
 
-    cpu_bytes: sizes with units, 0 for no tier; eviction_policy: names the engine validates. On a
-    colocated sweep the block is the pool's tier. On a disaggregated one it is the default for
-    both pools, and `prefill.offload` / `decode.offload` state one pool's own (replacing the
-    default for it; `cpu_bytes: [0]` is a pool with no tier). That needs a simulator whose
-    deployment schema lets a pool state its offload (`pool_offload`, blis-substrate#307).
+
+def _storage_devices(catalog):
+    """The storage device names the catalog lists (`devices/storage.yaml`), or the priced fallback
+    when no catalog directory is given or the file cannot be read. A missing checkout never fails
+    validation: the fallback is the set the registry prices."""
+    if catalog:
+        path = os.path.join(catalog, "devices", "storage.yaml")
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+        except OSError:
+            data = None
+        if isinstance(data, dict) and data:
+            return set(data)
+    return set(PRICED_STORAGE_DEVICES)
+
+
+def offload_errors(sw, where, pool_offload=False, catalog=None):
+    """Errors in a sweep's `offload:` blocks: the KV tier hierarchy, off as the control.
+
+    cpu_bytes: sizes with units, 0 for no tier; eviction_policy: names the engine validates;
+    tiers: extra fs/obj device tiers below the CPU tier; p2p: a p2p secondary tier. On a colocated
+    sweep the block is the pool's tiers. On a disaggregated one it is the default for both pools,
+    and `prefill.offload` / `decode.offload` state one pool's own (replacing the default for it;
+    `cpu_bytes: [0]` is a pool with no tier). That needs a simulator whose deployment schema lets a
+    pool state its offload (`pool_offload`, blis-substrate#307).
     """
     errs = []
     blocks = [("offload", sw.get("offload"))]
     for role in ("prefill", "decode"):
         if isinstance(sw.get(role), dict):
             blocks.append((f"{role}.offload", sw[role].get("offload")))
+    devices = _storage_devices(catalog)
     for name, block in blocks:
         if block is None:
             continue
-        errs.extend(_offload_block_errors(block, f"{where}.{name}"))
+        errs.extend(_offload_block_errors(block, f"{where}.{name}", devices))
         if not _sweep_is_colocated(sw) and not pool_offload:
             errs.append(f"{where}.{name}: this simulator's deployment schema has no per-pool offload "
-                        f"(blis-substrate#307), so a disaggregated sweep cannot state a CPU tier "
-                        f"(inference-sim/blis-config-search#94)")
+                        f"(blis-substrate#307), so a disaggregated sweep cannot state a tier")
     return errs
 
 
-def _offload_block_errors(block, where):
+def _offload_tiers_errors(vals, where, devices):
+    """Errors in a sweep's `offload.tiers`: a fixed list (not swept) of {tier: <device>, bytes}
+    hierarchy entries below the primary CPU tier. Each device is a catalog storage class other
+    than cpu_dram (the primary tier, stated with cpu_bytes)."""
+    if not _is_list(vals) or not vals:
+        return [f"{where}: must be a non-empty list of {{tier: <device>, bytes: <size>}} entries"]
+    errs = []
+    for i, t in enumerate(vals):
+        at = f"{where}[{i}]"
+        if not isinstance(t, dict) or set(t) - {"tier", "bytes"} or "tier" not in t or "bytes" not in t:
+            errs.append(f"{at}: must be a mapping of exactly tier and bytes")
+            continue
+        dev = t["tier"]
+        if dev == "cpu_dram":
+            errs.append(f"{at}.tier: cpu_dram is the primary tier; state its size with cpu_bytes, "
+                        f"not as a tiers entry")
+        elif not isinstance(dev, str) or dev not in devices:
+            errs.append(f"{at}.tier: {dev!r} is not a catalog storage device "
+                        f"(known: {', '.join(sorted(devices))})")
+        if parse_size(t["bytes"]) in (None, 0):
+            errs.append(f"{at}.bytes: {t['bytes']!r} is not a non-zero size: use a number with a unit "
+                        f"such as 2TiB")
+    return errs
+
+
+def _offload_block_errors(block, where, devices=None):
+    if devices is None:
+        devices = set(PRICED_STORAGE_DEVICES)
     if not isinstance(block, dict) or not block:
         return [f"{where}: must be a non-empty mapping"]
     errs = []
     for key, vals in block.items():
-        if key not in ("cpu_bytes", "eviction_policy"):
-            errs.append(f"{where}.{key}: unknown offload option (allowed: cpu_bytes, eviction_policy)")
+        if key not in ("cpu_bytes", "eviction_policy", "tiers", "p2p"):
+            errs.append(f"{where}.{key}: unknown offload option "
+                        f"(allowed: cpu_bytes, eviction_policy, tiers, p2p)")
+        elif key == "tiers":
+            errs.extend(_offload_tiers_errors(vals, f"{where}.tiers", devices))
+        elif key == "p2p":
+            if not isinstance(vals, bool):
+                errs.append(f"{where}.p2p: must be true or false (a p2p secondary tier, on or off)")
         elif not _is_list(vals) or not vals:
             errs.append(f"{where}.{key}: must be a non-empty list")
         elif key == "cpu_bytes":
@@ -928,6 +984,56 @@ def _offload_block_errors(block, where):
             errs.append(f"{where}.eviction_policy: must be a list of policy names")
     if "eviction_policy" in block and "cpu_bytes" not in block:
         errs.append(f"{where}.eviction_policy: needs cpu_bytes (a policy of no tier states nothing)")
+    # A fs/obj tier or a p2p tier sits below the primary CPU tier, so it needs one: the engine puts
+    # cpu_dram first and refuses secondary tiers without a primary (engines/vllm build/offload.go).
+    if ("tiers" in block or "p2p" in block) and "cpu_bytes" not in block:
+        errs.append(f"{where}: tiers and p2p sit below the CPU tier, so they need cpu_bytes "
+                    f"(the primary tier)")
+    return errs
+
+
+# The keys of the acceptance and routing scenario pins, passed through to BLIS whole (it validates
+# their values: acceptance.Pin/acceptance.Value, routing.Pin/routing.Value, at the pinned release).
+# config-search checks only the key names, so a typo fails here rather than per-run in a whole sweep.
+_ACCEPTANCE_PIN_KEYS = ("profiles", "value", "fallback_category", "exact_only")
+_ACCEPTANCE_VALUE_KEYS = ("num_spec_tokens", "acceptance_length", "acceptance_rate",
+                          "per_position_rates", "source", "realisation")
+_ROUTING_PIN_KEYS = ("profiles", "value", "fallback_category")
+_ROUTING_VALUE_KEYS = ("token_imbalance", "expert_imbalance", "source")
+
+
+def _pin_errors(pin, where, pin_keys, value_keys):
+    """Key-name errors in a scenario acceptance/routing pin (a mapping named by `where`). The pin
+    either names a registry profile set (`profiles`) or states a value inline (`value`); BLIS
+    checks that choice and every value, so config-search checks only that the keys are known."""
+    if not isinstance(pin, dict) or not pin:
+        return [f"{where}: must be a non-empty mapping (a profile set name or an inline value)"]
+    errs = []
+    for key in pin:
+        if key not in pin_keys:
+            errs.append(f"{where}.{key}: unknown key (allowed: {', '.join(pin_keys)})")
+    value = pin.get("value")
+    if value is not None:
+        if not isinstance(value, dict) or not value:
+            errs.append(f"{where}.value: must be a non-empty mapping")
+        else:
+            for key in value:
+                if key not in value_keys:
+                    errs.append(f"{where}.value.{key}: unknown key "
+                                f"(allowed: {', '.join(value_keys)})")
+    return errs
+
+
+def scenario_pin_errors(sc):
+    """Errors in the scenario's acceptance/routing pins (#201). Both are optional and pass through
+    to BLIS unchanged; routing has no CLI alternative (the flags were removed in v0.12.0)."""
+    errs = []
+    if sc.get("acceptance") is not None:
+        errs.extend(_pin_errors(sc["acceptance"], "scenario.acceptance",
+                                _ACCEPTANCE_PIN_KEYS, _ACCEPTANCE_VALUE_KEYS))
+    if sc.get("routing") is not None:
+        errs.extend(_pin_errors(sc["routing"], "scenario.routing",
+                                _ROUTING_PIN_KEYS, _ROUTING_VALUE_KEYS))
     return errs
 
 
@@ -1053,7 +1159,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
         sc = {}
     else:
         known_sc = {"model", "hardware", "workload", "workload_spec", "gpus", "slo", "concurrency",
-                    "seed", "engine", "engine_kind", "replay", "cluster"}
+                    "seed", "engine", "engine_kind", "replay", "cluster", "acceptance", "routing"}
         for key in sc:
             if key not in known_sc:
                 errs.append(f"scenario.{key}: unknown key "
@@ -1066,6 +1172,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
         errs.extend(scenario_identity_errors(sc, blis, catalog))
         errs.extend(cluster_errors(sc, blis, catalog))
         errs.extend(replay_errors(sc))
+        errs.extend(scenario_pin_errors(sc))
         gpus = sc.get("gpus")
         if not isinstance(gpus, int) or isinstance(gpus, bool) or gpus < 1:
             errs.append("scenario.gpus: required positive integer -- the budget EVERY run uses")
@@ -1142,7 +1249,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
         known_sw = {"name", "narrative", "num-instances", "parallel", "engine", "router",
                     "prefill-instances", "decode-instances", "prefill", "decode", "simulator",
                     "offload"}
-        errs.extend(offload_errors(sw, where, pool_offload))
+        errs.extend(offload_errors(sw, where, pool_offload, catalog))
         for key in sw:
             if key not in known_sw:
                 errs.append(f"{where}.{key}: unknown sweep key "

@@ -542,6 +542,43 @@ class SchemaAgreesWithValidator(unittest.TestCase):
 # --- validator --------------------------------------------------------------------------------
 
 
+class AcceptanceAndRoutingPins(unittest.TestCase):
+    """scenario.acceptance / scenario.routing pass through to BLIS; config-search checks only that
+    the key names are known (inference-sim/blis-config-search#201)."""
+
+    def errs(self, **sc):
+        s = spec()
+        s["scenario"].update(sc)
+        return V.validate(s, BLIS, ROUTING)
+
+    def test_a_profile_set_and_an_inline_value_validate(self):
+        self.assertEqual([], self.errs(acceptance={"profiles": "sensitivity-k3"}))
+        self.assertEqual([], self.errs(
+            acceptance={"value": {"num_spec_tokens": 3, "acceptance_length": 2.4,
+                                  "per_position_rates": [0.8, 0.6], "realisation": "synthetic",
+                                  "source": "run-x"}, "fallback_category": "coding",
+                        "exact_only": True},
+            routing={"value": {"token_imbalance": 1.3, "expert_imbalance": 1.1, "source": "run-y"},
+                     "fallback_category": "coding", "profiles": "ep-sensitivity"}))
+
+    def test_an_unknown_acceptance_key_is_refused_naming_it(self):
+        errs = self.errs(acceptance={"profile": "x"})           # profile, not profiles
+        self.assertTrue(any("scenario.acceptance.profile:" in e and "unknown key" in e for e in errs), errs)
+
+    def test_an_unknown_acceptance_value_key_is_refused(self):
+        errs = self.errs(acceptance={"value": {"num_spec_tokens": 3, "accept_length": 2.4}})
+        self.assertTrue(any("scenario.acceptance.value.accept_length" in e for e in errs), errs)
+
+    def test_an_unknown_routing_key_and_value_key_are_refused(self):
+        errs = self.errs(routing={"fallback": "coding"})
+        self.assertTrue(any("scenario.routing.fallback:" in e for e in errs), errs)
+        errs = self.errs(routing={"value": {"token_imbalance": 1.2, "expert": 1.1}})
+        self.assertTrue(any("scenario.routing.value.expert" in e for e in errs), errs)
+
+    def test_a_spec_that_pins_neither_is_unchanged(self):
+        self.assertEqual([], V.validate(spec(), BLIS, ROUTING))
+
+
 class ValidatorRejects(unittest.TestCase):
     def errs(self, doc):
         return V.validate(doc, BLIS, ROUTING)

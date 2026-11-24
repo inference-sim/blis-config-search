@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests of the sweepable CPU KV tier (a sweep's `offload:` block, #94). Hermetic.
+"""Tests of the sweepable KV tier hierarchy (a sweep's `offload:` block). Hermetic.
 
 Run: python3 -I scripts/test_offload.py
 """
@@ -175,7 +175,7 @@ def pd_doc(**sweep):
 
 
 class PerPoolOffload(unittest.TestCase):
-    """A disaggregated sweep's CPU tier, per pool (#94; the schema side is blis-substrate#307)."""
+    """A disaggregated sweep's CPU tier, per pool (the schema side is blis-substrate#307)."""
 
     def setUp(self):
         import tempfile
@@ -335,7 +335,7 @@ class ArmsDiffer(unittest.TestCase):
         with self.assertRaises(run_blis.ConfigError) as e:
             run_blis.classify_config({"prefill_instances": 1, "decode_instances": 1, "prefill_tp": 4,
                                       "decode_tp": 4, "offload_cpu_bytes": 2**39}, vocab)
-        self.assertIn("#94", str(e.exception))
+        self.assertIn("blis-substrate#307", str(e.exception))
 
     def test_the_arms_are_told_apart_in_the_report(self):
         self.assertEqual("CPU KV tier off", topologies.knob_phrase("offload_cpu_bytes", 0))
@@ -345,6 +345,69 @@ class ArmsDiffer(unittest.TestCase):
         base = E.sweep_baseline(cands + [dict(cands[0])])
         self.assertEqual("", E.variant_of(cands[0], "", base))
         self.assertIn("CPU KV tier 512 GiB", E.variant_of(cands[1], "", base))
+
+    def test_the_scenario_renders_an_fs_tier_below_the_cpu_tier_and_a_p2p_secondary_tier(self):
+        vocab = settings.vocabulary(BLIS)
+        parallel, engine, _, _ = run_blis.classify_config(
+            {"tp": 4, "offload_cpu_bytes": 2**39, "offload_eviction_policy": "lru",
+             "offload_tiers": [{"tier": "nvme_gen4", "bytes": 2 * 2**40}], "offload_p2p": True}, vocab)
+        y = run_blis.scenario_yaml("llama-3.1-70b-instruct", "h200", parallel, engine, "x")
+        # cpu_dram (the primary tier) first, then the fs device tier, in order.
+        self.assertIn("tiers:\n    - {tier: cpu_dram, bytes: 549755813888}\n"
+                      "    - {tier: nvme_gen4, bytes: 2199023255552}", y)
+        self.assertIn("connector_options:\n    secondary_tiers:\n      - {type: p2p}", y)
+        self.assertIn("cost-model-offload-tiers", y)
+
+    def test_a_pool_renders_an_fs_tier_and_a_p2p_secondary_tier(self):
+        vocab = settings.vocabulary(BLIS)
+        off = {"cpu_bytes": 2**38, "tiers": [{"tier": "s3", "bytes": 4 * 2**40}], "p2p": True}
+        body = run_blis._pool_offload_block(off)
+        self.assertIn("    offload:\n      tiers:\n        - {tier: cpu_dram, bytes: 274877906944}\n"
+                      "        - {tier: s3, bytes: 4398046511104}", body)
+        self.assertIn("      connector_options:\n        secondary_tiers:\n          - {type: p2p}", body)
+
+    def test_classify_collects_the_extra_tiers_and_the_p2p_flag(self):
+        vocab = settings.vocabulary(BLIS)
+        parallel, _, _, _ = run_blis.classify_config(
+            {"tp": 4, "offload_cpu_bytes": 2**38,
+             "offload_tiers": [{"tier": "nvme_gen3", "bytes": 2**40}], "offload_p2p": True}, vocab)
+        off = parallel["offload"]
+        self.assertEqual([{"tier": "nvme_gen3", "bytes": 2**40}], off["tiers"])
+        self.assertTrue(off["p2p"])
+
+    def test_expansion_attaches_the_extra_tiers_to_each_arm_with_a_cpu_tier_not_the_control(self):
+        sw = doc({"cpu_bytes": [0, "512GiB"], "tiers": [{"tier": "nvme_gen4", "bytes": "2TiB"}],
+                  "p2p": True})["sweeps"][0]
+        kept, _ = E.expand_sweep(sw, 16)
+        by_size = {c["offload_cpu_bytes"]: c for c in kept}
+        self.assertNotIn("offload_tiers", by_size[0])          # the 0-byte control carries no extra tier
+        self.assertNotIn("offload_p2p", by_size[0])
+        self.assertEqual([{"tier": "nvme_gen4", "bytes": 2 * 2**40}], by_size[512 * 2**30]["offload_tiers"])
+        self.assertTrue(by_size[512 * 2**30]["offload_p2p"])
+
+    def test_a_good_tier_hierarchy_block_validates(self):
+        d = doc({"cpu_bytes": ["512GiB"], "tiers": [{"tier": "nvme_gen4", "bytes": "2TiB"}], "p2p": True})
+        self.assertEqual([], V.validate(copy.deepcopy(d), BLIS, ROUTING))
+
+    def test_each_way_the_tier_hierarchy_can_be_wrong_is_named(self):
+        for offload, want in (
+                ({"cpu_bytes": ["512GiB"], "tiers": [{"tier": "floppy_disk", "bytes": "2TiB"}]},
+                 "is not a catalog storage device"),
+                ({"cpu_bytes": ["512GiB"], "tiers": [{"tier": "cpu_dram", "bytes": "2TiB"}]},
+                 "cpu_dram is the primary tier"),
+                ({"cpu_bytes": ["512GiB"], "tiers": [{"tier": "nvme_gen4", "bytes": 0}]},
+                 "is not a non-zero size"),
+                ({"cpu_bytes": ["512GiB"], "tiers": [{"tier": "nvme_gen4"}]},
+                 "exactly tier and bytes"),
+                ({"cpu_bytes": ["512GiB"], "p2p": ["yes"]}, "must be true or false"),
+                ({"tiers": [{"tier": "nvme_gen4", "bytes": "2TiB"}]}, "need cpu_bytes")):
+            errs = V.validate(copy.deepcopy(doc(offload)), BLIS, ROUTING)
+            self.assertTrue(any(want in e for e in errs), (offload, errs))
+
+    def test_the_device_names_fall_back_to_the_priced_set_without_a_catalog_checkout(self):
+        self.assertIn("nvme_gen4", V._storage_devices(None))
+        self.assertIn("s3", V._storage_devices(None))
+        self.assertNotIn("floppy_disk", V._storage_devices(None))
 
     def test_the_tiers_hit_rate_is_read_from_the_result(self):
         doc_ = {"metrics": {"output_tok_s": {"value": 10.0, "unit": "tok/s"}},

@@ -154,7 +154,7 @@
   "finalists": [
     {
       "at_c_use": {
-        "interactivity": 109.545,
+        "interactivity": 114.518,
         "itl_p99_ms": 19.247,
         "tok_per_s_per_user": 52.0,
         "tokens_per_sec": 1957.5,
@@ -213,7 +213,7 @@
     },
     {
       "at_c_use": {
-        "interactivity": 195.382,
+        "interactivity": 221.259,
         "itl_p99_ms": 16.239,
         "tok_per_s_per_user": 61.6,
         "tokens_per_sec": 3212.4,
@@ -276,7 +276,7 @@
     },
     {
       "at_c_use": {
-        "interactivity": 110.229,
+        "interactivity": 114.471,
         "itl_p99_ms": 18.242,
         "tok_per_s_per_user": 54.8,
         "tokens_per_sec": 1964.4,
@@ -337,7 +337,7 @@
     },
     {
       "at_c_use": {
-        "interactivity": 108.581,
+        "interactivity": 113.79,
         "itl_p99_ms": 18.62,
         "tok_per_s_per_user": 53.7,
         "tokens_per_sec": 1958.7,
@@ -400,7 +400,7 @@
     },
     {
       "at_c_use": {
-        "interactivity": 124.481,
+        "interactivity": 127.76,
         "itl_p99_ms": 14.635,
         "tok_per_s_per_user": 68.3,
         "tokens_per_sec": 1204.5,
@@ -463,7 +463,7 @@
     },
     {
       "at_c_use": {
-        "interactivity": 109.841,
+        "interactivity": 114.563,
         "itl_p99_ms": 19.562,
         "tok_per_s_per_user": 51.1,
         "tokens_per_sec": 1962.0,
@@ -548,7 +548,7 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 195.382,
+            "interactivity": 221.259,
             "label": "4x TP8 + EP",
             "status": "front",
             "sweep": "drafting-depth",
@@ -571,7 +571,7 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 234.469,
+            "interactivity": 262.082,
             "label": "4x TP8 + EP",
             "status": "front",
             "sweep": "drafting-depth",
@@ -594,7 +594,7 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 290.294,
+            "interactivity": 312.479,
             "label": "4x TP8 + EP",
             "status": "front",
             "sweep": "drafting-depth",
@@ -628,7 +628,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 109.545,
+              "interactivity": 114.518,
               "label": "4x TP8 + EP",
               "status": "front",
               "sweep": "topology",
@@ -647,7 +647,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 123.772,
+              "interactivity": 127.455,
               "label": "4x TP8 + EP",
               "status": "front",
               "sweep": "topology",
@@ -697,7 +697,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 195.382,
+              "interactivity": 221.259,
               "label": "4x TP8 + EP",
               "status": "front",
               "sweep": "drafting-depth",
@@ -720,7 +720,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 234.469,
+              "interactivity": 262.082,
               "label": "4x TP8 + EP",
               "status": "front",
               "sweep": "drafting-depth",
@@ -743,7 +743,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 290.294,
+              "interactivity": 312.479,
               "label": "4x TP8 + EP",
               "status": "front",
               "sweep": "drafting-depth",
@@ -778,7 +778,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 110.229,
+              "interactivity": 114.471,
               "label": "4x TP8 + EP",
               "status": "front",
               "sweep": "batch-caps",
@@ -799,7 +799,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 122.591,
+              "interactivity": 126.564,
               "label": "4x TP8 + EP",
               "status": "front",
               "sweep": "batch-caps",
@@ -820,7 +820,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 123.772,
+              "interactivity": 127.455,
               "label": "4x TP8 + EP",
               "status": "front",
               "sweep": "batch-caps",
@@ -841,7 +841,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 125.776,
+              "interactivity": 128.6,
               "label": "4x TP8 + EP",
               "status": "front",
               "sweep": "batch-caps",
@@ -891,7 +891,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 108.581,
+              "interactivity": 113.79,
               "label": "4x TP8 + EP",
               "status": "front",
               "sweep": "kv-and-engram",
@@ -914,7 +914,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 109.545,
+              "interactivity": 114.518,
               "label": "4x TP8 + EP",
               "status": "front",
               "sweep": "kv-and-engram",
@@ -937,7 +937,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 123.772,
+              "interactivity": 127.455,
               "label": "4x TP8 + EP",
               "status": "front",
               "sweep": "kv-and-engram",
@@ -960,7 +960,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 123.772,
+              "interactivity": 127.455,
               "label": "4x TP8 + EP",
               "status": "front",
               "sweep": "kv-and-engram",
@@ -997,7 +997,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 124.481,
+              "interactivity": 127.76,
               "label": "4x TP8 + EP",
               "status": "front",
               "sweep": "engram-in-hbm",
@@ -1031,7 +1031,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 109.545,
+              "interactivity": 114.518,
               "label": "4x TP8 + EP",
               "status": "front",
               "sweep": "cudagraph",
@@ -1051,7 +1051,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 109.841,
+              "interactivity": 114.563,
               "label": "4x TP8 + EP",
               "status": "front",
               "sweep": "cudagraph",
@@ -1071,7 +1071,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 123.772,
+              "interactivity": 127.455,
               "label": "4x TP8 + EP",
               "status": "front",
               "sweep": "cudagraph",
@@ -1091,7 +1091,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 125.991,
+              "interactivity": 128.579,
               "label": "4x TP8 + EP",
               "status": "front",
               "sweep": "cudagraph",
@@ -1118,7 +1118,7 @@
       }
     ],
     "throughput": "total",
-    "x": "interactivity_of_mean_tpot",
+    "x": "interactivity_mean",
     "y": {
       "decode": "output_tokens_per_second_per_decode_gpu",
       "total": "total_tokens_per_second_per_gpu"

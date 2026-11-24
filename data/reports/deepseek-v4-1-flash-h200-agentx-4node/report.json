@@ -26,7 +26,7 @@
     "basis: measured window",
     "scope: cluster; worst instance for TTFT and end-to-end gates"
   ],
-  "recommendation_num": 10,
+  "recommendation_num": 11,
   "recommendation_prose": [
     "The table below lists the measured operating points. Headline ranking: max output tok/s per accelerator subject to the scenario's SLOs. The Pareto front of every sweep is in pareto.json."
   ],
@@ -102,6 +102,20 @@
         "Measured: best was <strong>4x TP8 + EP (graph capture full+piecewise)</strong> at 62.35 tok/s/accelerator (concurrency 64)."
       ],
       "title": "Sweep: cudagraph"
+    },
+    {
+      "caption_note": "6 drafting arms.",
+      "num": 10,
+      "prose": [
+        "Each drafting arm was priced with the acceptance the simulator resolved for it. BORROWED marks a profile measured under other settings than the run's, so that arm's gain is only as good as the borrowing; arms with no drafting (K=0) are not listed.",
+        "drafting: 4x TP8 + EP used acceptance length 1.81 (BORROWED, rung same_drafter_other_settings, differs in draft_sampler, verifier, measured on b200) from inferencex-golden-al, https://github.com/SemiAnalysisAI/InferenceX/blob/e63beeeee981b5f7bd055685a32cc38ad30c7fdb/inferencex-e2e/infx/golden_al_distribution/deepseek-v4.1-flash__dspark__native__probabilistic-block.yaml",
+        "drafting: 4x TP8 + EP (3 draft tokens) used acceptance length 2.9 (BORROWED, rung same_drafter_other_settings, differs in draft_sampler, verifier, measured on b200) from inferencex-golden-al, https://github.com/SemiAnalysisAI/InferenceX/blob/e63beeeee981b5f7bd055685a32cc38ad30c7fdb/inferencex-e2e/infx/golden_al_distribution/deepseek-v4.1-flash__dspark__native__probabilistic-block.yaml",
+        "drafting: 4x TP8 + EP (5 draft tokens) used acceptance length 3.51 (BORROWED, rung same_drafter_other_settings, differs in draft_sampler, verifier, measured on b200) from inferencex-golden-al, https://github.com/SemiAnalysisAI/InferenceX/blob/e63beeeee981b5f7bd055685a32cc38ad30c7fdb/inferencex-e2e/infx/golden_al_distribution/deepseek-v4.1-flash__dspark__native__probabilistic-block.yaml",
+        "drafting: 8x TP4 + EP used acceptance length 1.81 (BORROWED, rung same_drafter_other_settings, differs in draft_sampler, verifier, measured on b200) from inferencex-golden-al, https://github.com/SemiAnalysisAI/InferenceX/blob/e63beeeee981b5f7bd055685a32cc38ad30c7fdb/inferencex-e2e/infx/golden_al_distribution/deepseek-v4.1-flash__dspark__native__probabilistic-block.yaml",
+        "drafting: 8x TP4 + EP (3 draft tokens) used acceptance length 2.9 (BORROWED, rung same_drafter_other_settings, differs in draft_sampler, verifier, measured on b200) from inferencex-golden-al, https://github.com/SemiAnalysisAI/InferenceX/blob/e63beeeee981b5f7bd055685a32cc38ad30c7fdb/inferencex-e2e/infx/golden_al_distribution/deepseek-v4.1-flash__dspark__native__probabilistic-block.yaml",
+        "drafting: 8x TP4 + EP (5 draft tokens) used acceptance length 3.51 (BORROWED, rung same_drafter_other_settings, differs in draft_sampler, verifier, measured on b200) from inferencex-golden-al, https://github.com/SemiAnalysisAI/InferenceX/blob/e63beeeee981b5f7bd055685a32cc38ad30c7fdb/inferencex-e2e/infx/golden_al_distribution/deepseek-v4.1-flash__dspark__native__probabilistic-block.yaml"
+      ],
+      "title": "Drafting acceptance"
     }
   ],
   "standfirst": "A deterministic sweep over custom (not in the catalog) (AgentX run recipe: 300 s idle-gap cap, 10 warm-up requests per lane, trajectory start 0.25 to 0.75, 3600 s window, 30 s grace, corpus semianalysis_cc_traces_weka_062126) traffic, comparing 8 designs on one GPU budget.",

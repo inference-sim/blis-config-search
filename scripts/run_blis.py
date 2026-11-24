@@ -395,9 +395,7 @@ def classify_config(config, vocab, node_size=None, pool_offload=False):
         # MultiConnector (vLLM refuses a NixlConnector beside an offload tier, and a
         # MultiConnector over NIXL alone), so the connector follows the pool, not the deployment.
         for role in PD_ROLES:
-            # A pool's own block REPLACES the sweep's for that pool (it does not inherit the
-            # sweep's tiers/p2p), so a pool can drop a sweep-level extra tier and `p2p: false`
-            # wins -- p2p is only ever rendered when true.
+            # Replace, not merge: a pool drops the sweep's tiers/p2p (p2p is only rendered when true).
             own = pd_offload[role] or offload
             if own.get("cpu_bytes"):
                 pd[role]["offload"] = own

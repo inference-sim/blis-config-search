@@ -10,11 +10,11 @@
     },
     {
       "h": "What was found",
-      "html": "<strong>4x TP8xPP2 + EP</strong>, from the <em>pipeline</em> sweep, reached 90.94 tok/s/accelerator (5820.4 tok/s across the fleet) at concurrency 256 while holding the scenario's SLOs. Ranking: max output tok/s per accelerator subject to the scenario's SLOs."
+      "html": "<strong>4x TP8xPP2 + EP</strong>, from the <em>pipeline</em> sweep, reached 97.44 tok/s/accelerator (6235.9 tok/s across the fleet) at concurrency 256 while holding the scenario's SLOs. Ranking: max output tok/s per accelerator subject to the scenario's SLOs."
     },
     {
       "h": "What to run",
-      "html": "4x TP8xPP2 + EP at concurrency 256. 130 of 140 runs held the SLOs.",
+      "html": "4x TP8xPP2 + EP at concurrency 256. 131 of 140 runs held the SLOs.",
       "run": true
     }
   ],
@@ -36,7 +36,7 @@
       "num": 2,
       "prose": [
         "Eight TP8 instances should peak highest, since a 64-wide EP group pays all-to-all on every step for little extra batch.",
-        "Measured: best was <strong>8x TP8 + EP</strong> at 87.65 tok/s/accelerator (concurrency 256)."
+        "Measured: best was <strong>8x TP8 + EP</strong> at 88.55 tok/s/accelerator (concurrency 256)."
       ],
       "title": "Sweep: topology"
     },
@@ -45,7 +45,7 @@
       "num": 3,
       "prose": [
         "Replicating experts instead of sharding them should cost KV room and throughput against the EP twins in topology.",
-        "Measured: best was <strong>8x TP8</strong> at 69.43 tok/s/accelerator (concurrency 256)."
+        "Measured: best was <strong>8x TP8</strong> at 66.65 tok/s/accelerator (concurrency 256)."
       ],
       "title": "Sweep: ep-off"
     },
@@ -54,7 +54,7 @@
       "num": 4,
       "prose": [
         "Pipeline stages should trail data-parallel shapes of the same width, since each stage adds a boundary hop per step.",
-        "Measured: best was <strong>4x TP8xPP2 + EP</strong> at 90.94 tok/s/accelerator (concurrency 256)."
+        "Measured: best was <strong>4x TP8xPP2 + EP</strong> at 97.44 tok/s/accelerator (concurrency 256)."
       ],
       "title": "Sweep: pipeline"
     },
@@ -63,7 +63,7 @@
       "num": 5,
       "prose": [
         "A seq cap of 32 should bind on 8x TP8 at 512 lanes but not on 2x TP8 DP4, whose dp ranks each schedule their own batch.",
-        "Measured: best was <strong>8x TP8 + EP (batch tokens 32,768)</strong> at 86.23 tok/s/accelerator (concurrency 256)."
+        "Measured: best was <strong>8x TP8 + EP (max seqs 256 \u00b7 batch tokens 32,768)</strong> at 87.72 tok/s/accelerator (concurrency 256)."
       ],
       "title": "Sweep: batch-caps"
     },
@@ -72,7 +72,7 @@
       "num": 6,
       "prose": [
         "DeepEP backends should pay off at EP width 64 and matter little at width 8, where dispatch volume is small.",
-        "Measured: best was <strong>8x TP8 + EP</strong> at 87.65 tok/s/accelerator (concurrency 256)."
+        "Measured: best was <strong>8x TP8 + EP</strong> at 88.55 tok/s/accelerator (concurrency 256)."
       ],
       "title": "Sweep: moe-collective"
     },
@@ -81,7 +81,7 @@
       "num": 7,
       "prose": [
         "prefix-affinity should only beat queue and random with caching on, and eight instances give it the most room to win.",
-        "Measured: best was <strong>8x TP8 + EP (prefix-affinity routing)</strong> at 88.64 tok/s/accelerator (concurrency 256)."
+        "Measured: best was <strong>8x TP8 + EP (prefix-affinity routing)</strong> at 75.89 tok/s/accelerator (concurrency 256)."
       ],
       "title": "Sweep: routing-prefix-cache"
     },
@@ -90,7 +90,7 @@
       "num": 8,
       "prose": [
         "Capping long prefills should trade a little peak throughput for a much lower ITL p99 at saturation.",
-        "Measured: best was <strong>8x TP8 + EP</strong> at 90.18 tok/s/accelerator (concurrency 256)."
+        "Measured: best was <strong>8x TP8 + EP</strong> at 91.57 tok/s/accelerator (concurrency 256)."
       ],
       "title": "Sweep: prefill-chunking"
     },
@@ -99,7 +99,7 @@
       "num": 9,
       "prose": [
         "FULL capture should beat the PIECEWISE default by a few percent, and NONE should collapse.",
-        "Measured: best was <strong>8x TP8 + EP (graph capture full)</strong> at 87.13 tok/s/accelerator (concurrency 256)."
+        "Measured: best was <strong>8x TP8 + EP (graph capture full)</strong> at 89.47 tok/s/accelerator (concurrency 256)."
       ],
       "title": "Sweep: cudagraph"
     }

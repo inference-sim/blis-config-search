@@ -10,11 +10,11 @@
     },
     {
       "h": "What was found",
-      "html": "<strong>2x TP8xPP4 + EP</strong>, from the <em>pipeline</em> sweep, reached 33.11 tok/s/accelerator (2119.3 tok/s across the fleet) at concurrency 128 while holding the scenario's SLOs. 4 runs were refused and are not counted as misses: 2 configurations (2 runs): the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[1141].e2e_us: is 127270137, less than ttft_us 131537500\\n  error: result.request_rows[1141].tpot_us: must be a finite number, not negative; 1 configuration (1 run): the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[2486].e2e_us: is 73809840, less than ttft_us 75751987\\n  error: result.request_rows[2486].tpot_us: must be a finite number, not negative; 1 configuration (1 run): the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[7523].e2e_us: is 1140139310, less than ttft_us 1151865527\\n  error: result.request_rows[7523].tpot_us: must be a finite number, not negative. Ranking: max output tok/s per accelerator subject to the scenario's SLOs."
+      "html": "<strong>2x TP8xPP4 + EP</strong>, from the <em>pipeline</em> sweep, reached 32.11 tok/s/accelerator (2055.3 tok/s across the fleet) at concurrency 128 while holding the scenario's SLOs. 228 runs were refused and are not counted as misses: 47 configurations (188 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists; 6 configurations (24 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 84.4 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists; 2 configurations (8 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 82.5 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists; 2 more reasons. Ranking: max output tok/s per accelerator subject to the scenario's SLOs."
     },
     {
       "h": "What to run",
-      "html": "2x TP8xPP4 + EP at concurrency 128. 11 of 240 runs held the SLOs.",
+      "html": "2x TP8xPP4 + EP at concurrency 128. 9 of 240 runs held the SLOs.",
       "run": true
     }
   ],
@@ -36,7 +36,7 @@
       "num": 2,
       "prose": [
         "Eight single-node TP8 instances are the control every other sweep is read against.",
-        "Measured: no configuration in this sweep held the SLOs at any tested load."
+        "Measured: nothing ran; the simulator refused every configuration in this sweep. Refused: 1 configuration (4 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists."
       ],
       "title": "Sweep: topology"
     },
@@ -45,7 +45,7 @@
       "num": 3,
       "prose": [
         "Replicating all 256 experts instead of sharding them should cost KV room and throughput against the EP twins in topology.",
-        "Measured: no configuration in this sweep held the SLOs at any tested load."
+        "Measured: nothing ran; the simulator refused every configuration in this sweep. Refused: 1 configuration (4 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 1): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists."
       ],
       "title": "Sweep: ep-off"
     },
@@ -54,7 +54,7 @@
       "num": 4,
       "prose": [
         "Pipeline stages should trail data-parallel shapes of the same width, since each stage adds a boundary hop per decode step.",
-        "Measured: best was <strong>2x TP8xPP4 + EP</strong> at 33.11 tok/s/accelerator (concurrency 128)."
+        "Measured: best was <strong>2x TP8xPP4 + EP</strong> at 32.11 tok/s/accelerator (concurrency 128)."
       ],
       "title": "Sweep: pipeline"
     },
@@ -63,7 +63,7 @@
       "num": 5,
       "prose": [
         "At in-node EP width 8 on NVLink the all-to-all backend should matter little.",
-        "Measured: no configuration in this sweep held the SLOs at any tested load."
+        "Measured: nothing ran; the simulator refused every configuration in this sweep. Refused: 4 configurations (16 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists."
       ],
       "title": "Sweep: moe-collective"
     },
@@ -72,7 +72,7 @@
       "num": 6,
       "prose": [
         "fp8 KV should matter most on 8x TP8, whose 80 GiB ranks leave the least KV room (fp8 was +40% there at c=32 in the 8gpu report).",
-        "Measured: best was <strong>8x TP8 + EP (KV dtype fp8)</strong> at 14.19 tok/s/accelerator (concurrency 64)."
+        "Measured: nothing ran; the simulator refused every configuration in this sweep. Refused: 2 configurations (8 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists."
       ],
       "title": "Sweep: kv-capacity"
     },
@@ -81,7 +81,7 @@
       "num": 7,
       "prose": [
         "A seq cap of 32 should bind on 8x TP8 at 512 lanes.",
-        "Measured: no configuration in this sweep held the SLOs at any tested load."
+        "Measured: nothing ran; the simulator refused every configuration in this sweep. Refused: 2 configurations (8 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 82.5 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists; 2 configurations (8 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 84.4 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists."
       ],
       "title": "Sweep: batch-caps"
     },
@@ -90,7 +90,7 @@
       "num": 8,
       "prose": [
         "prefix-affinity should only beat queue and random with caching on, and eight instances give it the most room to win.",
-        "Measured: no configuration in this sweep held the SLOs at any tested load."
+        "Measured: nothing ran; the simulator refused every configuration in this sweep. Refused: 6 configurations (24 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists."
       ],
       "title": "Sweep: routing-prefix-cache"
     },
@@ -99,7 +99,7 @@
       "num": 9,
       "prose": [
         "Capping long prefills should trade a little peak throughput for a much lower ITL p99 at saturation.",
-        "Measured: no configuration in this sweep held the SLOs at any tested load."
+        "Measured: nothing ran; the simulator refused every configuration in this sweep. Refused: 1 configuration (4 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists."
       ],
       "title": "Sweep: prefill-chunking"
     },
@@ -108,7 +108,7 @@
       "num": 10,
       "prose": [
         "Decode-heavy ratios should win on AgentX, since cached prefixes leave only a short uncached tail to prefill per turn -- and the RoCE handoff taxes the prefill-heavy splits more.",
-        "Measured: no configuration that ran in this sweep held the SLOs at any tested load. Refused: 1 configuration (1 run): the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[2486].e2e_us: is 73809840, less than ttft_us 75751987\\n  error: result.request_rows[2486].tpot_us: must be a finite number, not negative."
+        "Measured: nothing ran; the simulator refused every configuration in this sweep. Refused: 16 configurations (64 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists."
       ],
       "title": "Sweep: pd-ratio"
     },
@@ -117,7 +117,7 @@
       "num": 11,
       "prose": [
         "Splitting every request should trail the threshold arms, because a turn with a cached prefix pays a cross-node RoCE handoff for little prefill.",
-        "Measured: no configuration that ran in this sweep held the SLOs at any tested load. Refused: 1 configuration (1 run): the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[1141].e2e_us: is 127270137, less than ttft_us 131537500\\n  error: result.request_rows[1141].tpot_us: must be a finite number, not negative."
+        "Measured: nothing ran; the simulator refused every configuration in this sweep. Refused: 4 configurations (16 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists."
       ],
       "title": "Sweep: pd-always"
     },
@@ -126,7 +126,7 @@
       "num": 12,
       "prose": [
         "TP16 decode instances should hold ITL at higher load than TP8 ones, trading batch slots for faster steps.",
-        "Measured: best was <strong>6P TP8 + EP / 1D TP16 + EP</strong> at 13.3 tok/s/accelerator (concurrency 64)."
+        "Measured: nothing ran; the simulator refused every configuration in this sweep. Refused: 6 configurations (24 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists."
       ],
       "title": "Sweep: pd-wide-decode"
     },
@@ -135,7 +135,7 @@
       "num": 13,
       "prose": [
         "A bigger prefill budget should matter on the prefill-light layout and a decode-pool prefill cap on the decode-heavy one.",
-        "Measured: no configuration that ran in this sweep held the SLOs at any tested load. Refused: 1 configuration (1 run): the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[1141].e2e_us: is 127270137, less than ttft_us 131537500\\n  error: result.request_rows[1141].tpot_us: must be a finite number, not negative; 1 configuration (1 run): the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[7523].e2e_us: is 1140139310, less than ttft_us 1151865527\\n  error: result.request_rows[7523].tpot_us: must be a finite number, not negative."
+        "Measured: nothing ran; the simulator refused every configuration in this sweep. Refused: 4 configurations (16 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists; 4 configurations (16 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 84.4 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists."
       ],
       "title": "Sweep: pd-pool-engine"
     },
@@ -144,7 +144,7 @@
       "num": 14,
       "prose": [
         "Full graph capture on the decode pool should lower ITL by a few percent, with FULL_DECODE_ONLY matching FULL there.",
-        "Measured: no configuration in this sweep held the SLOs at any tested load."
+        "Measured: nothing ran; the simulator refused every configuration in this sweep. Refused: 2 configurations (8 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists."
       ],
       "title": "Sweep: pd-decode-cudagraph"
     },
@@ -153,7 +153,7 @@
       "num": 15,
       "prose": [
         "FULL capture should beat the PIECEWISE default by a few percent, and NONE should collapse.",
-        "Measured: no configuration in this sweep held the SLOs at any tested load."
+        "Measured: nothing ran; the simulator refused every configuration in this sweep. Refused: 1 configuration (4 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 82.0 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists; 1 configuration (4 runs): scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists."
       ],
       "title": "Sweep: cudagraph"
     }

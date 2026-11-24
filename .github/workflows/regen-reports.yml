@@ -464,7 +464,7 @@ jobs:
           git push origin "$branch"
           cat > /tmp/body.md <<EOF
           Regenerates the **$BATCH** reports against the stack now pinned in \`pins.env\`
-          (inference-sim **$BLIS_REF**, merged in ${SWEPT::10}).
+          (inference-sim **$BLIS_REF**, merged in $SWEPT).
 
           $table
 

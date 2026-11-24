@@ -482,6 +482,14 @@ jobs:
 
           This is one of several batch PRs from [this run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID); each can merge on its own.
 
+          ## Invariants
+
+          - X8
+          - X14
+
+          X8: each report is regenerated from its own experiment spec at the pins named above.
+          X14: this description is the one the workflow wrote; the commit hash it lists is the merge that moved the pin.
+
           🤖 Generated with [Claude Code](https://claude.com/claude-code)
           EOF
           # Labels mark a PR this automation opened: `auto-update` for every one, plus its kind.

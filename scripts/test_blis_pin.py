@@ -559,6 +559,9 @@ def test_workflow_wiring():
         check("go-version-file: upstream/go.mod" in text,
               f"{name} must build with the toolchain the release's go.mod names")
     check("$BLIS_SHA" in regen, "regen-reports.yml must refuse a moved tag")
+    body = regen.split("cat > /tmp/body.md <<EOF")[1].split("\n          EOF\n")[0]
+    check("\n          ## Invariants\n" in body and "- X14" in body,
+          "the regen PR body names the invariants it touches (X14): the PR check refuses a body without the section")
     check("scripts/blis_pin.py bump" in bump, "the bump PR is written by blis_pin.py")
     check("bump/blis-pin-" in bump and 'gh pr list --head "$branch" --state all' in bump,
           "the daily poll must not open a second PR for a release it already proposed")

@@ -184,7 +184,7 @@ jobs:
             while read -r commit status; do
               [ -n "$commit" ] || continue
               if contains "$commit"; then
-                seen=true
+                [ "$status" = errored ] || seen=true  # an errored build may be superseded; still request one
                 [ "$status" = built ] && { echo "Pages build of $commit is built (contains $SHA)"; exit 0; }
               elif [ "$status" = queued ] || [ "$status" = building ]; then
                 busy=true
@@ -194,7 +194,9 @@ jobs:
             # Pages skips a push that lands mid-build (another PR's preview, a main deploy), so ask for one.
             if [ "$seen" = false ] && [ "$busy" = false ] && [ $SECONDS -ge $next_request ]; then
               echo "No Pages build contains $SHA yet; requesting one"
-              gh api -X POST "repos/$REPO/pages/builds" --jq .status || echo "::warning::Pages build request failed"
+              if ! gh api -X POST "repos/$REPO/pages/builds" --jq .status; then
+                echo "::warning::Pages build request failed; polling again"
+              fi
               next_request=$((SECONDS + 120))
             fi
             tip=$(gh api repos/$REPO/branches/gh-pages --jq .commit.sha)

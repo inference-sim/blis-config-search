@@ -32,6 +32,7 @@ the sweep ran.
 """
 import argparse
 import collections
+import copy
 import hashlib
 import itertools
 import json
@@ -187,14 +188,24 @@ def row_origins(rec, fixed, swept, sweep=None):
 
 
 def _offload_candidates(block, role=None):
-    """A sweep's `offload:` block as candidate keys: offload_cpu_bytes (bytes, 0 = no tier, the control)
-    and offload_eviction_policy. One candidate per combination; a 0-byte tier takes no policy.
+    """A sweep's `offload:` block as candidate keys: offload_cpu_bytes (bytes, 0 = no tier, the
+    control) and offload_eviction_policy, swept; plus offload_tiers (extra fs/obj device tiers
+    below the CPU tier) and offload_p2p (a p2p secondary tier), attached to every arm that runs a
+    CPU tier. One candidate per (size, policy) combination; a 0-byte tier takes no policy and no
+    extra tier (p2p and fs/obj tiers sit below a primary CPU tier, which the control has none of).
 
     With a `role`, a disaggregated sweep's block for that pool: the same keys, prefixed
     (prefill_offload_cpu_bytes), which replace the sweep-level block for that pool alone."""
     if not block:
         return [{}]
     sizes = [validator.parse_size(v) for v in block["cpu_bytes"]]
+    extra = {}
+    tiers = [{"tier": t["tier"], "bytes": validator.parse_size(t["bytes"])}
+             for t in block.get("tiers") or []]
+    if tiers:
+        extra["offload_tiers"] = tiers
+    if block.get("p2p"):
+        extra["offload_p2p"] = True
     out = []
     for size in dict.fromkeys(sizes):
         if size == 0 or "eviction_policy" not in block:
@@ -203,6 +214,8 @@ def _offload_candidates(block, role=None):
             combo = [{"offload_cpu_bytes": size, "offload_eviction_policy": p}
                      for p in dict.fromkeys(block["eviction_policy"])]
         for c in combo:
+            if size and extra:
+                c = {**c, **copy.deepcopy(extra)}
             c = {_flag(role, k): v for k, v in c.items()} if role else c
             if c not in out:
                 out.append(c)
@@ -845,6 +858,11 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
     fabric = (sc.get("cluster") or {}).get("fabric") or run_blis.DEFAULT_FABRIC
     # The node size the specification states, for a chip whose catalog entry fixes none (#96).
     gpus_per_node = (sc.get("cluster") or {}).get("gpus_per_node")
+    # The acceptance and routing pins the scenario states, passed through to BLIS unchanged (it
+    # validates them: acceptance.Pin, routing.Pin). Both scenario-wide, like the fabric; routing
+    # has no CLI alternative (the flags were removed in v0.12.0), so this is its only path.
+    acceptance_pin = sc.get("acceptance")
+    routing_pin = sc.get("routing")
 
     final_dir = os.path.join(out_root, name)
     # Into the committed reports/, a sweep is staged outside the tree: only the Results can say
@@ -1022,7 +1040,8 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                                    replay={k: v for k, v in replay.items()
                                            if k not in RECORD_ONLY_REPLAY} if replay else None,
                                    fabric=fabric, gpus_per_node=gpus_per_node, fields=fields,
-                                   data_override=data_override)
+                                   data_override=data_override, acceptance=acceptance_pin,
+                                   routing=routing_pin)
             if journal:
                 journal.append({**rec, "sweep": sname})
             return _row_of(idx, rec, cfg, label, variant, c, router_rec)

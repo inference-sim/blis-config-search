@@ -239,8 +239,10 @@ class ConfigError(ValueError):
     pass
 
 
-# The CPU KV tier's candidate keys (a sweep's `offload:` block): a size in bytes, 0 for no tier, and a policy.
-SCENARIO_OFFLOAD = frozenset({"offload_cpu_bytes", "offload_eviction_policy"})
+# The KV tier's candidate keys (a sweep's `offload:` block): the primary CPU tier's size in bytes
+# (0 for no tier) and its policy; `offload_tiers`, extra device tiers below it (fs/obj devices such
+# as nvme_gen4 or s3); and `offload_p2p`, a p2p secondary tier (a peer instance's host memory).
+SCENARIO_OFFLOAD = frozenset({"offload_cpu_bytes", "offload_eviction_policy", "offload_tiers", "offload_p2p"})
 
 
 def merge_nested(base, over):
@@ -400,7 +402,7 @@ def classify_config(config, vocab, node_size=None, pool_offload=False):
             if not pool_offload:
                 raise ConfigError("offload_cpu_bytes: this simulator's deployment schema has no per-pool "
                                   "offload (blis-substrate#307), so a disaggregated deployment cannot "
-                                  "state a CPU tier (inference-sim/blis-config-search#94)")
+                                  "state a tier")
             if pd["connector"] not in ("NixlConnector", "MultiConnector"):
                 raise ConfigError(f"pd_connector {pd['connector']!r} with a CPU tier: a pool that runs a tier "
                                   f"carries NIXL as a MultiConnector, which is modelled over NixlConnector only")
@@ -1370,16 +1372,77 @@ def pool_nodes(parallel, num_instances=1, node_size=8):
     return max(1, -(-total // node_size))           # ceil(total / the node size)
 
 
+def _offload_tiers(off):
+    """The ordered tier list a resolved offload dict states: the primary cpu_dram tier (from
+    cpu_bytes), then each extra device tier (`tiers`, an fs/obj device below HBM)."""
+    tiers = []
+    if off.get("cpu_bytes"):
+        tiers.append({"tier": "cpu_dram", "bytes": int(off["cpu_bytes"])})
+    for t in off.get("tiers") or []:
+        tiers.append({"tier": t["tier"], "bytes": int(t["bytes"])})
+    return tiers
+
+
+def _render_offload(off, indent):
+    """The body of an `offload:` block, indented by `indent`: the eviction policy, the ordered
+    `tiers:` list, and a p2p secondary tier under `connector_options.secondary_tiers` when the
+    arm asks for one. "" when the dict states no tier (so the block is omitted entirely).
+
+    A p2p tier (a peer instance's host memory) sits on no catalog device, so vLLM states it in
+    connector_options.secondary_tiers, not as one of the tiers above; the engine refuses any type
+    but p2p there (engineconfig/connector.go)."""
+    tiers = _offload_tiers(off)
+    if not tiers:
+        return ""
+    pad = " " * indent
+    lines = []
+    if off.get("eviction_policy"):
+        lines.append(f"{pad}eviction_policy: {json.dumps(off['eviction_policy'])}")
+    lines.append(f"{pad}tiers:")
+    lines += [f"{pad}  - {{tier: {t['tier']}, bytes: {t['bytes']}}}" for t in tiers]
+    if off.get("p2p"):
+        lines.append(f"{pad}connector_options:")
+        lines.append(f"{pad}  secondary_tiers:")
+        lines.append(f"{pad}    - {{type: p2p}}")
+    return "\n".join(lines)
+
+
+def _pin_lines(obj, indent):
+    """Minimal block-style YAML for a JSON-like scenario pin value (acceptance/routing): a mapping,
+    a mapping nested one deep (`value`), and a list of scalars (`per_position_rates`)."""
+    pad = " " * indent
+    lines = []
+    for k, v in obj.items():
+        if isinstance(v, dict):
+            lines.append(f"{pad}{k}:")
+            lines += _pin_lines(v, indent + 2)
+        elif isinstance(v, list):
+            lines.append(f"{pad}{k}:")
+            lines += [f"{pad}  - {json.dumps(item)}" for item in v]
+        else:
+            lines.append(f"{pad}{k}: {json.dumps(v)}")
+    return lines
+
+
+def _pin_block(key, pin):
+    """A top-level scenario pin block (`acceptance:`/`routing:`), or "" when the scenario pins none.
+    The pin is the already-parsed mapping from the spec; BLIS validates its keys (acceptance.Pin,
+    routing.Pin), so it is rendered through whole."""
+    if not pin:
+        return ""
+    return "\n" + "\n".join([f"{key}:"] + _pin_lines(pin, 2))
+
+
 def _pool_offload_block(off):
-    """A pool's own `offload:` block (the CPU tier), or "" for a pool with none."""
+    """A pool's own `offload:` block, or "" for a pool with none."""
     if not off:
         return ""
-    policy = f"      eviction_policy: {json.dumps(off['eviction_policy'])}\n" if off.get("eviction_policy") else ""
-    return f"    offload:\n{policy}      tiers:\n        - {{tier: cpu_dram, bytes: {int(off['cpu_bytes'])}}}\n"
+    body = _render_offload(off, 6)
+    return f"    offload:\n{body}\n" if body else ""
 
 
 def _pd_scenario_yaml(model, hardware, pd, name, block, fabric, router,
-                      node_size, states_node_size):
+                      node_size, states_node_size, acceptance=None, routing=None):
     """Render a DISAGGREGATED Scenario+Deployment: one pool per role plus `pd_transfer`.
 
     Pools never share a node (blis-vllm places each role on its own nodes and asserts they do
@@ -1414,7 +1477,7 @@ name: {name}
 engine:
   kind: {settings.ENGINE_KIND}
 model: {model}
-coefficients: [{", ".join(COEFFICIENTS + (["cost-model-offload-tiers"] if any_offload else []))}]
+coefficients: [{", ".join(COEFFICIENTS + (["cost-model-offload-tiers"] if any_offload else []))}]{_pin_block("acceptance", acceptance)}{_pin_block("routing", routing)}
 cluster:
   hardware: {hardware}
   fabric: {fabric}
@@ -1487,7 +1550,8 @@ def to_vllm_block(eng):
 
 
 def scenario_yaml(model, hardware, parallel, engine, name, num_instances=1,
-                  fabric=DEFAULT_FABRIC, router=None, node_size=8, states_node_size=True):
+                  fabric=DEFAULT_FABRIC, router=None, node_size=8, states_node_size=True,
+                  acceptance=None, routing=None):
     """Render a two-doc Scenario+Deployment YAML (no external yaml dep). Omitted engine keys (e.g.
     quantization when unset) let the checkpoint/engine govern.
 
@@ -1515,7 +1579,7 @@ def scenario_yaml(model, hardware, parallel, engine, name, num_instances=1,
     if pd:
         pd = {**pd, **{r: {**pd[r], "engine": to_vllm_block(pd[r].get("engine"))} for r in PD_ROLES if r in pd}}
         return _pd_scenario_yaml(model, hardware, pd, name, block, fabric, router,
-                                 node_size, states_node_size)
+                                 node_size, states_node_size, acceptance, routing)
     engine = to_vllm_block(engine)
     nodes = pool_nodes(parallel, num_instances, node_size)
     node_size_line = f"\n  gpus_per_node: {node_size}" if states_node_size else ""
@@ -1534,16 +1598,16 @@ def scenario_yaml(model, hardware, parallel, engine, name, num_instances=1,
     # that prices the tier's transfers, which the simulator requires beside it.
     off = (parallel or {}).get("offload")
     offload_block, coefficients = "", list(COEFFICIENTS)
-    if off:
-        policy = f"\n  eviction_policy: {json.dumps(off['eviction_policy'])}" if off.get("eviction_policy") else ""
-        offload_block = f"\noffload:{policy}\n  tiers:\n    - {{tier: cpu_dram, bytes: {int(off['cpu_bytes'])}}}"
+    body = _render_offload(off, 2) if off else ""
+    if body:
+        offload_block = f"\noffload:\n{body}"
         coefficients.append("cost-model-offload-tiers")
     return f"""kind: Scenario
 name: {name}
 engine:
   kind: {settings.ENGINE_KIND}
 model: {model}
-coefficients: [{", ".join(coefficients)}]
+coefficients: [{", ".join(coefficients)}]{_pin_block("acceptance", acceptance)}{_pin_block("routing", routing)}
 cluster:
   hardware: {hardware}{fabric_line}
   nodes: {nodes}{node_size_line}
@@ -1561,21 +1625,27 @@ pools:
 
 
 def scenario_name(model, hardware, engine_version, parallel, engine, num_instances=1,
-                  fabric=DEFAULT_FABRIC, router=None, node_size=8, states_node_size=True):
+                  fabric=DEFAULT_FABRIC, router=None, node_size=8, states_node_size=True,
+                  acceptance=None, routing=None):
     """The hashed file name (no .yaml) of a deployment's scenario; the router is part of the key
-    because two routing arms differ ONLY in their `router:` block."""
+    because two routing arms differ ONLY in their `router:` block, and the acceptance/routing pins
+    are too (two acceptance or routing arms differ ONLY in their `acceptance:`/`routing:` block)."""
     parts = [model, hardware, engine_version, parallel, engine, num_instances, fabric, router or {}]
     # Part of the key only when it differs from what every earlier scenario used (8 GPUs a node,
     # stated), so a committed report on an HGX server keeps the file name it was recorded under.
     if (node_size, states_node_size) != (8, True):
         parts += [node_size, states_node_size]
+    # Appended only when pinned, so a scenario that pins neither keeps the file name it was
+    # recorded under before these existed.
+    if acceptance or routing:
+        parts += [acceptance or {}, routing or {}]
     key = json.dumps(parts, sort_keys=True)
     return f"{model}-{hardware}-{hashlib.sha1(key.encode()).hexdigest()[:10]}"
 
 
 def write_scenario(blis, scenarios_dir, model, hardware, engine_version, parallel, engine,
                    num_instances=1, fabric=DEFAULT_FABRIC, router=None, node_size=8,
-                   states_node_size=True):
+                   states_node_size=True, acceptance=None, routing=None):
     """Write a scenario ATOMICALLY (temp + os.replace) so concurrent pool workers never read a
     half-written file for the same hashed deployment; return its file name.
 
@@ -1586,12 +1656,12 @@ def write_scenario(blis, scenarios_dir, model, hardware, engine_version, paralle
     that differ only in instance count need DIFFERENT scenario files, or the second reuses a
     pool too small for it and BLIS refuses the run."""
     name = scenario_name(model, hardware, engine_version, parallel, engine, num_instances, fabric, router,
-                         node_size, states_node_size)
+                         node_size, states_node_size, acceptance, routing)
     os.makedirs(scenarios_dir, exist_ok=True)
     path = os.path.join(scenarios_dir, name + ".yaml")
     if not os.path.exists(path):
         body = scenario_yaml(model, hardware, parallel, engine, name, num_instances,
-                             fabric, router, node_size, states_node_size)
+                             fabric, router, node_size, states_node_size, acceptance, routing)
         fd, tmp = tempfile.mkstemp(dir=scenarios_dir, prefix=".tmp-", suffix=".yaml")
         try:
             with os.fdopen(fd, "w") as f:
@@ -1861,7 +1931,7 @@ def outcome_of(rec):
 def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_version,
             workload, num_requests, seed, horizon, config, phase="probe", timeout=120, defaults=None,
             replay=None, fabric=DEFAULT_FABRIC, gpus_per_node=None, fields=None,
-            data_override=False):
+            data_override=False, acceptance=None, routing=None):
     """Run one kernel-priced BLIS config and return a record dict. No runs.jsonl I/O (caller writes).
 
     `replay` selects the trace-REPLAY path (`blis replay --agentic-scenario`) instead of
@@ -1937,7 +2007,7 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
     try:
         scenario_name = write_scenario(blis, scenarios_dir, model, hardware, engine_version,
                                        parallel, engine, num_instances, fabric, router,
-                                       node_size, states_node_size)
+                                       node_size, states_node_size, acceptance, routing)
     except blis_cli.DocumentInvalid as e:
         rec.update({"deployment": None, "cmd": None, "returncode": None, "wall_s": 0.0,
                     "metrics": {}, "metrics_all_instances": [],

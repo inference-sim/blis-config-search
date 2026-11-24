@@ -1124,6 +1124,71 @@ class RouterBlockInScenario(unittest.TestCase):
             shutil.rmtree(d)
 
 
+class AcceptanceRoutingInScenario(unittest.TestCase):
+    """The scenario.acceptance / scenario.routing pins, rendered into the Scenario doc whole and
+    part of its hash (inference-sim/blis-config-search#201)."""
+
+    def test_an_acceptance_pin_renders_as_a_top_level_scenario_block(self):
+        pin = {"profiles": "sensitivity-k3", "fallback_category": "coding",
+               "value": {"num_spec_tokens": 3, "acceptance_length": 2.4,
+                         "per_position_rates": [0.8, 0.6], "realisation": "synthetic"},
+               "exact_only": True}
+        y = run_blis.scenario_yaml("m", "h100", dict(run_blis.PARALLEL_DEFAULTS),
+                                   {"block_size": 64}, "n", acceptance=pin)
+        self.assertRegex(y, r"(?m)^acceptance:$")
+        self.assertRegex(y, r"(?m)^  profiles: \"sensitivity-k3\"$")
+        self.assertRegex(y, r"(?m)^  value:$")
+        self.assertRegex(y, r"(?m)^    num_spec_tokens: 3$")
+        self.assertRegex(y, r"(?m)^      - 0.8$")           # per_position_rates list item
+        self.assertRegex(y, r"(?m)^  exact_only: true$")
+        # Rendered before cluster:, a sibling of coefficients:.
+        self.assertLess(y.index("acceptance:"), y.index("cluster:"))
+
+    def test_a_routing_pin_renders_as_a_top_level_scenario_block(self):
+        pin = {"value": {"token_imbalance": 1.3, "expert_imbalance": 1.1}}
+        y = run_blis.scenario_yaml("m", "h100", dict(run_blis.PARALLEL_DEFAULTS),
+                                   {"block_size": 64}, "n", routing=pin)
+        self.assertRegex(y, r"(?m)^routing:$")
+        self.assertRegex(y, r"(?m)^    token_imbalance: 1.3$")
+
+    def test_absent_pins_emit_no_block_and_leave_the_scenario_byte_identical(self):
+        par, eng = dict(run_blis.PARALLEL_DEFAULTS), {"block_size": 64}
+        y = run_blis.scenario_yaml("m", "h100", par, eng, "n")
+        self.assertNotIn("acceptance:", y)
+        self.assertNotIn("routing:", y)
+        self.assertEqual(y, run_blis.scenario_yaml("m", "h100", par, eng, "n",
+                                                   acceptance=None, routing=None))
+
+    def test_the_pins_reach_a_disaggregated_scenario_too(self):
+        par, _, cli, _ = classify({"prefill_instances": 1, "decode_instances": 1,
+                                   "prefill_tp": 8, "decode_tp": 8})
+        for role in run_blis.PD_ROLES:
+            par["pd"][role]["engine"]["block_size"] = 64
+        y = run_blis.scenario_yaml("qwen3-14b", "h100", par, {}, "n", node_size=8,
+                                   acceptance={"profiles": "s"}, routing={"profiles": "r"})
+        self.assertRegex(y, r"(?m)^acceptance:$")
+        self.assertRegex(y, r"(?m)^routing:$")
+
+    def test_each_pin_participates_in_the_scenario_hash(self):
+        """Two acceptance (or routing) arms differ ONLY in their pin block: sharing a file would
+        run the second arm with the first's pin. An unpinned scenario keeps its old name."""
+        import shutil
+        d = tempfile.mkdtemp()
+        try:
+            args = ("m", "h100", "0.32.0", dict(run_blis.PARALLEL_DEFAULTS),
+                    {"block_size": 64}, 1, run_blis.DEFAULT_FABRIC, None, 8, True)
+            n0 = run_blis.write_scenario(FIXTURE_BLIS, d, *args)
+            na = run_blis.write_scenario(FIXTURE_BLIS, d, *args, acceptance={"profiles": "a"})
+            nb = run_blis.write_scenario(FIXTURE_BLIS, d, *args, acceptance={"profiles": "b"})
+            nr = run_blis.write_scenario(FIXTURE_BLIS, d, *args, routing={"profiles": "a"})
+            self.assertEqual(4, len({n0, na, nb, nr}))
+            # Absent pins keep the file name the scenario had before these existed.
+            self.assertEqual(n0, run_blis.scenario_name("m", "h100", "0.32.0",
+                             dict(run_blis.PARALLEL_DEFAULTS), {"block_size": 64}) + ".yaml")
+        finally:
+            shutil.rmtree(d)
+
+
 class SpeculativeDecoding(unittest.TestCase):
     """Drafting is priced by the kernel; see run_blis's speculative comment."""
 

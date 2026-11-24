@@ -13,9 +13,15 @@
       "tp": 8
     },
     "disaggregated": false,
+    "engine_origin": {
+      "block_size": "runner",
+      "cache_dtype": "sweep",
+      "gpu_memory_utilization": "sweep",
+      "max_model_len": "scenario"
+    },
     "gpus": 8,
     "in_flight_at_cutoff": 17,
-    "interactivity": 25.82,
+    "interactivity": 29.581,
     "interactivity_basis": "result",
     "itl_p99_ms": 104.583,
     "itl_p99_ms_aggregate": 104.5829019963369,
@@ -68,7 +74,7 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 25.82,
+            "interactivity": 29.581,
             "label": "1x TP8 + EP",
             "status": "front",
             "sweep": "kv-capacity",
@@ -88,7 +94,7 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 42.579,
+            "interactivity": 47.468,
             "label": "1x TP8 + EP",
             "status": "front",
             "sweep": "kv-capacity",
@@ -108,7 +114,7 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 58.164,
+            "interactivity": 61.044,
             "label": "1x TP8 + EP",
             "status": "front",
             "sweep": "kv-capacity",
@@ -128,7 +134,7 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 58.164,
+            "interactivity": 61.044,
             "label": "1x TP8 + EP",
             "status": "front",
             "sweep": "kv-capacity",
@@ -148,7 +154,7 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 69.713,
+            "interactivity": 71.583,
             "label": "1x TP8 + EP",
             "status": "front",
             "sweep": "kv-capacity",
@@ -168,7 +174,7 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 69.713,
+            "interactivity": 71.583,
             "label": "1x TP8 + EP",
             "status": "front",
             "sweep": "kv-capacity",
@@ -201,7 +207,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 32.917,
+              "interactivity": 39.663,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "topology-pp",
@@ -219,7 +225,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 54.083,
+              "interactivity": 57.288,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "topology-pp",
@@ -237,7 +243,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 67.302,
+              "interactivity": 69.654,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "topology-pp",
@@ -271,7 +277,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 34.957,
+              "interactivity": 40.65,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "batch-caps",
@@ -291,7 +297,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 41.215,
+              "interactivity": 46.369,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "batch-caps",
@@ -311,7 +317,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 54.702,
+              "interactivity": 57.228,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "batch-caps",
@@ -331,7 +337,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 55.086,
+              "interactivity": 57.544,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "batch-caps",
@@ -345,18 +351,38 @@
                 "dp": 1,
                 "enable_expert_parallel": true,
                 "max_model_len": 262144,
-                "max_num_batched_tokens": 4096,
+                "max_num_batched_tokens": 16384,
+                "max_num_seqs": 8,
+                "num_instances": 1,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 69.678,
+              "label": "1x TP8 + EP",
+              "status": "front",
+              "sweep": "batch-caps",
+              "throughput_per_gpu": 1718.117,
+              "variant": "batch tokens 16,384"
+            },
+            {
+              "concurrency": 4,
+              "config": {
+                "concurrency": 4,
+                "dp": 1,
+                "enable_expert_parallel": true,
+                "max_model_len": 262144,
+                "max_num_batched_tokens": 16384,
                 "max_num_seqs": 16,
                 "num_instances": 1,
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 67.677,
+              "interactivity": 69.678,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "batch-caps",
               "throughput_per_gpu": 1718.117,
-              "variant": "max seqs 16 \u00b7 batch tokens 4,096"
+              "variant": "max seqs 16 \u00b7 batch tokens 16,384"
             }
           ],
           "points": 21,
@@ -385,7 +411,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 25.82,
+              "interactivity": 29.581,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "kv-capacity",
@@ -405,7 +431,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 42.579,
+              "interactivity": 47.468,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "kv-capacity",
@@ -425,7 +451,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 58.164,
+              "interactivity": 61.044,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "kv-capacity",
@@ -445,7 +471,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 58.164,
+              "interactivity": 61.044,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "kv-capacity",
@@ -465,7 +491,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 69.713,
+              "interactivity": 71.583,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "kv-capacity",
@@ -485,7 +511,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 69.713,
+              "interactivity": 71.583,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "kv-capacity",
@@ -518,7 +544,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 32.917,
+              "interactivity": 39.663,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "moe-collective",
@@ -537,7 +563,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 32.917,
+              "interactivity": 39.663,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "moe-collective",
@@ -556,7 +582,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 32.917,
+              "interactivity": 39.663,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "moe-collective",
@@ -575,7 +601,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 32.917,
+              "interactivity": 39.663,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "moe-collective",
@@ -594,7 +620,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 54.083,
+              "interactivity": 57.288,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "moe-collective",
@@ -613,7 +639,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 54.083,
+              "interactivity": 57.288,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "moe-collective",
@@ -632,7 +658,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 54.083,
+              "interactivity": 57.288,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "moe-collective",
@@ -651,7 +677,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 54.083,
+              "interactivity": 57.288,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "moe-collective",
@@ -670,7 +696,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 67.302,
+              "interactivity": 69.654,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "moe-collective",
@@ -689,7 +715,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 67.302,
+              "interactivity": 69.654,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "moe-collective",
@@ -708,7 +734,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 67.302,
+              "interactivity": 69.654,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "moe-collective",
@@ -727,7 +753,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 67.302,
+              "interactivity": 69.654,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "moe-collective",
@@ -760,7 +786,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 32.917,
+              "interactivity": 39.663,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "prefill-chunking",
@@ -779,7 +805,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 54.083,
+              "interactivity": 57.288,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "prefill-chunking",
@@ -798,7 +824,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 64.047,
+              "interactivity": 68.137,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "prefill-chunking",
@@ -817,7 +843,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 67.302,
+              "interactivity": 69.654,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "prefill-chunking",
@@ -849,7 +875,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 32.917,
+              "interactivity": 39.663,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "cudagraph",
@@ -867,12 +893,30 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 54.083,
+              "interactivity": 57.288,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "cudagraph",
               "throughput_per_gpu": 2912.211,
               "variant": "graph capture full+piecewise"
+            },
+            {
+              "concurrency": 4,
+              "config": {
+                "concurrency": 4,
+                "cudagraph_mode": "FULL",
+                "enable_expert_parallel": true,
+                "max_model_len": 262144,
+                "num_instances": 1,
+                "tp": 8
+              },
+              "disaggregated": false,
+              "interactivity": 69.654,
+              "label": "1x TP8 + EP",
+              "status": "front",
+              "sweep": "cudagraph",
+              "throughput_per_gpu": 1708.008,
+              "variant": "graph capture full"
             },
             {
               "concurrency": 4,
@@ -885,7 +929,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 67.302,
+              "interactivity": 69.654,
               "label": "1x TP8 + EP",
               "status": "front",
               "sweep": "cudagraph",
@@ -899,31 +943,31 @@
       }
     ],
     "throughput": "total",
-    "x": "interactivity_of_mean_tpot",
+    "x": "interactivity_mean",
     "y": {
       "decode": "output_tokens_per_second_per_decode_gpu",
       "total": "total_tokens_per_second_per_gpu"
     }
   },
   "pinned_stack": {
-    "blis": "v0.18.2",
+    "blis": "v0.19.0",
     "data": "embedded",
-    "engine_version": "0.33.0",
+    "engine_version": "0.34.0+0fda86a35419",
     "kernel": "unpinned",
     "resolved": {
       "blis": {
-        "sha256": "9ef1b510a1fd93949708e23a6024dee01879fda1944547a3113e4001ac834761",
+        "sha256": "ab2cbc0430d928fb009b24a9941f0f705447b970b0ac9fec3cdd1ede1e2d7077",
         "version": "unknown"
       }
     },
-    "router": "v1.0.0-blis.5.0.20261118163949-601ff6e9d37d",
+    "router": "v1.0.0-blis.6",
     "router_configs": {
       "resolved": {
         "module": "github.com/llm-d/llm-d-router",
-        "version": "v1.0.0-blis.5.0.20261118163949-601ff6e9d37d"
+        "version": "v1.0.0-blis.6"
       }
     },
-    "substrate": "v0.15.1-0.20261118162118-b6748ca9d757"
+    "substrate": "in-tree"
   },
   "ranking": {
     "throughput": "total",
@@ -944,7 +988,7 @@
     "engine": {
       "max_model_len": 262144
     },
-    "engine_version": "0.33.0",
+    "engine_version": "0.34.0+0fda86a35419",
     "gpus": 8,
     "hardware": "h200",
     "model": "muse-spark-open-816b-a42b-nvfp4",
@@ -1033,9 +1077,13 @@
           "tp": 8
         },
         "disaggregated": false,
+        "engine_origin": {
+          "block_size": "runner",
+          "max_model_len": "scenario"
+        },
         "gpus": 8,
         "in_flight_at_cutoff": 8,
-        "interactivity": 32.917,
+        "interactivity": 39.663,
         "interactivity_basis": "result",
         "itl_p99_ms": 112.684,
         "itl_p99_ms_aggregate": 112.6840245435083,
@@ -1095,9 +1143,13 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 67.302,
+          "interactivity": 69.654,
           "interactivity_basis": "result",
           "itl_p99_ms": 27.256,
           "itl_p99_ms_aggregate": 27.25558528571428,
@@ -1126,9 +1178,13 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 54.083,
+          "interactivity": 57.288,
           "interactivity_basis": "result",
           "itl_p99_ms": 38.245,
           "itl_p99_ms_aggregate": 38.244505884098125,
@@ -1157,9 +1213,13 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 8,
-          "interactivity": 32.917,
+          "interactivity": 39.663,
           "interactivity_basis": "result",
           "itl_p99_ms": 112.684,
           "itl_p99_ms_aggregate": 112.6840245435083,
@@ -1188,9 +1248,13 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 31,
-          "interactivity": 2.566,
+          "interactivity": 4.236,
           "interactivity_basis": "result",
           "itl_p99_ms": 662.937,
           "itl_p99_ms_aggregate": 662.9368927651515,
@@ -1219,9 +1283,13 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 60,
-          "interactivity": 1.894,
+          "interactivity": 2.068,
           "interactivity_basis": "result",
           "itl_p99_ms": 648.05,
           "itl_p99_ms_aggregate": 648.0495261913629,
@@ -1251,9 +1319,13 @@
             "tp": 4
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 2,
-          "interactivity": 48.219,
+          "interactivity": 49.846,
           "interactivity_basis": "result",
           "itl_p99_ms": 33.626,
           "itl_p99_ms_aggregate": 33.62625773215721,
@@ -1282,9 +1354,13 @@
             "tp": 4
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 0,
-          "interactivity": 40.05,
+          "interactivity": 41.876,
           "interactivity_basis": "result",
           "itl_p99_ms": 44.242,
           "itl_p99_ms_aggregate": 44.24198230806473,
@@ -1313,9 +1389,13 @@
             "tp": 4
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 10,
-          "interactivity": 27.822,
+          "interactivity": 31.151,
           "interactivity_basis": "result",
           "itl_p99_ms": 102.391,
           "itl_p99_ms_aggregate": 102.39081382978723,
@@ -1344,9 +1424,13 @@
             "tp": 4
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 19,
-          "interactivity": 5.23,
+          "interactivity": 8.188,
           "interactivity_basis": "result",
           "itl_p99_ms": 863.359,
           "itl_p99_ms_aggregate": 863.3593710864724,
@@ -1375,9 +1459,13 @@
             "tp": 4
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 79,
-          "interactivity": 1.526,
+          "interactivity": 1.636,
           "interactivity_basis": "result",
           "itl_p99_ms": 1023.891,
           "itl_p99_ms_aggregate": 1023.8905153265796,
@@ -1407,9 +1495,13 @@
             "tp": 2
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 4,
-          "interactivity": 23.146,
+          "interactivity": 24.688,
           "interactivity_basis": "result",
           "itl_p99_ms": 62.92,
           "itl_p99_ms_aggregate": 62.92041778635599,
@@ -1438,9 +1530,13 @@
             "tp": 2
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 5,
-          "interactivity": 22.933,
+          "interactivity": 25.372,
           "interactivity_basis": "result",
           "itl_p99_ms": 69.784,
           "itl_p99_ms_aggregate": 69.78380252525251,
@@ -1469,9 +1565,13 @@
             "tp": 2
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 5,
-          "interactivity": 19.274,
+          "interactivity": 20.317,
           "interactivity_basis": "result",
           "itl_p99_ms": 103.384,
           "itl_p99_ms_aggregate": 103.3837951807229,
@@ -1500,9 +1600,13 @@
             "tp": 2
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 24,
-          "interactivity": 4.509,
+          "interactivity": 6.393,
           "interactivity_basis": "result",
           "itl_p99_ms": 902.353,
           "itl_p99_ms_aggregate": 902.353190985971,
@@ -1531,9 +1635,13 @@
             "tp": 2
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 79,
-          "interactivity": 1.348,
+          "interactivity": 1.539,
           "interactivity_basis": "result",
           "itl_p99_ms": 1787.905,
           "itl_p99_ms_aggregate": 1787.9051020408162,
@@ -1569,9 +1677,15 @@
           "tp": 8
         },
         "disaggregated": false,
+        "engine_origin": {
+          "block_size": "runner",
+          "max_model_len": "scenario",
+          "max_num_batched_tokens": "sweep",
+          "max_num_seqs": "sweep"
+        },
         "gpus": 8,
         "in_flight_at_cutoff": 10,
-        "interactivity": 34.957,
+        "interactivity": 40.65,
         "interactivity_basis": "result",
         "itl_p99_ms": 107.023,
         "itl_p99_ms_aggregate": 107.02256819513107,
@@ -1612,9 +1726,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 67.234,
+          "interactivity": 69.355,
           "interactivity_basis": "result",
           "itl_p99_ms": 26.853,
           "itl_p99_ms_aggregate": 26.853247619233827,
@@ -1645,9 +1765,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 3,
-          "interactivity": 54.614,
+          "interactivity": 57.187,
           "interactivity_basis": "result",
           "itl_p99_ms": 36.638,
           "itl_p99_ms_aggregate": 36.63844447513814,
@@ -1678,9 +1804,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 8,
-          "interactivity": 44.512,
+          "interactivity": 48.004,
           "interactivity_basis": "result",
           "itl_p99_ms": 67.697,
           "itl_p99_ms_aggregate": 67.69744021476102,
@@ -1712,9 +1844,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 7,
-          "interactivity": 15.382,
+          "interactivity": 24.108,
           "interactivity_basis": "result",
           "itl_p99_ms": 180.199,
           "itl_p99_ms_aggregate": 180.19856671099288,
@@ -1746,9 +1884,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 7,
-          "interactivity": 18.683,
+          "interactivity": 27.051,
           "interactivity_basis": "result",
           "itl_p99_ms": 173.284,
           "itl_p99_ms_aggregate": 173.2839154605659,
@@ -1780,9 +1924,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 67.21,
+          "interactivity": 69.344,
           "interactivity_basis": "result",
           "itl_p99_ms": 26.848,
           "itl_p99_ms_aggregate": 26.848035990634028,
@@ -1813,9 +1963,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 2,
-          "interactivity": 54.301,
+          "interactivity": 57.029,
           "interactivity_basis": "result",
           "itl_p99_ms": 38.654,
           "itl_p99_ms_aggregate": 38.654432041795644,
@@ -1846,9 +2002,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 10,
-          "interactivity": 34.861,
+          "interactivity": 40.165,
           "interactivity_basis": "result",
           "itl_p99_ms": 116.732,
           "itl_p99_ms_aggregate": 116.7319558571429,
@@ -1879,9 +2041,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 15,
-          "interactivity": 6.63,
+          "interactivity": 7.574,
           "interactivity_basis": "result",
           "itl_p99_ms": 200.314,
           "itl_p99_ms_aggregate": 200.3144020714286,
@@ -1913,9 +2081,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 13,
-          "interactivity": 9.775,
+          "interactivity": 12.231,
           "interactivity_basis": "result",
           "itl_p99_ms": 189.989,
           "itl_p99_ms_aggregate": 189.98913422222222,
@@ -1947,9 +2121,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 67.676,
+          "interactivity": 69.565,
           "interactivity_basis": "result",
           "itl_p99_ms": 26.998,
           "itl_p99_ms_aggregate": 26.997822857142854,
@@ -1980,9 +2160,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 54.962,
+          "interactivity": 57.315,
           "interactivity_basis": "result",
           "itl_p99_ms": 35.201,
           "itl_p99_ms_aggregate": 35.20079698588718,
@@ -2013,9 +2199,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 8,
-          "interactivity": 44.733,
+          "interactivity": 48.375,
           "interactivity_basis": "result",
           "itl_p99_ms": 67.472,
           "itl_p99_ms_aggregate": 67.47203098313452,
@@ -2047,9 +2239,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 8,
-          "interactivity": 14.923,
+          "interactivity": 23.667,
           "interactivity_basis": "result",
           "itl_p99_ms": 305.539,
           "itl_p99_ms_aggregate": 305.5388502392343,
@@ -2081,9 +2279,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 8,
-          "interactivity": 19.872,
+          "interactivity": 28.559,
           "interactivity_basis": "result",
           "itl_p99_ms": 196.964,
           "itl_p99_ms_aggregate": 196.96411402479487,
@@ -2115,9 +2319,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 67.677,
+          "interactivity": 69.566,
           "interactivity_basis": "result",
           "itl_p99_ms": 26.998,
           "itl_p99_ms_aggregate": 26.997822857142854,
@@ -2148,9 +2358,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 54.419,
+          "interactivity": 57.126,
           "interactivity_basis": "result",
           "itl_p99_ms": 35.908,
           "itl_p99_ms_aggregate": 35.907908843283586,
@@ -2181,9 +2397,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 10,
-          "interactivity": 34.957,
+          "interactivity": 40.65,
           "interactivity_basis": "result",
           "itl_p99_ms": 107.023,
           "itl_p99_ms_aggregate": 107.02256819513107,
@@ -2214,9 +2436,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 16,
-          "interactivity": 6.675,
+          "interactivity": 9.212,
           "interactivity_basis": "result",
           "itl_p99_ms": 342.44,
           "itl_p99_ms_aggregate": 342.43953832132854,
@@ -2248,9 +2476,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 16,
-          "interactivity": 9.741,
+          "interactivity": 13.149,
           "interactivity_basis": "result",
           "itl_p99_ms": 308.492,
           "itl_p99_ms_aggregate": 308.4919997272726,
@@ -2282,9 +2516,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 67.443,
+          "interactivity": 69.678,
           "interactivity_basis": "result",
           "itl_p99_ms": 26.705,
           "itl_p99_ms_aggregate": 26.70538999999999,
@@ -2315,9 +2555,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 55.086,
+          "interactivity": 57.544,
           "interactivity_basis": "result",
           "itl_p99_ms": 35.955,
           "itl_p99_ms_aggregate": 35.955419253012074,
@@ -2348,9 +2594,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 8,
-          "interactivity": 43.943,
+          "interactivity": 48.762,
           "interactivity_basis": "result",
           "itl_p99_ms": 57.815,
           "itl_p99_ms_aggregate": 57.81485036363635,
@@ -2382,9 +2634,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 8,
-          "interactivity": 15.283,
+          "interactivity": 26.075,
           "interactivity_basis": "result",
           "itl_p99_ms": 250.975,
           "itl_p99_ms_aggregate": 250.97482349016553,
@@ -2416,9 +2674,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 8,
-          "interactivity": 18.946,
+          "interactivity": 29.081,
           "interactivity_basis": "result",
           "itl_p99_ms": 209.234,
           "itl_p99_ms_aggregate": 209.23422159204995,
@@ -2450,9 +2714,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 67.443,
+          "interactivity": 69.678,
           "interactivity_basis": "result",
           "itl_p99_ms": 26.705,
           "itl_p99_ms_aggregate": 26.70538999999999,
@@ -2483,9 +2753,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 54.865,
+          "interactivity": 57.298,
           "interactivity_basis": "result",
           "itl_p99_ms": 33.874,
           "itl_p99_ms_aggregate": 33.873999352627614,
@@ -2516,9 +2792,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 11,
-          "interactivity": 29.028,
+          "interactivity": 38.084,
           "interactivity_basis": "result",
           "itl_p99_ms": 192.043,
           "itl_p99_ms_aggregate": 192.0434116173357,
@@ -2549,9 +2831,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 16,
-          "interactivity": 6.579,
+          "interactivity": 11.132,
           "interactivity_basis": "result",
           "itl_p99_ms": 649.015,
           "itl_p99_ms_aggregate": 649.0151336135941,
@@ -2583,9 +2871,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 16,
-          "interactivity": 9.878,
+          "interactivity": 13.838,
           "interactivity_basis": "result",
           "itl_p99_ms": 289.68,
           "itl_p99_ms_aggregate": 289.67969749035274,
@@ -2617,9 +2911,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 67.29,
+          "interactivity": 69.589,
           "interactivity_basis": "result",
           "itl_p99_ms": 26.92,
           "itl_p99_ms_aggregate": 26.91979702164502,
@@ -2650,9 +2950,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 54.516,
+          "interactivity": 57.273,
           "interactivity_basis": "result",
           "itl_p99_ms": 37.375,
           "itl_p99_ms_aggregate": 37.37484374025974,
@@ -2683,9 +2989,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 3,
-          "interactivity": 41.215,
+          "interactivity": 46.369,
           "interactivity_basis": "result",
           "itl_p99_ms": 80.606,
           "itl_p99_ms_aggregate": 80.60563903381639,
@@ -2716,9 +3028,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 8,
-          "interactivity": 13.908,
+          "interactivity": 25.796,
           "interactivity_basis": "result",
           "itl_p99_ms": 279.872,
           "itl_p99_ms_aggregate": 279.8723492682932,
@@ -2750,9 +3068,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 8,
-          "interactivity": 17.176,
+          "interactivity": 29.169,
           "interactivity_basis": "result",
           "itl_p99_ms": 220.771,
           "itl_p99_ms_aggregate": 220.77119782039867,
@@ -2784,9 +3108,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 67.29,
+          "interactivity": 69.589,
           "interactivity_basis": "result",
           "itl_p99_ms": 26.92,
           "itl_p99_ms_aggregate": 26.91979702164502,
@@ -2817,9 +3147,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 54.702,
+          "interactivity": 57.228,
           "interactivity_basis": "result",
           "itl_p99_ms": 36.613,
           "itl_p99_ms_aggregate": 36.61330137172896,
@@ -2850,9 +3186,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 11,
-          "interactivity": 25.885,
+          "interactivity": 36.186,
           "interactivity_basis": "result",
           "itl_p99_ms": 213.184,
           "itl_p99_ms_aggregate": 213.18412291382927,
@@ -2883,9 +3225,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 16,
-          "interactivity": 6.53,
+          "interactivity": 11.583,
           "interactivity_basis": "result",
           "itl_p99_ms": 672.405,
           "itl_p99_ms_aggregate": 672.405006363635,
@@ -2917,9 +3265,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "max_model_len": "scenario",
+            "max_num_batched_tokens": "sweep",
+            "max_num_seqs": "sweep"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 16,
-          "interactivity": 9.556,
+          "interactivity": 13.834,
           "interactivity_basis": "result",
           "itl_p99_ms": 341.923,
           "itl_p99_ms_aggregate": 341.9230609693882,
@@ -2955,9 +3309,15 @@
           "tp": 8
         },
         "disaggregated": false,
+        "engine_origin": {
+          "block_size": "runner",
+          "cache_dtype": "sweep",
+          "gpu_memory_utilization": "sweep",
+          "max_model_len": "scenario"
+        },
         "gpus": 8,
         "in_flight_at_cutoff": 17,
-        "interactivity": 25.82,
+        "interactivity": 29.581,
         "interactivity_basis": "result",
         "itl_p99_ms": 104.583,
         "itl_p99_ms_aggregate": 104.5829019963369,
@@ -2998,9 +3358,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 67.302,
+          "interactivity": 69.654,
           "interactivity_basis": "result",
           "itl_p99_ms": 27.256,
           "itl_p99_ms_aggregate": 27.25558528571428,
@@ -3031,9 +3397,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 54.643,
+          "interactivity": 57.229,
           "interactivity_basis": "result",
           "itl_p99_ms": 36.911,
           "itl_p99_ms_aggregate": 36.9112258554217,
@@ -3064,9 +3436,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 4,
-          "interactivity": 19.883,
+          "interactivity": 29.884,
           "interactivity_basis": "result",
           "itl_p99_ms": 299.771,
           "itl_p99_ms_aggregate": 299.77069278397573,
@@ -3097,9 +3475,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 35,
-          "interactivity": 2.313,
+          "interactivity": 3.412,
           "interactivity_basis": "result",
           "itl_p99_ms": 664.33,
           "itl_p99_ms_aggregate": 664.3295733612644,
@@ -3131,9 +3515,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 51,
-          "interactivity": 2.495,
+          "interactivity": 2.802,
           "interactivity_basis": "result",
           "itl_p99_ms": 629.032,
           "itl_p99_ms_aggregate": 629.0315701555838,
@@ -3165,9 +3555,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 67.302,
+          "interactivity": 69.654,
           "interactivity_basis": "result",
           "itl_p99_ms": 27.256,
           "itl_p99_ms_aggregate": 27.25558528571428,
@@ -3198,9 +3594,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 55.023,
+          "interactivity": 57.419,
           "interactivity_basis": "result",
           "itl_p99_ms": 33.932,
           "itl_p99_ms_aggregate": 33.931638036078965,
@@ -3231,9 +3633,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 3,
-          "interactivity": 37.587,
+          "interactivity": 41.523,
           "interactivity_basis": "result",
           "itl_p99_ms": 64.182,
           "itl_p99_ms_aggregate": 64.1823668205128,
@@ -3264,9 +3672,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 34,
-          "interactivity": 2.922,
+          "interactivity": 5.305,
           "interactivity_basis": "result",
           "itl_p99_ms": 654.863,
           "itl_p99_ms_aggregate": 654.8628829003497,
@@ -3297,9 +3711,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 69,
-          "interactivity": 1.761,
+          "interactivity": 1.854,
           "interactivity_basis": "result",
           "itl_p99_ms": 655.845,
           "itl_p99_ms_aggregate": 655.8449171764706,
@@ -3331,9 +3751,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 0,
-          "interactivity": 69.713,
+          "interactivity": 71.583,
           "interactivity_basis": "result",
           "itl_p99_ms": 25.817,
           "itl_p99_ms_aggregate": 25.817024104761902,
@@ -3364,9 +3790,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 2,
-          "interactivity": 58.164,
+          "interactivity": 61.044,
           "interactivity_basis": "result",
           "itl_p99_ms": 38.603,
           "itl_p99_ms_aggregate": 38.60300201680676,
@@ -3397,9 +3829,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 5,
-          "interactivity": 42.579,
+          "interactivity": 47.468,
           "interactivity_basis": "result",
           "itl_p99_ms": 63.013,
           "itl_p99_ms_aggregate": 63.01336614354136,
@@ -3430,9 +3868,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 17,
-          "interactivity": 11.876,
+          "interactivity": 18.97,
           "interactivity_basis": "result",
           "itl_p99_ms": 533.428,
           "itl_p99_ms_aggregate": 533.4278064050228,
@@ -3463,9 +3907,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 76,
-          "interactivity": 1.59,
+          "interactivity": 1.591,
           "interactivity_basis": "result",
           "itl_p99_ms": 651.386,
           "itl_p99_ms_aggregate": 651.3859155555555,
@@ -3497,9 +3947,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 0,
-          "interactivity": 69.713,
+          "interactivity": 71.583,
           "interactivity_basis": "result",
           "itl_p99_ms": 25.817,
           "itl_p99_ms_aggregate": 25.817024104761902,
@@ -3530,9 +3986,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 2,
-          "interactivity": 58.164,
+          "interactivity": 61.044,
           "interactivity_basis": "result",
           "itl_p99_ms": 38.603,
           "itl_p99_ms_aggregate": 38.60300201680676,
@@ -3563,9 +4025,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 5,
-          "interactivity": 42.329,
+          "interactivity": 47.438,
           "interactivity_basis": "result",
           "itl_p99_ms": 58.134,
           "itl_p99_ms_aggregate": 58.13389855851122,
@@ -3596,9 +4064,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 17,
-          "interactivity": 25.82,
+          "interactivity": 29.581,
           "interactivity_basis": "result",
           "itl_p99_ms": 104.583,
           "itl_p99_ms_aggregate": 104.5829019963369,
@@ -3629,9 +4103,15 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cache_dtype": "sweep",
+            "gpu_memory_utilization": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 79,
-          "interactivity": 1.582,
+          "interactivity": 1.583,
           "interactivity_basis": "result",
           "itl_p99_ms": 659.473,
           "itl_p99_ms_aggregate": 659.473100048485,
@@ -3666,9 +4146,14 @@
           "tp": 8
         },
         "disaggregated": false,
+        "engine_origin": {
+          "all2all_backend": "sweep",
+          "block_size": "runner",
+          "max_model_len": "scenario"
+        },
         "gpus": 8,
         "in_flight_at_cutoff": 8,
-        "interactivity": 32.917,
+        "interactivity": 39.663,
         "interactivity_basis": "result",
         "itl_p99_ms": 112.684,
         "itl_p99_ms_aggregate": 112.6840245435083,
@@ -3708,9 +4193,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 67.302,
+          "interactivity": 69.654,
           "interactivity_basis": "result",
           "itl_p99_ms": 27.256,
           "itl_p99_ms_aggregate": 27.25558528571428,
@@ -3740,9 +4230,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 54.083,
+          "interactivity": 57.288,
           "interactivity_basis": "result",
           "itl_p99_ms": 38.245,
           "itl_p99_ms_aggregate": 38.244505884098125,
@@ -3772,9 +4267,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 8,
-          "interactivity": 32.917,
+          "interactivity": 39.663,
           "interactivity_basis": "result",
           "itl_p99_ms": 112.684,
           "itl_p99_ms_aggregate": 112.6840245435083,
@@ -3804,9 +4304,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 31,
-          "interactivity": 2.566,
+          "interactivity": 4.236,
           "interactivity_basis": "result",
           "itl_p99_ms": 662.937,
           "itl_p99_ms_aggregate": 662.9368927651515,
@@ -3836,9 +4341,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 60,
-          "interactivity": 1.894,
+          "interactivity": 2.068,
           "interactivity_basis": "result",
           "itl_p99_ms": 648.05,
           "itl_p99_ms_aggregate": 648.0495261913629,
@@ -3869,9 +4379,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 67.302,
+          "interactivity": 69.654,
           "interactivity_basis": "result",
           "itl_p99_ms": 27.256,
           "itl_p99_ms_aggregate": 27.25558528571428,
@@ -3901,9 +4416,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 54.083,
+          "interactivity": 57.288,
           "interactivity_basis": "result",
           "itl_p99_ms": 38.245,
           "itl_p99_ms_aggregate": 38.244505884098125,
@@ -3933,9 +4453,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 8,
-          "interactivity": 32.917,
+          "interactivity": 39.663,
           "interactivity_basis": "result",
           "itl_p99_ms": 112.684,
           "itl_p99_ms_aggregate": 112.6840245435083,
@@ -3965,9 +4490,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 31,
-          "interactivity": 2.566,
+          "interactivity": 4.236,
           "interactivity_basis": "result",
           "itl_p99_ms": 662.937,
           "itl_p99_ms_aggregate": 662.9368927651515,
@@ -3997,9 +4527,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 60,
-          "interactivity": 1.894,
+          "interactivity": 2.068,
           "interactivity_basis": "result",
           "itl_p99_ms": 648.05,
           "itl_p99_ms_aggregate": 648.0495261913629,
@@ -4030,9 +4565,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 67.302,
+          "interactivity": 69.654,
           "interactivity_basis": "result",
           "itl_p99_ms": 27.256,
           "itl_p99_ms_aggregate": 27.25558528571428,
@@ -4062,9 +4602,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 54.083,
+          "interactivity": 57.288,
           "interactivity_basis": "result",
           "itl_p99_ms": 38.245,
           "itl_p99_ms_aggregate": 38.244505884098125,
@@ -4094,9 +4639,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 8,
-          "interactivity": 32.917,
+          "interactivity": 39.663,
           "interactivity_basis": "result",
           "itl_p99_ms": 112.684,
           "itl_p99_ms_aggregate": 112.6840245435083,
@@ -4126,9 +4676,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 31,
-          "interactivity": 2.566,
+          "interactivity": 4.236,
           "interactivity_basis": "result",
           "itl_p99_ms": 662.937,
           "itl_p99_ms_aggregate": 662.9368927651515,
@@ -4158,9 +4713,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 60,
-          "interactivity": 1.894,
+          "interactivity": 2.068,
           "interactivity_basis": "result",
           "itl_p99_ms": 648.05,
           "itl_p99_ms_aggregate": 648.0495261913629,
@@ -4191,9 +4751,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 67.302,
+          "interactivity": 69.654,
           "interactivity_basis": "result",
           "itl_p99_ms": 27.256,
           "itl_p99_ms_aggregate": 27.25558528571428,
@@ -4223,9 +4788,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 54.083,
+          "interactivity": 57.288,
           "interactivity_basis": "result",
           "itl_p99_ms": 38.245,
           "itl_p99_ms_aggregate": 38.244505884098125,
@@ -4255,9 +4825,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 8,
-          "interactivity": 32.917,
+          "interactivity": 39.663,
           "interactivity_basis": "result",
           "itl_p99_ms": 112.684,
           "itl_p99_ms_aggregate": 112.6840245435083,
@@ -4287,9 +4862,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 31,
-          "interactivity": 2.566,
+          "interactivity": 4.236,
           "interactivity_basis": "result",
           "itl_p99_ms": 662.937,
           "itl_p99_ms_aggregate": 662.9368927651515,
@@ -4319,9 +4899,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "all2all_backend": "sweep",
+            "block_size": "runner",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 60,
-          "interactivity": 1.894,
+          "interactivity": 2.068,
           "interactivity_basis": "result",
           "itl_p99_ms": 648.05,
           "itl_p99_ms_aggregate": 648.0495261913629,
@@ -4356,9 +4941,14 @@
           "tp": 8
         },
         "disaggregated": false,
+        "engine_origin": {
+          "block_size": "runner",
+          "long_prefill_token_threshold": "sweep",
+          "max_model_len": "scenario"
+        },
         "gpus": 8,
         "in_flight_at_cutoff": 8,
-        "interactivity": 32.917,
+        "interactivity": 39.663,
         "interactivity_basis": "result",
         "itl_p99_ms": 112.684,
         "itl_p99_ms_aggregate": 112.6840245435083,
@@ -4409,9 +4999,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 0,
-          "interactivity": 64.047,
+          "interactivity": 68.137,
           "interactivity_basis": "result",
           "itl_p99_ms": 30.376,
           "itl_p99_ms_aggregate": 30.37581074176279,
@@ -4441,9 +5036,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 3,
-          "interactivity": 51.488,
+          "interactivity": 55.565,
           "interactivity_basis": "result",
           "itl_p99_ms": 45.837,
           "itl_p99_ms_aggregate": 45.837286187500005,
@@ -4473,9 +5073,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 10,
-          "interactivity": 27.639,
+          "interactivity": 36.038,
           "interactivity_basis": "result",
           "itl_p99_ms": 183.716,
           "itl_p99_ms_aggregate": 183.71566666666666,
@@ -4505,9 +5110,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 20,
-          "interactivity": 2.987,
+          "interactivity": 3.841,
           "interactivity_basis": "result",
           "itl_p99_ms": 645.232,
           "itl_p99_ms_aggregate": 645.2320392,
@@ -4537,9 +5147,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 70,
-          "interactivity": 1.854,
+          "interactivity": 1.893,
           "interactivity_basis": "result",
           "itl_p99_ms": 649.352,
           "itl_p99_ms_aggregate": 649.351714717742,
@@ -4570,9 +5185,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 67.302,
+          "interactivity": 69.654,
           "interactivity_basis": "result",
           "itl_p99_ms": 27.256,
           "itl_p99_ms_aggregate": 27.25558528571428,
@@ -4602,9 +5222,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 54.083,
+          "interactivity": 57.288,
           "interactivity_basis": "result",
           "itl_p99_ms": 38.245,
           "itl_p99_ms_aggregate": 38.244505884098125,
@@ -4634,9 +5259,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 8,
-          "interactivity": 32.917,
+          "interactivity": 39.663,
           "interactivity_basis": "result",
           "itl_p99_ms": 112.684,
           "itl_p99_ms_aggregate": 112.6840245435083,
@@ -4666,9 +5296,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 31,
-          "interactivity": 2.566,
+          "interactivity": 4.236,
           "interactivity_basis": "result",
           "itl_p99_ms": 662.937,
           "itl_p99_ms_aggregate": 662.9368927651515,
@@ -4698,9 +5333,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 60,
-          "interactivity": 1.894,
+          "interactivity": 2.068,
           "interactivity_basis": "result",
           "itl_p99_ms": 648.05,
           "itl_p99_ms_aggregate": 648.0495261913629,
@@ -4731,9 +5371,14 @@
             "tp": 4
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 0,
-          "interactivity": 49.4,
+          "interactivity": 50.892,
           "interactivity_basis": "result",
           "itl_p99_ms": 35.807,
           "itl_p99_ms_aggregate": 35.80744817119642,
@@ -4763,9 +5408,14 @@
             "tp": 4
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 0,
-          "interactivity": 39.652,
+          "interactivity": 41.812,
           "interactivity_basis": "result",
           "itl_p99_ms": 47.761,
           "itl_p99_ms_aggregate": 47.761364285714215,
@@ -4795,9 +5445,14 @@
             "tp": 4
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 10,
-          "interactivity": 28.473,
+          "interactivity": 31.349,
           "interactivity_basis": "result",
           "itl_p99_ms": 82.649,
           "itl_p99_ms_aggregate": 82.64887584967332,
@@ -4827,9 +5482,14 @@
             "tp": 4
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 22,
-          "interactivity": 6.022,
+          "interactivity": 8.319,
           "interactivity_basis": "result",
           "itl_p99_ms": 482.756,
           "itl_p99_ms_aggregate": 482.75570189189193,
@@ -4859,9 +5519,14 @@
             "tp": 4
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 78,
-          "interactivity": 1.547,
+          "interactivity": 1.663,
           "interactivity_basis": "result",
           "itl_p99_ms": 1007.308,
           "itl_p99_ms_aggregate": 1007.3084392113046,
@@ -4892,9 +5557,14 @@
             "tp": 4
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 2,
-          "interactivity": 48.219,
+          "interactivity": 49.846,
           "interactivity_basis": "result",
           "itl_p99_ms": 33.626,
           "itl_p99_ms_aggregate": 33.62625773215721,
@@ -4924,9 +5594,14 @@
             "tp": 4
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 0,
-          "interactivity": 40.05,
+          "interactivity": 41.876,
           "interactivity_basis": "result",
           "itl_p99_ms": 44.242,
           "itl_p99_ms_aggregate": 44.24198230806473,
@@ -4956,9 +5631,14 @@
             "tp": 4
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 10,
-          "interactivity": 27.822,
+          "interactivity": 31.151,
           "interactivity_basis": "result",
           "itl_p99_ms": 102.391,
           "itl_p99_ms_aggregate": 102.39081382978723,
@@ -4988,9 +5668,14 @@
             "tp": 4
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 19,
-          "interactivity": 5.23,
+          "interactivity": 8.188,
           "interactivity_basis": "result",
           "itl_p99_ms": 863.359,
           "itl_p99_ms_aggregate": 863.3593710864724,
@@ -5020,9 +5705,14 @@
             "tp": 4
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "long_prefill_token_threshold": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 79,
-          "interactivity": 1.526,
+          "interactivity": 1.636,
           "interactivity_basis": "result",
           "itl_p99_ms": 1023.891,
           "itl_p99_ms_aggregate": 1023.8905153265796,
@@ -5056,9 +5746,14 @@
           "tp": 8
         },
         "disaggregated": false,
+        "engine_origin": {
+          "block_size": "runner",
+          "cudagraph_mode": "sweep",
+          "max_model_len": "scenario"
+        },
         "gpus": 8,
         "in_flight_at_cutoff": 8,
-        "interactivity": 32.917,
+        "interactivity": 39.663,
         "interactivity_basis": "result",
         "itl_p99_ms": 112.684,
         "itl_p99_ms_aggregate": 112.6840245435083,
@@ -5097,9 +5792,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cudagraph_mode": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 0,
-          "interactivity": 41.437,
+          "interactivity": 42.487,
           "interactivity_basis": "result",
           "itl_p99_ms": 48.2,
           "itl_p99_ms_aggregate": 48.19979624191297,
@@ -5128,9 +5828,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cudagraph_mode": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 3,
-          "interactivity": 35.766,
+          "interactivity": 36.732,
           "interactivity_basis": "result",
           "itl_p99_ms": 45.463,
           "itl_p99_ms_aggregate": 45.46336387682778,
@@ -5159,9 +5864,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cudagraph_mode": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 7,
-          "interactivity": 25.845,
+          "interactivity": 28.677,
           "interactivity_basis": "result",
           "itl_p99_ms": 111.109,
           "itl_p99_ms_aggregate": 111.10875322465415,
@@ -5190,9 +5900,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cudagraph_mode": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 22,
-          "interactivity": 2.664,
+          "interactivity": 3.961,
           "interactivity_basis": "result",
           "itl_p99_ms": 654.645,
           "itl_p99_ms_aggregate": 654.644674532074,
@@ -5221,9 +5936,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cudagraph_mode": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 65,
-          "interactivity": 1.846,
+          "interactivity": 1.944,
           "interactivity_basis": "result",
           "itl_p99_ms": 654.584,
           "itl_p99_ms_aggregate": 654.5843590926935,
@@ -5253,9 +5973,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cudagraph_mode": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 67.301,
+          "interactivity": 69.654,
           "interactivity_basis": "result",
           "itl_p99_ms": 27.252,
           "itl_p99_ms_aggregate": 27.252415999999993,
@@ -5284,9 +6009,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cudagraph_mode": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 53.86,
+          "interactivity": 57.18,
           "interactivity_basis": "result",
           "itl_p99_ms": 36.962,
           "itl_p99_ms_aggregate": 36.96180686206218,
@@ -5315,9 +6045,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cudagraph_mode": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 8,
-          "interactivity": 31.115,
+          "interactivity": 38.377,
           "interactivity_basis": "result",
           "itl_p99_ms": 139.465,
           "itl_p99_ms_aggregate": 139.46539631441615,
@@ -5346,9 +6081,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cudagraph_mode": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 31,
-          "interactivity": 2.566,
+          "interactivity": 4.236,
           "interactivity_basis": "result",
           "itl_p99_ms": 662.937,
           "itl_p99_ms_aggregate": 662.9368927651515,
@@ -5377,9 +6117,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cudagraph_mode": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 60,
-          "interactivity": 1.894,
+          "interactivity": 2.068,
           "interactivity_basis": "result",
           "itl_p99_ms": 648.05,
           "itl_p99_ms_aggregate": 648.0495261913629,
@@ -5409,9 +6154,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cudagraph_mode": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 67.302,
+          "interactivity": 69.654,
           "interactivity_basis": "result",
           "itl_p99_ms": 27.256,
           "itl_p99_ms_aggregate": 27.25558528571428,
@@ -5440,9 +6190,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cudagraph_mode": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 1,
-          "interactivity": 54.083,
+          "interactivity": 57.288,
           "interactivity_basis": "result",
           "itl_p99_ms": 38.245,
           "itl_p99_ms_aggregate": 38.244505884098125,
@@ -5471,9 +6226,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cudagraph_mode": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 8,
-          "interactivity": 32.917,
+          "interactivity": 39.663,
           "interactivity_basis": "result",
           "itl_p99_ms": 112.684,
           "itl_p99_ms_aggregate": 112.6840245435083,
@@ -5502,9 +6262,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cudagraph_mode": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 31,
-          "interactivity": 2.566,
+          "interactivity": 4.236,
           "interactivity_basis": "result",
           "itl_p99_ms": 662.937,
           "itl_p99_ms_aggregate": 662.9368927651515,
@@ -5533,9 +6298,14 @@
             "tp": 8
           },
           "disaggregated": false,
+          "engine_origin": {
+            "block_size": "runner",
+            "cudagraph_mode": "sweep",
+            "max_model_len": "scenario"
+          },
           "gpus": 8,
           "in_flight_at_cutoff": 60,
-          "interactivity": 1.894,
+          "interactivity": 2.068,
           "interactivity_basis": "result",
           "itl_p99_ms": 648.05,
           "itl_p99_ms_aggregate": 648.0495261913629,

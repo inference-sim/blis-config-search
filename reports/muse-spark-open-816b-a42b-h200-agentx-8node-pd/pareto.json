@@ -139,7 +139,7 @@
   "finalists": [
     {
       "at_c_use": {
-        "interactivity": 26.484,
+        "interactivity": 36.186,
         "itl_p99_ms": 259.211,
         "tok_per_s_per_user": 3.9,
         "tokens_per_sec": 2369.7,
@@ -197,7 +197,7 @@
     },
     {
       "at_c_use": {
-        "interactivity": 25.531,
+        "interactivity": 35.681,
         "itl_p99_ms": 275.416,
         "tok_per_s_per_user": 3.6,
         "tokens_per_sec": 2446.8,
@@ -257,7 +257,7 @@
     },
     {
       "at_c_use": {
-        "interactivity": 39.427,
+        "interactivity": 40.011,
         "itl_p99_ms": 31.535,
         "tok_per_s_per_user": 31.7,
         "tokens_per_sec": 1446.5,
@@ -372,7 +372,7 @@
               "tp": 8
             },
             "disaggregated": true,
-            "interactivity": 39.427,
+            "interactivity": 40.011,
             "label": "6P TP8 + EP / 1D TP16 + EP",
             "status": "front",
             "sweep": "pd-wide-decode",
@@ -398,7 +398,7 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 25.531,
+            "interactivity": 35.681,
             "label": "8x TP8 + EP",
             "status": "front",
             "sweep": "colocated-tuned",
@@ -416,7 +416,7 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 26.484,
+            "interactivity": 36.186,
             "label": "8x TP8 + EP",
             "status": "front",
             "sweep": "colocated",
@@ -436,7 +436,7 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 26.484,
+            "interactivity": 36.186,
             "label": "8x TP8 + EP",
             "status": "front",
             "sweep": "colocated-tuned",
@@ -456,7 +456,7 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 55.383,
+            "interactivity": 59.85,
             "label": "8x TP8 + EP",
             "status": "front",
             "sweep": "colocated-tuned",
@@ -474,7 +474,7 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 56.353,
+            "interactivity": 60.193,
             "label": "8x TP8 + EP",
             "status": "front",
             "sweep": "colocated",
@@ -494,7 +494,7 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 56.353,
+            "interactivity": 60.193,
             "label": "8x TP8 + EP",
             "status": "front",
             "sweep": "colocated-tuned",
@@ -514,7 +514,7 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 57.848,
+            "interactivity": 60.828,
             "label": "8x TP8 + EP",
             "status": "front",
             "sweep": "colocated-tuned",
@@ -547,7 +547,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 26.484,
+              "interactivity": 36.186,
               "label": "8x TP8 + EP",
               "status": "front",
               "sweep": "colocated",
@@ -565,7 +565,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 56.353,
+              "interactivity": 60.193,
               "label": "8x TP8 + EP",
               "status": "front",
               "sweep": "colocated",
@@ -599,7 +599,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 25.531,
+              "interactivity": 35.681,
               "label": "8x TP8 + EP",
               "status": "front",
               "sweep": "colocated-tuned",
@@ -619,7 +619,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 26.484,
+              "interactivity": 36.186,
               "label": "8x TP8 + EP",
               "status": "front",
               "sweep": "colocated-tuned",
@@ -639,7 +639,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 55.383,
+              "interactivity": 59.85,
               "label": "8x TP8 + EP",
               "status": "front",
               "sweep": "colocated-tuned",
@@ -659,7 +659,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 56.353,
+              "interactivity": 60.193,
               "label": "8x TP8 + EP",
               "status": "front",
               "sweep": "colocated-tuned",
@@ -679,7 +679,7 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 57.848,
+              "interactivity": 60.828,
               "label": "8x TP8 + EP",
               "status": "front",
               "sweep": "colocated-tuned",
@@ -736,7 +736,7 @@
                 "tp": 8
               },
               "disaggregated": true,
-              "interactivity": 39.427,
+              "interactivity": 40.011,
               "label": "6P TP8 + EP / 1D TP16 + EP",
               "status": "front",
               "sweep": "pd-wide-decode",
@@ -766,7 +766,7 @@
                 "tp": 8
               },
               "disaggregated": true,
-              "interactivity": 39.427,
+              "interactivity": 40.011,
               "label": "6P TP8 + EP / 1D TP16 + EP",
               "status": "front",
               "sweep": "pd-wide-decode",
@@ -806,7 +806,7 @@
       }
     ],
     "throughput": "total",
-    "x": "interactivity_of_mean_tpot",
+    "x": "interactivity_mean",
     "y": {
       "decode": "output_tokens_per_second_per_decode_gpu",
       "total": "total_tokens_per_second_per_gpu"

@@ -10,11 +10,11 @@
     },
     {
       "h": "What was found",
-      "html": "<strong>8x TP8 + EP (batch tokens 32,768)</strong>, from the <em>colocated</em> sweep, reached 39.45 tok/s/accelerator (2524.9 tok/s across the fleet) at concurrency 32 while holding the scenario's SLOs. Ranking: max output tok/s per accelerator subject to the scenario's SLOs."
+      "html": "<strong>4x TP8xDP2 + EP (batch tokens 32,768)</strong>, from the <em>colocated</em> sweep, reached 49.92 tok/s/accelerator (3195.1 tok/s across the fleet) at concurrency 64 while holding the scenario's SLOs. Ranking: max output tok/s per accelerator subject to the scenario's SLOs."
     },
     {
       "h": "What to run",
-      "html": "8x TP8 + EP (batch tokens 32,768) at concurrency 32. 427 of 950 runs held the SLOs.",
+      "html": "4x TP8xDP2 + EP (batch tokens 32,768) at concurrency 64. 438 of 950 runs held the SLOs.",
       "run": true
     }
   ],
@@ -36,7 +36,7 @@
       "num": 2,
       "prose": [
         "The colocated control should hold ITL only with a chunked-prefill cap, and the wide-dp shapes should give the most tokens per GPU.",
-        "Measured: best was <strong>8x TP8 + EP (batch tokens 32,768)</strong> at 39.45 tok/s/accelerator (concurrency 32)."
+        "Measured: best was <strong>4x TP8xDP2 + EP (batch tokens 32,768)</strong> at 49.92 tok/s/accelerator (concurrency 64)."
       ],
       "title": "Sweep: colocated"
     },

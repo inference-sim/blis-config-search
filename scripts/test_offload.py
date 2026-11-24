@@ -216,6 +216,27 @@ class PerPoolOffload(unittest.TestCase):
         self.assertNotIn("offload", self.pool(decode_off, "decode"))
         self.assertNotIn("pd_transfer", self.pool(decode_off, "decode"))
 
+    def test_a_pools_own_block_replaces_the_sweeps_tiers_and_p2p_for_that_pool(self):
+        """A pool that states its own offload does NOT inherit the sweep-level extra tier or p2p:
+        its block replaces the sweep's for that pool, so `p2p: false` (never rendered) wins."""
+        text = self.scenario({
+            "offload_cpu_bytes": 2**38,
+            "offload_tiers": [{"tier": "nvme_gen4", "bytes": 2 * 2**40}], "offload_p2p": True,
+            "prefill_offload_cpu_bytes": 2**38, "decode_offload_cpu_bytes": 2**38})
+        for role in ("prefill", "decode"):
+            pool = self.pool(text, role)
+            self.assertIn("tier: cpu_dram", pool)
+            self.assertNotIn("nvme_gen4", pool)           # the sweep's extra tier does not leak in
+            self.assertNotIn("secondary_tiers", pool)     # nor its p2p tier
+            self.assertNotIn("TieringOffloadingSpec", pool)
+        # A pool that states nothing still takes the sweep-level block whole, tiers and p2p and all.
+        both = self.scenario({"offload_cpu_bytes": 2**38,
+                              "offload_tiers": [{"tier": "nvme_gen4", "bytes": 2 * 2**40}],
+                              "offload_p2p": True})
+        for role in ("prefill", "decode"):
+            self.assertIn("nvme_gen4", self.pool(both, role))
+            self.assertIn("type: p2p", self.pool(both, role))
+
     def test_a_deployment_connector_of_multi_gives_a_pool_without_a_tier_nixl(self):
         text = self.scenario({"prefill_offload_cpu_bytes": 2**38, "pd_connector": "MultiConnector"})
         self.assertNotIn("pd_transfer", self.pool(text, "prefill"))
@@ -358,11 +379,33 @@ class ArmsDiffer(unittest.TestCase):
         self.assertIn("connector_options:\n    secondary_tiers:\n      - {type: p2p}", y)
         self.assertIn("cost-model-offload-tiers", y)
 
+    def test_the_tiering_spec_is_emitted_exactly_when_a_second_tier_or_p2p_is_present(self):
+        """The pin refuses a tier below cpu_dram or a p2p secondary tier unless `offload:` names
+        `spec: TieringOffloadingSpec`; a CPU-only block must stay without it (hashes are stable)."""
+        vocab = settings.vocabulary(BLIS)
+
+        def render(off):
+            parallel, engine, _, _ = run_blis.classify_config({"tp": 4, **off}, vocab)
+            return run_blis.scenario_yaml("llama-3.1-70b-instruct", "h200", parallel, engine, "x")
+
+        cpu_only = render({"offload_cpu_bytes": 2**39, "offload_eviction_policy": "lru"})
+        self.assertNotIn("spec: TieringOffloadingSpec", cpu_only)
+        fs_tier = render({"offload_cpu_bytes": 2**39,
+                          "offload_tiers": [{"tier": "nvme_gen4", "bytes": 2 * 2**40}]})
+        self.assertIn("offload:\n  spec: TieringOffloadingSpec", fs_tier)
+        p2p = render({"offload_cpu_bytes": 2**39, "offload_p2p": True})
+        self.assertIn("offload:\n  spec: TieringOffloadingSpec", p2p)
+        # The pool render carries it the same way, indented under the pool's `offload:`.
+        pool = run_blis._pool_offload_block({"cpu_bytes": 2**38, "p2p": True})
+        self.assertIn("    offload:\n      spec: TieringOffloadingSpec", pool)
+        self.assertNotIn("spec:", run_blis._pool_offload_block({"cpu_bytes": 2**38}))
+
     def test_a_pool_renders_an_fs_tier_and_a_p2p_secondary_tier(self):
         vocab = settings.vocabulary(BLIS)
         off = {"cpu_bytes": 2**38, "tiers": [{"tier": "s3", "bytes": 4 * 2**40}], "p2p": True}
         body = run_blis._pool_offload_block(off)
-        self.assertIn("    offload:\n      tiers:\n        - {tier: cpu_dram, bytes: 274877906944}\n"
+        self.assertIn("    offload:\n      spec: TieringOffloadingSpec\n"
+                      "      tiers:\n        - {tier: cpu_dram, bytes: 274877906944}\n"
                       "        - {tier: s3, bytes: 4398046511104}", body)
         self.assertIn("      connector_options:\n        secondary_tiers:\n          - {type: p2p}", body)
 

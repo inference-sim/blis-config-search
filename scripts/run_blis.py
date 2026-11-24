@@ -395,7 +395,10 @@ def classify_config(config, vocab, node_size=None, pool_offload=False):
         # MultiConnector (vLLM refuses a NixlConnector beside an offload tier, and a
         # MultiConnector over NIXL alone), so the connector follows the pool, not the deployment.
         for role in PD_ROLES:
-            own = {**offload, **pd_offload[role]}
+            # A pool's own block REPLACES the sweep's for that pool (it does not inherit the
+            # sweep's tiers/p2p), so a pool can drop a sweep-level extra tier and `p2p: false`
+            # wins -- p2p is only ever rendered when true.
+            own = pd_offload[role] or offload
             if own.get("cpu_bytes"):
                 pd[role]["offload"] = own
         if any(pd[r].get("offload") for r in PD_ROLES):
@@ -1384,13 +1387,9 @@ def _offload_tiers(off):
 
 
 def _render_offload(off, indent):
-    """The body of an `offload:` block, indented by `indent`: the eviction policy, the ordered
-    `tiers:` list, and a p2p secondary tier under `connector_options.secondary_tiers` when the
-    arm asks for one. "" when the dict states no tier (so the block is omitted entirely).
-
-    A p2p tier (a peer instance's host memory) sits on no catalog device, so vLLM states it in
-    connector_options.secondary_tiers, not as one of the tiers above; the engine refuses any type
-    but p2p there (engineconfig/connector.go)."""
+    """The body of an `offload:` block (eviction policy, tiering spec when needed, `tiers:`, and a
+    p2p secondary tier under `connector_options.secondary_tiers`), indented by `indent`; "" for a
+    dict with no tier, so the block is omitted entirely."""
     tiers = _offload_tiers(off)
     if not tiers:
         return ""
@@ -1398,6 +1397,11 @@ def _render_offload(off, indent):
     lines = []
     if off.get("eviction_policy"):
         lines.append(f"{pad}eviction_policy: {json.dumps(off['eviction_policy'])}")
+    # A tier below the primary CPU tier, or a p2p secondary tier, only runs under the tiering
+    # offloading spec at the pin (vllmengine refuses either without it); emit the spec exactly
+    # then, so a CPU-only block stays byte-identical and its hashed scenario name does not move.
+    if len(tiers) > 1 or off.get("p2p"):
+        lines.append(f"{pad}spec: TieringOffloadingSpec")
     lines.append(f"{pad}tiers:")
     lines += [f"{pad}  - {{tier: {t['tier']}, bytes: {t['bytes']}}}" for t in tiers]
     if off.get("p2p"):

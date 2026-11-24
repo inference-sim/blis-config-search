@@ -3527,6 +3527,20 @@ class DryRunPlan(unittest.TestCase):
         self.assertEqual(2, report["totals"]["runs"])
         self.assertEqual(50.0, report["interactivity_floor"]["tok_per_s_per_user"])
 
+    def test_the_report_records_scenario_acceptance_and_routing_pins_only_when_present(self):
+        """scenario.acceptance / scenario.routing change what BLIS prices, so the report records
+        them -- and only when present, so an unpinned report's scenario block is byte-identical."""
+        plain = E.run_experiment(spec(), blis=BLIS, catalog=None, registry=None,
+                                 out_root="/nonexistent", dry_run=True, verbose=False)
+        self.assertNotIn("acceptance", plain["scenario"])
+        self.assertNotIn("routing", plain["scenario"])
+        acc, rtg = {"profiles": "sensitivity-k3"}, {"value": {"token_imbalance": 1.3}}
+        pinned = E.run_experiment(spec(scenario={**spec()["scenario"], "acceptance": acc, "routing": rtg}),
+                                  blis=BLIS, catalog=None, registry=None,
+                                  out_root="/nonexistent", dry_run=True, verbose=False)
+        self.assertEqual(acc, pinned["scenario"]["acceptance"])
+        self.assertEqual(rtg, pinned["scenario"]["routing"])
+
     def test_runs_and_report_use_the_simulators_engine_release(self):
         seen = []
 

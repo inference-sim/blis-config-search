@@ -97,19 +97,12 @@ jobs:
               sys.exit("empty catalog sections: " + ", ".join(empty))
           print(f"ok: {len(scen)} scenarios, every report present")
           PY
-      - name: Disable Jekyll on the published site (it is a Vite SPA, not a Jekyll site)
-        # Without this, GitHub runs Jekyll over gh-pages and "Page build failed" on the built
-        # SPA/report content. The main deploy copies dist/ to the gh-pages root, so shipping
-        # .nojekyll in dist/ keeps it at the root durably (the preview job seeds the root too).
-        working-directory: web
-        run: touch dist/.nojekyll
       - name: Upload the built site for the deploy jobs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: site
           path: web/dist
           retention-days: 1
-          include-hidden-files: true
 
   deploy:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -150,24 +143,6 @@ jobs:
     steps:
       # The preview action reads the checkout for git config, and on `closed` it only removes.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Ensure .nojekyll at the gh-pages root
-        # A preview deploys to pr-preview/pr-<N>/, a subfolder, so a .nojekyll shipped in dist/
-        # lands in the subfolder and does NOT stop Jekyll over the whole branch. GitHub only reads
-        # .nojekyll at the publishing-source root, so seed one there (idempotent) before the push.
-        if: github.event.action != 'closed'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          if gh api "repos/$REPO/contents/.nojekyll?ref=gh-pages" >/dev/null 2>&1; then
-            echo ".nojekyll already present at gh-pages root"
-          else
-            gh api -X PUT "repos/$REPO/contents/.nojekyll" \
-              -f message="Disable Jekyll on gh-pages (serve the built SPA as-is)" \
-              -f branch=gh-pages -f content="" >/dev/null
-            echo "created .nojekyll at gh-pages root"
-          fi
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         if: github.event.action != 'closed'
         with: { name: site, path: dist }

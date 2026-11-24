@@ -47,6 +47,15 @@ def test_web_only():
     check(on == {"web", "pages"} and not r["smoke"], f"web/ selects web and pages only, got {on}")
 
 
+def test_preview_is_site_code_only():
+    print("test_preview_is_site_code_only")
+    for f in ("web/src/App.tsx", "report/lexicon.json", "scripts/build_gallery.py", ".github/workflows/pages.yml"):
+        check(S.scope([f])["pages"], f"{f} is site code and selects the preview")
+    for f in (f"reports/{ONE}/ledger.jsonl", f"experiments/{ONE}.yaml", "pins.env", "routing/x.yaml"):
+        r = S.scope([f])
+        check(r["web"] and not r["pages"], f"{f} is data: the web build checks it, no preview")
+
+
 def test_spec_selects_its_own_smoke():
     print("test_spec_selects_its_own_smoke")
     on, r = jobs([f"experiments/{ONE}.yaml"])
@@ -124,6 +133,7 @@ if __name__ == "__main__":
     test_unknown_change_list_runs_everything()
     test_docs_only_runs_nothing()
     test_web_only()
+    test_preview_is_site_code_only()
     test_spec_selects_its_own_smoke()
     test_pin_move_and_runner_scripts_select_all_smoke()
     test_default_smoke_is_only_the_core()

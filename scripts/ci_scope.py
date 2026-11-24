@@ -18,7 +18,8 @@ What each job reads (the single place this is written down):
   experiments  validates and dry-runs every spec with the pinned simulator: the specs, routing/ and
                workloads/, pins.env (which simulator), the scripts the validator and runner import.
   web          typecheck, test and build of web/, which stages reports/ through build_gallery.py.
-  pages        the same build, published as the PR preview.
+  pages        the same build, published as the PR preview: only site code (web/, report/, the
+               site builder's scripts). A data-only change (reports/, specs, pins) is not previewed.
   smoke        re-runs a few rows of one report on the pinned simulator. It reads that report's own
                spec and ledger (experiments/<id>.yaml, reports/<id>/), the routing/ and workloads/
                files that spec names, the pin VALUES, and the scripts blis_pin.py imports. A data
@@ -148,7 +149,9 @@ def scope(files, pins_moved=False, root=ROOT, workflow_file=None):
             on["experiments"], known = True, True
         if f.startswith(("web/", "reports/", "report/", "experiments/", "routing/", "workloads/")) \
                 or f in ("pins.env", "requirements.txt") or f in clo["web"]:
-            on["web"], on["pages"], known = True, True, True
+            on["web"], known = True, True
+        if f.startswith(("web/", "report/")) or f in clo["web"]:
+            on["pages"] = True
         if f in ("requirements.txt", "requirements.in"):
             on["experiments"] = True
         # smoke

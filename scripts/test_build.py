@@ -753,6 +753,8 @@ def test_workflows_sane():
           and "-X POST" in wait.get("run", "")
           and pdoc["jobs"]["preview"]["permissions"].get("pages") == "write",
           "the preview comment waits for the Pages build (and may request one Pages skipped)")
+    check('grep -m1 "^$tip "' in wait.get("run", "") and 'grep -q "^$tip errored' not in wait.get("run", ""),
+          "the tip-errored fail-fast reads only the tip's newest build, so a queued rebuild resets it")
     check("github.event.pull_request.number" in str(pdoc["concurrency"]["group"]),
           "pages runs are grouped per PR, so batch PRs don't cancel each other's previews")
 

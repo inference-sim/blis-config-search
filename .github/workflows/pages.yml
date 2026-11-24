@@ -175,7 +175,7 @@ jobs:
             lacks="$lacks$1 "; return 1
           }
           since=$(gh api "repos/$REPO/commits/$SHA" --jq .commit.committer.date)
-          deadline=$((SECONDS + 1800)); tip_errored_polls=0; next_request=$((SECONDS + 60))
+          deadline=$((SECONDS + 1800)); tip_errored_polls=0; next_request=$((SECONDS + 60)); requested=false
           while [ $SECONDS -lt $deadline ]; do
             # Newest first, and only builds started after $SHA was pushed: older ones can't contain it.
             builds=$(gh api "repos/$REPO/pages/builds?per_page=30" |
@@ -184,7 +184,8 @@ jobs:
             while read -r commit status; do
               [ -n "$commit" ] || continue
               if contains "$commit"; then
-                [ "$status" = errored ] || seen=true  # an errored build may be superseded; still request one
+                if [ "$status" != errored ]; then seen=true  # an errored build may be superseded: request now
+                elif [ "$requested" = false ]; then next_request=$SECONDS; fi
                 [ "$status" = built ] && { echo "Pages build of $commit is built (contains $SHA)"; exit 0; }
               elif [ "$status" = queued ] || [ "$status" = building ]; then
                 busy=true
@@ -197,20 +198,20 @@ jobs:
               if ! gh api -X POST "repos/$REPO/pages/builds" --jq .status; then
                 echo "::warning::Pages build request failed; polling again"
               fi
-              next_request=$((SECONDS + 120))
+              next_request=$((SECONDS + 120)); requested=true
             fi
             tip=$(gh api repos/$REPO/branches/gh-pages --jq .commit.sha)
             # Fail fast if the preview was overwritten; an API error just means poll again.
-            if [ "$tip" = "$SHA" ]; then
-              rel=identical
+            if contains "$tip"; then
+              rel=ahead
             elif ! rel=$(gh api "repos/$REPO/compare/$SHA...$tip" --jq .status); then
               rel=unknown
             fi
             if [ "$rel" = diverged ] || [ "$rel" = behind ]; then
               echo "::error::gh-pages tip $tip no longer contains preview commit $SHA"; exit 1
             fi
-            # Fail fast on a real error: the current tip's build errored and nothing has superseded it.
-            if grep -q "^$tip errored$" <<< "$builds"; then
+            # Fail fast on a real error: the tip's newest build errored and nothing has superseded it.
+            if [ "$(grep -m1 "^$tip " <<< "$builds")" = "$tip errored" ]; then
               tip_errored_polls=$((tip_errored_polls + 1))
               if [ $tip_errored_polls -ge 3 ]; then
                 echo "::error::Pages build of gh-pages tip $tip errored"; exit 1

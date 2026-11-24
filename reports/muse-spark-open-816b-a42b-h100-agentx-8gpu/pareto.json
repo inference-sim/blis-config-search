@@ -94,7 +94,7 @@
   "finalists": [
     {
       "at_c_use": {
-        "interactivity": 17.245,
+        "interactivity": 24.13,
         "itl_p99_ms": 205.317,
         "tok_per_s_per_user": 4.9,
         "tokens_per_sec": 48.7,
@@ -161,7 +161,7 @@
     },
     {
       "at_c_use": {
-        "interactivity": 29.914,
+        "interactivity": 37.786,
         "itl_p99_ms": 119.591,
         "tok_per_s_per_user": 8.4,
         "tokens_per_sec": 62.7,
@@ -230,7 +230,7 @@
     },
     {
       "at_c_use": {
-        "interactivity": 13.254,
+        "interactivity": 17.175,
         "itl_p99_ms": 203.616,
         "tok_per_s_per_user": 4.9,
         "tokens_per_sec": 92.0,
@@ -298,7 +298,7 @@
     },
     {
       "at_c_use": {
-        "interactivity": 19.647,
+        "interactivity": 23.178,
         "itl_p99_ms": 139.816,
         "tok_per_s_per_user": 7.2,
         "tokens_per_sec": 50.0,
@@ -388,7 +388,7 @@
               "tp": 4
             },
             "disaggregated": false,
-            "interactivity": 31.641,
+            "interactivity": 40.153,
             "label": "1x TP4xPP2 + EP",
             "status": "front",
             "sweep": "kv-capacity",
@@ -422,7 +422,7 @@
                 "tp": 2
               },
               "disaggregated": false,
-              "interactivity": 17.245,
+              "interactivity": 24.13,
               "label": "1x TP2xPP4",
               "status": "front",
               "sweep": "pipeline-topology",
@@ -451,34 +451,13 @@
                 "gpu_memory_utilization": 0.95,
                 "max_model_len": 262144,
                 "max_num_batched_tokens": 2048,
-                "max_num_seqs": 8,
-                "num_instances": 1,
-                "pp": 2,
-                "tp": 4
-              },
-              "disaggregated": false,
-              "interactivity": 29.914,
-              "label": "1x TP4xPP2 + EP",
-              "status": "front",
-              "sweep": "batch-caps",
-              "throughput_per_gpu": 1082.591,
-              "variant": ""
-            },
-            {
-              "concurrency": 4,
-              "config": {
-                "concurrency": 4,
-                "enable_expert_parallel": true,
-                "gpu_memory_utilization": 0.95,
-                "max_model_len": 262144,
-                "max_num_batched_tokens": 2048,
                 "max_num_seqs": 16,
                 "num_instances": 1,
                 "pp": 2,
                 "tp": 4
               },
               "disaggregated": false,
-              "interactivity": 29.914,
+              "interactivity": 37.787,
               "label": "1x TP4xPP2 + EP",
               "status": "front",
               "sweep": "batch-caps",
@@ -512,7 +491,7 @@
                 "tp": 4
               },
               "disaggregated": false,
-              "interactivity": 31.641,
+              "interactivity": 40.153,
               "label": "1x TP4xPP2 + EP",
               "status": "front",
               "sweep": "kv-capacity",
@@ -559,7 +538,7 @@
                 "tp": 2
               },
               "disaggregated": false,
-              "interactivity": 19.647,
+              "interactivity": 23.178,
               "label": "1x TP2xPP4 + EP",
               "status": "front",
               "sweep": "prefix-cache",
@@ -599,7 +578,7 @@
       }
     ],
     "throughput": "total",
-    "x": "interactivity_of_mean_tpot",
+    "x": "interactivity_mean",
     "y": {
       "decode": "output_tokens_per_second_per_decode_gpu",
       "total": "total_tokens_per_second_per_gpu"
@@ -636,7 +615,7 @@
         "1x TP4xPP2 + EP (gpu mem util 0.95)"
       ],
       "issue": null,
-      "reason": "scenario: engine vllm 0.33.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.61 GiB KV cache is needed, which is larger than the available KV cache memory (2.49 GiB). Based on the available memory, the estimated maximum model length is 246240. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
+      "reason": "scenario: engine vllm 0.34.0+0fda86a35419: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.61 GiB KV cache is needed, which is larger than the available KV cache memory (2.49 GiB). Based on the available memory, the estimated maximum model length is 246240. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
       "runs": 50,
       "source": "engine"
     },
@@ -647,7 +626,7 @@
         "1x TP4xPP2 + EP (max seqs 16 \u00b7 batch tokens 16,384)"
       ],
       "issue": null,
-      "reason": "scenario: engine vllm 0.33.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (3.17 GiB KV cache is needed, which is larger than the available KV cache memory (1.24 GiB). Based on the available memory, the estimated maximum model length is 40560. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
+      "reason": "scenario: engine vllm 0.34.0+0fda86a35419: vllm: kv: To serve at least one request with the model's max seq len (262144), (3.17 GiB KV cache is needed, which is larger than the available KV cache memory (1.24 GiB). Based on the available memory, the estimated maximum model length is 40560. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
       "runs": 10,
       "source": "engine"
     },
@@ -766,7 +745,7 @@
             "1x TP4xPP2"
           ],
           "issue": null,
-          "reason": "scenario: engine vllm 0.33.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.61 GiB KV cache is needed, which is larger than the available KV cache memory (2.49 GiB). Based on the available memory, the estimated maximum model length is 246240. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
+          "reason": "scenario: engine vllm 0.34.0+0fda86a35419: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.61 GiB KV cache is needed, which is larger than the available KV cache memory (2.49 GiB). Based on the available memory, the estimated maximum model length is 246240. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
           "runs": 10,
           "source": "engine"
         },
@@ -807,7 +786,7 @@
             "1x TP4xPP2 + EP (max seqs 16 \u00b7 batch tokens 16,384)"
           ],
           "issue": null,
-          "reason": "scenario: engine vllm 0.33.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (3.17 GiB KV cache is needed, which is larger than the available KV cache memory (1.24 GiB). Based on the available memory, the estimated maximum model length is 40560. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
+          "reason": "scenario: engine vllm 0.34.0+0fda86a35419: vllm: kv: To serve at least one request with the model's max seq len (262144), (3.17 GiB KV cache is needed, which is larger than the available KV cache memory (1.24 GiB). Based on the available memory, the estimated maximum model length is 40560. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
           "runs": 10,
           "source": "engine"
         },
@@ -916,7 +895,7 @@
             "1x TP4xPP2 + EP (gpu mem util 0.95)"
           ],
           "issue": null,
-          "reason": "scenario: engine vllm 0.33.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.61 GiB KV cache is needed, which is larger than the available KV cache memory (2.49 GiB). Based on the available memory, the estimated maximum model length is 246240. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
+          "reason": "scenario: engine vllm 0.34.0+0fda86a35419: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.61 GiB KV cache is needed, which is larger than the available KV cache memory (2.49 GiB). Based on the available memory, the estimated maximum model length is 246240. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
           "runs": 5,
           "source": "engine"
         }
@@ -936,7 +915,7 @@
             "1x TP4xPP2 + EP (all-to-all deepep_v2)"
           ],
           "issue": null,
-          "reason": "scenario: engine vllm 0.33.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.61 GiB KV cache is needed, which is larger than the available KV cache memory (2.49 GiB). Based on the available memory, the estimated maximum model length is 246240. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
+          "reason": "scenario: engine vllm 0.34.0+0fda86a35419: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.61 GiB KV cache is needed, which is larger than the available KV cache memory (2.49 GiB). Based on the available memory, the estimated maximum model length is 246240. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
           "runs": 20,
           "source": "engine"
         },
@@ -968,7 +947,7 @@
             "1x TP4xPP2 + EP"
           ],
           "issue": null,
-          "reason": "scenario: engine vllm 0.33.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.61 GiB KV cache is needed, which is larger than the available KV cache memory (2.49 GiB). Based on the available memory, the estimated maximum model length is 246240. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
+          "reason": "scenario: engine vllm 0.34.0+0fda86a35419: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.61 GiB KV cache is needed, which is larger than the available KV cache memory (2.49 GiB). Based on the available memory, the estimated maximum model length is 246240. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
           "runs": 5,
           "source": "engine"
         },
@@ -997,7 +976,7 @@
             "1x TP4xPP2 + EP (prefill chunk 8,192)"
           ],
           "issue": null,
-          "reason": "scenario: engine vllm 0.33.0: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.61 GiB KV cache is needed, which is larger than the available KV cache memory (2.49 GiB). Based on the available memory, the estimated maximum model length is 246240. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
+          "reason": "scenario: engine vllm 0.34.0+0fda86a35419: vllm: kv: To serve at least one request with the model's max seq len (262144), (2.61 GiB KV cache is needed, which is larger than the available KV cache memory (2.49 GiB). Based on the available memory, the estimated maximum model length is 246240. Try increasing `gpu_memory_utilization` or decreasing `max_model_len` when initializing the engine (vllm/v1/core/kv_cache_utils.py:2636-2646@5df63a72)",
           "runs": 10,
           "source": "engine"
         },

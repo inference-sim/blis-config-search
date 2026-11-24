@@ -109,12 +109,12 @@
   "finalists": [
     {
       "at_c_use": {
-        "interactivity": 24.93,
-        "itl_p99_ms": 100.706,
-        "tok_per_s_per_user": 9.9,
-        "tokens_per_sec": 2119.3,
-        "tokens_per_sec_per_gpu": 33.11,
-        "total_tokens_per_sec_per_gpu": 3462.672
+        "interactivity": 23.898,
+        "itl_p99_ms": 115.351,
+        "tok_per_s_per_user": 8.7,
+        "tokens_per_sec": 2055.3,
+        "tokens_per_sec_per_gpu": 32.11,
+        "total_tokens_per_sec_per_gpu": 3381.535
       },
       "c_star": 128,
       "c_use": 128,
@@ -130,195 +130,40 @@
       "curve": [
         {
           "concurrency": 64,
-          "itl_p99_ms": 47.92,
+          "itl_p99_ms": 56.187,
           "preemption_count": 0,
-          "tok_per_s_per_user": 20.9,
-          "tokens_per_sec": 1445.7,
-          "ttft_p99_ms": 2553.1
+          "tok_per_s_per_user": 17.8,
+          "tokens_per_sec": 1442.0,
+          "ttft_p99_ms": 2568.9
         },
         {
           "concurrency": 128,
-          "itl_p99_ms": 100.706,
+          "itl_p99_ms": 115.351,
           "preemption_count": 0,
-          "tok_per_s_per_user": 9.9,
-          "tokens_per_sec": 2119.3,
-          "ttft_p99_ms": 4106.5
+          "tok_per_s_per_user": 8.7,
+          "tokens_per_sec": 2055.3,
+          "ttft_p99_ms": 5551.7
         },
         {
           "concurrency": 256,
-          "itl_p99_ms": 683.353,
+          "itl_p99_ms": 709.679,
           "preemption_count": 0,
-          "tok_per_s_per_user": 1.5,
-          "tokens_per_sec": 851.5,
-          "ttft_p99_ms": 136124.1
+          "tok_per_s_per_user": 1.4,
+          "tokens_per_sec": 751.0,
+          "ttft_p99_ms": 175030.4
         },
         {
           "concurrency": 512,
-          "itl_p99_ms": 698.691,
+          "itl_p99_ms": 718.402,
           "preemption_count": 0,
           "tok_per_s_per_user": 1.4,
-          "tokens_per_sec": 565.0,
-          "ttft_p99_ms": 583904.0
+          "tokens_per_sec": 539.0,
+          "ttft_p99_ms": 620386.8
         }
       ],
       "gpus": 64,
       "label": "2x TP8xPP4 + EP",
       "sweep": "pipeline",
-      "variant": ""
-    },
-    {
-      "at_c_use": {
-        "interactivity": 29.378,
-        "itl_p99_ms": 611.401,
-        "tok_per_s_per_user": 1.6,
-        "tokens_per_sec": 908.4,
-        "tokens_per_sec_per_gpu": 14.19,
-        "total_tokens_per_sec_per_gpu": 1414.99
-      },
-      "c_star": 64,
-      "c_use": 64,
-      "config": {
-        "cache_dtype": "fp8",
-        "concurrency": 64,
-        "enable_expert_parallel": true,
-        "gpu_memory_utilization": 0.95,
-        "max_model_len": 262144,
-        "num_instances": 8,
-        "tp": 8
-      },
-      "curve": [
-        {
-          "concurrency": 64,
-          "itl_p99_ms": 611.401,
-          "preemption_count": 0,
-          "tok_per_s_per_user": 1.6,
-          "tokens_per_sec": 908.4,
-          "ttft_p99_ms": 39399.0
-        },
-        {
-          "concurrency": 128,
-          "itl_p99_ms": 486.681,
-          "preemption_count": 20,
-          "tok_per_s_per_user": 2.1,
-          "tokens_per_sec": 756.5,
-          "ttft_p99_ms": 194031.3
-        },
-        {
-          "concurrency": 256,
-          "itl_p99_ms": 480.794,
-          "preemption_count": 16,
-          "tok_per_s_per_user": 2.1,
-          "tokens_per_sec": 776.9,
-          "ttft_p99_ms": 357108.4
-        },
-        {
-          "concurrency": 512,
-          "itl_p99_ms": 573.917,
-          "preemption_count": 14,
-          "tok_per_s_per_user": 1.7,
-          "tokens_per_sec": 827.8,
-          "ttft_p99_ms": 828591.8
-        }
-      ],
-      "gpus": 64,
-      "label": "8x TP8 + EP",
-      "sweep": "kv-capacity",
-      "variant": "KV dtype fp8"
-    },
-    {
-      "at_c_use": {
-        "interactivity": 45.001,
-        "itl_p99_ms": 27.737,
-        "tok_per_s_per_user": 36.1,
-        "tokens_per_sec": 851.3,
-        "tokens_per_sec_per_gpu": 13.3,
-        "total_tokens_per_sec_per_gpu": 1276.54
-      },
-      "c_star": 64,
-      "c_use": 64,
-      "config": {
-        "concurrency": 64,
-        "decode_enable_expert_parallel": true,
-        "decode_instances": 1,
-        "decode_tp": 16,
-        "gpu_memory_utilization": 0.95,
-        "max_model_len": 262144,
-        "num_instances": 7,
-        "prefill_enable_expert_parallel": true,
-        "prefill_instances": 6,
-        "prefill_tp": 8,
-        "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-h100-agentx-8node/routing/pd-prefix-based-d2878efc34.yaml",
-        "tp": 8
-      },
-      "curve": [
-        {
-          "concurrency": 64,
-          "itl_p99_ms": 27.164,
-          "preemption_count": 0,
-          "tok_per_s_per_user": 36.8,
-          "tokens_per_sec": 843.5,
-          "ttft_p99_ms": 89718.5
-        },
-        {
-          "concurrency": 128,
-          "itl_p99_ms": 28.562,
-          "preemption_count": 0,
-          "tok_per_s_per_user": 35.0,
-          "tokens_per_sec": 844.5,
-          "ttft_p99_ms": 190319.2
-        },
-        {
-          "concurrency": 256,
-          "itl_p99_ms": 28.228,
-          "preemption_count": 0,
-          "tok_per_s_per_user": 35.4,
-          "tokens_per_sec": 869.8,
-          "ttft_p99_ms": 393165.4
-        },
-        {
-          "concurrency": 512,
-          "itl_p99_ms": 30.159,
-          "preemption_count": 0,
-          "tok_per_s_per_user": 33.2,
-          "tokens_per_sec": 1005.2,
-          "ttft_p99_ms": 793079.5
-        },
-        {
-          "concurrency": 64,
-          "itl_p99_ms": 27.737,
-          "preemption_count": 0,
-          "tok_per_s_per_user": 36.1,
-          "tokens_per_sec": 851.3,
-          "ttft_p99_ms": 86376.0
-        },
-        {
-          "concurrency": 128,
-          "itl_p99_ms": 29.77,
-          "preemption_count": 0,
-          "tok_per_s_per_user": 33.6,
-          "tokens_per_sec": 857.6,
-          "ttft_p99_ms": 196417.2
-        },
-        {
-          "concurrency": 256,
-          "itl_p99_ms": 29.368,
-          "preemption_count": 0,
-          "tok_per_s_per_user": 34.1,
-          "tokens_per_sec": 893.3,
-          "ttft_p99_ms": 418752.8
-        },
-        {
-          "concurrency": 512,
-          "itl_p99_ms": 32.454,
-          "preemption_count": 0,
-          "tok_per_s_per_user": 30.8,
-          "tokens_per_sec": 998.6,
-          "ttft_p99_ms": 836093.8
-        }
-      ],
-      "gpus": 64,
-      "label": "6P TP8 + EP / 1D TP16 + EP",
-      "sweep": "pd-wide-decode",
       "variant": ""
     }
   ],
@@ -326,34 +171,9 @@
     "interval": null,
     "overall": {
       "decode": {
-        "members": [
-          {
-            "concurrency": 64,
-            "config": {
-              "concurrency": 64,
-              "decode_enable_expert_parallel": true,
-              "decode_instances": 1,
-              "decode_tp": 16,
-              "gpu_memory_utilization": 0.95,
-              "max_model_len": 262144,
-              "num_instances": 7,
-              "prefill_enable_expert_parallel": true,
-              "prefill_instances": 6,
-              "prefill_tp": 8,
-              "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-h100-agentx-8node/routing/pd-prefix-based-d2878efc34.yaml",
-              "tp": 8
-            },
-            "disaggregated": true,
-            "interactivity": 45.001,
-            "label": "6P TP8 + EP / 1D TP16 + EP",
-            "status": "front",
-            "sweep": "pd-wide-decode",
-            "throughput_per_gpu": 53.204,
-            "variant": ""
-          }
-        ],
-        "points": 1,
-        "unrated": 10
+        "members": [],
+        "points": 0,
+        "unrated": 9
       },
       "total": {
         "members": [
@@ -369,11 +189,11 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 24.93,
+            "interactivity": 23.898,
             "label": "2x TP8xPP4 + EP",
             "status": "front",
             "sweep": "pipeline",
-            "throughput_per_gpu": 3462.672,
+            "throughput_per_gpu": 3381.535,
             "variant": ""
           },
           {
@@ -388,15 +208,15 @@
               "tp": 8
             },
             "disaggregated": false,
-            "interactivity": 45.98,
+            "interactivity": 45.4,
             "label": "4x TP8xPP2 + EP",
             "status": "front",
             "sweep": "pipeline",
-            "throughput_per_gpu": 2502.512,
+            "throughput_per_gpu": 2476.459,
             "variant": ""
           }
         ],
-        "points": 11,
+        "points": 9,
         "unrated": 0
       }
     },
@@ -448,11 +268,11 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 24.93,
+              "interactivity": 23.898,
               "label": "2x TP8xPP4 + EP",
               "status": "front",
               "sweep": "pipeline",
-              "throughput_per_gpu": 3462.672,
+              "throughput_per_gpu": 3381.535,
               "variant": ""
             },
             {
@@ -467,11 +287,11 @@
                 "tp": 8
               },
               "disaggregated": false,
-              "interactivity": 45.98,
+              "interactivity": 45.4,
               "label": "4x TP8xPP2 + EP",
               "status": "front",
               "sweep": "pipeline",
-              "throughput_per_gpu": 2502.512,
+              "throughput_per_gpu": 2476.459,
               "variant": ""
             }
           ],
@@ -496,32 +316,12 @@
         "decode": {
           "members": [],
           "points": 0,
-          "unrated": 1
+          "unrated": 0
         },
         "name": "kv-capacity",
         "total": {
-          "members": [
-            {
-              "concurrency": 64,
-              "config": {
-                "cache_dtype": "fp8",
-                "concurrency": 64,
-                "enable_expert_parallel": true,
-                "gpu_memory_utilization": 0.95,
-                "max_model_len": 262144,
-                "num_instances": 8,
-                "tp": 8
-              },
-              "disaggregated": false,
-              "interactivity": 29.378,
-              "label": "8x TP8 + EP",
-              "status": "front",
-              "sweep": "kv-capacity",
-              "throughput_per_gpu": 1414.99,
-              "variant": "KV dtype fp8"
-            }
-          ],
-          "points": 1,
+          "members": [],
+          "points": 0,
           "unrated": 0
         }
       },
@@ -592,64 +392,14 @@
       },
       {
         "decode": {
-          "members": [
-            {
-              "concurrency": 64,
-              "config": {
-                "concurrency": 64,
-                "decode_enable_expert_parallel": true,
-                "decode_instances": 1,
-                "decode_tp": 16,
-                "gpu_memory_utilization": 0.95,
-                "max_model_len": 262144,
-                "num_instances": 7,
-                "prefill_enable_expert_parallel": true,
-                "prefill_instances": 6,
-                "prefill_tp": 8,
-                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-h100-agentx-8node/routing/pd-prefix-based-d2878efc34.yaml",
-                "tp": 8
-              },
-              "disaggregated": true,
-              "interactivity": 45.001,
-              "label": "6P TP8 + EP / 1D TP16 + EP",
-              "status": "front",
-              "sweep": "pd-wide-decode",
-              "throughput_per_gpu": 53.204,
-              "variant": ""
-            }
-          ],
-          "points": 1,
+          "members": [],
+          "points": 0,
           "unrated": 0
         },
         "name": "pd-wide-decode",
         "total": {
-          "members": [
-            {
-              "concurrency": 64,
-              "config": {
-                "concurrency": 64,
-                "decode_enable_expert_parallel": true,
-                "decode_instances": 1,
-                "decode_tp": 16,
-                "gpu_memory_utilization": 0.95,
-                "max_model_len": 262144,
-                "num_instances": 7,
-                "prefill_enable_expert_parallel": true,
-                "prefill_instances": 6,
-                "prefill_tp": 8,
-                "router_config": "../../_temp/regen/muse-spark-open-816b-a42b-h100-agentx-8node/routing/pd-prefix-based-d2878efc34.yaml",
-                "tp": 8
-              },
-              "disaggregated": true,
-              "interactivity": 45.001,
-              "label": "6P TP8 + EP / 1D TP16 + EP",
-              "status": "front",
-              "sweep": "pd-wide-decode",
-              "throughput_per_gpu": 1276.54,
-              "variant": ""
-            }
-          ],
-          "points": 1,
+          "members": [],
+          "points": 0,
           "unrated": 0
         }
       },
@@ -701,9 +451,9 @@
     }
   },
   "outcomes": {
-    "overloaded": 225,
-    "refused": 4,
-    "served": 11
+    "overloaded": 3,
+    "refused": 228,
+    "served": 9
   },
   "ranking": {
     "description": "max output tok/s per accelerator subject to the scenario's SLOs",
@@ -712,33 +462,58 @@
   },
   "refusals": [
     {
+      "configs": 47,
+      "examples": [
+        "8x TP8 + EP",
+        "8x TP8 + EP (all-to-all deepep_low_latency)",
+        "8x TP8 + EP (all-to-all deepep_v2)"
+      ],
+      "issue": null,
+      "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+      "runs": 188,
+      "source": "engine"
+    },
+    {
+      "configs": 6,
+      "examples": [
+        "8x TP8 + EP (batch tokens 16,384)",
+        "8x TP8 + EP (max seqs 256 \u00b7 batch tokens 16,384)",
+        "2P/6D TP8 + EP (prefill batch tokens 16,384)"
+      ],
+      "issue": null,
+      "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 84.4 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+      "runs": 24,
+      "source": "engine"
+    },
+    {
       "configs": 2,
       "examples": [
-        "4P/4D TP8 + EP"
+        "8x TP8 + EP",
+        "8x TP8 + EP (max seqs 256)"
       ],
       "issue": null,
-      "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[1141].e2e_us: is 127270137, less than ttft_us 131537500\\n  error: result.request_rows[1141].tpot_us: must be a finite number, not negative",
-      "runs": 2,
+      "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 82.5 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+      "runs": 8,
       "source": "engine"
     },
     {
       "configs": 1,
       "examples": [
-        "4P/4D TP8 + EP"
+        "8x TP8"
       ],
       "issue": null,
-      "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[2486].e2e_us: is 73809840, less than ttft_us 75751987\\n  error: result.request_rows[2486].tpot_us: must be a finite number, not negative",
-      "runs": 1,
+      "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 1): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+      "runs": 4,
       "source": "engine"
     },
     {
       "configs": 1,
       "examples": [
-        "4P/4D TP8 + EP"
+        "8x TP8 + EP"
       ],
       "issue": null,
-      "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[7523].e2e_us: is 1140139310, less than ttft_us 1151865527\\n  error: result.request_rows[7523].tpot_us: must be a finite number, not negative",
-      "runs": 1,
+      "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 82.0 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+      "runs": 4,
       "source": "engine"
     }
   ],
@@ -747,16 +522,38 @@
     {
       "name": "topology",
       "outcomes": {
-        "overloaded": 4
+        "refused": 4
       },
-      "refusals": []
+      "refusals": [
+        {
+          "configs": 1,
+          "examples": [
+            "8x TP8 + EP"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 4,
+          "source": "engine"
+        }
+      ]
     },
     {
       "name": "ep-off",
       "outcomes": {
-        "overloaded": 4
+        "refused": 4
       },
-      "refusals": []
+      "refusals": [
+        {
+          "configs": 1,
+          "examples": [
+            "8x TP8"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 1): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 4,
+          "source": "engine"
+        }
+      ]
     },
     {
       "name": "pipeline",
@@ -769,54 +566,126 @@
     {
       "name": "moe-collective",
       "outcomes": {
-        "overloaded": 16
+        "refused": 16
       },
-      "refusals": []
+      "refusals": [
+        {
+          "configs": 4,
+          "examples": [
+            "8x TP8 + EP",
+            "8x TP8 + EP (all-to-all deepep_low_latency)",
+            "8x TP8 + EP (all-to-all deepep_v2)"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 16,
+          "source": "engine"
+        }
+      ]
     },
     {
       "name": "kv-capacity",
       "outcomes": {
-        "overloaded": 7,
-        "served": 1
+        "refused": 8
       },
-      "refusals": []
+      "refusals": [
+        {
+          "configs": 2,
+          "examples": [
+            "8x TP8 + EP",
+            "8x TP8 + EP (KV dtype fp8)"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 8,
+          "source": "engine"
+        }
+      ]
     },
     {
       "name": "batch-caps",
       "outcomes": {
-        "overloaded": 16
+        "refused": 16
       },
-      "refusals": []
+      "refusals": [
+        {
+          "configs": 2,
+          "examples": [
+            "8x TP8 + EP",
+            "8x TP8 + EP (max seqs 256)"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 82.5 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 8,
+          "source": "engine"
+        },
+        {
+          "configs": 2,
+          "examples": [
+            "8x TP8 + EP (batch tokens 16,384)",
+            "8x TP8 + EP (max seqs 256 \u00b7 batch tokens 16,384)"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 84.4 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 8,
+          "source": "engine"
+        }
+      ]
     },
     {
       "name": "routing-prefix-cache",
       "outcomes": {
-        "overloaded": 24
+        "refused": 24
       },
-      "refusals": []
+      "refusals": [
+        {
+          "configs": 6,
+          "examples": [
+            "8x TP8 + EP",
+            "8x TP8 + EP (queue routing)",
+            "8x TP8 + EP (prefix-affinity routing)"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 24,
+          "source": "engine"
+        }
+      ]
     },
     {
       "name": "prefill-chunking",
       "outcomes": {
-        "overloaded": 4
-      },
-      "refusals": []
-    },
-    {
-      "name": "pd-ratio",
-      "outcomes": {
-        "overloaded": 63,
-        "refused": 1
+        "refused": 4
       },
       "refusals": [
         {
           "configs": 1,
           "examples": [
-            "4P/4D TP8 + EP"
+            "8x TP8 + EP"
           ],
           "issue": null,
-          "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[2486].e2e_us: is 73809840, less than ttft_us 75751987\\n  error: result.request_rows[2486].tpot_us: must be a finite number, not negative",
-          "runs": 1,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 4,
+          "source": "engine"
+        }
+      ]
+    },
+    {
+      "name": "pd-ratio",
+      "outcomes": {
+        "refused": 64
+      },
+      "refusals": [
+        {
+          "configs": 16,
+          "examples": [
+            "1P/7D TP8 + EP",
+            "2P/6D TP8 + EP",
+            "3P/5D TP8 + EP"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 64,
           "source": "engine"
         }
       ]
@@ -824,18 +693,19 @@
     {
       "name": "pd-always",
       "outcomes": {
-        "overloaded": 15,
-        "refused": 1
+        "refused": 16
       },
       "refusals": [
         {
-          "configs": 1,
+          "configs": 4,
           "examples": [
-            "4P/4D TP8 + EP"
+            "1P/7D TP8 + EP",
+            "2P/6D TP8 + EP",
+            "3P/5D TP8 + EP"
           ],
           "issue": null,
-          "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[1141].e2e_us: is 127270137, less than ttft_us 131537500\\n  error: result.request_rows[1141].tpot_us: must be a finite number, not negative",
-          "runs": 1,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 16,
           "source": "engine"
         }
       ]
@@ -843,36 +713,51 @@
     {
       "name": "pd-wide-decode",
       "outcomes": {
-        "overloaded": 23,
-        "served": 1
+        "refused": 24
       },
-      "refusals": []
+      "refusals": [
+        {
+          "configs": 6,
+          "examples": [
+            "2P TP8 + EP / 3D TP16 + EP",
+            "4P TP8 + EP / 2D TP16 + EP",
+            "6P TP8 + EP / 1D TP16 + EP"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 24,
+          "source": "engine"
+        }
+      ]
     },
     {
       "name": "pd-pool-engine",
       "outcomes": {
-        "overloaded": 30,
-        "refused": 2
+        "refused": 32
       },
       "refusals": [
         {
-          "configs": 1,
+          "configs": 4,
           "examples": [
+            "2P/6D TP8 + EP",
+            "2P/6D TP8 + EP (decode prefill chunk 2,048)",
             "4P/4D TP8 + EP"
           ],
           "issue": null,
-          "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[1141].e2e_us: is 127270137, less than ttft_us 131537500\\n  error: result.request_rows[1141].tpot_us: must be a finite number, not negative",
-          "runs": 1,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 16,
           "source": "engine"
         },
         {
-          "configs": 1,
+          "configs": 4,
           "examples": [
-            "4P/4D TP8 + EP"
+            "2P/6D TP8 + EP (prefill batch tokens 16,384)",
+            "2P/6D TP8 + EP (decode prefill chunk 2,048 \u00b7 prefill batch tokens 16,384)",
+            "4P/4D TP8 + EP (prefill batch tokens 16,384)"
           ],
           "issue": null,
-          "reason": "the Result document: the emitted Result does not validate against blis-schemas:\\n  error: result.request_rows[7523].e2e_us: is 1140139310, less than ttft_us 1151865527\\n  error: result.request_rows[7523].tpot_us: must be a finite number, not negative",
-          "runs": 1,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 84.4 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 16,
           "source": "engine"
         }
       ]
@@ -880,22 +765,55 @@
     {
       "name": "pd-decode-cudagraph",
       "outcomes": {
-        "overloaded": 8
+        "refused": 8
       },
-      "refusals": []
+      "refusals": [
+        {
+          "configs": 2,
+          "examples": [
+            "3P/5D TP8 + EP",
+            "3P/5D TP8 + EP (decode graph capture full decode only)"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 8,
+          "source": "engine"
+        }
+      ]
     },
     {
       "name": "cudagraph",
       "outcomes": {
-        "overloaded": 8
+        "refused": 8
       },
-      "refusals": []
+      "refusals": [
+        {
+          "configs": 1,
+          "examples": [
+            "8x TP8 + EP"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 82.0 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 4,
+          "source": "engine"
+        },
+        {
+          "configs": 1,
+          "examples": [
+            "8x TP8 + EP (graph capture full)"
+          ],
+          "issue": null,
+          "reason": "scenario: kernelmodel: muse-spark-open-816b-a42b-nvfp4 does not fit 79.2 GiB devices at tp=8 (expert-parallel width 8): one rank's weights alone are 80.8 GiB, and its fixed occupancy 83.1 GiB; widen tensor or expert parallelism or use a larger part. No KV budget exists",
+          "runs": 4,
+          "source": "engine"
+        }
+      ]
     }
   ],
   "winner": {
     "chosen": "2x TP8xPP4 + EP",
     "label": "2x TP8xPP4 + EP",
-    "reason": "2x TP8xPP4 + EP in sweep 'pipeline' gives the most tok/s/accelerator (33.11 tok/s/accelerator, 2119.3 tok/s fleet) while holding the scenario's SLOs, at concurrency 128.",
+    "reason": "2x TP8xPP4 + EP in sweep 'pipeline' gives the most tok/s/accelerator (32.11 tok/s/accelerator, 2055.3 tok/s fleet) while holding the scenario's SLOs, at concurrency 128.",
     "sweep": "pipeline",
     "variant": ""
   }

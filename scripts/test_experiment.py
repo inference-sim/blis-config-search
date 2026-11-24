@@ -1635,6 +1635,46 @@ class ReplayKeysReachTheSimulator(unittest.TestCase):
         self.assertEqual(1, wl["document"]["trace_idle_gap_cap_s"])
         self.assertEqual([1, 300], wl["recipe"]["differs_from_run"]["trace_idle_gap_cap_s"])
 
+    def _committed_spec_report(self, out, spec_dir):
+        """Run the spec-side workload through the committed-reports staging path once, with the
+        BLIS call stubbed and `_is_committed_reports` forced true for `out`, and return the report.
+        A tagged release on embedded data keeps the sweep off the experimental gate so it stages
+        and publishes (the #199 path that rewrites the random sweep- staging dir)."""
+        def fake_run_one(*a, **kw):
+            return {**_ran(100.0, 10.0), "data": "embedded", "released_build": True}
+        real_run, real_committed = E.run_blis.run_one, E._is_committed_reports
+        E.run_blis.run_one = fake_run_one
+        E._is_committed_reports = lambda o, _o=out: os.path.realpath(o) == os.path.realpath(_o)
+        try:
+            return E.run_experiment(self.with_file("./wl.yaml"), BLIS, "/c", "/r", out,
+                                    verbose=False, spec_dir=spec_dir)
+        finally:
+            E.run_blis.run_one, E._is_committed_reports = real_run, real_committed
+
+    def test_a_committed_spec_side_report_records_a_stable_relative_workload_path(self):
+        """#199: a committed run stages under a `tempfile.mkdtemp(prefix="sweep-")` directory, so the
+        live replay.workload_spec is an absolute sweep-<random> path. The report must record the
+        report-relative `workloads/<name>` instead -- the absolute path does not survive the move
+        into reports/ and its random component would make identical reruns differ. Exercised twice."""
+        spec_dir = self.beside(self.recipe(1))
+        with tempfile.TemporaryDirectory() as out_a, tempfile.TemporaryDirectory() as out_b:
+            rep_a = self._committed_spec_report(out_a, spec_dir)
+            rep_b = self._committed_spec_report(out_b, spec_dir)
+            # The recorded replay path and the top-level file record both resolve to the committed
+            # workloads/ copy, by a stable report-relative path.
+            rel = rep_a["scenario"]["replay"]["workload_spec"]
+            self.assertEqual("workloads/wl.yaml", rel)
+            self.assertEqual("workloads/wl.yaml", rep_a["scenario"]["workload_spec"]["file"])
+            self.assertTrue(os.path.isfile(os.path.join(out_a, "t", rel)))
+            # No random staging path survives anywhere in the serialized report, and nothing anchors
+            # it to the (per-run) output directory.
+            blob_a = json.dumps(rep_a, sort_keys=True, default=str)
+            self.assertNotIn("sweep-", blob_a)
+            self.assertNotIn(os.path.realpath(out_a), blob_a)
+            # Identical reruns produce a byte-identical report document.
+            blob_b = json.dumps(rep_b, sort_keys=True, default=str)
+            self.assertEqual(blob_a, blob_b)
+
 
 class ReplayComesFromTheCatalog(unittest.TestCase):
     """A replay workload is fully described by blis-catalog/workloads/<name>.yaml.

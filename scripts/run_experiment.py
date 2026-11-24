@@ -795,6 +795,31 @@ class _AttemptJournal:
             os.fsync(f.fileno())
 
 
+def _report_replay(replay, workload_spec, out_dir, dry_run):
+    """The `scenario.replay` block as recorded in the report: the live replay dict minus the
+    execution-only `workload_document`, and -- for a spec-side workload staged under the run
+    directory -- its `workload_spec` recorded as the stable report-relative path (`workloads/
+    <basename>`) rather than the absolute staging path.
+
+    A committed run stages under `tempfile.mkdtemp(prefix="sweep-")`, so the live
+    `replay["workload_spec"]` is an absolute `sweep-<random>/.../workloads/<name>` path. That path
+    does not survive `_replace_dir` into reports/, and its random component differs across identical
+    reruns -- recording it would make identical sweeps produce differing reports (#199). BLIS still
+    receives the absolute staged path during the run; this only shapes the report, and never mutates
+    the live `replay` dict the run used.
+    """
+    out = {k: v for k, v in replay.items() if k != "workload_document"}
+    spec_side = bool(workload_spec) and workload_spec.startswith(validator.SPEC_PREFIX) and not dry_run
+    staged = out.get("workload_spec")
+    if spec_side and isinstance(staged, str) and os.path.isabs(staged):
+        rel = os.path.relpath(staged, out_dir)
+        # Only when the staged file really lives under the run directory (it always does on this
+        # path); never climb out of it, which would be a worse record than the absolute path.
+        if not rel.startswith(os.pardir + os.sep) and rel != os.pardir:
+            out["workload_spec"] = rel
+    return out
+
+
 def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dry_run=False,
                    run_timeout=600, max_parallel=1, verbose=True, fields=None, data_override=False,
                    router_cfg=None, shard=None, recorded=None, checkpoint_runs=None, spec_dir=None):
@@ -1093,7 +1118,7 @@ def run_experiment(spec, blis, catalog, registry, out_root, routing_dir=None, dr
                      # The cluster fabric the sweep assumed, so a report states its interconnect
                      # without reopening the spec. Omitted (null) means the ib-400g default.
                      "cluster": (sc.get("cluster") or None),
-                     "replay": ({k: v for k, v in replay.items() if k != "workload_document"}
+                     "replay": (_report_replay(replay, workload_spec, out_dir, dry_run)
                                 if replay else None)},
         "slo_ms": slo_ms,
         # What every ranked figure is (CFG-4, DEV-8): the metric basis and the scope it ranges over.

@@ -17,13 +17,14 @@ print(" ".join(["Y" if r[j] else "-" for j in ("python", "experiments", "web", "
 }
 total=$(ls reports | wc -l | tr -d ' ')
 printf 'reports with a smoke job: %s\n' "$total"
-row "one spec"                  false "Y Y Y Y 1"  "experiments/$one.yaml"
-row "one report's ledger"       false "Y - Y Y 1"  "reports/$one/ledger.jsonl"
-row "pins.env, value moved"     true  "Y Y Y Y $total" pins.env
-row "pins.env, comment only"    false "Y Y Y Y 0"  pins.env
+row "one spec"                  false "Y Y Y - 1"  "experiments/$one.yaml"
+row "one report's ledger"       false "Y - Y - 1"  "reports/$one/ledger.jsonl"
+row "pins.env, value moved"     true  "Y Y Y - $total" pins.env
+row "pins.env, comment only"    false "Y Y Y - 0"  pins.env
 row "runner script blis_pin.py" false "Y - - - $total" scripts/blis_pin.py
 row "test file only"            false "Y - - - 0"  scripts/test_build.py
 row "web/ only"                 false "- - Y Y 0"  web/src/App.tsx
+row "site builder script"       false "Y - Y Y 0"  scripts/build_gallery.py
 row "docs only"                 false "- - - - 0"  docs/objective-refusals-router-files.md
 row "unknown path"              false "Y Y Y Y $total" brand-new-dir/x
 [ "$bad" = 0 ] || { echo "harness: a row differs from its expectation" >&2; exit 1; }

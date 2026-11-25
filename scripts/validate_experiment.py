@@ -927,9 +927,28 @@ def offload_errors(sw, where, pool_offload=False, catalog=None):
         if block is None:
             continue
         errs.extend(_offload_block_errors(block, f"{where}.{name}", devices))
-        if not _sweep_is_colocated(sw) and not pool_offload:
+        if _sweep_is_colocated(sw):
+            continue
+        if not pool_offload:
             errs.append(f"{where}.{name}: this simulator's deployment schema has no per-pool offload "
                         f"(blis-substrate#307), so a disaggregated sweep cannot state a tier")
+        elif isinstance(block, dict) and ("tiers" in block or "p2p" in block):
+            # A disaggregated pool's secondary (fs/obj) tier or p2p option renders into the pool's
+            # engine `kv_offload` alongside a MultiConnector (the pool's own NIXL + CPU-tier pair,
+            # run_blis._pd_scenario_yaml); the pinned simulator's splitOffload does not move either
+            # key into the offloading child's own kv_connector_extra_config, so vLLM refuses the pair
+            # outright -- verified against the pinned binary (v0.19.0, e7597a8c): "vllm: kv_offload.
+            # secondary_tiers beside a MultiConnector: the offloading child's own kv_connector_extra_
+            # config states it as vLLM does; state it there once" (engines/vllm/core/vllm/
+            # multiconnector.go:217). Not fixable from the runner side (it cannot place the key in the
+            # child's own config without duplicating the simulator's own derived offload values), so a
+            # disaggregated sweep's tier is cpu_bytes only (the primary CPU tier, which works) until the
+            # simulator closes this (blis-config-search#94).
+            errs.append(f"{where}.{name}: a disaggregated pool's tiers/p2p option fails at runtime "
+                        f"against a MultiConnector (the pinned simulator's splitOffload leaves "
+                        f"secondary_tiers at the top level instead of the offloading child's own "
+                        f"kv_connector_extra_config; engines/vllm/core/vllm/multiconnector.go:217), "
+                        f"so a disaggregated sweep's tier is cpu_bytes only (blis-config-search#94)")
     return errs
 
 

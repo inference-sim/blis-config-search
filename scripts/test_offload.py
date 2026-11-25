@@ -229,13 +229,15 @@ class PerPoolOffload(unittest.TestCase):
             self.assertNotIn("nvme_gen4", pool)           # the sweep's extra tier does not leak in
             self.assertNotIn("secondary_tiers", pool)     # nor its p2p tier
             self.assertNotIn("TieringOffloadingSpec", pool)
-        # A pool that states nothing still takes the sweep-level block whole, tiers and p2p and all.
-        both = self.scenario({"offload_cpu_bytes": 2**38,
-                              "offload_tiers": [{"tier": "nvme_gen4", "bytes": 2 * 2**40}],
-                              "offload_p2p": True})
-        for role in ("prefill", "decode"):
-            self.assertIn("nvme_gen4", self.pool(both, role))
-            self.assertIn("type: p2p", self.pool(both, role))
+        # A pool that states nothing still takes the sweep-level block whole -- which is refused
+        # when it carries a secondary tier or p2p (blis-config-search#94: a disaggregated pool's
+        # MultiConnector refuses kv_offload.secondary_tiers beside it), the same guard as a pool's
+        # own tiers/p2p (test_the_runner_refuses_a_pools_tiers_or_p2p_too_not_only_the_validator).
+        with self.assertRaises(run_blis.ConfigError) as cm:
+            self.scenario({"offload_cpu_bytes": 2**38,
+                          "offload_tiers": [{"tier": "nvme_gen4", "bytes": 2 * 2**40}],
+                          "offload_p2p": True})
+        self.assertIn("#94", str(cm.exception))
 
     def test_a_deployment_connector_of_multi_gives_a_pool_without_a_tier_nixl(self):
         text = self.scenario({"prefill_offload_cpu_bytes": 2**38, "pd_connector": "MultiConnector"})
@@ -266,6 +268,34 @@ class PerPoolOffload(unittest.TestCase):
         bad = pd_doc(decode={"parallel": {"tp": [8]}, "offload": {"eviction_policy": ["lru"]}})
         errs = V.validate(bad, self.capable, ROUTING)
         self.assertTrue(any("decode.offload.eviction_policy: needs cpu_bytes" in e for e in errs), errs)
+
+    def test_a_secondary_tier_or_p2p_on_a_disaggregated_pool_is_refused_even_when_the_schema_has_it(self):
+        """blis-config-search#94: even a simulator whose deployment schema lets a pool state `offload`
+        (per-pool-cpu-tier) still fails at runtime for a secondary tier or p2p there -- the pool's
+        MultiConnector (NIXL + the CPU tier) refuses `kv_offload.secondary_tiers` beside it
+        (engines/vllm/core/vllm/multiconnector.go:217). The primary CPU tier alone (cpu_bytes) is
+        unaffected and must still validate clean."""
+        tiers = pd_doc(prefill={"parallel": {"tp": [8]}, "offload": {
+            "cpu_bytes": ["512GiB"], "tiers": [{"tier": "nvme_gen4", "bytes": "2TiB"}]}})
+        errs = V.validate(copy.deepcopy(tiers), self.capable, ROUTING)
+        self.assertTrue(any("sweeps[0](s).prefill.offload" in e and "#94" in e and "MultiConnector" in e
+                            for e in errs), errs)
+        p2p = pd_doc(decode={"parallel": {"tp": [8]}, "offload": {"cpu_bytes": ["512GiB"], "p2p": [True]}})
+        errs = V.validate(copy.deepcopy(p2p), self.capable, ROUTING)
+        self.assertTrue(any("sweeps[0](s).decode.offload" in e and "#94" in e for e in errs), errs)
+        primary_only = pd_doc(prefill={"parallel": {"tp": [8]}, "offload": {"cpu_bytes": ["512GiB"]}})
+        self.assertEqual([], V.validate(copy.deepcopy(primary_only), self.capable, ROUTING))
+
+    def test_the_runner_refuses_a_pools_tiers_or_p2p_too_not_only_the_validator(self):
+        """The same guard as runner_refusals/classify_config (defence in depth: a candidate that
+        reaches run_blis directly, bypassing validate_experiment, must still be refused)."""
+        with self.assertRaises(run_blis.ConfigError) as cm:
+            self.scenario({"prefill_offload_cpu_bytes": 2**38,
+                           "prefill_offload_tiers": [{"tier": "nvme_gen4", "bytes": 2 * 2**40}]})
+        self.assertIn("#94", str(cm.exception))
+        with self.assertRaises(run_blis.ConfigError) as cm:
+            self.scenario({"decode_offload_cpu_bytes": 2**38, "decode_offload_p2p": True})
+        self.assertIn("#94", str(cm.exception))
 
     def test_a_disaggregated_sweep_at_data_parallel_8_validates(self):
         """The validator once refused every P/D pool at dp>1 (blis-vllm#44, closed): the simulator runs it."""

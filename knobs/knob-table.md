@@ -19,10 +19,10 @@ One row for each coverage entry; `knob_table.py --json FILE` writes every proper
 | `deployment:pools[].engine` | 1 | `sweeps[].engine.<setting> (the engine rows)` |  |
 | `deployment:pools[].labels` | 1 |  | router selectors are derived from the pool's role |
 | `deployment:pools[].nodes` | 1 | `sweeps[].num-instances (nodes follow the layout)` |  |
-| `deployment:pools[].offload.*` | 4 |  | the connector, its spec and the prefetch depth take the simulator's defaults; connector_options is opened by the engine, its p2p secondary tier exposed as sweeps[].offload.p2p |
+| `deployment:pools[].offload.*` | 4 |  | the connector, its spec and the prefetch depth take the simulator's defaults; connector_options' p2p secondary tier (sweeps[].offload.p2p) is refused at validate on a disaggregated pool (blis-config-search#94: the pinned simulator's MultiConnector refuses it beside the pool's NIXL connector) |
 | `deployment:pools[].offload.eviction_policy` | 1 | `sweeps[].offload.eviction_policy, sweeps[].prefill.offload.eviction_policy, sweeps[].decode.offload.eviction_policy` |  |
-| `deployment:pools[].offload.tiers[].bytes` | 1 | `sweeps[].offload.cpu_bytes (a disaggregated sweep: the default for both pools), sweeps[].prefill.offload.cpu_bytes, sweeps[].decode.offload.cpu_bytes (0 is a pool with no tier), sweeps[].offload.tiers[].bytes` |  |
-| `deployment:pools[].offload.tiers[].tier` | 1 | `sweeps[].offload.tiers[].tier (the CPU tier is implied by cpu_bytes)` |  |
+| `deployment:pools[].offload.tiers[].bytes` | 1 | `sweeps[].offload.cpu_bytes (a disaggregated sweep: the default for both pools), sweeps[].prefill.offload.cpu_bytes, sweeps[].decode.offload.cpu_bytes (0 is a pool with no tier); the primary CPU tier only -- a secondary fs/obj tier (sweeps[].offload.tiers[].bytes) on a disaggregated pool is refused at validate (blis-config-search#94: the pinned simulator's MultiConnector refuses it beside the pool's NIXL connector)` |  |
+| `deployment:pools[].offload.tiers[].tier` | 1 | `sweeps[].offload.tiers[].tier (the CPU tier is implied by cpu_bytes); refused at validate on a disaggregated pool (blis-config-search#94: the pinned simulator's MultiConnector refuses a secondary tier beside the pool's NIXL connector)` |  |
 | `deployment:pools[].parallel.data_parallel_load_balancing` | 1 | `sweeps[].parallel.data_parallel_load_balancing` |  |
 | `deployment:pools[].parallel.dcp` | 1 | `sweeps[].parallel.dcp` |  |
 | `deployment:pools[].parallel.dp` | 1 | `sweeps[].parallel.dp` |  |
@@ -80,7 +80,7 @@ The other settings, with their status and issue, are in the full table (`knob_ta
 | sglang-engine | the engine kind of an experiment, and the SGLang settings the simulator models Pending the pinned build. | `scenario:engine.kind`, `engine:sglang:config:chunked_prefill_size` |
 | multi-node-pd-handoff | prefill and decode pools of different layout, including a prefill pool whose data-parallel ranks span nodes (Handoff.At) | `deployment:pools[].role`, `deployment:pools[].nodes`, `deployment:pools[].parallel.dp`, `deployment:pools[].parallel.tp` |
 | per-rank-cpu-tier | the CPU KV tier and its size, off as the control | `deployment:offload.tiers[].bytes` |
-| per-pool-cpu-tier | a disaggregated deployment's CPU tier on the prefill pool, the decode pool or both (blis-substrate#307) | `deployment:pools[].offload.tiers[].bytes` |
+| per-pool-cpu-tier | a disaggregated deployment's primary CPU tier on the prefill pool, the decode pool or both (blis-substrate#307); a secondary fs/obj tier or p2p on that pool is refused at validate (blis-config-search#94) | `deployment:pools[].offload.tiers[].bytes` |
 | offload-with-drafting | the KV tier beside an EAGLE-3 or MTP drafter | `deployment:offload.tiers[].bytes`, `engine:vllm:config:speculative_config.method` |
 | dp-balancing-modes | the data-parallel load-balancing mode of a pool | `deployment:pools[].parallel.data_parallel_load_balancing` |
 | all-reduce-lane | custom or NCCL all-reduce (the field list says why it is not swept yet) | `engine:vllm:config:disable_custom_all_reduce` |

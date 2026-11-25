@@ -404,6 +404,25 @@ def classify_config(config, vocab, node_size=None, pool_offload=False):
                 raise ConfigError("offload_cpu_bytes: this simulator's deployment schema has no per-pool "
                                   "offload (blis-substrate#307), so a disaggregated deployment cannot "
                                   "state a tier")
+            # A disaggregated pool's secondary (fs/obj) tier or p2p option renders beside a
+            # MultiConnector (the pool's own NIXL + CPU-tier pair, below); the pinned simulator's
+            # splitOffload leaves secondary_tiers at kv_offload's top level instead of moving it into
+            # the offloading child's own kv_connector_extra_config, so vLLM refuses the pair outright
+            # -- verified against the pinned binary (v0.19.0, e7597a8c): "vllm: kv_offload.
+            # secondary_tiers beside a MultiConnector: the offloading child's own
+            # kv_connector_extra_config states it as vLLM does; state it there once"
+            # (engines/vllm/core/vllm/multiconnector.go:217). Not fixable here without duplicating the
+            # simulator's own derived offload values, so a disaggregated pool's tier is cpu_bytes only
+            # until the simulator closes this (blis-config-search#94).
+            for r in PD_ROLES:
+                own_off = pd[r].get("offload")
+                bad = "tiers" if own_off and own_off.get("tiers") else "p2p" if own_off and own_off.get("p2p") else None
+                if bad:
+                    raise ConfigError(
+                        f"{r}_offload_{bad}: a disaggregated pool's secondary tier or p2p option fails "
+                        f"at runtime against a MultiConnector (engines/vllm/core/vllm/"
+                        f"multiconnector.go:217), so a disaggregated pool's tier is cpu_bytes only "
+                        f"(blis-config-search#94)")
             if pd["connector"] not in ("NixlConnector", "MultiConnector"):
                 raise ConfigError(f"pd_connector {pd['connector']!r} with a CPU tier: a pool that runs a tier "
                                   f"carries NIXL as a MultiConnector, which is modelled over NixlConnector only")

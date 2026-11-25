@@ -217,16 +217,16 @@ knobs:
       - deployment:offload.prefetch_depth
       - deployment:offload.spec
   deployment:pools[].offload.tiers[].bytes:
-    sweep: "sweeps[].offload.cpu_bytes (a disaggregated sweep: the default for both pools), sweeps[].prefill.offload.cpu_bytes, sweeps[].decode.offload.cpu_bytes (0 is a pool with no tier), sweeps[].offload.tiers[].bytes"
+    sweep: "sweeps[].offload.cpu_bytes (a disaggregated sweep: the default for both pools), sweeps[].prefill.offload.cpu_bytes, sweeps[].decode.offload.cpu_bytes (0 is a pool with no tier); the primary CPU tier only -- a secondary fs/obj tier (sweeps[].offload.tiers[].bytes) on a disaggregated pool is refused at validate (blis-config-search#94: the pinned simulator's MultiConnector refuses it beside the pool's NIXL connector)"
     optional: true
   deployment:pools[].offload.eviction_policy:
     sweep: "sweeps[].offload.eviction_policy, sweeps[].prefill.offload.eviction_policy, sweeps[].decode.offload.eviction_policy"
     optional: true
   deployment:pools[].offload.tiers[].tier:
-    sweep: "sweeps[].offload.tiers[].tier (the CPU tier is implied by cpu_bytes)"
+    sweep: "sweeps[].offload.tiers[].tier (the CPU tier is implied by cpu_bytes); refused at validate on a disaggregated pool (blis-config-search#94: the pinned simulator's MultiConnector refuses a secondary tier beside the pool's NIXL connector)"
     optional: true
   deployment:pools[].offload.*:
-    reason: "the connector, its spec and the prefetch depth take the simulator's defaults; connector_options is opened by the engine, its p2p secondary tier exposed as sweeps[].offload.p2p"
+    reason: "the connector, its spec and the prefetch depth take the simulator's defaults; connector_options' p2p secondary tier (sweeps[].offload.p2p) is refused at validate on a disaggregated pool (blis-config-search#94: the pinned simulator's MultiConnector refuses it beside the pool's NIXL connector)"
     optional: true
     covers:
       - deployment:pools[].offload.connector
@@ -263,7 +263,7 @@ capabilities:
   per-pool-cpu-tier:
     requires_schema: deployment:pools[].offload.tiers[].bytes
     rows: ["deployment:pools[].offload.tiers[].bytes"]
-    note: a disaggregated deployment's CPU tier on the prefill pool, the decode pool or both (blis-substrate#307)
+    note: a disaggregated deployment's primary CPU tier on the prefill pool, the decode pool or both (blis-substrate#307); a secondary fs/obj tier or p2p on that pool is refused at validate (blis-config-search#94)
   offload-with-drafting:
     rows: ["deployment:offload.tiers[].bytes", "engine:vllm:config:speculative_config.method"]
     note: the KV tier beside an EAGLE-3 or MTP drafter

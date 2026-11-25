@@ -1248,7 +1248,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
     catalog directory; None means the catalog the binary embeds. `registry` names a registry
     checkout (--registry/SUBSTRATE_REGISTRY) that additionally checks a `scenario.routing` pin's
     profile set name and model coverage; None skips that one check. With `catalog` too, that check
-    also covers the workload's category (via `fallback_category`).
+    also covers the workload's category, or the pin's `fallback_category` when the set lacks it.
 
     Collects ALL errors rather than stopping at the first: a contributor fixing a spec by hand
     should see every problem in one run, not discover them one CI round-trip at a time.

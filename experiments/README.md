@@ -153,7 +153,9 @@ Below the CPU tier the block may state more tiers. `tiers: [{tier: nvme_gen4, by
 fs/obj device tier (any catalog storage device other than `cpu_dram`, the primary tier set with
 `cpu_bytes`), and `p2p: true` adds a p2p secondary tier (a peer instance's host memory, rendered under
 `connector_options.secondary_tiers`). Both sit below a CPU tier, so they need a non-zero `cpu_bytes`;
-they are a fixed hierarchy applied to every arm that runs a tier, not swept element by element.
+they are a fixed hierarchy applied to every arm that runs a tier, not swept element by element. A
+disaggregated sweep takes `cpu_bytes` only: the pinned simulator refuses a secondary tier or p2p beside
+a pool's MultiConnector (#94).
 
 On a disaggregated sweep the sweep-level `offload:` block is the default for both pools, and
 `prefill: {offload: {...}}` / `decode: {offload: {...}}` state one pool's own, replacing the default for

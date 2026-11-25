@@ -728,6 +728,33 @@ def acceptance_record(doc):
             "k_rule": entry.get("k_rule") or prop.get("k_rule") or None})
 
 
+def routing_record(doc):
+    """Each opened pool's routing-imbalance resolution, as the pinned simulator's Result records
+    it, or None when no pool opened one (an inline token_imbalance/expert_imbalance value states
+    no profile set, so its pool's kernel resolves no routing record at all).
+
+    Read from `reports.kernel.<pool>.routing` (sim.RoutingRecord, "recorded the way acceptance's
+    source layer is" -- sim/engine_records.go): the colocated pool's key is "colocated", a
+    disaggregated run's "prefill" and "decode". A field RoutingRecord omits (an inline value
+    states no set, measured_on or fallback_from) is None here, the same as acceptance_record.
+    """
+    kernel = (doc.get("reports") or {}).get("kernel")
+    if not isinstance(kernel, dict):
+        return None
+    out = {}
+    for role, prov in kernel.items():
+        routing = (prov or {}).get("routing") if isinstance(prov, dict) else None
+        if not isinstance(routing, dict):
+            continue
+        out[role] = {"source_layer": routing.get("source_layer"), "profile_set": routing.get("set") or None,
+                     "profile_keys": routing.get("keys") or [], "source": routing.get("source") or None,
+                     "reason": routing.get("reason") or None, "measured_on": routing.get("measured_on") or None,
+                     "fallback_from": routing.get("fallback_from") or None,
+                     "token_imbalance": routing.get("token_imbalance") or None,
+                     "expert_imbalance": routing.get("expert_imbalance") or None}
+    return out or None
+
+
 def draft_depth(run):
     """The draft depth a recorded run actually ran at, 0 when drafting was off.
 
@@ -2095,6 +2122,10 @@ def run_one(blis, catalog, registry, scenarios_dir, model, hardware, engine_vers
                        # The acceptance the drafting run was priced with, as its Result
                        # records it (D8); None when drafting is off or the run failed.
                        "acceptance": acceptance_record(doc) if doc is not None else None,
+                       # Each opened pool's routing-imbalance resolution, as its Result records
+                       # it (reports.kernel.<pool>.routing); None when the run failed or no pool
+                       # resolved one.
+                       "routing": routing_record(doc) if doc is not None else None,
                        "workload": ({"kind": "replay", **replay} if replay
                                     else {"kind": "shape", "preset": workload})},
         "cmd": cmd, "returncode": rc, "wall_s": round(time.time() - t0, 3),

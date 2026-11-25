@@ -579,6 +579,108 @@ class AcceptanceAndRoutingPins(unittest.TestCase):
         self.assertEqual([], V.validate(spec(), BLIS, ROUTING))
 
 
+class RoutingProfileNameAgainstARegistry(unittest.TestCase):
+    """A `scenario.routing` pin's `profiles` name is checked against a registry checkout
+    (--registry/SUBSTRATE_REGISTRY): a name the registry does not define, or that carries no
+    profile for the scenario's model, otherwise fails per-run only once a whole sweep has already
+    run. No registry (the default) skips the check, since it is optional (review point 3a)."""
+
+    MODEL = "qwen3-14b"
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.reg = os.path.join(self.dir.name, "registry")
+        os.makedirs(os.path.join(self.reg, "routing"))
+
+    def _write(self, fn, doc):
+        with open(os.path.join(self.reg, "routing", fn), "w") as f:
+            yaml.safe_dump(doc, f)
+
+    def test_no_registry_skips_the_check(self):
+        sc = {"model": self.MODEL, "routing": {"profiles": "nope"}}
+        self.assertEqual([], V.scenario_pin_errors(sc, None))
+
+    def test_an_unknown_profile_set_name_is_refused_naming_it(self):
+        self._write("golden.yaml", {"name": "golden", "profiles": [{"model": self.MODEL}]})
+        sc = {"model": self.MODEL, "routing": {"profiles": "silver"}}
+        errs = V.scenario_pin_errors(sc, self.reg)
+        self.assertTrue(any("scenario.routing.profiles:" in e and "'silver'" in e
+                            and "golden" in e for e in errs), errs)
+
+    def test_a_known_set_with_no_profile_for_the_model_is_refused(self):
+        self._write("golden.yaml", {"name": "golden", "profiles": [{"model": "some-other-model"}]})
+        sc = {"model": self.MODEL, "routing": {"profiles": "golden"}}
+        errs = V.scenario_pin_errors(sc, self.reg)
+        self.assertTrue(any("scenario.routing.profiles:" in e and "no profile for model" in e
+                            and self.MODEL in e for e in errs), errs)
+
+    def test_a_known_set_with_a_profile_for_the_model_validates(self):
+        self._write("golden.yaml", {"name": "golden", "profiles": [{"model": self.MODEL}]})
+        sc = {"model": self.MODEL, "routing": {"profiles": "golden"}}
+        self.assertEqual([], V.scenario_pin_errors(sc, self.reg))
+
+    def test_an_inline_routing_value_skips_the_check(self):
+        sc = {"model": self.MODEL, "routing": {"value": {"token_imbalance": 1.2}}}
+        self.assertEqual([], V.scenario_pin_errors(sc, self.reg))
+
+    def test_an_unreadable_registry_directory_is_treated_as_empty(self):
+        sc = {"model": self.MODEL, "routing": {"profiles": "golden"}}
+        errs = V.scenario_pin_errors(sc, os.path.join(self.dir.name, "does-not-exist"))
+        self.assertTrue(any("not a routing profile set" in e for e in errs), errs)
+
+    def test_acceptance_profile_names_are_not_checked_against_the_registry(self):
+        """Out of scope (review point 3a): only scenario.routing's profile name is checked."""
+        sc = {"model": self.MODEL, "acceptance": {"profiles": "nope-at-all"}}
+        self.assertEqual([], V.scenario_pin_errors(sc, self.reg))
+
+
+class AcceptanceKAgainstSweptSpeculative(unittest.TestCase):
+    """scenario.acceptance.value.num_spec_tokens, an inline K, must agree with every sweep's own
+    swept engine.speculative.num_spec_tokens -- drafting's K is a whole-run property, so a swept
+    value the inline acceptance was not measured at would price those runs with the wrong curve
+    silently (review point 3b)."""
+
+    def _spec(self, k, swept):
+        return spec(scenario={"model": "qwen3-14b", "hardware": "h100",
+                              "workload": "chatbot", "cluster": {"gpus_per_node": 8}, "gpus": 16,
+                              "slo": {"itl_p99": "20ms"}, "concurrency": [1, 2],
+                              "acceptance": {"value": {"num_spec_tokens": k}}},
+                   sweeps=[{"name": "s", "num-instances": [2], "parallel": {"tp": [8]},
+                            "engine": {"speculative": {"method": ["dspark"],
+                                                       "num_spec_tokens": swept}}}])
+
+    def test_a_swept_k_that_disagrees_is_refused_naming_both_values(self):
+        errs = V._acceptance_k_mismatch_errors(self._spec(3, [1, 3]))
+        self.assertTrue(any("sweeps[0].engine.speculative.num_spec_tokens" in e and "[1]" in e
+                            and "(3)" in e for e in errs), errs)
+
+    def test_a_swept_k_that_matches_throughout_validates(self):
+        self.assertEqual([], V._acceptance_k_mismatch_errors(self._spec(3, [3])))
+
+    def test_no_inline_acceptance_value_skips_the_check(self):
+        s = spec(sweeps=[{"name": "s", "num-instances": [2], "parallel": {"tp": [8]},
+                          "engine": {"speculative": {"method": ["dspark"],
+                                                     "num_spec_tokens": [1, 3]}}}])
+        self.assertEqual([], V._acceptance_k_mismatch_errors(s))
+
+    def test_a_profile_set_acceptance_pin_skips_the_check(self):
+        """A `profiles` pin states no K of its own -- only an inline `value.num_spec_tokens` does."""
+        s = spec(scenario={"model": "qwen3-14b", "hardware": "h100", "workload": "chatbot",
+                           "cluster": {"gpus_per_node": 8}, "gpus": 16,
+                           "slo": {"itl_p99": "20ms"}, "concurrency": [1, 2],
+                           "acceptance": {"profiles": "golden"}},
+                 sweeps=[{"name": "s", "num-instances": [2], "parallel": {"tp": [8]},
+                          "engine": {"speculative": {"method": ["dspark"],
+                                                     "num_spec_tokens": [1, 3]}}}])
+        self.assertEqual([], V._acceptance_k_mismatch_errors(s))
+
+    def test_an_unswept_speculative_block_skips_the_check(self):
+        s = self._spec(3, [1, 3])
+        s["sweeps"][0]["engine"] = {}
+        self.assertEqual([], V._acceptance_k_mismatch_errors(s))
+
+
 class ValidatorRejects(unittest.TestCase):
     def errs(self, doc):
         return V.validate(doc, BLIS, ROUTING)

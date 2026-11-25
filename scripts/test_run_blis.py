@@ -1383,6 +1383,49 @@ class AcceptanceFromTheResult(unittest.TestCase):
                          (a["profile_set"], a["source"]))
 
 
+class RoutingFromTheResult(unittest.TestCase):
+    """A row records each pool's routing-imbalance resolution the simulator priced it with, from
+    its Result (reports.kernel.<pool>.routing, sim.RoutingRecord), the same pattern as
+    AcceptanceFromTheResult reads reports.engine.cluster.acceptance."""
+
+    ROUTING = {"source_layer": "registry", "set": "inferencex-golden-routing",
+               "keys": ["m/dspark/prefill", "m/dspark/decode"],
+               "source": "https://example.org/routing.yaml", "measured_on": "b200"}
+
+    def doc(self, roles=("prefill", "decode"), **extra):
+        return {"reports": {"kernel": {role: {"routing": self.ROUTING} for role in roles}}, **extra}
+
+    def test_each_poolS_record_gives_layer_set_keys_and_source(self):
+        r = run_blis.routing_record(self.doc())
+        self.assertEqual({"prefill", "decode"}, set(r))
+        for role in ("prefill", "decode"):
+            self.assertEqual("registry", r[role]["source_layer"])
+            self.assertEqual("inferencex-golden-routing", r[role]["profile_set"])
+            self.assertEqual(["m/dspark/prefill", "m/dspark/decode"], r[role]["profile_keys"])
+            self.assertEqual("https://example.org/routing.yaml", r[role]["source"])
+            self.assertEqual("b200", r[role]["measured_on"])
+
+    def test_a_colocated_run_is_keyed_by_the_colocated_pool(self):
+        r = run_blis.routing_record(self.doc(roles=("colocated",)))
+        self.assertEqual({"colocated"}, set(r))
+
+    def test_an_inline_value_resolves_no_set_or_keys(self):
+        """An inline token_imbalance/expert_imbalance value states no profile set; the simulator's
+        RoutingRecord still carries the imbalance ratios, with set/keys/source absent."""
+        inline = {"source_layer": "scenario", "token_imbalance": 1.4, "expert_imbalance": 1.1}
+        r = run_blis.routing_record({"reports": {"kernel": {"colocated": {"routing": inline}}}})
+        self.assertEqual("scenario", r["colocated"]["source_layer"])
+        self.assertIsNone(r["colocated"]["profile_set"])
+        self.assertEqual([], r["colocated"]["profile_keys"])
+        self.assertEqual(1.4, r["colocated"]["token_imbalance"])
+        self.assertEqual(1.1, r["colocated"]["expert_imbalance"])
+
+    def test_a_run_that_opened_no_routing_records_none(self):
+        self.assertIsNone(run_blis.routing_record({"reports": {"kernel": {"colocated": {}}}}))
+        self.assertIsNone(run_blis.routing_record({"reports": {}}))
+        self.assertIsNone(run_blis.routing_record({}))
+
+
 class GeneratedScenario(unittest.TestCase):
     def test_names_the_engine_by_kind_and_no_version(self):
         """A generated scenario names its engine as engine: {kind} (SIM-1); the build fixes the release

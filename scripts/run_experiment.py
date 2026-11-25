@@ -2057,7 +2057,8 @@ def main(argv=None):
         raise SystemExit(f"{args.spec}: {e}")
     try:
         errs = validator.validate(spec, args.blis, args.routing, args.catalog, args.fields,
-                                  router_cfg, spec_dir=os.path.dirname(os.path.abspath(args.spec)))
+                                  router_cfg, spec_dir=os.path.dirname(os.path.abspath(args.spec)),
+                                  registry=args.registry)
     except blis_cli.BlisCommandError as e:
         raise SystemExit(f"{args.spec}: {e}")
     if errs:

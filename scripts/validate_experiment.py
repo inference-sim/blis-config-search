@@ -1043,9 +1043,66 @@ def _pin_errors(pin, where, pin_keys, value_keys):
     return errs
 
 
-def scenario_pin_errors(sc):
+def _registry_profile_sets(registry, subdir):
+    """Every profile-set document in <registry>/<subdir>/*.yaml ({"routing", "acceptance"}), each
+    {"name", "profiles", ...} (the file's own fields passed through). A file that cannot be read or
+    parsed is skipped -- the same leniency catalog_drafters.exact_profiles gives a checkout that is
+    not there, since this is an optional, best-effort check (registry may be None)."""
+    d = os.path.join(registry or "", subdir)
+    try:
+        files = sorted(n for n in os.listdir(d) if n.endswith((".yaml", ".yml")))
+    except OSError:
+        return []
+    out = []
+    for fn in files:
+        try:
+            with open(os.path.join(d, fn), encoding="utf-8") as f:
+                doc = yaml.safe_load(f) or {}
+        except (OSError, yaml.YAMLError):
+            continue
+        if isinstance(doc, dict) and doc.get("name"):
+            out.append(doc)
+    return out
+
+
+def _profile_name_errors(sc, where, pin, subdir, registry):
+    """`pin.profiles` (a registry set name) must name a set under <registry>/<subdir>/ that carries
+    at least one profile for the scenario's model -- else every lookup at it fails or falls back
+    silently (acceptance.resolve.go / routing.Resolve: a request whose ScenarioSet name does not
+    match the set's own name is treated as naming no set). [] when there is no registry checkout to
+    check against (--registry, SUBSTRATE_REGISTRY): BLIS itself refuses an unknown name at run
+    time, just not until the whole sweep has already run."""
+    if registry is None:
+        return []
+    name = pin.get("profiles") if isinstance(pin, dict) else None
+    if not isinstance(name, str) or not name:
+        return []
+    sets = _registry_profile_sets(registry, subdir)
+    by_name = {s.get("name"): s for s in sets}
+    if name not in by_name:
+        known = ", ".join(sorted(n for n in by_name if n)) or "none"
+        return [f"{where}.profiles: {name!r} is not a {subdir} profile set in the registry "
+                f"(known: {known})"]
+    model = sc.get("model")
+    if not isinstance(model, str) or not model:
+        return []
+    profiles = by_name[name].get("profiles") or []
+    models = {p.get("model") for p in profiles if isinstance(p, dict)}
+    if model not in models:
+        return [f"{where}.profiles: {name!r} has no profile for model {model!r} "
+                f"(models in that set: {', '.join(sorted(m for m in models if m)) or 'none'})"]
+    return []
+
+
+def scenario_pin_errors(sc, registry=None):
     """Errors in the scenario's acceptance/routing pins (#201). Both are optional and pass through
-    to BLIS unchanged; routing has no CLI alternative (the flags were removed in v0.12.0)."""
+    to BLIS unchanged; routing has no CLI alternative (the flags were removed in v0.12.0).
+
+    `registry` (a registry checkout directory, --registry/SUBSTRATE_REGISTRY) additionally checks a
+    `routing` pin's `profiles` name against the registry's routing profile sets: a name that is not
+    there, or carries no profile for the scenario's model, otherwise only fails per-run once a whole
+    sweep has already run (acceptance is not checked here -- out of scope, see the PR review this
+    closes). None skips that check."""
     errs = []
     if sc.get("acceptance") is not None:
         errs.extend(_pin_errors(sc["acceptance"], "scenario.acceptance",
@@ -1053,6 +1110,41 @@ def scenario_pin_errors(sc):
     if sc.get("routing") is not None:
         errs.extend(_pin_errors(sc["routing"], "scenario.routing",
                                 _ROUTING_PIN_KEYS, _ROUTING_VALUE_KEYS))
+        if isinstance(sc["routing"], dict):
+            errs.extend(_profile_name_errors(sc, "scenario.routing", sc["routing"], "routing", registry))
+    return errs
+
+
+def _acceptance_k_mismatch_errors(spec):
+    """scenario.acceptance.value.num_spec_tokens, an inline K, must agree with every sweep's own
+    swept `engine.speculative.num_spec_tokens` list when both are stated -- drafting's K is a
+    whole-run property (the engine refuses pools, and by extension a run, that disagree on the draft
+    width), so a swept K the inline acceptance value was not measured at prices those runs with the
+    wrong curve, silently."""
+    sc = spec.get("scenario") or {}
+    acc = sc.get("acceptance")
+    if not isinstance(acc, dict):
+        return []
+    value = acc.get("value")
+    if not isinstance(value, dict):
+        return []
+    k = value.get("num_spec_tokens")
+    if not isinstance(k, int) or isinstance(k, bool):
+        return []
+    errs = []
+    for i, sw in enumerate(spec.get("sweeps") or []):
+        if not isinstance(sw, dict):
+            continue
+        eng = sw.get("engine")
+        ks = ((eng or {}).get("speculative") or {}).get("num_spec_tokens") if isinstance(eng, dict) else None
+        if not _is_list(ks):
+            continue
+        mismatched = sorted({v for v in ks if isinstance(v, int) and not isinstance(v, bool) and v != k})
+        if mismatched:
+            errs.append(f"sweeps[{i}].engine.speculative.num_spec_tokens: {mismatched} differs from "
+                        f"scenario.acceptance.value.num_spec_tokens ({k}); drafting's K is a "
+                        f"whole-run property, so a swept value the inline acceptance was not "
+                        f"measured at prices those runs with the wrong curve")
     return errs
 
 
@@ -1125,7 +1217,7 @@ def _ask_field_list(blis, catalog, spec):
 
 
 def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, router_cfg=None,
-             spec_dir=None):
+             spec_dir=None, registry=None):
     """Every error in `spec`, as readable `path: message` strings. Empty means valid.
 
     `router_cfg` is the router's reference configs (router_configs.open_checkout) a spec may name;
@@ -1134,7 +1226,9 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
 
     `blis` is the simulator binary whose commands supply the names (`blis fields`, `blis
     schema deployment`) and the catalog identities (`blis catalog resolve`). `catalog` names a
-    catalog directory; None means the catalog the binary embeds.
+    catalog directory; None means the catalog the binary embeds. `registry` names a registry
+    checkout (--registry/SUBSTRATE_REGISTRY) that additionally checks a `scenario.routing` pin's
+    profile set name and model coverage; None skips that one check.
 
     Collects ALL errors rather than stopping at the first: a contributor fixing a spec by hand
     should see every problem in one run, not discover them one CI round-trip at a time.
@@ -1191,7 +1285,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
         errs.extend(scenario_identity_errors(sc, blis, catalog))
         errs.extend(cluster_errors(sc, blis, catalog))
         errs.extend(replay_errors(sc))
-        errs.extend(scenario_pin_errors(sc))
+        errs.extend(scenario_pin_errors(sc, registry))
         gpus = sc.get("gpus")
         if not isinstance(gpus, int) or isinstance(gpus, bool) or gpus < 1:
             errs.append("scenario.gpus: required positive integer -- the budget EVERY run uses")
@@ -1371,6 +1465,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
             if n and sum(reasons.values()) == n:
                 top = max(reasons, key=reasons.get)
                 errs.append(f"{where}: the runner refuses every arm ({n}): {top}")
+    errs.extend(_acceptance_k_mismatch_errors(spec))
     if not errs:
         errs.extend(offload_policy_errors(spec, blis, fields, catalog))
     return errs
@@ -1508,6 +1603,10 @@ def main(argv=None):
     ap.add_argument("--catalog",
                     help="a catalog directory for `blis catalog resolve` (default: the catalog "
                          "the binary embeds)")
+    ap.add_argument("--registry", default=os.environ.get("SUBSTRATE_REGISTRY"),
+                    help="a registry checkout (substrate/registry layout) to check a "
+                         "scenario.routing pin's profile set name and model coverage against "
+                         "(default: $SUBSTRATE_REGISTRY; omit to skip that check)")
     args = ap.parse_args(argv)
 
     paths = spec_paths(args.target)
@@ -1547,7 +1646,7 @@ def main(argv=None):
         spec, err = load(path)
         try:
             errs = [err] if err else validate(spec, args.blis, args.routing, args.catalog, args.fields, router_cfg,
-                                              os.path.dirname(os.path.abspath(path)))
+                                              os.path.dirname(os.path.abspath(path)), registry=args.registry)
         except blis_cli.BlisCommandError as e:
             print(f"validate_experiment: {rel}: {e}", file=sys.stderr)
             return 2

@@ -61,7 +61,7 @@ STRIPPED_PLUGINS = {
     "disaggregatedset-rollout-screener": "it acts only during a rollout, and the simulated pods carry "
                                          "no DisaggregatedSet labels",
 }
-REFUSED_PLUGINS = {"utilization-filter": "inference-sim/inference-sim#2205"}
+REFUSED_PLUGINS = {"utilization-filter": "blis-config-search#210"}
 REFUSED_PARAMETERS = {("inflight-load-producer", "prefillCompletionFromKVEvents"):
                       "inference-sim/inference-sim#2206"}
 

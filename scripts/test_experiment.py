@@ -1186,7 +1186,7 @@ class RouterFileBesideTheSpec(unittest.TestCase):
                                "parameters": {"conditions": [{"metric": "waiting-queue", "maxValue": 2}]}})
         errs = self.errs(self.doc(), self.beside(doc))
         self.assertTrue(any("'prefill-stall-guard' (type utilization-filter)" in e
-                            and "inference-sim/inference-sim#2205" in e for e in errs), errs)
+                            and "blis-config-search#210" in e for e in errs), errs)
         doc = self.base()
         next(p for p in doc["plugins"] if p["type"] == "inflight-load-producer")["parameters"][
             "prefillCompletionFromKVEvents"] = True

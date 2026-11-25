@@ -270,11 +270,7 @@ class PerPoolOffload(unittest.TestCase):
         self.assertTrue(any("decode.offload.eviction_policy: needs cpu_bytes" in e for e in errs), errs)
 
     def test_a_secondary_tier_or_p2p_on_a_disaggregated_pool_is_refused_even_when_the_schema_has_it(self):
-        """blis-config-search#94: even a simulator whose deployment schema lets a pool state `offload`
-        (per-pool-cpu-tier) still fails at runtime for a secondary tier or p2p there -- the pool's
-        MultiConnector (NIXL + the CPU tier) refuses `kv_offload.secondary_tiers` beside it
-        (engines/vllm/core/vllm/multiconnector.go:217). The primary CPU tier alone (cpu_bytes) is
-        unaffected and must still validate clean."""
+        """#94: a P/D pool's secondary tier or p2p is refused even with per-pool offload; cpu_bytes alone validates."""
         tiers = pd_doc(prefill={"parallel": {"tp": [8]}, "offload": {
             "cpu_bytes": ["512GiB"], "tiers": [{"tier": "nvme_gen4", "bytes": "2TiB"}]}})
         errs = V.validate(copy.deepcopy(tiers), self.capable, ROUTING)
@@ -285,6 +281,20 @@ class PerPoolOffload(unittest.TestCase):
         self.assertTrue(any("sweeps[0](s).decode.offload" in e and "#94" in e for e in errs), errs)
         primary_only = pd_doc(prefill={"parallel": {"tp": [8]}, "offload": {"cpu_bytes": ["512GiB"]}})
         self.assertEqual([], V.validate(copy.deepcopy(primary_only), self.capable, ROUTING))
+
+    def test_a_tiers_or_p2p_key_present_but_falsy_is_not_the_94_refusal(self):
+        """A tiers/p2p key that is present but renders nothing at runtime (run_blis's own
+        own_off.get(...) guard) must not be refused as #94 -- only whatever its own value
+        requires (an empty tiers list is still refused, but for being empty, not for #94)."""
+        for p2p in (False, [False]):
+            doc = pd_doc(decode={"parallel": {"tp": [8]}, "offload": {"cpu_bytes": ["512GiB"], "p2p": p2p}})
+            errs = V.validate(copy.deepcopy(doc), self.capable, ROUTING)
+            self.assertFalse(any("#94" in e for e in errs), (p2p, errs))
+        empty_tiers = pd_doc(prefill={"parallel": {"tp": [8]},
+                                      "offload": {"cpu_bytes": ["512GiB"], "tiers": []}})
+        errs = V.validate(copy.deepcopy(empty_tiers), self.capable, ROUTING)
+        self.assertFalse(any("#94" in e for e in errs), errs)
+        self.assertTrue(any("tiers" in e and "non-empty list" in e for e in errs), errs)
 
     def test_the_runner_refuses_a_pools_tiers_or_p2p_too_not_only_the_validator(self):
         """The same guard as runner_refusals/classify_config (defence in depth: a candidate that

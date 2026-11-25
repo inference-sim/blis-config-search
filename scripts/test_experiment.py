@@ -592,9 +592,16 @@ class RoutingProfileNameAgainstARegistry(unittest.TestCase):
         self.addCleanup(self.dir.cleanup)
         self.reg = os.path.join(self.dir.name, "registry")
         os.makedirs(os.path.join(self.reg, "routing"))
+        self.catalog = os.path.join(self.dir.name, "catalog")
 
     def _write(self, fn, doc):
         with open(os.path.join(self.reg, "routing", fn), "w") as f:
+            yaml.safe_dump(doc, f)
+
+    def _write_workload(self, name, category=None):
+        os.makedirs(os.path.join(self.catalog, "workloads"), exist_ok=True)
+        doc = {} if category is None else {"category": category}
+        with open(os.path.join(self.catalog, "workloads", f"{name}.yaml"), "w") as f:
             yaml.safe_dump(doc, f)
 
     def test_no_registry_skips_the_check(self):
@@ -634,6 +641,46 @@ class RoutingProfileNameAgainstARegistry(unittest.TestCase):
         sc = {"model": self.MODEL, "acceptance": {"profiles": "nope-at-all"}}
         self.assertEqual([], V.scenario_pin_errors(sc, self.reg))
 
+    def test_a_set_covering_the_model_but_not_the_workloads_category_is_refused(self):
+        """A profile's key is model+category+phase+placement+expert_parallel (routing.go's Key), not
+        model alone -- a set with a profile for the model but not the workload's own category still
+        resolves nothing at runtime (e.g. chatbot, which states no category, against a category:
+        text-only set)."""
+        self._write("flash.yaml", {"name": "flash",
+                                   "profiles": [{"model": self.MODEL, "category": "text",
+                                                "phase": "decode"}]})
+        self._write_workload("chatbot")  # states no category, like the real catalog preset
+        sc = {"model": self.MODEL, "workload": "chatbot", "routing": {"profiles": "flash"}}
+        errs = V.scenario_pin_errors(sc, self.reg, self.catalog)
+        self.assertTrue(any("scenario.routing.profiles:" in e and "category" in e
+                            and "scenario.routing.fallback_category" in e for e in errs), errs)
+
+    def test_a_fallback_category_on_the_same_pin_validates(self):
+        self._write("flash.yaml", {"name": "flash",
+                                   "profiles": [{"model": self.MODEL, "category": "text",
+                                                "phase": "decode"}]})
+        self._write_workload("chatbot")
+        sc = {"model": self.MODEL, "workload": "chatbot",
+              "routing": {"profiles": "flash", "fallback_category": "text"}}
+        self.assertEqual([], V.scenario_pin_errors(sc, self.reg, self.catalog))
+
+    def test_a_workload_whose_own_category_is_covered_validates(self):
+        self._write("flash.yaml", {"name": "flash",
+                                   "profiles": [{"model": self.MODEL, "category": "text",
+                                                "phase": "decode"}]})
+        self._write_workload("supportbot", category="text")
+        sc = {"model": self.MODEL, "workload": "supportbot", "routing": {"profiles": "flash"}}
+        self.assertEqual([], V.scenario_pin_errors(sc, self.reg, self.catalog))
+
+    def test_without_a_catalog_the_category_check_is_skipped(self):
+        """catalog is optional, like registry: without a checkout to read the workload's own
+        category from, the best-effort check cannot know the set fails to cover it."""
+        self._write("flash.yaml", {"name": "flash",
+                                   "profiles": [{"model": self.MODEL, "category": "text",
+                                                "phase": "decode"}]})
+        sc = {"model": self.MODEL, "workload": "chatbot", "routing": {"profiles": "flash"}}
+        self.assertEqual([], V.scenario_pin_errors(sc, self.reg))
+
 
 class AcceptanceKAgainstSweptSpeculative(unittest.TestCase):
     """scenario.acceptance.value.num_spec_tokens, an inline K, must agree with every sweep's own
@@ -657,6 +704,11 @@ class AcceptanceKAgainstSweptSpeculative(unittest.TestCase):
 
     def test_a_swept_k_that_matches_throughout_validates(self):
         self.assertEqual([], V._acceptance_k_mismatch_errors(self._spec(3, [3])))
+
+    def test_a_swept_k0_drafting_off_control_alongside_the_matching_k_is_not_a_mismatch(self):
+        """0 is drafting-off, a control arm, not a K the acceptance curve prices --
+        only a swept K that disagrees and is itself drafting (nonzero) is a real mismatch."""
+        self.assertEqual([], V._acceptance_k_mismatch_errors(self._spec(3, [0, 3])))
 
     def test_no_inline_acceptance_value_skips_the_check(self):
         s = spec(sweeps=[{"name": "s", "num-instances": [2], "parallel": {"tp": [8]},

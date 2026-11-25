@@ -11,18 +11,18 @@ One row for each coverage entry; `knob_table.py --json FILE` writes every proper
 |---|---|---|---|
 | `deployment:kind` | 1 |  | the document's kind |
 | `deployment:name` | 1 |  | the document's identity, derived from the arm |
-| `deployment:offload.*` | 4 |  | the connector, its spec, its options and the prefetch depth take the simulator's defaults; secondary tiers have no key (inference-sim/blis-config-search#94) |
+| `deployment:offload.*` | 4 |  | the connector, its spec and the prefetch depth take the simulator's defaults; connector_options is opened by the engine, its p2p secondary tier exposed as sweeps[].offload.p2p |
 | `deployment:offload.eviction_policy` | 1 | `sweeps[].offload.eviction_policy` |  |
-| `deployment:offload.tiers[].bytes` | 1 | `sweeps[].offload.cpu_bytes (0 is the control)` |  |
-| `deployment:offload.tiers[].tier` | 1 |  | the spec states the CPU tier only; the fs, obj and p2p tiers have no key yet (inference-sim/blis-config-search#94) |
+| `deployment:offload.tiers[].bytes` | 1 | `sweeps[].offload.cpu_bytes (0 is the control), sweeps[].offload.tiers[].bytes` |  |
+| `deployment:offload.tiers[].tier` | 1 | `sweeps[].offload.tiers[].tier (the CPU tier is implied by cpu_bytes)` |  |
 | `deployment:pd_transfer.connector` | 1 |  | the P/D connector has no spec key (inference-sim/blis-config-search#144) |
 | `deployment:pools[].engine` | 1 | `sweeps[].engine.<setting> (the engine rows)` |  |
 | `deployment:pools[].labels` | 1 |  | router selectors are derived from the pool's role |
 | `deployment:pools[].nodes` | 1 | `sweeps[].num-instances (nodes follow the layout)` |  |
-| `deployment:pools[].offload.*` | 4 |  | the connector, its spec, its options and the prefetch depth take the simulator's defaults; secondary tiers have no key (inference-sim/blis-config-search#94) |
+| `deployment:pools[].offload.*` | 4 |  | the connector, its spec and the prefetch depth take the simulator's defaults; connector_options' p2p secondary tier (sweeps[].offload.p2p) is refused at validate on a disaggregated pool (blis-config-search#94: the pinned simulator's MultiConnector refuses it beside the pool's NIXL connector) |
 | `deployment:pools[].offload.eviction_policy` | 1 | `sweeps[].offload.eviction_policy, sweeps[].prefill.offload.eviction_policy, sweeps[].decode.offload.eviction_policy` |  |
-| `deployment:pools[].offload.tiers[].bytes` | 1 | `sweeps[].offload.cpu_bytes (a disaggregated sweep: the default for both pools), sweeps[].prefill.offload.cpu_bytes, sweeps[].decode.offload.cpu_bytes (0 is a pool with no tier)` |  |
-| `deployment:pools[].offload.tiers[].tier` | 1 |  | the spec states the CPU tier only; the fs, obj and p2p tiers have no key yet (inference-sim/blis-config-search#94) |
+| `deployment:pools[].offload.tiers[].bytes` | 1 | `sweeps[].offload.cpu_bytes (a disaggregated sweep: the default for both pools), sweeps[].prefill.offload.cpu_bytes, sweeps[].decode.offload.cpu_bytes (0 is a pool with no tier); the primary CPU tier only -- a secondary fs/obj tier (sweeps[].offload.tiers[].bytes) on a disaggregated pool is refused at validate (blis-config-search#94: the pinned simulator's MultiConnector refuses it beside the pool's NIXL connector)` |  |
+| `deployment:pools[].offload.tiers[].tier` | 1 | `sweeps[].offload.tiers[].tier (the CPU tier is implied by cpu_bytes); refused at validate on a disaggregated pool (blis-config-search#94: the pinned simulator's MultiConnector refuses a secondary tier beside the pool's NIXL connector)` |  |
 | `deployment:pools[].parallel.data_parallel_load_balancing` | 1 | `sweeps[].parallel.data_parallel_load_balancing` |  |
 | `deployment:pools[].parallel.dcp` | 1 | `sweeps[].parallel.dcp` |  |
 | `deployment:pools[].parallel.dp` | 1 | `sweeps[].parallel.dp` |  |
@@ -36,7 +36,7 @@ One row for each coverage entry; `knob_table.py --json FILE` writes every proper
 | `deployment:router.endpoint_picker_config` | 1 | `sweeps[].router.endpoint_picker_config` |  |
 | `deployment:router.epp_flags[]` | 1 |  | router flags have no spec key (inference-sim/blis-config-search#144) |
 | `deployment:router.manifests[]` | 1 |  | router manifests have no spec key (inference-sim/blis-config-search#144) |
-| `scenario:acceptance.*` | 9 |  | the acceptance of a drafter is read from the catalog's measured profile and recorded with its source on each arm |
+| `scenario:acceptance.*` | 9 | `scenario.acceptance (a Pin passed through whole -- a profile set or an inline value)` |  |
 | `scenario:cluster.fabric` | 1 |  | a scenario constant (scenario.cluster.fabric); compare fabrics with two experiments |
 | `scenario:cluster.gpus_per_node` | 1 |  | a scenario constant (scenario.cluster.gpus_per_node), fixed by the hardware |
 | `scenario:cluster.gpus_per_rack` | 1 |  | a catalog fact of the hardware, not a search dimension |
@@ -52,7 +52,7 @@ One row for each coverage entry; `knob_table.py --json FILE` writes every proper
 | `scenario:kind` | 1 |  | the document's kind |
 | `scenario:model` | 1 |  | one model per experiment (experiments/README.md); a second model is a second experiment |
 | `scenario:name` | 1 |  | the document's identity, derived from the experiment name |
-| `scenario:routing.*` | 5 |  | the routing profile is read from the catalog's measured profile, not chosen by a search |
+| `scenario:routing.*` | 5 | `scenario.routing (a Pin passed through whole -- a profile set or an inline value)` |  |
 | `scenario:workload.*` | 113 |  | one workload per experiment (experiments/README.md); the replay's constants come from scenario.replay and the workload descriptor |
 
 ## Engine settings: vllm 0.34.0+0fda86a35419
@@ -80,7 +80,7 @@ The other settings, with their status and issue, are in the full table (`knob_ta
 | sglang-engine | the engine kind of an experiment, and the SGLang settings the simulator models Pending the pinned build. | `scenario:engine.kind`, `engine:sglang:config:chunked_prefill_size` |
 | multi-node-pd-handoff | prefill and decode pools of different layout, including a prefill pool whose data-parallel ranks span nodes (Handoff.At) | `deployment:pools[].role`, `deployment:pools[].nodes`, `deployment:pools[].parallel.dp`, `deployment:pools[].parallel.tp` |
 | per-rank-cpu-tier | the CPU KV tier and its size, off as the control | `deployment:offload.tiers[].bytes` |
-| per-pool-cpu-tier | a disaggregated deployment's CPU tier on the prefill pool, the decode pool or both (blis-substrate#307) | `deployment:pools[].offload.tiers[].bytes` |
+| per-pool-cpu-tier | a disaggregated deployment's primary CPU tier on the prefill pool, the decode pool or both (blis-substrate#307); a secondary fs/obj tier or p2p on that pool is refused at validate (blis-config-search#94) | `deployment:pools[].offload.tiers[].bytes` |
 | offload-with-drafting | the KV tier beside an EAGLE-3 or MTP drafter | `deployment:offload.tiers[].bytes`, `engine:vllm:config:speculative_config.method` |
 | dp-balancing-modes | the data-parallel load-balancing mode of a pool | `deployment:pools[].parallel.data_parallel_load_balancing` |
 | all-reduce-lane | custom or NCCL all-reduce (the field list says why it is not swept yet) | `engine:vllm:config:disable_custom_all_reduce` |

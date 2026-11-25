@@ -542,6 +542,221 @@ class SchemaAgreesWithValidator(unittest.TestCase):
 # --- validator --------------------------------------------------------------------------------
 
 
+class AcceptanceAndRoutingPins(unittest.TestCase):
+    """scenario.acceptance / scenario.routing pass through to BLIS; config-search checks only that
+    the key names are known (inference-sim/blis-config-search#201)."""
+
+    def errs(self, **sc):
+        s = spec()
+        s["scenario"].update(sc)
+        return V.validate(s, BLIS, ROUTING)
+
+    def test_a_profile_set_and_an_inline_value_validate(self):
+        self.assertEqual([], self.errs(acceptance={"profiles": "sensitivity-k3"}))
+        self.assertEqual([], self.errs(
+            acceptance={"value": {"num_spec_tokens": 3, "acceptance_length": 2.4,
+                                  "per_position_rates": [0.8, 0.6], "realisation": "synthetic",
+                                  "source": "run-x"}, "fallback_category": "coding",
+                        "exact_only": True},
+            routing={"value": {"token_imbalance": 1.3, "expert_imbalance": 1.1, "source": "run-y"},
+                     "fallback_category": "coding", "profiles": "ep-sensitivity"}))
+
+    def test_an_unknown_acceptance_key_is_refused_naming_it(self):
+        errs = self.errs(acceptance={"profile": "x"})           # profile, not profiles
+        self.assertTrue(any("scenario.acceptance.profile:" in e and "unknown key" in e for e in errs), errs)
+
+    def test_an_unknown_acceptance_value_key_is_refused(self):
+        errs = self.errs(acceptance={"value": {"num_spec_tokens": 3, "accept_length": 2.4}})
+        self.assertTrue(any("scenario.acceptance.value.accept_length" in e for e in errs), errs)
+
+    def test_an_unknown_routing_key_and_value_key_are_refused(self):
+        errs = self.errs(routing={"fallback": "coding"})
+        self.assertTrue(any("scenario.routing.fallback:" in e for e in errs), errs)
+        errs = self.errs(routing={"value": {"token_imbalance": 1.2, "expert": 1.1}})
+        self.assertTrue(any("scenario.routing.value.expert" in e for e in errs), errs)
+
+    def test_a_spec_that_pins_neither_is_unchanged(self):
+        self.assertEqual([], V.validate(spec(), BLIS, ROUTING))
+
+
+class RoutingProfileNameAgainstARegistry(unittest.TestCase):
+    """A `scenario.routing` pin's `profiles` name is checked against a registry checkout
+    (--registry/SUBSTRATE_REGISTRY): a name the registry does not define, or that carries no
+    profile for the scenario's model, otherwise fails per-run only once a whole sweep has already
+    run. No registry (the default) skips the check, since it is optional (review point 3a)."""
+
+    MODEL = "qwen3-14b"
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.reg = os.path.join(self.dir.name, "registry")
+        os.makedirs(os.path.join(self.reg, "routing"))
+        self.catalog = os.path.join(self.dir.name, "catalog")
+
+    def _write(self, fn, doc):
+        with open(os.path.join(self.reg, "routing", fn), "w") as f:
+            yaml.safe_dump(doc, f)
+
+    def _write_workload(self, name, category=None):
+        os.makedirs(os.path.join(self.catalog, "workloads"), exist_ok=True)
+        doc = {} if category is None else {"category": category}
+        with open(os.path.join(self.catalog, "workloads", f"{name}.yaml"), "w") as f:
+            yaml.safe_dump(doc, f)
+
+    def test_no_registry_skips_the_check(self):
+        sc = {"model": self.MODEL, "routing": {"profiles": "nope"}}
+        self.assertEqual([], V.scenario_pin_errors(sc, None))
+
+    def test_an_unknown_profile_set_name_is_refused_naming_it(self):
+        self._write("golden.yaml", {"name": "golden", "profiles": [{"model": self.MODEL}]})
+        sc = {"model": self.MODEL, "routing": {"profiles": "silver"}}
+        errs = V.scenario_pin_errors(sc, self.reg)
+        self.assertTrue(any("scenario.routing.profiles:" in e and "'silver'" in e
+                            and "golden" in e for e in errs), errs)
+
+    def test_a_known_set_with_no_profile_for_the_model_is_refused(self):
+        self._write("golden.yaml", {"name": "golden", "profiles": [{"model": "some-other-model"}]})
+        sc = {"model": self.MODEL, "routing": {"profiles": "golden"}}
+        errs = V.scenario_pin_errors(sc, self.reg)
+        self.assertTrue(any("scenario.routing.profiles:" in e and "no profile for model" in e
+                            and self.MODEL in e for e in errs), errs)
+
+    def test_a_known_set_with_a_profile_for_the_model_validates(self):
+        self._write("golden.yaml", {"name": "golden", "profiles": [{"model": self.MODEL}]})
+        sc = {"model": self.MODEL, "routing": {"profiles": "golden"}}
+        self.assertEqual([], V.scenario_pin_errors(sc, self.reg))
+
+    def test_an_inline_routing_value_skips_the_check(self):
+        sc = {"model": self.MODEL, "routing": {"value": {"token_imbalance": 1.2}}}
+        self.assertEqual([], V.scenario_pin_errors(sc, self.reg))
+
+    def test_an_unreadable_registry_directory_is_treated_as_empty(self):
+        sc = {"model": self.MODEL, "routing": {"profiles": "golden"}}
+        errs = V.scenario_pin_errors(sc, os.path.join(self.dir.name, "does-not-exist"))
+        self.assertTrue(any("not a routing profile set" in e for e in errs), errs)
+
+    def test_acceptance_profile_names_are_not_checked_against_the_registry(self):
+        """Out of scope (review point 3a): only scenario.routing's profile name is checked."""
+        sc = {"model": self.MODEL, "acceptance": {"profiles": "nope-at-all"}}
+        self.assertEqual([], V.scenario_pin_errors(sc, self.reg))
+
+    def test_a_set_covering_the_model_but_not_the_workloads_category_is_refused(self):
+        """A profile's key is model+category+phase+placement+expert_parallel (routing.go's Key), not
+        model alone -- a set with a profile for the model but not the workload's own category still
+        resolves nothing at runtime (e.g. chatbot, which states no category, against a category:
+        text-only set)."""
+        self._write("flash.yaml", {"name": "flash",
+                                   "profiles": [{"model": self.MODEL, "category": "text",
+                                                "phase": "decode"}]})
+        self._write_workload("chatbot")  # states no category, like the real catalog preset
+        sc = {"model": self.MODEL, "workload": "chatbot", "routing": {"profiles": "flash"}}
+        errs = V.scenario_pin_errors(sc, self.reg, self.catalog)
+        self.assertTrue(any("scenario.routing.profiles:" in e and "category" in e
+                            and "scenario.routing.fallback_category" in e for e in errs), errs)
+
+    def test_a_fallback_category_on_the_same_pin_validates(self):
+        self._write("flash.yaml", {"name": "flash",
+                                   "profiles": [{"model": self.MODEL, "category": "text",
+                                                "phase": "decode"}]})
+        self._write_workload("chatbot")
+        sc = {"model": self.MODEL, "workload": "chatbot",
+              "routing": {"profiles": "flash", "fallback_category": "text"}}
+        self.assertEqual([], V.scenario_pin_errors(sc, self.reg, self.catalog))
+
+    def test_a_fallback_category_the_set_has_no_profile_for_is_refused(self):
+        """fallback_category is itself a category the set must cover for the model -- stating one
+        the set has no profile for still resolves nothing at runtime, same as the workload's own
+        uncovered category."""
+        self._write("flash.yaml", {"name": "flash",
+                                   "profiles": [{"model": self.MODEL, "category": "text",
+                                                "phase": "decode"}]})
+        sc = {"model": self.MODEL, "routing": {"profiles": "flash", "fallback_category": "coding"}}
+        errs = V.scenario_pin_errors(sc, self.reg)
+        self.assertTrue(any("scenario.routing.fallback_category:" in e and "'coding'" in e
+                            and "text" in e for e in errs), errs)
+
+    def test_a_workload_whose_own_category_is_covered_validates(self):
+        self._write("flash.yaml", {"name": "flash",
+                                   "profiles": [{"model": self.MODEL, "category": "text",
+                                                "phase": "decode"}]})
+        self._write_workload("supportbot", category="text")
+        sc = {"model": self.MODEL, "workload": "supportbot", "routing": {"profiles": "flash"}}
+        self.assertEqual([], V.scenario_pin_errors(sc, self.reg, self.catalog))
+
+    def test_a_covered_workload_validates_even_with_a_fallback_the_set_lacks(self):
+        """routing.Resolve tries the workload's own category first -- it never reaches
+        fallback_category when that resolves, so a bad fallback beside a covered workload is not
+        a real failure (review: the previous order refused this)."""
+        self._write("flash.yaml", {"name": "flash",
+                                   "profiles": [{"model": self.MODEL, "category": "text",
+                                                "phase": "decode"}]})
+        self._write_workload("supportbot", category="text")
+        sc = {"model": self.MODEL, "workload": "supportbot",
+              "routing": {"profiles": "flash", "fallback_category": "coding"}}
+        self.assertEqual([], V.scenario_pin_errors(sc, self.reg, self.catalog))
+
+    def test_without_a_catalog_the_category_check_is_skipped(self):
+        """catalog is optional, like registry: without a checkout to read the workload's own
+        category from, the best-effort check cannot know the set fails to cover it."""
+        self._write("flash.yaml", {"name": "flash",
+                                   "profiles": [{"model": self.MODEL, "category": "text",
+                                                "phase": "decode"}]})
+        sc = {"model": self.MODEL, "workload": "chatbot", "routing": {"profiles": "flash"}}
+        self.assertEqual([], V.scenario_pin_errors(sc, self.reg))
+
+
+class AcceptanceKAgainstSweptSpeculative(unittest.TestCase):
+    """scenario.acceptance.value.num_spec_tokens, an inline K, must agree with every sweep's own
+    swept engine.speculative.num_spec_tokens -- drafting's K is a whole-run property, so a swept
+    value the inline acceptance was not measured at would price those runs with the wrong curve
+    silently (review point 3b)."""
+
+    def _spec(self, k, swept):
+        return spec(scenario={"model": "qwen3-14b", "hardware": "h100",
+                              "workload": "chatbot", "cluster": {"gpus_per_node": 8}, "gpus": 16,
+                              "slo": {"itl_p99": "20ms"}, "concurrency": [1, 2],
+                              "acceptance": {"value": {"num_spec_tokens": k}}},
+                   sweeps=[{"name": "s", "num-instances": [2], "parallel": {"tp": [8]},
+                            "engine": {"speculative": {"method": ["dspark"],
+                                                       "num_spec_tokens": swept}}}])
+
+    def test_a_swept_k_that_disagrees_is_refused_naming_both_values(self):
+        errs = V._acceptance_k_mismatch_errors(self._spec(3, [1, 3]))
+        self.assertTrue(any("sweeps[0].engine.speculative.num_spec_tokens" in e and "[1]" in e
+                            and "(3)" in e for e in errs), errs)
+
+    def test_a_swept_k_that_matches_throughout_validates(self):
+        self.assertEqual([], V._acceptance_k_mismatch_errors(self._spec(3, [3])))
+
+    def test_a_swept_k0_drafting_off_control_alongside_the_matching_k_is_not_a_mismatch(self):
+        """0 is drafting-off, a control arm, not a K the acceptance curve prices --
+        only a swept K that disagrees and is itself drafting (nonzero) is a real mismatch."""
+        self.assertEqual([], V._acceptance_k_mismatch_errors(self._spec(3, [0, 3])))
+
+    def test_no_inline_acceptance_value_skips_the_check(self):
+        s = spec(sweeps=[{"name": "s", "num-instances": [2], "parallel": {"tp": [8]},
+                          "engine": {"speculative": {"method": ["dspark"],
+                                                     "num_spec_tokens": [1, 3]}}}])
+        self.assertEqual([], V._acceptance_k_mismatch_errors(s))
+
+    def test_a_profile_set_acceptance_pin_skips_the_check(self):
+        """A `profiles` pin states no K of its own -- only an inline `value.num_spec_tokens` does."""
+        s = spec(scenario={"model": "qwen3-14b", "hardware": "h100", "workload": "chatbot",
+                           "cluster": {"gpus_per_node": 8}, "gpus": 16,
+                           "slo": {"itl_p99": "20ms"}, "concurrency": [1, 2],
+                           "acceptance": {"profiles": "golden"}},
+                 sweeps=[{"name": "s", "num-instances": [2], "parallel": {"tp": [8]},
+                          "engine": {"speculative": {"method": ["dspark"],
+                                                     "num_spec_tokens": [1, 3]}}}])
+        self.assertEqual([], V._acceptance_k_mismatch_errors(s))
+
+    def test_an_unswept_speculative_block_skips_the_check(self):
+        s = self._spec(3, [1, 3])
+        s["sweeps"][0]["engine"] = {}
+        self.assertEqual([], V._acceptance_k_mismatch_errors(s))
+
+
 class ValidatorRejects(unittest.TestCase):
     def errs(self, doc):
         return V.validate(doc, BLIS, ROUTING)
@@ -971,7 +1186,7 @@ class RouterFileBesideTheSpec(unittest.TestCase):
                                "parameters": {"conditions": [{"metric": "waiting-queue", "maxValue": 2}]}})
         errs = self.errs(self.doc(), self.beside(doc))
         self.assertTrue(any("'prefill-stall-guard' (type utilization-filter)" in e
-                            and "inference-sim/inference-sim#2205" in e for e in errs), errs)
+                            and "blis-config-search#210" in e for e in errs), errs)
         doc = self.base()
         next(p for p in doc["plugins"] if p["type"] == "inflight-load-producer")["parameters"][
             "prefillCompletionFromKVEvents"] = True
@@ -1634,6 +1849,46 @@ class ReplayKeysReachTheSimulator(unittest.TestCase):
         self.assertEqual(RC.sha256_of(os.path.join(d, "wl.yaml")), wl["sha256"])
         self.assertEqual(1, wl["document"]["trace_idle_gap_cap_s"])
         self.assertEqual([1, 300], wl["recipe"]["differs_from_run"]["trace_idle_gap_cap_s"])
+
+    def _committed_spec_report(self, out, spec_dir):
+        """Run the spec-side workload through the committed-reports staging path once, with the
+        BLIS call stubbed and `_is_committed_reports` forced true for `out`, and return the report.
+        A tagged release on embedded data keeps the sweep off the experimental gate so it stages
+        and publishes (the #199 path that rewrites the random sweep- staging dir)."""
+        def fake_run_one(*a, **kw):
+            return {**_ran(100.0, 10.0), "data": "embedded", "released_build": True}
+        real_run, real_committed = E.run_blis.run_one, E._is_committed_reports
+        E.run_blis.run_one = fake_run_one
+        E._is_committed_reports = lambda o, _o=out: os.path.realpath(o) == os.path.realpath(_o)
+        try:
+            return E.run_experiment(self.with_file("./wl.yaml"), BLIS, "/c", "/r", out,
+                                    verbose=False, spec_dir=spec_dir)
+        finally:
+            E.run_blis.run_one, E._is_committed_reports = real_run, real_committed
+
+    def test_a_committed_spec_side_report_records_a_stable_relative_workload_path(self):
+        """#199: a committed run stages under a `tempfile.mkdtemp(prefix="sweep-")` directory, so the
+        live replay.workload_spec is an absolute sweep-<random> path. The report must record the
+        report-relative `workloads/<name>` instead -- the absolute path does not survive the move
+        into reports/ and its random component would make identical reruns differ. Exercised twice."""
+        spec_dir = self.beside(self.recipe(1))
+        with tempfile.TemporaryDirectory() as out_a, tempfile.TemporaryDirectory() as out_b:
+            rep_a = self._committed_spec_report(out_a, spec_dir)
+            rep_b = self._committed_spec_report(out_b, spec_dir)
+            # The recorded replay path and the top-level file record both resolve to the committed
+            # workloads/ copy, by a stable report-relative path.
+            rel = rep_a["scenario"]["replay"]["workload_spec"]
+            self.assertEqual("workloads/wl.yaml", rel)
+            self.assertEqual("workloads/wl.yaml", rep_a["scenario"]["workload_spec"]["file"])
+            self.assertTrue(os.path.isfile(os.path.join(out_a, "t", rel)))
+            # No random staging path survives anywhere in the serialized report, and nothing anchors
+            # it to the (per-run) output directory.
+            blob_a = json.dumps(rep_a, sort_keys=True, default=str)
+            self.assertNotIn("sweep-", blob_a)
+            self.assertNotIn(os.path.realpath(out_a), blob_a)
+            # Identical reruns produce a byte-identical report document.
+            blob_b = json.dumps(rep_b, sort_keys=True, default=str)
+            self.assertEqual(blob_a, blob_b)
 
 
 class ReplayComesFromTheCatalog(unittest.TestCase):
@@ -3449,6 +3704,20 @@ class DryRunPlan(unittest.TestCase):
         self.assertEqual(1, report["totals"]["configs"])
         self.assertEqual(2, report["totals"]["runs"])
         self.assertEqual(50.0, report["interactivity_floor"]["tok_per_s_per_user"])
+
+    def test_the_report_records_scenario_acceptance_and_routing_pins_only_when_present(self):
+        """scenario.acceptance / scenario.routing change what BLIS prices, so the report records
+        them -- and only when present, so an unpinned report's scenario block is byte-identical."""
+        plain = E.run_experiment(spec(), blis=BLIS, catalog=None, registry=None,
+                                 out_root="/nonexistent", dry_run=True, verbose=False)
+        self.assertNotIn("acceptance", plain["scenario"])
+        self.assertNotIn("routing", plain["scenario"])
+        acc, rtg = {"profiles": "sensitivity-k3"}, {"value": {"token_imbalance": 1.3}}
+        pinned = E.run_experiment(spec(scenario={**spec()["scenario"], "acceptance": acc, "routing": rtg}),
+                                  blis=BLIS, catalog=None, registry=None,
+                                  out_root="/nonexistent", dry_run=True, verbose=False)
+        self.assertEqual(acc, pinned["scenario"]["acceptance"])
+        self.assertEqual(rtg, pinned["scenario"]["routing"])
 
     def test_runs_and_report_use_the_simulators_engine_release(self):
         seen = []

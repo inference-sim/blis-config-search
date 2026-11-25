@@ -1124,6 +1124,71 @@ class RouterBlockInScenario(unittest.TestCase):
             shutil.rmtree(d)
 
 
+class AcceptanceRoutingInScenario(unittest.TestCase):
+    """The scenario.acceptance / scenario.routing pins, rendered into the Scenario doc whole and
+    part of its hash (inference-sim/blis-config-search#201)."""
+
+    def test_an_acceptance_pin_renders_as_a_top_level_scenario_block(self):
+        pin = {"profiles": "sensitivity-k3", "fallback_category": "coding",
+               "value": {"num_spec_tokens": 3, "acceptance_length": 2.4,
+                         "per_position_rates": [0.8, 0.6], "realisation": "synthetic"},
+               "exact_only": True}
+        y = run_blis.scenario_yaml("m", "h100", dict(run_blis.PARALLEL_DEFAULTS),
+                                   {"block_size": 64}, "n", acceptance=pin)
+        self.assertRegex(y, r"(?m)^acceptance:$")
+        self.assertRegex(y, r"(?m)^  profiles: \"sensitivity-k3\"$")
+        self.assertRegex(y, r"(?m)^  value:$")
+        self.assertRegex(y, r"(?m)^    num_spec_tokens: 3$")
+        self.assertRegex(y, r"(?m)^      - 0.8$")           # per_position_rates list item
+        self.assertRegex(y, r"(?m)^  exact_only: true$")
+        # Rendered before cluster:, a sibling of coefficients:.
+        self.assertLess(y.index("acceptance:"), y.index("cluster:"))
+
+    def test_a_routing_pin_renders_as_a_top_level_scenario_block(self):
+        pin = {"value": {"token_imbalance": 1.3, "expert_imbalance": 1.1}}
+        y = run_blis.scenario_yaml("m", "h100", dict(run_blis.PARALLEL_DEFAULTS),
+                                   {"block_size": 64}, "n", routing=pin)
+        self.assertRegex(y, r"(?m)^routing:$")
+        self.assertRegex(y, r"(?m)^    token_imbalance: 1.3$")
+
+    def test_absent_pins_emit_no_block_and_leave_the_scenario_byte_identical(self):
+        par, eng = dict(run_blis.PARALLEL_DEFAULTS), {"block_size": 64}
+        y = run_blis.scenario_yaml("m", "h100", par, eng, "n")
+        self.assertNotIn("acceptance:", y)
+        self.assertNotIn("routing:", y)
+        self.assertEqual(y, run_blis.scenario_yaml("m", "h100", par, eng, "n",
+                                                   acceptance=None, routing=None))
+
+    def test_the_pins_reach_a_disaggregated_scenario_too(self):
+        par, _, cli, _ = classify({"prefill_instances": 1, "decode_instances": 1,
+                                   "prefill_tp": 8, "decode_tp": 8})
+        for role in run_blis.PD_ROLES:
+            par["pd"][role]["engine"]["block_size"] = 64
+        y = run_blis.scenario_yaml("qwen3-14b", "h100", par, {}, "n", node_size=8,
+                                   acceptance={"profiles": "s"}, routing={"profiles": "r"})
+        self.assertRegex(y, r"(?m)^acceptance:$")
+        self.assertRegex(y, r"(?m)^routing:$")
+
+    def test_each_pin_participates_in_the_scenario_hash(self):
+        """Two acceptance (or routing) arms differ ONLY in their pin block: sharing a file would
+        run the second arm with the first's pin. An unpinned scenario keeps its old name."""
+        import shutil
+        d = tempfile.mkdtemp()
+        try:
+            args = ("m", "h100", "0.32.0", dict(run_blis.PARALLEL_DEFAULTS),
+                    {"block_size": 64}, 1, run_blis.DEFAULT_FABRIC, None, 8, True)
+            n0 = run_blis.write_scenario(FIXTURE_BLIS, d, *args)
+            na = run_blis.write_scenario(FIXTURE_BLIS, d, *args, acceptance={"profiles": "a"})
+            nb = run_blis.write_scenario(FIXTURE_BLIS, d, *args, acceptance={"profiles": "b"})
+            nr = run_blis.write_scenario(FIXTURE_BLIS, d, *args, routing={"profiles": "a"})
+            self.assertEqual(4, len({n0, na, nb, nr}))
+            # Absent pins keep the file name the scenario had before these existed.
+            self.assertEqual(n0, run_blis.scenario_name("m", "h100", "0.32.0",
+                             dict(run_blis.PARALLEL_DEFAULTS), {"block_size": 64}) + ".yaml")
+        finally:
+            shutil.rmtree(d)
+
+
 class SpeculativeDecoding(unittest.TestCase):
     """Drafting is priced by the kernel; see run_blis's speculative comment."""
 
@@ -1316,6 +1381,49 @@ class AcceptanceFromTheResult(unittest.TestCase):
         a = run_blis.acceptance_record(self.doc())
         self.assertEqual(("inferencex-golden-al", "https://example.org/curve.yaml"),
                          (a["profile_set"], a["source"]))
+
+
+class RoutingFromTheResult(unittest.TestCase):
+    """A row records each pool's routing-imbalance resolution the simulator priced it with, from
+    its Result (reports.kernel.<pool>.routing, sim.RoutingRecord), the same pattern as
+    AcceptanceFromTheResult reads reports.engine.cluster.acceptance."""
+
+    ROUTING = {"source_layer": "registry", "set": "inferencex-golden-routing",
+               "keys": ["m/dspark/prefill", "m/dspark/decode"],
+               "source": "https://example.org/routing.yaml", "measured_on": "b200"}
+
+    def doc(self, roles=("prefill", "decode"), **extra):
+        return {"reports": {"kernel": {role: {"routing": self.ROUTING} for role in roles}}, **extra}
+
+    def test_each_poolS_record_gives_layer_set_keys_and_source(self):
+        r = run_blis.routing_record(self.doc())
+        self.assertEqual({"prefill", "decode"}, set(r))
+        for role in ("prefill", "decode"):
+            self.assertEqual("registry", r[role]["source_layer"])
+            self.assertEqual("inferencex-golden-routing", r[role]["profile_set"])
+            self.assertEqual(["m/dspark/prefill", "m/dspark/decode"], r[role]["profile_keys"])
+            self.assertEqual("https://example.org/routing.yaml", r[role]["source"])
+            self.assertEqual("b200", r[role]["measured_on"])
+
+    def test_a_colocated_run_is_keyed_by_the_colocated_pool(self):
+        r = run_blis.routing_record(self.doc(roles=("colocated",)))
+        self.assertEqual({"colocated"}, set(r))
+
+    def test_an_inline_value_resolves_no_set_or_keys(self):
+        """An inline token_imbalance/expert_imbalance value states no profile set; the simulator's
+        RoutingRecord still carries the imbalance ratios, with set/keys/source absent."""
+        inline = {"source_layer": "scenario", "token_imbalance": 1.4, "expert_imbalance": 1.1}
+        r = run_blis.routing_record({"reports": {"kernel": {"colocated": {"routing": inline}}}})
+        self.assertEqual("scenario", r["colocated"]["source_layer"])
+        self.assertIsNone(r["colocated"]["profile_set"])
+        self.assertEqual([], r["colocated"]["profile_keys"])
+        self.assertEqual(1.4, r["colocated"]["token_imbalance"])
+        self.assertEqual(1.1, r["colocated"]["expert_imbalance"])
+
+    def test_a_run_that_opened_no_routing_records_none(self):
+        self.assertIsNone(run_blis.routing_record({"reports": {"kernel": {"colocated": {}}}}))
+        self.assertIsNone(run_blis.routing_record({"reports": {}}))
+        self.assertIsNone(run_blis.routing_record({}))
 
 
 class GeneratedScenario(unittest.TestCase):

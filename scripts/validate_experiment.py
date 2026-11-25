@@ -885,38 +885,112 @@ def parse_size(v):
     return int(float(m.group(1)) * _SIZE_UNITS[m.group(2)]) if m else None
 
 
-def offload_errors(sw, where, pool_offload=False):
-    """Errors in a sweep's `offload:` blocks: the CPU KV tier, off as the control (#94).
+# The storage device classes the pinned registry prices, the fallback when no catalog checkout is
+# present to read `devices/storage.yaml` from. cpu_dram is the primary tier (stated with cpu_bytes),
+# so a `tiers` entry names one of the others.
+PRICED_STORAGE_DEVICES = ("cpu_dram", "nvme_gen3", "nvme_gen4", "nvme_gen4_raid0_8x", "sata_ssd", "s3")
 
-    cpu_bytes: sizes with units, 0 for no tier; eviction_policy: names the engine validates. On a
-    colocated sweep the block is the pool's tier. On a disaggregated one it is the default for
-    both pools, and `prefill.offload` / `decode.offload` state one pool's own (replacing the
-    default for it; `cpu_bytes: [0]` is a pool with no tier). That needs a simulator whose
-    deployment schema lets a pool state its offload (`pool_offload`, blis-substrate#307).
+
+def _storage_devices(catalog):
+    """The storage device names the catalog lists (`devices/storage.yaml`), or the priced fallback
+    when no catalog directory is given or the file cannot be read. A missing checkout never fails
+    validation: the fallback is the set the registry prices."""
+    if catalog:
+        path = os.path.join(catalog, "devices", "storage.yaml")
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+        except OSError:
+            data = None
+        if isinstance(data, dict) and data:
+            return set(data)
+    return set(PRICED_STORAGE_DEVICES)
+
+
+def _renders_a_pd_tier(block):
+    """Whether `block` renders a secondary tier at runtime: a non-empty `tiers`, or a truthy `p2p`
+    (bool or list form) -- matches run_blis's own `own_off.get(...)` guard."""
+    if block.get("tiers"):
+        return True
+    p2p = block.get("p2p")
+    return True in p2p if isinstance(p2p, list) else bool(p2p)
+
+
+def offload_errors(sw, where, pool_offload=False, catalog=None):
+    """Errors in a sweep's `offload:` blocks: the KV tier hierarchy, off as the control.
+
+    cpu_bytes: sizes with units, 0 for no tier; eviction_policy: names the engine validates;
+    tiers: extra fs/obj device tiers below the CPU tier; p2p: a p2p secondary tier. On a colocated
+    sweep the block is the pool's tiers. On a disaggregated one it is the default for both pools,
+    and `prefill.offload` / `decode.offload` state one pool's own (replacing the default for it;
+    `cpu_bytes: [0]` is a pool with no tier). That needs a simulator whose deployment schema lets a
+    pool state its offload (`pool_offload`, blis-substrate#307).
     """
     errs = []
     blocks = [("offload", sw.get("offload"))]
     for role in ("prefill", "decode"):
         if isinstance(sw.get(role), dict):
             blocks.append((f"{role}.offload", sw[role].get("offload")))
+    devices = _storage_devices(catalog)
     for name, block in blocks:
         if block is None:
             continue
-        errs.extend(_offload_block_errors(block, f"{where}.{name}"))
-        if not _sweep_is_colocated(sw) and not pool_offload:
+        errs.extend(_offload_block_errors(block, f"{where}.{name}", devices))
+        if _sweep_is_colocated(sw):
+            continue
+        if not pool_offload:
             errs.append(f"{where}.{name}: this simulator's deployment schema has no per-pool offload "
-                        f"(blis-substrate#307), so a disaggregated sweep cannot state a CPU tier "
-                        f"(inference-sim/blis-config-search#94)")
+                        f"(blis-substrate#307), so a disaggregated sweep cannot state a tier")
+        elif isinstance(block, dict) and _renders_a_pd_tier(block):
+            # Mirrors the runner's guard in classify_config (#94).
+            errs.append(f"{where}.{name}: a disaggregated pool's tiers/p2p option fails at runtime "
+                        f"against a MultiConnector (the pinned simulator's splitOffload leaves "
+                        f"secondary_tiers at the top level instead of the offloading child's own "
+                        f"kv_connector_extra_config; engines/vllm/core/vllm/multiconnector.go:217), "
+                        f"so a disaggregated sweep's tier is cpu_bytes only (blis-config-search#94)")
     return errs
 
 
-def _offload_block_errors(block, where):
+def _offload_tiers_errors(vals, where, devices):
+    """Errors in a sweep's `offload.tiers`: a fixed list (not swept) of {tier: <device>, bytes}
+    hierarchy entries below the primary CPU tier. Each device is a catalog storage class other
+    than cpu_dram (the primary tier, stated with cpu_bytes)."""
+    if not _is_list(vals) or not vals:
+        return [f"{where}: must be a non-empty list of {{tier: <device>, bytes: <size>}} entries"]
+    errs = []
+    for i, t in enumerate(vals):
+        at = f"{where}[{i}]"
+        if not isinstance(t, dict) or set(t) - {"tier", "bytes"} or "tier" not in t or "bytes" not in t:
+            errs.append(f"{at}: must be a mapping of exactly tier and bytes")
+            continue
+        dev = t["tier"]
+        if dev == "cpu_dram":
+            errs.append(f"{at}.tier: cpu_dram is the primary tier; state its size with cpu_bytes, "
+                        f"not as a tiers entry")
+        elif not isinstance(dev, str) or dev not in devices:
+            errs.append(f"{at}.tier: {dev!r} is not a catalog storage device "
+                        f"(known: {', '.join(sorted(devices))})")
+        if parse_size(t["bytes"]) in (None, 0):
+            errs.append(f"{at}.bytes: {t['bytes']!r} is not a non-zero size: use a number with a unit "
+                        f"such as 2TiB")
+    return errs
+
+
+def _offload_block_errors(block, where, devices=None):
+    if devices is None:
+        devices = set(PRICED_STORAGE_DEVICES)
     if not isinstance(block, dict) or not block:
         return [f"{where}: must be a non-empty mapping"]
     errs = []
     for key, vals in block.items():
-        if key not in ("cpu_bytes", "eviction_policy"):
-            errs.append(f"{where}.{key}: unknown offload option (allowed: cpu_bytes, eviction_policy)")
+        if key not in ("cpu_bytes", "eviction_policy", "tiers", "p2p"):
+            errs.append(f"{where}.{key}: unknown offload option "
+                        f"(allowed: cpu_bytes, eviction_policy, tiers, p2p)")
+        elif key == "tiers":
+            errs.extend(_offload_tiers_errors(vals, f"{where}.tiers", devices))
+        elif key == "p2p":
+            if not isinstance(vals, bool):
+                errs.append(f"{where}.p2p: must be true or false (a p2p secondary tier, on or off)")
         elif not _is_list(vals) or not vals:
             errs.append(f"{where}.{key}: must be a non-empty list")
         elif key == "cpu_bytes":
@@ -928,6 +1002,168 @@ def _offload_block_errors(block, where):
             errs.append(f"{where}.eviction_policy: must be a list of policy names")
     if "eviction_policy" in block and "cpu_bytes" not in block:
         errs.append(f"{where}.eviction_policy: needs cpu_bytes (a policy of no tier states nothing)")
+    # A fs/obj tier or a p2p tier sits below the primary CPU tier, so it needs one: the engine puts
+    # cpu_dram first and refuses secondary tiers without a primary (engines/vllm build/offload.go).
+    if ("tiers" in block or "p2p" in block) and "cpu_bytes" not in block:
+        errs.append(f"{where}: tiers and p2p sit below the CPU tier, so they need cpu_bytes "
+                    f"(the primary tier)")
+    return errs
+
+
+# The keys of the acceptance and routing scenario pins, passed through to BLIS whole (it validates
+# their values: acceptance.Pin/acceptance.Value, routing.Pin/routing.Value, at the pinned release).
+# config-search checks only the key names, so a typo fails here rather than per-run in a whole sweep.
+_ACCEPTANCE_PIN_KEYS = ("profiles", "value", "fallback_category", "exact_only")
+_ACCEPTANCE_VALUE_KEYS = ("num_spec_tokens", "acceptance_length", "acceptance_rate",
+                          "per_position_rates", "source", "realisation")
+_ROUTING_PIN_KEYS = ("profiles", "value", "fallback_category")
+_ROUTING_VALUE_KEYS = ("token_imbalance", "expert_imbalance", "source")
+
+
+def _pin_errors(pin, where, pin_keys, value_keys):
+    """Key-name errors in a scenario acceptance/routing pin (a mapping named by `where`). The pin
+    either names a registry profile set (`profiles`) or states a value inline (`value`); BLIS
+    checks that choice and every value, so config-search checks only that the keys are known."""
+    if not isinstance(pin, dict) or not pin:
+        return [f"{where}: must be a non-empty mapping (a profile set name or an inline value)"]
+    errs = []
+    for key in pin:
+        if key not in pin_keys:
+            errs.append(f"{where}.{key}: unknown key (allowed: {', '.join(pin_keys)})")
+    value = pin.get("value")
+    if value is not None:
+        if not isinstance(value, dict) or not value:
+            errs.append(f"{where}.value: must be a non-empty mapping")
+        else:
+            for key in value:
+                if key not in value_keys:
+                    errs.append(f"{where}.value.{key}: unknown key "
+                                f"(allowed: {', '.join(value_keys)})")
+    return errs
+
+
+def _registry_profile_sets(registry, subdir):
+    """The named profile-set documents under <registry>/<subdir>/; unreadable files are skipped (best-effort check)."""
+    d = os.path.join(registry or "", subdir)
+    try:
+        files = sorted(n for n in os.listdir(d) if n.endswith((".yaml", ".yml")))
+    except OSError:
+        return []
+    out = []
+    for fn in files:
+        try:
+            with open(os.path.join(d, fn), encoding="utf-8") as f:
+                doc = yaml.safe_load(f) or {}
+        except (OSError, yaml.YAMLError):
+            continue
+        if isinstance(doc, dict) and doc.get("name"):
+            out.append(doc)
+    return out
+
+
+def _workload_category(catalog, workload):
+    """The catalog workload preset's own `category` (workload.go's Shape.Category), or None when
+    there is no catalog, no such preset, or the file can't be read -- best-effort."""
+    if not catalog or not isinstance(workload, str) or not workload:
+        return None
+    try:
+        with open(os.path.join(catalog, "workloads", f"{workload}.yaml"), encoding="utf-8") as f:
+            doc = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError):
+        return None
+    return doc.get("category", "") if isinstance(doc, dict) else None
+
+
+def _profile_name_errors(sc, where, pin, subdir, registry, catalog=None):
+    """A routing pin's `profiles` must name a registry set with a profile for the model; [] without a registry."""
+    if registry is None:
+        return []
+    name = pin.get("profiles") if isinstance(pin, dict) else None
+    if not isinstance(name, str) or not name:
+        return []
+    sets = _registry_profile_sets(registry, subdir)
+    by_name = {s.get("name"): s for s in sets}
+    if name not in by_name:
+        known = ", ".join(sorted(n for n in by_name if n)) or "none"
+        return [f"{where}.profiles: {name!r} is not a {subdir} profile set in the registry "
+                f"(known: {known})"]
+    model = sc.get("model")
+    if not isinstance(model, str) or not model:
+        return []
+    profiles = by_name[name].get("profiles") or []
+    model_profiles = [p for p in profiles if isinstance(p, dict) and p.get("model") == model]
+    if not model_profiles:
+        models = {p.get("model") for p in profiles if isinstance(p, dict)}
+        return [f"{where}.profiles: {name!r} has no profile for model {model!r} "
+                f"(models in that set: {', '.join(sorted(m for m in models if m)) or 'none'})"]
+    # A profile's key is (model, category, phase, placement, expert_parallel) (routing.go's Key),
+    # not model alone: a set with a profile for the model but not the workload's category --
+    # or not the pin's own fallback_category, routing.Resolve's fallback once the workload's own
+    # category misses -- resolves nothing at run time. Checked for routing only (subdir ==
+    # "routing" on every call site). The workload's own category is tried first, matching
+    # routing.Resolve: a covered workload validates even with a fallback_category the set lacks,
+    # since BLIS never reaches the fallback for it.
+    categories = sorted({p.get("category") for p in model_profiles if p.get("category")})
+    category = _workload_category(catalog, sc.get("workload"))
+    if category is not None and category in categories:
+        return []
+    fallback = pin.get("fallback_category")
+    if fallback:
+        if fallback in categories:
+            return []
+        return [f"{where}.fallback_category: {fallback!r} has no {model!r} profile in {name!r} "
+                f"(it has: {', '.join(categories) or 'none'})"]
+    if category is None:
+        return []
+    stated = repr(category) if category else "none (the workload states no category)"
+    return [f"{where}.profiles: {name!r} has no {model!r} profile for the workload's category "
+            f"{stated} (it has: {', '.join(categories) or 'none'}); state {where}.fallback_category "
+            f"to use one of those instead"]
+
+
+def scenario_pin_errors(sc, registry=None, catalog=None):
+    """Errors in the scenario's acceptance/routing pins (#201). Both are optional and pass through
+    to BLIS unchanged; routing has no CLI alternative (the flags were removed in v0.12.0).
+    `registry`, when given, also checks a routing pin's profile set name."""
+    errs = []
+    if sc.get("acceptance") is not None:
+        errs.extend(_pin_errors(sc["acceptance"], "scenario.acceptance",
+                                _ACCEPTANCE_PIN_KEYS, _ACCEPTANCE_VALUE_KEYS))
+    if sc.get("routing") is not None:
+        errs.extend(_pin_errors(sc["routing"], "scenario.routing",
+                                _ROUTING_PIN_KEYS, _ROUTING_VALUE_KEYS))
+        if isinstance(sc["routing"], dict):
+            errs.extend(_profile_name_errors(sc, "scenario.routing", sc["routing"], "routing",
+                                             registry, catalog))
+    return errs
+
+
+def _acceptance_k_mismatch_errors(spec):
+    """An inline acceptance K must match every swept engine.speculative.num_spec_tokens (K is whole-run)."""
+    sc = spec.get("scenario") or {}
+    acc = sc.get("acceptance")
+    if not isinstance(acc, dict):
+        return []
+    value = acc.get("value")
+    if not isinstance(value, dict):
+        return []
+    k = value.get("num_spec_tokens")
+    if not isinstance(k, int) or isinstance(k, bool):
+        return []
+    errs = []
+    for i, sw in enumerate(spec.get("sweeps") or []):
+        if not isinstance(sw, dict):
+            continue
+        eng = sw.get("engine")
+        ks = ((eng or {}).get("speculative") or {}).get("num_spec_tokens") if isinstance(eng, dict) else None
+        if not _is_list(ks):
+            continue
+        mismatched = sorted({v for v in ks if isinstance(v, int) and not isinstance(v, bool) and v not in (0, k)})
+        if mismatched:
+            errs.append(f"sweeps[{i}].engine.speculative.num_spec_tokens: {mismatched} differs from "
+                        f"scenario.acceptance.value.num_spec_tokens ({k}); drafting's K is a "
+                        f"whole-run property, so a swept value the inline acceptance was not "
+                        f"measured at prices those runs with the wrong curve")
     return errs
 
 
@@ -1000,7 +1236,7 @@ def _ask_field_list(blis, catalog, spec):
 
 
 def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, router_cfg=None,
-             spec_dir=None):
+             spec_dir=None, registry=None):
     """Every error in `spec`, as readable `path: message` strings. Empty means valid.
 
     `router_cfg` is the router's reference configs (router_configs.open_checkout) a spec may name;
@@ -1009,7 +1245,10 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
 
     `blis` is the simulator binary whose commands supply the names (`blis fields`, `blis
     schema deployment`) and the catalog identities (`blis catalog resolve`). `catalog` names a
-    catalog directory; None means the catalog the binary embeds.
+    catalog directory; None means the catalog the binary embeds. `registry` names a registry
+    checkout (--registry/SUBSTRATE_REGISTRY) that additionally checks a `scenario.routing` pin's
+    profile set name and model coverage; None skips that one check. With `catalog` too, that check
+    also covers the workload's category, or the pin's `fallback_category` when the set lacks it.
 
     Collects ALL errors rather than stopping at the first: a contributor fixing a spec by hand
     should see every problem in one run, not discover them one CI round-trip at a time.
@@ -1053,7 +1292,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
         sc = {}
     else:
         known_sc = {"model", "hardware", "workload", "workload_spec", "gpus", "slo", "concurrency",
-                    "seed", "engine", "engine_kind", "replay", "cluster"}
+                    "seed", "engine", "engine_kind", "replay", "cluster", "acceptance", "routing"}
         for key in sc:
             if key not in known_sc:
                 errs.append(f"scenario.{key}: unknown key "
@@ -1066,6 +1305,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
         errs.extend(scenario_identity_errors(sc, blis, catalog))
         errs.extend(cluster_errors(sc, blis, catalog))
         errs.extend(replay_errors(sc))
+        errs.extend(scenario_pin_errors(sc, registry, catalog))
         gpus = sc.get("gpus")
         if not isinstance(gpus, int) or isinstance(gpus, bool) or gpus < 1:
             errs.append("scenario.gpus: required positive integer -- the budget EVERY run uses")
@@ -1142,7 +1382,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
         known_sw = {"name", "narrative", "num-instances", "parallel", "engine", "router",
                     "prefill-instances", "decode-instances", "prefill", "decode", "simulator",
                     "offload"}
-        errs.extend(offload_errors(sw, where, pool_offload))
+        errs.extend(offload_errors(sw, where, pool_offload, catalog))
         for key in sw:
             if key not in known_sw:
                 errs.append(f"{where}.{key}: unknown sweep key "
@@ -1245,6 +1485,7 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
             if n and sum(reasons.values()) == n:
                 top = max(reasons, key=reasons.get)
                 errs.append(f"{where}: the runner refuses every arm ({n}): {top}")
+    errs.extend(_acceptance_k_mismatch_errors(spec))
     if not errs:
         errs.extend(offload_policy_errors(spec, blis, fields, catalog))
     return errs
@@ -1382,6 +1623,10 @@ def main(argv=None):
     ap.add_argument("--catalog",
                     help="a catalog directory for `blis catalog resolve` (default: the catalog "
                          "the binary embeds)")
+    ap.add_argument("--registry", default=os.environ.get("SUBSTRATE_REGISTRY"),
+                    help="a registry checkout (substrate/registry layout) to check a "
+                         "scenario.routing pin's profile set name and model coverage against "
+                         "(default: $SUBSTRATE_REGISTRY; omit to skip that check)")
     args = ap.parse_args(argv)
 
     paths = spec_paths(args.target)
@@ -1421,7 +1666,7 @@ def main(argv=None):
         spec, err = load(path)
         try:
             errs = [err] if err else validate(spec, args.blis, args.routing, args.catalog, args.fields, router_cfg,
-                                              os.path.dirname(os.path.abspath(path)))
+                                              os.path.dirname(os.path.abspath(path)), registry=args.registry)
         except blis_cli.BlisCommandError as e:
             print(f"validate_experiment: {rel}: {e}", file=sys.stderr)
             return 2

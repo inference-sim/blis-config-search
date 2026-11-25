@@ -142,13 +142,20 @@ keeps its own origin in `engine_origin`. At the pinned release the field list ma
 `speculative_*` setting not modelled and the engine refuses a run that enables drafting, so such a
 sweep does not run yet.
 
-## The CPU KV tier
+## The KV tier hierarchy
 
 A sweep may state `offload: {cpu_bytes: [0, 512GiB], eviction_policy: [lru]}` for a colocated pool: a
 CPU tier of that size below HBM, and `0` for no tier, the control. Sizes carry units (`512GiB`) or are
 bytes. The row records `cpu_tier_hit_rate` beside the throughput, so a reader can tell whether the tier
-was used; a tier only helps once the GPU KV pool fills (long contexts, a replay). The fs, obj and p2p
-tiers have no key yet (#94).
+was used; a tier only helps once the GPU KV pool fills (long contexts, a replay).
+
+Below the CPU tier the block may state more tiers. `tiers: [{tier: nvme_gen4, bytes: 2TiB}]` adds an
+fs/obj device tier (any catalog storage device other than `cpu_dram`, the primary tier set with
+`cpu_bytes`), and `p2p: true` adds a p2p secondary tier (a peer instance's host memory, rendered under
+`connector_options.secondary_tiers`). Both sit below a CPU tier, so they need a non-zero `cpu_bytes`;
+they are a fixed hierarchy applied to every arm that runs a tier, not swept element by element. A
+disaggregated sweep takes `cpu_bytes` only: the pinned simulator refuses a secondary tier or p2p beside
+a pool's MultiConnector (#94).
 
 On a disaggregated sweep the sweep-level `offload:` block is the default for both pools, and
 `prefill: {offload: {...}}` / `decode: {offload: {...}}` state one pool's own, replacing the default for

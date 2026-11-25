@@ -684,6 +684,18 @@ class RoutingProfileNameAgainstARegistry(unittest.TestCase):
         sc = {"model": self.MODEL, "workload": "supportbot", "routing": {"profiles": "flash"}}
         self.assertEqual([], V.scenario_pin_errors(sc, self.reg, self.catalog))
 
+    def test_a_covered_workload_validates_even_with_a_fallback_the_set_lacks(self):
+        """routing.Resolve tries the workload's own category first -- it never reaches
+        fallback_category when that resolves, so a bad fallback beside a covered workload is not
+        a real failure (review: the previous order refused this)."""
+        self._write("flash.yaml", {"name": "flash",
+                                   "profiles": [{"model": self.MODEL, "category": "text",
+                                                "phase": "decode"}]})
+        self._write_workload("supportbot", category="text")
+        sc = {"model": self.MODEL, "workload": "supportbot",
+              "routing": {"profiles": "flash", "fallback_category": "coding"}}
+        self.assertEqual([], V.scenario_pin_errors(sc, self.reg, self.catalog))
+
     def test_without_a_catalog_the_category_check_is_skipped(self):
         """catalog is optional, like registry: without a checkout to read the workload's own
         category from, the best-effort check cannot know the set fails to cover it."""

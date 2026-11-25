@@ -1098,24 +1098,27 @@ def _profile_name_errors(sc, where, pin, subdir, registry, catalog=None):
                 f"(models in that set: {', '.join(sorted(m for m in models if m)) or 'none'})"]
     # A profile's key is (model, category, phase, placement, expert_parallel) (routing.go's Key),
     # not model alone: a set with a profile for the model but not the workload's category --
-    # or not the pin's own fallback_category -- resolves nothing at run time (routing.Resolve).
-    # Checked for routing only (subdir == "routing" on every call site).
+    # or not the pin's own fallback_category, routing.Resolve's fallback once the workload's own
+    # category misses -- resolves nothing at run time. Checked for routing only (subdir ==
+    # "routing" on every call site). The workload's own category is tried first, matching
+    # routing.Resolve: a covered workload validates even with a fallback_category the set lacks,
+    # since BLIS never reaches the fallback for it.
     categories = sorted({p.get("category") for p in model_profiles if p.get("category")})
+    category = _workload_category(catalog, sc.get("workload"))
+    if category is not None and category in categories:
+        return []
     fallback = pin.get("fallback_category")
     if fallback:
         if fallback in categories:
             return []
         return [f"{where}.fallback_category: {fallback!r} has no {model!r} profile in {name!r} "
                 f"(it has: {', '.join(categories) or 'none'})"]
-    category = _workload_category(catalog, sc.get("workload"))
     if category is None:
         return []
-    if category not in categories:
-        stated = repr(category) if category else "none (the workload states no category)"
-        return [f"{where}.profiles: {name!r} has no {model!r} profile for the workload's category "
-                f"{stated} (it has: {', '.join(categories) or 'none'}); state {where}.fallback_category "
-                f"to use one of those instead"]
-    return []
+    stated = repr(category) if category else "none (the workload states no category)"
+    return [f"{where}.profiles: {name!r} has no {model!r} profile for the workload's category "
+            f"{stated} (it has: {', '.join(categories) or 'none'}); state {where}.fallback_category "
+            f"to use one of those instead"]
 
 
 def scenario_pin_errors(sc, registry=None, catalog=None):

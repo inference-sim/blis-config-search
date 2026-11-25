@@ -404,7 +404,7 @@ def classify_config(config, vocab, node_size=None, pool_offload=False):
                 raise ConfigError("offload_cpu_bytes: this simulator's deployment schema has no per-pool "
                                   "offload (blis-substrate#307), so a disaggregated deployment cannot "
                                   "state a tier")
-            # The pinned simulator refuses secondary_tiers beside a pool's MultiConnector (#94).
+            # The pinned simulator refuses secondary_tiers beside a pool's MultiConnector.
             for r in PD_ROLES:
                 own_off = pd[r].get("offload")
                 bad = "tiers" if own_off and own_off.get("tiers") else "p2p" if own_off and own_off.get("p2p") else None

@@ -284,8 +284,8 @@ class PerPoolOffload(unittest.TestCase):
 
     def test_a_tiers_or_p2p_key_present_but_falsy_is_not_the_94_refusal(self):
         """A tiers/p2p key that is present but renders nothing at runtime (run_blis's own
-        own_off.get(...) guard) must not be refused as #94 -- only whatever its own value
-        requires (an empty tiers list is still refused, but for being empty, not for #94)."""
+        own_off.get(...) guard) must not trigger the MultiConnector refusal -- only whatever its
+        own value requires (an empty tiers list is still refused, but for being empty, not that)."""
         for p2p in (False, [False]):
             doc = pd_doc(decode={"parallel": {"tp": [8]}, "offload": {"cpu_bytes": ["512GiB"], "p2p": p2p}})
             errs = V.validate(copy.deepcopy(doc), self.capable, ROUTING)

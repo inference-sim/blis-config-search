@@ -664,6 +664,18 @@ class RoutingProfileNameAgainstARegistry(unittest.TestCase):
               "routing": {"profiles": "flash", "fallback_category": "text"}}
         self.assertEqual([], V.scenario_pin_errors(sc, self.reg, self.catalog))
 
+    def test_a_fallback_category_the_set_has_no_profile_for_is_refused(self):
+        """fallback_category is itself a category the set must cover for the model -- stating one
+        the set has no profile for still resolves nothing at runtime, same as the workload's own
+        uncovered category."""
+        self._write("flash.yaml", {"name": "flash",
+                                   "profiles": [{"model": self.MODEL, "category": "text",
+                                                "phase": "decode"}]})
+        sc = {"model": self.MODEL, "routing": {"profiles": "flash", "fallback_category": "coding"}}
+        errs = V.scenario_pin_errors(sc, self.reg)
+        self.assertTrue(any("scenario.routing.fallback_category:" in e and "'coding'" in e
+                            and "text" in e for e in errs), errs)
+
     def test_a_workload_whose_own_category_is_covered_validates(self):
         self._write("flash.yaml", {"name": "flash",
                                    "profiles": [{"model": self.MODEL, "category": "text",

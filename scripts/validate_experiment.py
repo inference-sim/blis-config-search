@@ -908,10 +908,8 @@ def _storage_devices(catalog):
 
 
 def _renders_a_pd_tier(block):
-    """Whether a disaggregated pool's `offload` block actually renders a secondary tier at
-    runtime -- a non-empty `tiers`, or `p2p` true (a bool, or, tolerating the list form `tiers`
-    and `cpu_bytes` take, a list containing true) -- so `tiers: []` / `p2p: false` is not refused
-    for a key that is present but renders nothing (matches run_blis's own `own_off.get(...)` guard)."""
+    """Whether `block` renders a secondary tier at runtime: a non-empty `tiers`, or a truthy `p2p`
+    (bool or list form) -- matches run_blis's own `own_off.get(...)` guard."""
     if block.get("tiers"):
         return True
     p2p = block.get("p2p")
@@ -1064,10 +1062,8 @@ def _registry_profile_sets(registry, subdir):
 
 
 def _workload_category(catalog, workload):
-    """The catalog workload preset's own `category` (substrate/contracts/spec/workload/workload.go's
-    Shape.Category; "" when the preset states none). None when there is no catalog checkout to read
-    it from, the workload is not a catalog name (a `workload_spec` file), or the file cannot be
-    read or parsed -- best-effort, like _registry_profile_sets."""
+    """The catalog workload preset's own `category` (workload.go's Shape.Category), or None when
+    there is no catalog, no such preset, or the file can't be read -- best-effort."""
     if not catalog or not isinstance(workload, str) or not workload:
         return None
     try:
@@ -1101,15 +1097,19 @@ def _profile_name_errors(sc, where, pin, subdir, registry, catalog=None):
         return [f"{where}.profiles: {name!r} has no profile for model {model!r} "
                 f"(models in that set: {', '.join(sorted(m for m in models if m)) or 'none'})"]
     # A profile's key is (model, category, phase, placement, expert_parallel) (routing.go's Key),
-    # not model alone: a set with a profile for the model but not the workload's category still
-    # resolves nothing at run time (routing.Resolve) unless fallback_category names a category it
-    # does have. Checked for routing only (subdir == "routing" on every call site).
-    if pin.get("fallback_category"):
-        return []
+    # not model alone: a set with a profile for the model but not the workload's category --
+    # or not the pin's own fallback_category -- resolves nothing at run time (routing.Resolve).
+    # Checked for routing only (subdir == "routing" on every call site).
+    categories = sorted({p.get("category") for p in model_profiles if p.get("category")})
+    fallback = pin.get("fallback_category")
+    if fallback:
+        if fallback in categories:
+            return []
+        return [f"{where}.fallback_category: {fallback!r} has no {model!r} profile in {name!r} "
+                f"(it has: {', '.join(categories) or 'none'})"]
     category = _workload_category(catalog, sc.get("workload"))
     if category is None:
         return []
-    categories = sorted({p.get("category") for p in model_profiles if p.get("category")})
     if category not in categories:
         stated = repr(category) if category else "none (the workload states no category)"
         return [f"{where}.profiles: {name!r} has no {model!r} profile for the workload's category "
@@ -1244,10 +1244,8 @@ def validate(spec, blis, routing_dir=ROUTING_DIR, catalog=None, fields=None, rou
     schema deployment`) and the catalog identities (`blis catalog resolve`). `catalog` names a
     catalog directory; None means the catalog the binary embeds. `registry` names a registry
     checkout (--registry/SUBSTRATE_REGISTRY) that additionally checks a `scenario.routing` pin's
-    profile set name and model coverage; None skips that one check. With `catalog` a checkout
-    directory too, that check also covers the workload's own category (unless the pin states
-    `fallback_category`), since a set with a profile for the model but not the workload's category
-    still resolves nothing at run time.
+    profile set name and model coverage; None skips that one check. With `catalog` too, that check
+    also covers the workload's category (via `fallback_category`).
 
     Collects ALL errors rather than stopping at the first: a contributor fixing a spec by hand
     should see every problem in one run, not discover them one CI round-trip at a time.

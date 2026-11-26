@@ -528,7 +528,7 @@
       "decode": {
         "members": [],
         "points": 0,
-        "unrated": 80
+        "unrated": 83
       },
       "total": {
         "members": [
@@ -602,7 +602,7 @@
             "variant": "5 draft tokens"
           }
         ],
-        "points": 80,
+        "points": 83,
         "unrated": 0
       }
     },
@@ -611,7 +611,7 @@
         "decode": {
           "members": [],
           "points": 0,
-          "unrated": 15
+          "unrated": 18
         },
         "name": "topology-ep",
         "total": {
@@ -674,7 +674,7 @@
               "variant": ""
             }
           ],
-          "points": 15,
+          "points": 18,
           "unrated": 0
         }
       },
@@ -1318,8 +1318,8 @@
   },
   "outcomes": {
     "refused": 63,
-    "served": 80,
-    "slo_miss": 34
+    "served": 83,
+    "slo_miss": 31
   },
   "ranking": {
     "description": "max output tok/s per accelerator subject to the scenario's SLOs",
@@ -1388,8 +1388,8 @@
       "name": "topology-ep",
       "outcomes": {
         "refused": 12,
-        "served": 15,
-        "slo_miss": 9
+        "served": 18,
+        "slo_miss": 6
       },
       "refusals": [
         {

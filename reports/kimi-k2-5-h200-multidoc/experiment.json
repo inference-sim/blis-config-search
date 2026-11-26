@@ -870,13 +870,13 @@
     }
   },
   "pinned_stack": {
-    "blis": "v0.19.0",
+    "blis": "v0.19.1",
     "data": "embedded",
     "engine_version": "0.34.0+0fda86a35419",
     "kernel": "unpinned",
     "resolved": {
       "blis": {
-        "sha256": "ab2cbc0430d928fb009b24a9941f0f705447b970b0ac9fec3cdd1ede1e2d7077",
+        "sha256": "70f6c2ff6e5cc919517ceb7160c08cde53e8c3ee4cb0e4f258aca1cd329cf115",
         "version": "unknown"
       }
     },
